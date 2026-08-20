@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "visual-profile-representations/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "catalog_size", "graph_completeness", "desc_completeness", "failure_count", "dimension", "item_ids", "source_fingerprint", "encoder", "encoder_fingerprint"],
+  "properties": {
+    "schema_version": {"const": "visual-profile-representations/v1"},
+    "catalog_size": {"type": "integer", "minimum": 1},
+    "graph_completeness": {"const": 1.0},
+    "desc_completeness": {"const": 1.0},
+    "failure_count": {"const": 0},
+    "dimension": {"const": 1024},
+    "item_ids": {"type": "array", "items": {"type": "string"}},
+    "source_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "encoder": {"type": "object"},
+    "encoder_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "graph-description-noninferiority-report/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "claim_scope", "result", "metrics", "primary_non_inferiority", "secondary_id_comparisons", "diagnostics"],
+  "properties": {
+    "schema_version": {"const": "graph-description-noninferiority-report/v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "claim_scope": {"const": "Graph versus Description next-item ranking non-inferiority"},
+    "result": {"enum": ["GRAPH_NON_INFERIOR_TO_DESC", "NON_INFERIORITY_NOT_ESTABLISHED"]},
+    "metrics": {"type": "object"},
+    "primary_non_inferiority": {"type": "object"},
+    "secondary_id_comparisons": {"type": "object"},
+    "diagnostics": {"type": "object"}
+  }
+}

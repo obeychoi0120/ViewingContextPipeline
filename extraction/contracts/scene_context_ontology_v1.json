@@ -1,0 +1,182 @@
+{
+  "ontology_id": "scene_context_ontology/v1",
+  "vocabularies": {
+    "scene_types": [
+      "people_social",
+      "person_portrait",
+      "object_product",
+      "food_drink",
+      "nature_landscape",
+      "animal_pet",
+      "graphic_information",
+      "sport_fitness",
+      "vehicle_transport",
+      "unknown"
+    ],
+    "people_density": [
+      "none",
+      "one",
+      "few",
+      "many",
+      "unknown"
+    ],
+    "face_prominence": [
+      "none",
+      "low",
+      "mid",
+      "high",
+      "unknown"
+    ],
+    "mood_bins": [
+      "cheerful",
+      "peaceful",
+      "neutral",
+      "serious",
+      "tense",
+      "dark",
+      "unknown"
+    ],
+    "affect_cues": [
+      "cheerful",
+      "excited",
+      "calm",
+      "serious",
+      "tense",
+      "sad",
+      "neutral",
+      "unknown"
+    ],
+    "scene_functions": [
+      "instructional",
+      "review_comparison",
+      "information_report",
+      "observation_documentary",
+      "competition_game",
+      "narrative",
+      "performance",
+      "emotional_social",
+      "unknown"
+    ],
+    "styles": [
+      "natural_documentary",
+      "soft_warm_intimate",
+      "bright_social_pop",
+      "clean_minimal_product",
+      "low_key_cinematic",
+      "neon_synthetic",
+      "flat_graphic_playful",
+      "editorial_portrait",
+      "vintage_filmic",
+      "mixed"
+    ],
+    "settings": [
+      "home",
+      "dining",
+      "workplace",
+      "studio",
+      "sports_venue",
+      "commercial",
+      "transport",
+      "urban",
+      "nature_green",
+      "nature_water",
+      "arid",
+      "virtual",
+      "unknown"
+    ]
+  },
+  "visual_style_cues": {
+    "media_form": [
+      "live_action",
+      "live_action_cg",
+      "animation",
+      "graphics",
+      "unknown"
+    ],
+    "fantasy_element": [
+      "none",
+      "mid",
+      "high",
+      "unknown"
+    ],
+    "shot_scale": [
+      "close",
+      "medium",
+      "wide",
+      "unknown"
+    ],
+    "graphic_density": [
+      "none",
+      "medium",
+      "high",
+      "unknown"
+    ],
+    "composition_density": [
+      "minimal",
+      "balanced",
+      "busy",
+      "unknown"
+    ]
+  },
+  "entities": {
+    "categories": [
+      "person",
+      "animal",
+      "food",
+      "vehicle",
+      "device",
+      "object",
+      "building",
+      "nature",
+      "text",
+      "unknown"
+    ],
+    "roles": [
+      "main_subject",
+      "object",
+      "setting_element",
+      "background"
+    ]
+  },
+  "relations": {
+    "DOING": {
+      "value_kind": "free_text",
+      "description": "What is this entity doing? (verb phrase, e.g. \"cooking\", \"running\", \"reporting\")"
+    },
+    "WEARING": {
+      "value_kind": "free_text",
+      "description": "What is this entity wearing? (e.g. \"suit\", \"apron\", \"helmet\")"
+    },
+    "IS_A": {
+      "value_kind": "free_text",
+      "description": "What is this entity's specific role/category? (e.g. \"news anchor\", \"chef\")"
+    },
+    "AT": {
+      "value_kind": "free_text",
+      "description": "Where is this entity located? (e.g. \"street\", \"desk\", \"riverbank\")"
+    },
+    "INTERACTS_WITH": {
+      "value_kind": "entity_local_id",
+      "description": "Which visible entity/object this entity directly interacts with."
+    }
+  },
+  "motif_filters": {
+    "excluded_entities": [
+      "person",
+      "man",
+      "woman",
+      "people",
+      "person_group",
+      "crowd"
+    ],
+    "excluded_values": [
+      "mixed",
+      "neutral",
+      "unknown",
+      "none"
+    ],
+    "excluded_roles": [
+      "background"
+    ]
+  }
+}

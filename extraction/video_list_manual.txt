@@ -1,0 +1,184 @@
+[News]
+News_Manual_001 https://www.youtube.com/watch?v=VV3qIkq5ofY
+News_Manual_002 https://www.youtube.com/watch?v=R0NS_0Sy9v0
+News_Manual_003 https://www.youtube.com/watch?v=pUxN3h8hHIg
+News_Manual_004 https://www.youtube.com/watch?v=mL7OYK3IBwA
+News_Manual_005 https://www.youtube.com/watch?v=6XqUCde9Dqo
+News_Manual_006 https://www.youtube.com/watch?v=x2ZlP0Fx5nA
+News_Manual_007 https://www.youtube.com/watch?v=AptrnyOIYQg
+News_Manual_008 https://www.youtube.com/watch?v=ikfnGYUfn1c
+News_Manual_009 https://www.youtube.com/watch?v=KLZNkzjpxkA
+News_Manual_010 https://www.youtube.com/watch?v=El2sbnczH0c
+News_Manual_011 https://www.youtube.com/watch?v=gLrJgVEH-Jw
+News_Manual_012 https://www.youtube.com/watch?v=OJJQSeUlGNQ
+News_Manual_013 https://www.youtube.com/watch?v=huKL7RqSi8E
+News_Manual_014 https://www.youtube.com/watch?v=GRNB5DYtTTY
+
+[Sports]
+Sports_Manual_001 https://www.youtube.com/watch?v=HM49RJU4Nnc
+Sports_Manual_002 https://www.youtube.com/watch?v=NxdQ-pgEvS8
+Sports_Manual_003 https://www.youtube.com/watch?v=A-Pd0p9V56c
+Sports_Manual_004 https://www.youtube.com/watch?v=aiKw24xS2Xg
+Sports_Manual_005 https://www.youtube.com/watch?v=Cpl373FOntY
+Sports_Manual_006 https://www.youtube.com/watch?v=ajzQj7bjSWE
+Sports_Manual_007 https://www.youtube.com/watch?v=f_9tZ9uh8nw
+Sports_Manual_008 https://www.youtube.com/watch?v=L980JgKB54E
+Sports_Manual_009 https://www.youtube.com/watch?v=2y7ecfsDDTg
+Sports_Manual_010 https://www.youtube.com/watch?v=ii0sl4CH-fQ
+Sports_Manual_011 https://www.youtube.com/watch?v=2DEDNW5Jq4Q
+Sports_Manual_012 https://www.youtube.com/watch?v=ztput_decdk
+Sports_Manual_013 https://www.youtube.com/watch?v=5gcCOorE-yQ
+Sports_Manual_014 https://www.youtube.com/watch?v=RG2_Ek5PuPc
+Sports_Manual_015 https://www.youtube.com/watch?v=JH_WRKTCPK4
+Sports_Manual_016 https://www.youtube.com/watch?v=ovh4l2Rf6s0
+Sports_Manual_017 https://www.youtube.com/watch?v=YoHRWi0OlAQ
+Sports_Manual_018 https://www.youtube.com/watch?v=UjXqtKUnVxs
+Sports_Manual_019 https://www.youtube.com/watch?v=16-7CevcE1I
+Sports_Manual_020 https://www.youtube.com/watch?v=VUBS7v0o2Zw
+Sports_Manual_021 https://www.youtube.com/watch?v=Ey8j_BlLvFM
+Sports_Manual_022 https://www.youtube.com/watch?v=WUBIV1LRhQA
+Sports_Manual_023 https://www.youtube.com/watch?v=Hz2F_S3Tl0Y
+Sports_Manual_024 https://www.youtube.com/watch?v=AMAQwErd2Iw
+
+[Movie]
+Movie_Manual_001 https://www.youtube.com/watch?v=NdI-k_CJ6vo
+Movie_Manual_002 https://www.youtube.com/watch?v=CWb1KZPi0Ek
+Movie_Manual_003 https://www.youtube.com/watch?v=-PWmE1A7Z8s
+Movie_Manual_004 https://www.youtube.com/watch?v=OEVg2R4UGio
+Movie_Manual_005 https://www.youtube.com/watch?v=0jfcKzYc3RU
+Movie_Manual_006 https://www.youtube.com/watch?v=kWC1W7BkNM0
+Movie_Manual_007 https://www.youtube.com/watch?v=pk-tzsXqFDA
+Movie_Manual_008 https://www.youtube.com/watch?v=YAPUVhAS8UQ
+Movie_Manual_009 https://www.youtube.com/watch?v=6z9qws7M8q8
+Movie_Manual_010 https://www.youtube.com/watch?v=C6-rwI-7hyI
+Movie_Manual_011 https://www.youtube.com/watch?v=RyWwXgb-MA0
+Movie_Manual_012 https://www.youtube.com/watch?v=tjJFehQd2oA
+Movie_Manual_013 https://www.youtube.com/watch?v=1eoKvx5X9JQ
+Movie_Manual_014 https://www.youtube.com/watch?v=bW7kDVh4w7U
+Movie_Manual_015 https://www.youtube.com/watch?v=NttUBB98zg4
+Movie_Manual_016 https://www.youtube.com/watch?v=vZ5vkiazP1s
+Movie_Manual_017 https://www.youtube.com/watch?v=5BxqahE0fu8
+Movie_Manual_018 https://www.youtube.com/watch?v=y7weGcCvwTQ
+Movie_Manual_019 https://www.youtube.com/watch?v=HXRJYcqlPSY
+
+[Variety]
+Variety_Manual_001 https://www.youtube.com/watch?v=dyjfCadehBo
+Variety_Manual_002 https://www.youtube.com/watch?v=FWXHJUk18zo
+Variety_Manual_003 https://www.youtube.com/watch?v=p9PLnrBXEAk
+Variety_Manual_004 https://www.youtube.com/watch?v=SEg6jVhl2JM
+Variety_Manual_005 https://www.youtube.com/watch?v=QC-x-uyfUuw
+Variety_Manual_006 https://www.youtube.com/watch?v=J0n_5d75wh0
+Variety_Manual_007 https://www.youtube.com/watch?v=YxkucCrld2k
+Variety_Manual_008 https://www.youtube.com/watch?v=1nUwaL0qRyk
+Variety_Manual_009 https://www.youtube.com/watch?v=IcEjE1pFLGI
+Variety_Manual_010 https://www.youtube.com/watch?v=bae0UiFVw84
+Variety_Manual_011 https://www.youtube.com/watch?v=cNIWhzfzwpo
+Variety_Manual_012 https://www.youtube.com/watch?v=Iq6RdCTLBd8
+Variety_Manual_013 https://www.youtube.com/watch?v=cyWp2zJDD3g
+Variety_Manual_014 https://www.youtube.com/watch?v=7CSlerXCZSo
+Variety_Manual_015 https://www.youtube.com/watch?v=iNh_bXmYfgw
+Variety_Manual_016 https://www.youtube.com/watch?v=TzMZjm1l65E
+Variety_Manual_017 https://www.youtube.com/watch?v=7pY293YseB0
+Variety_Manual_018 https://www.youtube.com/watch?v=L0l1osxsPnI
+Variety_Manual_019 https://www.youtube.com/watch?v=xD8JubOUYxI
+
+
+[Documentary]
+Documentary_Manual_001 https://www.youtube.com/watch?v=ah5DGbv2E64
+Documentary_Manual_002 https://www.youtube.com/watch?v=C1_Rx7YqQqk
+Documentary_Manual_003 https://www.youtube.com/watch?v=VyKFI7BCYY8
+Documentary_Manual_004 https://www.youtube.com/watch?v=JVZzpjS3hkE
+Documentary_Manual_005 https://www.youtube.com/watch?v=Ucis3S81Xcw
+Documentary_Manual_006 https://www.youtube.com/watch?v=mRZUtSQh2Ts
+Documentary_Manual_007 https://www.youtube.com/watch?v=QKufR4y7HMw
+Documentary_Manual_008 https://www.youtube.com/watch?v=6bgkqCg3hvo
+Documentary_Manual_009 https://www.youtube.com/watch?v=vp0ZsOrj6o0
+Documentary_Manual_010 https://www.youtube.com/watch?v=w_hM_z8_M74
+Documentary_Manual_011 https://www.youtube.com/watch?v=guDoMTahmeo
+Documentary_Manual_012 https://www.youtube.com/watch?v=Pe5OFb5Xcm0
+Documentary_Manual_013 https://www.youtube.com/watch?v=aSP7E_szMlk
+Documentary_Manual_014 https://www.youtube.com/watch?v=Bofc1QJQMIU
+Documentary_Manual_015 https://www.youtube.com/watch?v=Yl_zaRtwZcA
+Documentary_Manual_016 https://www.youtube.com/watch?v=oC5id8fnzIs
+Documentary_Manual_017 https://www.youtube.com/watch?v=98n_IlgrwAI
+Documentary_Manual_018 https://www.youtube.com/watch?v=tjcnSiBmTs0
+Documentary_Manual_019 https://www.youtube.com/watch?v=AHv3XC9tXcs
+Documentary_Manual_020 https://www.youtube.com/watch?v=dM6zveCXkg0
+Documentary_Manual_021 https://www.youtube.com/watch?v=28nFFjWI3fQ
+Documentary_Manual_022 https://www.youtube.com/watch?v=ZknwqieFqwk
+Documentary_Manual_023 https://www.youtube.com/watch?v=37VjHFBz0-M
+Documentary_Manual_024 https://www.youtube.com/watch?v=hgrYev-l1NQ
+Documentary_Manual_025 https://www.youtube.com/watch?v=-C9GqKM8_RI
+Documentary_Manual_026 https://www.youtube.com/watch?v=dWQnvKXodww
+
+[Drama]
+Drama_Manual_001 https://www.youtube.com/watch?v=r1Ln4oGBWdI
+Drama_Manual_002 https://www.youtube.com/watch?v=p4TN6l87zuw
+Drama_Manual_003 https://www.youtube.com/watch?v=33WJ9aPDHuc
+Drama_Manual_004 https://www.youtube.com/watch?v=45eo4PJQuUg
+Drama_Manual_005 https://www.youtube.com/watch?v=ipJZM2iugw0
+Drama_Manual_006 https://www.youtube.com/watch?v=9CEC4z0U07M
+Drama_Manual_007 https://www.youtube.com/watch?v=4zKLbNhebgg
+Drama_Manual_008 https://www.youtube.com/watch?v=WdxxgErUuoE
+Drama_Manual_009 https://www.youtube.com/watch?v=cQTd3s0rWEM
+Drama_Manual_010 https://www.youtube.com/watch?v=hp4NLL57frw
+Drama_Manual_011 https://www.youtube.com/watch?v=Cnhg6Q-piXo
+Drama_Manual_012 https://www.youtube.com/watch?v=oXAN4ynzKyE
+Drama_Manual_013 https://www.youtube.com/watch?v=K7_UqhBpKME
+Drama_Manual_014 https://www.youtube.com/watch?v=nxzbcaf9xK4
+Drama_Manual_015 https://www.youtube.com/watch?v=k0AShEuPYVU
+Drama_Manual_016 https://www.youtube.com/watch?v=lDmgtUrTZ8M
+Drama_Manual_017 https://www.youtube.com/watch?v=MXOgtSNF2Y4
+Drama_Manual_018 https://www.youtube.com/watch?v=crlGvUROufc
+Drama_Manual_019 https://www.youtube.com/watch?v=i1NmNMVp7Nw
+
+[Animation]
+Animation_Manual_001 https://www.youtube.com/watch?v=kWNFkHpaeDs
+Animation_Manual_002 https://www.youtube.com/watch?v=PG_IHoL96lM
+Animation_Manual_003 https://www.youtube.com/watch?v=ZadUOiEkYeA
+Animation_Manual_004 https://www.youtube.com/watch?v=342ly4n5Phs
+Animation_Manual_005 https://www.youtube.com/watch?v=PUbLGK2RCbE
+Animation_Manual_006 https://www.youtube.com/watch?v=yGMk3j13vgk
+Animation_Manual_007 https://www.youtube.com/watch?v=ekHadCX2-s8
+Animation_Manual_008 https://www.youtube.com/watch?v=nhr0igKYIMQ
+Animation_Manual_009 https://www.youtube.com/watch?v=sAoIM9Dt0uA
+Animation_Manual_010 https://www.youtube.com/watch?v=knchxFiU1gg
+
+[Shopping]
+Shopping_Manual_001 https://www.youtube.com/watch?v=udEDn10OP5s
+Shopping_Manual_002 https://www.youtube.com/watch?v=C2-zmXqyqNk
+Shopping_Manual_003 https://www.youtube.com/watch?v=jMDG4ICnhKM
+Shopping_Manual_004 https://www.youtube.com/watch?v=PNVmJxpeJDY
+Shopping_Manual_005 https://www.youtube.com/watch?v=Ff8nYzdDx8Q
+Shopping_Manual_006 https://www.youtube.com/watch?v=g2KUG1WgqyI
+Shopping_Manual_007 https://www.youtube.com/watch?v=nRDBUsDSoO4
+Shopping_Manual_008 https://www.youtube.com/watch?v=j-8-Wrm59Wg
+Shopping_Manual_009 https://www.youtube.com/watch?v=I3ONe34dMzw
+
+[Travel]
+Travel_Manual_001 https://www.youtube.com/watch?v=fulap_pZ_Uc
+Travel_Manual_002 https://www.youtube.com/watch?v=DjYPUs40AZk
+Travel_Manual_003 https://www.youtube.com/watch?v=BH-P6GwDSNU
+Travel_Manual_004 https://www.youtube.com/watch?v=TAAW-l-J7Yg
+Travel_Manual_005 https://www.youtube.com/watch?v=DK0aL7EPOJE
+Travel_Manual_006 https://www.youtube.com/watch?v=NlzPyRl_qcA
+Travel_Manual_007 https://www.youtube.com/watch?v=a9gR-UPdQKI
+Travel_Manual_008 https://www.youtube.com/watch?v=FO26fPp7Pww
+Travel_Manual_009 https://www.youtube.com/watch?v=bs4Yh1RuUhM
+
+[Music]
+Music_Manual_001 https://www.youtube.com/watch?v=00IPFnp2Tdg
+Music_Manual_002 https://www.youtube.com/watch?v=FQZhehVRSXQ
+Music_Manual_003 https://www.youtube.com/watch?v=Lm48ZD8s9PE
+Music_Manual_004 https://www.youtube.com/watch?v=83C3TZ4Zm_o
+
+[Game]
+Game_Manual_001 https://www.youtube.com/watch?v=YqNg2yO7eQU
+Game_Manual_002 https://www.youtube.com/watch?v=Dq6L1AHD9kU
+Game_Manual_003 https://www.youtube.com/watch?v=NzB09wB7Mrc
+Game_Manual_004 https://www.youtube.com/watch?v=499q1O0N_Sg
+
+[Tech]
+Tech_Manual_001 https://www.youtube.com/watch?v=TJ7YMKDR4D0
+Tech_Manual_002 https://www.youtube.com/watch?v=NeqB-O1M7IY
+Tech_Manual_003 https://www.youtube.com/watch?v=NJG0t45_QZk

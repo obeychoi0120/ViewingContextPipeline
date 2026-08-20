@@ -1,0 +1,17 @@
+schema_version: viewing-context-pipeline/v1
+run_id: microlens_100k_graph_vs_desc
+scope: canonical
+protocol:
+  modality: img_only
+  shot_interval: fixed_30s
+  graph_profile: VP_graph
+  description_profile: VP_desc
+artifacts_root: artifacts
+extraction_root: extraction
+validation_root: validation
+components:
+  microlens_config: extraction/config/microlens_config.json
+  processing_config: extraction/config/video_data_collection.json
+  graph_config: extraction/config/scene_context_extraction_ondevice.json
+  description_config: extraction/config/scene_description_generation.json
+  validation_config: validation/config/canonical_100k.yaml

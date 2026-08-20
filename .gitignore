@@ -1,0 +1,10 @@
+/artifacts/
+/config/local.yaml
+/extraction/config/.env
+/extraction/output/
+/validation/artifacts/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/

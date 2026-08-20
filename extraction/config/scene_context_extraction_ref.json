@@ -1,0 +1,7 @@
+{
+  "multimodal": true,
+  "shot_interval": "fixed_30s",
+  "gemini_location": "global",
+  "gemini_model": "gemini-3.6-flash",
+  "gemini_thinking_level": "high"
+}

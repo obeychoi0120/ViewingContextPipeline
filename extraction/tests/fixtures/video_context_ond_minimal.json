@@ -1,0 +1,24 @@
+{
+  "content_id": "News_Manual_001_VV3qIkq5ofY",
+  "source_scene_context_path": "output/viewing_context/img_only/fixed_15s/scene_context_graph_qwen/News_Manual_001_VV3qIkq5ofY_scene_context.jsonl",
+  "context": {
+    "content_axes_4d": {
+      "subject_sociality": 0.0,
+      "media_syntheticity": 0.0,
+      "setting_context": 0.0,
+      "utility_orientation": 0.0
+    },
+    "content_axis_distribution": {
+      "subject_sociality": {},
+      "media_syntheticity": {},
+      "setting_context": {},
+      "utility_orientation": {}
+    },
+    "top_styles": [],
+    "top_moods": [],
+    "top_scene_functions": [],
+    "top_entities": [],
+    "top_motifs": []
+  },
+  "aggregation_warnings": []
+}

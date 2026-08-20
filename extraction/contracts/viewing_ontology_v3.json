@@ -1,0 +1,637 @@
+{
+  "canonical_concepts": {
+    "content_type": [
+      {
+        "aliases": [
+          "튜토리얼",
+          "설명",
+          "해설"
+        ],
+        "allowed_boundary": "사용법·과정·원리의 단계별 안내와 개념 해설",
+        "assignable_as_preference": true,
+        "concept_id": "tutorial/explanation",
+        "description": "절차나 개념을 단계적으로 설명하는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "장단점 평가가 중심인 review/comparison 또는 관찰만 이어지는 documentary/observation",
+        "ko_label": "튜토리얼·설명",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "리뷰",
+          "비교"
+        ],
+        "allowed_boundary": "사용 경험 평가, 기준별 비교와 대안 선택",
+        "assignable_as_preference": true,
+        "concept_id": "review/comparison",
+        "description": "대상의 특징·장단점·대안을 평가하거나 비교하는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "평가 없이 기능만 보여주는 demonstration/showcase 또는 절차를 가르치는 tutorial/explanation",
+        "ko_label": "리뷰·비교",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "뉴스",
+          "보도",
+          "리포트"
+        ],
+        "allowed_boundary": "시의성 있는 사건 보도·현장 리포트·공공 브리핑",
+        "assignable_as_preference": true,
+        "concept_id": "news/report",
+        "description": "사건, 현황과 새 정보를 사실 중심으로 전달하는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "장기 관찰 중심의 documentary/observation 또는 선택을 직접 유도하는 광고",
+        "ko_label": "뉴스·보도",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "다큐멘터리",
+          "관찰"
+        ],
+        "allowed_boundary": "현실 기록·과정 추적·자연과 일상의 관찰",
+        "assignable_as_preference": true,
+        "concept_id": "documentary/observation",
+        "description": "현실 대상이나 과정을 지속적으로 기록·관찰하는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "시의성 중심의 news/report 또는 개인 경험 안내 중심의 vlog/guide",
+        "ko_label": "다큐멘터리·관찰",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "인터뷰",
+          "대담",
+          "토크"
+        ],
+        "allowed_boundary": "인터뷰·대담·패널 토크·질의응답",
+        "assignable_as_preference": true,
+        "concept_id": "interview/talk",
+        "description": "질문, 응답과 복수 화자의 대화가 중심인 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "단독 강의·내레이션 또는 연기된 서사 장면",
+        "ko_label": "인터뷰·대담",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "브이로그",
+          "가이드"
+        ],
+        "allowed_boundary": "경험 기록·현장 동행·장소와 활동 가이드",
+        "assignable_as_preference": true,
+        "concept_id": "vlog/guide",
+        "description": "개인 경험을 따라가거나 장소·활동을 안내하는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "공식 절차 교육은 tutorial/explanation, 객관적 장기 관찰은 documentary/observation",
+        "ko_label": "브이로그·가이드",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "하이라이트",
+          "모음"
+        ],
+        "allowed_boundary": "베스트 장면·요약 편집·주제별 클립 모음",
+        "assignable_as_preference": true,
+        "concept_id": "highlight/compilation",
+        "description": "여러 핵심 장면이나 항목을 선별해 묶은 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "하나의 연속된 경기·공연·서사 전개",
+        "ko_label": "하이라이트·모음",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "서사",
+          "클립"
+        ],
+        "allowed_boundary": "영화·드라마·웹서사의 장면과 짧은 서사 클립",
+        "assignable_as_preference": true,
+        "concept_id": "narrative/clip",
+        "description": "인물·사건의 연속과 이야기 전개가 중심인 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "사실 기록 중심의 documentary/observation 또는 장면 모음인 highlight/compilation",
+        "ko_label": "서사·클립",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "공연",
+          "퍼포먼스"
+        ],
+        "allowed_boundary": "콘서트·연주·무용·무대 퍼포먼스 실황",
+        "assignable_as_preference": true,
+        "concept_id": "performance",
+        "description": "음악·무용·연기 등 수행 자체를 보여주는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "공연에 대한 대화·해설 또는 기술·제품 기능 시연",
+        "ko_label": "공연",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "경쟁",
+          "대결",
+          "게임 진행"
+        ],
+        "allowed_boundary": "스포츠 경기·e스포츠·퀴즈·규칙 기반 대결의 진행",
+        "assignable_as_preference": true,
+        "concept_id": "competition/game",
+        "description": "규칙에 따른 경기·대결·게임 진행을 보여주는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "경기 장면 모음인 highlight/compilation 또는 비경쟁 기능 시연",
+        "ko_label": "경쟁·게임",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "시연",
+          "쇼케이스"
+        ],
+        "allowed_boundary": "기능 시연·작동 예시·작품 공개와 쇼케이스",
+        "assignable_as_preference": true,
+        "concept_id": "demonstration/showcase",
+        "description": "제품·기술·작품의 모습이나 기능을 직접 보여주는 형식",
+        "facet": "content_type",
+        "forbidden_boundary": "장단점 평가 중심의 review/comparison 또는 단계별 교육인 tutorial/explanation",
+        "ko_label": "시연·쇼케이스",
+        "parent_id": null
+      }
+    ],
+    "intent": [
+      {
+        "aliases": [
+          "정보",
+          "안내"
+        ],
+        "allowed_boundary": "중립적 사실·현황·공지와 상태 전달",
+        "assignable_as_preference": true,
+        "concept_id": "inform",
+        "description": "사실, 상태와 사건을 전달하는 기능",
+        "facet": "intent",
+        "forbidden_boundary": "절차 습득이 중심인 teach 또는 선택·행동을 직접 촉구하는 persuade",
+        "ko_label": "정보 제공",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "교육",
+          "학습"
+        ],
+        "allowed_boundary": "개념 학습·기술 습득·단계별 방법 안내",
+        "assignable_as_preference": true,
+        "concept_id": "teach",
+        "description": "지식, 원리나 방법을 이해하고 수행하도록 돕는 기능",
+        "facet": "intent",
+        "forbidden_boundary": "사실만 전달하는 inform 또는 특정 선택을 촉구하는 persuade",
+        "ko_label": "교육",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "분석",
+          "해석"
+        ],
+        "allowed_boundary": "근거 기반 해석·평가·비교와 쟁점 정리",
+        "assignable_as_preference": true,
+        "concept_id": "analyze",
+        "description": "대상·현상의 관계, 원인, 차이와 의미를 해석하는 기능",
+        "facet": "intent",
+        "forbidden_boundary": "해석 없는 사실 전달인 inform 또는 행동 유도가 중심인 persuade",
+        "ko_label": "분석",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "오락",
+          "재미"
+        ],
+        "allowed_boundary": "코미디·예능·게임·서사의 재미와 몰입",
+        "assignable_as_preference": true,
+        "concept_id": "entertain",
+        "description": "재미, 긴장, 웃음과 서사적 몰입을 제공하는 기능",
+        "facet": "intent",
+        "forbidden_boundary": "학습·정보 전달 또는 작품 감상 자체가 주된 기능인 경우",
+        "ko_label": "오락",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "설득",
+          "권유"
+        ],
+        "allowed_boundary": "명시적 권유·홍보·구매 또는 참여 촉구",
+        "assignable_as_preference": true,
+        "concept_id": "persuade",
+        "description": "특정 선택·태도·행동을 하도록 직접 유도하는 기능",
+        "facet": "intent",
+        "forbidden_boundary": "행동 요구 없이 사실·장단점만 제시하는 inform 또는 analyze",
+        "ko_label": "설득",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "감상",
+          "관람"
+        ],
+        "allowed_boundary": "예술 작품·음악·공연·경기·자연 경관 감상",
+        "assignable_as_preference": true,
+        "concept_id": "appreciate",
+        "description": "작품, 경기, 공연이나 경관을 보고 듣는 경험 자체를 제공하는 기능",
+        "facet": "intent",
+        "forbidden_boundary": "학습·분석·선택 유도가 주된 기능인 경우",
+        "ko_label": "감상",
+        "parent_id": null
+      }
+    ],
+    "topic": [
+      {
+        "aliases": [
+          "예술",
+          "문화",
+          "창작"
+        ],
+        "allowed_boundary": "미술·공예·디자인·건축·문화유산·창작 과정",
+        "assignable_as_preference": true,
+        "concept_id": "arts/culture",
+        "description": "시각예술, 공예, 디자인, 문화유산과 창작 활동",
+        "facet": "topic",
+        "forbidden_boundary": "음악·무대 예술이 중심이면 music/performance, 허구 이야기가 중심이면 entertainment/story",
+        "ko_label": "예술·문화",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "이야기",
+          "서사",
+          "대중 오락"
+        ],
+        "allowed_boundary": "영화·드라마·웹콘텐츠의 이야기와 예능·코미디",
+        "assignable_as_preference": true,
+        "concept_id": "entertainment/story",
+        "description": "허구 서사, 예능, 코미디와 대중 오락",
+        "facet": "topic",
+        "forbidden_boundary": "음악·공연 자체는 music/performance, 경기·게임 진행 자체는 해당 주제",
+        "ko_label": "오락·서사",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "음악",
+          "공연 예술",
+          "무대 공연"
+        ],
+        "allowed_boundary": "노래·연주·무용·콘서트와 공연 예술",
+        "assignable_as_preference": true,
+        "concept_id": "music/performance",
+        "description": "음악과 무대 공연의 작품·활동",
+        "facet": "topic",
+        "forbidden_boundary": "공연 실황이라는 전달 형식만 나타낼 때는 content_type=performance",
+        "ko_label": "음악·공연",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "스포츠",
+          "운동",
+          "피트니스"
+        ],
+        "allowed_boundary": "스포츠 종목·경기·훈련·홈트레이닝과 일반 체력 증진",
+        "assignable_as_preference": true,
+        "concept_id": "sports/fitness",
+        "description": "스포츠 경기, 운동법과 체력 활동",
+        "facet": "topic",
+        "forbidden_boundary": "e스포츠는 games/esports, 경기 진행 형식 자체는 content_type=competition/game",
+        "ko_label": "스포츠·운동",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "게임",
+          "e스포츠"
+        ],
+        "allowed_boundary": "게임 플레이·공략·게임 세계와 e스포츠",
+        "assignable_as_preference": true,
+        "concept_id": "games/esports",
+        "description": "디지털·보드 게임의 플레이, 전략과 e스포츠",
+        "facet": "topic",
+        "forbidden_boundary": "전통 스포츠는 sports/fitness, 게임 화면이라는 시각 형태만은 media_form=graphics",
+        "ko_label": "게임·e스포츠",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "여행",
+          "장소",
+          "지역 탐방"
+        ],
+        "allowed_boundary": "장소 안내·여행 경험·지역 문화 탐방",
+        "assignable_as_preference": true,
+        "concept_id": "travel/places",
+        "description": "여행 경험, 지역, 공간과 장소 탐색",
+        "facet": "topic",
+        "forbidden_boundary": "음식이 중심이면 food/lifestyle, 경험 공유 형식 자체는 content_type=vlog/guide",
+        "ko_label": "여행·장소",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "음식",
+          "요리",
+          "생활"
+        ],
+        "allowed_boundary": "요리·식문화·주거·정리·취미 등 일반 생활 정보",
+        "assignable_as_preference": true,
+        "concept_id": "food/lifestyle",
+        "description": "음식, 조리와 일상생활 정보",
+        "facet": "topic",
+        "forbidden_boundary": "제품 비교가 중심이면 products/consumption, 장소 탐방이 중심이면 travel/places",
+        "ko_label": "음식·생활",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "기술",
+          "과학",
+          "디지털"
+        ],
+        "allowed_boundary": "과학 개념·연구·공학 원리·소프트웨어와 디지털 활용",
+        "assignable_as_preference": true,
+        "concept_id": "technology/science",
+        "description": "기술 원리, 디지털 활용과 과학 지식",
+        "facet": "topic",
+        "forbidden_boundary": "구매 판단이 중심이면 products/consumption, 산업·경영이 중심이면 economy/business",
+        "ko_label": "기술·과학",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "사회",
+          "공공정보",
+          "안전"
+        ],
+        "allowed_boundary": "사실 중심 사건 보도·제도 안내·안전과 생활 공공정보",
+        "assignable_as_preference": true,
+        "concept_id": "society/public-information",
+        "description": "중립적·비정파적 사회 현상, 사건 보도와 공공정보",
+        "facet": "topic",
+        "forbidden_boundary": "정당·후보·선거의 지지·반대 유도 또는 경제·산업이 중심인 내용",
+        "ko_label": "사회·공공정보",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "경제",
+          "산업",
+          "비즈니스"
+        ],
+        "allowed_boundary": "거시경제·금융 원리·산업 동향·기업과 경영 정보",
+        "assignable_as_preference": true,
+        "concept_id": "economy/business",
+        "description": "경제 현상, 산업, 기업 활동과 경영",
+        "facet": "topic",
+        "forbidden_boundary": "개별 제품의 구매 비교는 products/consumption, 기술 원리는 technology/science",
+        "ko_label": "경제·비즈니스",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "제품",
+          "소비",
+          "구매"
+        ],
+        "allowed_boundary": "제품 기능·가격·사용 경험·구매 대안 비교",
+        "assignable_as_preference": true,
+        "concept_id": "products/consumption",
+        "description": "제품·서비스의 기능, 선택, 비교와 소비 정보",
+        "facet": "topic",
+        "forbidden_boundary": "기술 원리 자체는 technology/science, 산업·경영 전반은 economy/business",
+        "ko_label": "제품·소비",
+        "parent_id": null
+      },
+      {
+        "aliases": [
+          "자연",
+          "생태",
+          "동물"
+        ],
+        "allowed_boundary": "생태·환경·야생·반려동물과 자연 관찰",
+        "assignable_as_preference": true,
+        "concept_id": "nature/animals",
+        "description": "자연환경, 생태, 식물과 동물",
+        "facet": "topic",
+        "forbidden_boundary": "여행지 안내는 travel/places, 관련 제품 비교는 products/consumption",
+        "ko_label": "자연·동물",
+        "parent_id": null
+      }
+    ]
+  },
+  "closed_axes": {
+    "media_form": [
+      "live_action",
+      "live_action_cg",
+      "animation",
+      "graphics"
+    ],
+    "presentation": {
+      "complexity": [
+        "general",
+        "basic",
+        "intermediate",
+        "advanced"
+      ],
+      "information_density": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "pace": [
+        "slow",
+        "medium",
+        "fast"
+      ]
+    }
+  },
+  "closed_axis_definitions": {
+    "media_form": [
+      {
+        "allowed_boundary": "일반 실사와 색보정·자막·경미한 그래픽 오버레이",
+        "description": "카메라로 촬영한 현실 인물·사물·공간이 주된 시각 근거인 형태",
+        "forbidden_boundary": "CG가 장면 의미의 핵심이면 live_action_cg, 전체가 생성 영상이면 animation",
+        "ko_label": "실사",
+        "ordinal_rank": null,
+        "value_id": "live_action"
+      },
+      {
+        "allowed_boundary": "실사 위에 합성된 가상 대상·공간·효과가 내용 이해에 중요한 경우",
+        "description": "실사 촬영과 CGI·VFX가 장면의 대상이나 공간을 함께 구성하는 형태",
+        "forbidden_boundary": "단순 자막·차트 오버레이 또는 전적으로 생성된 애니메이션",
+        "ko_label": "실사·CG 결합",
+        "ordinal_rank": null,
+        "value_id": "live_action_cg"
+      },
+      {
+        "allowed_boundary": "2D·3D 애니메이션과 생성 캐릭터 중심 영상",
+        "description": "2D·3D로 생성한 인물·대상과 그 움직임이 주된 시각 근거인 형태",
+        "forbidden_boundary": "게임 플레이·UI·슬라이드·도표 중심 화면은 graphics",
+        "ko_label": "애니메이션",
+        "ordinal_rank": null,
+        "value_id": "animation"
+      },
+      {
+        "allowed_boundary": "게임 플레이·화면 녹화·정보 그래픽·프레젠테이션 화면",
+        "description": "게임 화면, UI, 슬라이드, 도표와 모션그래픽이 주된 시각 근거인 형태",
+        "forbidden_boundary": "촬영 실사 또는 서사적 2D·3D 애니메이션이 중심인 화면",
+        "ko_label": "그래픽",
+        "ordinal_rank": null,
+        "value_id": "graphics"
+      }
+    ],
+    "presentation": {
+      "complexity": [
+        {
+          "allowed_boundary": "일상 어휘와 보편적 배경지식만 필요한 내용",
+          "description": "주제별 사전지식 없이도 핵심 내용을 이해할 수 있음",
+          "forbidden_boundary": "특정 분야의 입문 개념이나 용어를 전제로 하는 내용",
+          "ko_label": "일반",
+          "ordinal_rank": 0,
+          "value_id": "general"
+        },
+        {
+          "allowed_boundary": "용어 정의, 첫 단계와 입문 원리를 설명하는 내용",
+          "description": "특정 분야를 처음 배우는 사람을 위한 기초 개념·용어 수준",
+          "forbidden_boundary": "분야 지식이 전혀 필요 없는 일반 내용 또는 선행 개념을 요구하는 내용",
+          "ko_label": "입문",
+          "ordinal_rank": 1,
+          "value_id": "basic"
+        },
+        {
+          "allowed_boundary": "여러 개념의 연결, 응용과 다단계 설명",
+          "description": "분야의 기본 용어와 핵심 개념을 알고 있다고 전제함",
+          "forbidden_boundary": "입문 설명만으로 충분하거나 전문 지식을 요구하는 내용",
+          "ko_label": "중급",
+          "ordinal_rank": 2,
+          "value_id": "intermediate"
+        },
+        {
+          "allowed_boundary": "전문적 분석, 고급 방법론과 높은 수준의 추상화",
+          "description": "전문 용어와 상당한 분야 지식을 전제로 함",
+          "forbidden_boundary": "기초 설명만으로 따라갈 수 있는 내용",
+          "ko_label": "고급",
+          "ordinal_rank": 3,
+          "value_id": "advanced"
+        }
+      ],
+      "information_density": [
+        {
+          "allowed_boundary": "소수 핵심 정보의 반복·시연·감상 중심 구성",
+          "description": "단위 시간당 새로 제시되는 사실·개념·단계가 적음",
+          "forbidden_boundary": "서로 다른 사실·개념·단계가 연속적으로 제시되는 구성",
+          "ko_label": "낮음",
+          "ordinal_rank": 0,
+          "value_id": "low"
+        },
+        {
+          "allowed_boundary": "설명과 예시가 균형을 이루는 일반적 정보량",
+          "description": "새로운 정보가 이해 가능한 간격으로 꾸준히 제시됨",
+          "forbidden_boundary": "정보가 거의 없거나 새로운 정보가 매우 빠르게 누적되는 구성",
+          "ko_label": "보통",
+          "ordinal_rank": 1,
+          "value_id": "medium"
+        },
+        {
+          "allowed_boundary": "압축된 설명, 다수의 근거·수치·절차가 연속되는 구성",
+          "description": "단위 시간당 서로 다른 사실·개념·단계가 많이 제시됨",
+          "forbidden_boundary": "소수 정보의 반복이나 감상 위주 구성",
+          "ko_label": "높음",
+          "ordinal_rank": 2,
+          "value_id": "high"
+        }
+      ],
+      "pace": [
+        {
+          "allowed_boundary": "긴 Shot, 적은 컷과 점진적인 화면 변화",
+          "description": "긴 화면 유지와 드문 전환으로 시각적 전개가 완만함",
+          "forbidden_boundary": "짧은 Shot과 빈번한 컷이 지속되는 전개",
+          "ko_label": "느림",
+          "ordinal_rank": 0,
+          "value_id": "slow"
+        },
+        {
+          "allowed_boundary": "일반적인 길이의 Shot과 규칙적인 장면 전환",
+          "description": "화면 유지와 전환이 어느 한쪽으로 치우치지 않은 전개",
+          "forbidden_boundary": "지속적으로 매우 느리거나 매우 빠른 전개",
+          "ko_label": "보통",
+          "ordinal_rank": 1,
+          "value_id": "medium"
+        },
+        {
+          "allowed_boundary": "짧은 Shot, 빈번한 컷과 빠른 화면 변화",
+          "description": "짧은 화면 유지와 잦은 전환으로 시각적 변화가 빠름",
+          "forbidden_boundary": "긴 Shot 위주의 완만한 전개",
+          "ko_label": "빠름",
+          "ordinal_rank": 2,
+          "value_id": "fast"
+        }
+      ]
+    }
+  },
+  "concept_id_policy": "concept_id는 불투명하고 안정적인 ID다. '/'는 계층을 뜻하지 않으며 계층 관계는 parent_id로만 판단한다.",
+  "facet_specs": [
+    {
+      "description": "콘텐츠가 주로 다루는 대상·활동·지식 영역",
+      "facet": "topic",
+      "ko_label": "주제",
+      "max_items": 6,
+      "min_items": 0,
+      "selection_rule": "무엇을 다루는지를 선택하고 전달 형식이나 기능을 주제로 쓰지 않는다.",
+      "value_kind": "canonical_concept"
+    },
+    {
+      "description": "콘텐츠가 내용을 구성하고 전달하는 주된 형식",
+      "facet": "content_type",
+      "ko_label": "콘텐츠 형식",
+      "max_items": 3,
+      "min_items": 0,
+      "selection_rule": "어떻게 구성해 전달하는지를 선택하고 소재나 기능을 형식으로 쓰지 않는다.",
+      "value_kind": "canonical_concept"
+    },
+    {
+      "description": "제작자의 내면을 추정하지 않고 콘텐츠가 관측상 수행하는 주된 기능",
+      "facet": "intent",
+      "ko_label": "콘텐츠 기능",
+      "max_items": 3,
+      "min_items": 0,
+      "selection_rule": "정보·교육·분석·오락·설득·감상 중 실제 내용이 수행하는 기능을 고른다.",
+      "value_kind": "canonical_concept"
+    },
+    {
+      "allow_unknown": true,
+      "description": "콘텐츠에서 관찰되는 주된 시각 표현 방식",
+      "facet": "media_form",
+      "ko_label": "시각 매체 형태",
+      "max_items": 2,
+      "min_items": 1,
+      "selection_rule": "최대 두 값을 중요도순으로 사용하며 단순 오버레이를 별도 형태로 과대평가하지 않는다.",
+      "value_kind": "closed_enum"
+    },
+    {
+      "allow_unknown": true,
+      "description": "영상 전체에서 관찰되는 속도·정보 밀도·이해 난이도의 순서형 특성",
+      "dimensions": [
+        "pace",
+        "information_density",
+        "complexity"
+      ],
+      "facet": "presentation",
+      "ko_label": "표현 특성",
+      "selection_rule": "세 차원을 독립적으로 판단하고 근거가 부족한 관측 profile에는 unknown을 사용한다.",
+      "value_kind": "ordinal"
+    }
+  ],
+  "ontology_version": "viewing-ontology-contract/v3",
+  "unknown_value_policy": "unknown은 근거가 부족한 관측 Video Profile의 closed axis에만 사용하는 sentinel이며 controlled preference에는 배정하지 않는다.",
+  "unmatched_concept_policy": "관측 콘텐츠가 어떤 canonical concept에도 맞지 않으면 가장 가까운 ID로 강제 분류하지 말고 해당 canonical facet 값을 생략한다."
+}

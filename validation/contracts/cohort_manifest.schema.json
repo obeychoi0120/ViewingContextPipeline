@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "microlens-user-cohort/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "user_count", "catalog_size", "stratum_quotas", "source_fingerprints", "inventory_fingerprint", "cohort_fingerprint"],
+  "properties": {
+    "schema_version": {"const": "microlens-user-cohort/v2"},
+    "run_id": {"type": "string", "minLength": 1},
+    "user_count": {"type": "integer", "minimum": 1},
+    "catalog_size": {"type": "integer", "minimum": 1},
+    "stratum_quotas": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "source_fingerprints": {"type": "array", "minItems": 1},
+    "inventory_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cohort_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

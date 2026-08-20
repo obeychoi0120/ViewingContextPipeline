@@ -1,0 +1,37 @@
+{
+  "shot_interval": "fixed_30s",
+  "ocr_config": {
+    "enabled": false,
+    "OCR_MIN_HEIGHT": 0,
+    "OCR_MAX_CHARS": 1000,
+    "OCR_SCORE_THR": 0.6,
+    "OCR_FILTER_UI": true,
+    "OCR_TOP_UI_REGION_Y": 0.1,
+    "OCR_RIGHT_CHAT_REGION_X": 0.8,
+    "OCR_SMALL_TEXT_HEIGHT_RATIO": 0.1
+  },
+  "asr_config": {
+    "enabled": false,
+    "BEAM_SIZE": 5,
+    "CONDITION_ON_PREVIOUS_TEXT": false,
+    "NO_SPEECH_THRESHOLD": 0.8,
+    "VAD_THRESHOLD": 0.25,
+    "VAD_MIN_SILENCE_MS": 1000,
+    "VAD_SPEECH_PAD_MS": 300,
+    "INITIAL_PROMPT": null,
+    "REF_MODEL_PATH": "/home_nvme/shared/models/faster-whisper-large-v3"
+  },
+  "scene_config": {
+    "MIN_LENGTH": 20.0,
+    "SPLIT_THRESOLD": 60.0,
+    "MAX_LENGTH": 80.0,
+    "MAX_SHOTS": 4,
+    "MIN_SHOT_OFFSET": 5.0
+  },
+  "resized_keyframe_config": {
+    "image_resolution": [
+      640,
+      352
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "vce-selection/v1",
+  "title": "Viewing Context Extraction selection row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["item_id", "content_id", "source_video_path", "url"],
+  "properties": {
+    "item_id": {"type": "string", "pattern": "^[1-9][0-9]*$"},
+    "content_id": {"type": "string", "pattern": "^microlens_100k_[0-9]{5}$"},
+    "source_video_path": {"type": "string", "minLength": 1},
+    "url": {"type": "string", "pattern": "^microlens://100k/[1-9][0-9]*$"}
+  }
+}
