@@ -1,7 +1,7 @@
 schema_version: validation-config/v1
 run_id: microlens_1k_graph_vs_desc
 dataset:
-  pairs_tsv: ../../MicroLens-100k-Dataset/MicroLens-100k_pairs.tsv
+  pairs_tsv: ../../MicroLens-100k-Dataset/MicroLens-100k_pairs_1k.tsv
   videos_dir: ../../MicroLens-100k-Dataset/MicroLens-100k-videos
 cohort:
   user_count: 1000
