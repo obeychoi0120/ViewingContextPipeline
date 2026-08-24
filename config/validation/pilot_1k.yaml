@@ -4,7 +4,7 @@ dataset:
   pairs_tsv: ../../MicroLens-100k-Dataset/MicroLens-100k_pairs_1k.tsv
   videos_dir: ../../MicroLens-100k-Dataset/MicroLens-100k-videos
 cohort:
-  user_count: 1000
+  user_count: 59
   seed: 42
   min_sequence_length: 5
   max_sequence_length: 13

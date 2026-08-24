@@ -3,10 +3,11 @@ from pathlib import Path
 from viewing_context_pipeline.validation.config import load_config
 
 
-def test_pilot_config_locks_user_count_and_protocol() -> None:
+def test_item_1k_pilot_config_locks_eligible_user_count_and_protocol() -> None:
     path = Path(__file__).resolve().parents[2] / "config" / "validation" / "pilot_1k.yaml"
     config = load_config(path)
-    assert config.cohort.user_count == 1000
+    assert config.dataset.pairs_tsv.name == "MicroLens-100k_pairs_1k.tsv"
+    assert config.cohort.user_count == 59
     assert config.model.max_sequence_length == 10
     assert config.model.embedding_dim == 128
     assert config.evaluation.cutoffs == [4, 8, 10, 20]

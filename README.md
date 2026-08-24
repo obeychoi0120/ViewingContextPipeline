@@ -161,7 +161,7 @@ Copy-Item config/local.example.yaml config/local.yaml
 - Qwen, BGE, faster-whisper local model 경로
 - Gemini project, location, model, thinking level
 
-`data.pairs_tsv`에는 item catalog가 1,000개로 제한된 `MicroLens-100k_pairs_1k.tsv`를 지정합니다. user 수는 이 파일과 실제 MP4의 교집합에서 `min_sequence_length`를 만족하는 사용자 수로 별도 결정됩니다. 요청한 `cohort.user_count`보다 적격 사용자가 적으면 `prepare_data`가 실패하고 `data/cohort/eligibility_summary.json`에 원인을 기록합니다.
+`data.pairs_tsv`에는 item catalog가 1,000개로 제한된 `MicroLens-100k_pairs_1k.tsv`를 지정합니다. pilot cohort는 이 파일과 실제 MP4의 교집합에서 `min_sequence_length >= 5`를 만족하는 적격 사용자 전원을 사용하며, 현재 dataset snapshot에서는 59명입니다. 요청한 `cohort.user_count`보다 적격 사용자가 적으면 `prepare_data`가 실패하고 `data/cohort/eligibility_summary.json`에 원인을 기록합니다.
 
 pipeline protocol과 활성 branch는 `config/pipelines/`에, component의 모델 처리 설정은 `config/extraction/`, SASRec protocol은 `config/validation/`에 있습니다. run 도중 원본 설정은 수정하지 않으며 `artifacts/{run_id}/runtime/components/`에 실행용 복사본을 만듭니다.
 
