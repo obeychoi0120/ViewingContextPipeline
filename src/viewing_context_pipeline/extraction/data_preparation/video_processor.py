@@ -16,6 +16,40 @@ FRAME_EXTRACTION_METADATA_FILENAME = ".pts_extraction.json"
 DIRECT_KEYFRAME_EXTRACTION_VERSION = 2
 
 
+def _last_decodable_frame_timestamp_seconds(video_path: Path) -> float:
+    completed = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_frames",
+            "-show_entries",
+            "frame=best_effort_timestamp_time",
+            "-of",
+            "csv=p=0",
+            str(video_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    frame_timestamps = []
+    for line in completed.stdout.splitlines():
+        try:
+            timestamp = float(line.strip())
+        except ValueError:
+            continue
+        if math.isfinite(timestamp) and timestamp >= 0:
+            frame_timestamps.append(timestamp)
+    if not frame_timestamps:
+        detail = completed.stderr.strip() or "no decodable video frames found"
+        raise RuntimeError(f"Could not determine last decodable frame: {video_path}: {detail}")
+    return max(frame_timestamps)
+
+
 def get_video_duration_seconds(video_path: str | Path) -> float:
     path = Path(video_path)
     if not path.is_file():
@@ -59,17 +93,34 @@ def extract_resized_keyframes(
         for timestamp in timestamps:
             destination = staging / f"{timestamp:04d}.png"
             filter_graph = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
-            completed = subprocess.run(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(timestamp), "-i", str(source), "-vf", filter_graph, "-frames:v", "1", str(destination)],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-            )
+            def extract_at(seek_timestamp: int | float) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(seek_timestamp), "-i", str(source), "-vf", filter_graph, "-frames:v", "1", str(destination)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+
+            completed = extract_at(timestamp)
             if completed.returncode != 0:
                 raise RuntimeError(f"Failed to extract keyframe at {timestamp}s: {completed.stderr.strip()}")
-            image = cv2.imread(str(destination))
-            if image is None or image.shape[:2] != (height, width):
+            image = cv2.imread(str(destination)) if destination.is_file() else None
+            if image is None:
+                last_timestamp = _last_decodable_frame_timestamp_seconds(source)
+                if last_timestamp < timestamp:
+                    destination.unlink(missing_ok=True)
+                    completed = extract_at(last_timestamp)
+                    if completed.returncode != 0:
+                        raise RuntimeError(f"Failed to clamp keyframe at {timestamp}s to {last_timestamp}s: {completed.stderr.strip()}")
+                    image = cv2.imread(str(destination)) if destination.is_file() else None
+                    print(
+                        f"[Info] Clamped trailing keyframe at {timestamp}s "
+                        f"to last decodable frame at {last_timestamp}s."
+                    )
+            if image is None:
+                raise RuntimeError(f"Could not read extracted keyframe: {destination}")
+            if image.shape[:2] != (height, width):
                 raise RuntimeError(f"Invalid keyframe dimensions: {destination}")
         if output.exists():
             shutil.rmtree(output)

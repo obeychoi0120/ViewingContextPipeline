@@ -48,6 +48,13 @@ def test_run_id_uses_asia_seoul_minute_format() -> None:
     assert generate_run_id(datetime(2026, 8, 24, 9, 38)) == RUN_ID
 
 
+def test_run_sh_requires_explicit_positional_run_id() -> None:
+    script = (ROOT / "run.sh").read_text(encoding="utf-8")
+    assert 'if [[ $# -eq 0 || -z "$1" ]]' in script
+    assert 'RUN_ID="$1"' in script
+    assert 'ARGS+=(--run-id "$RUN_ID")' in script
+
+
 def test_downstream_context_requires_explicit_run_id(context: PipelineContext) -> None:
     with pytest.raises(PipelineError, match="--run-id is required"):
         PipelineContext.load(context.pipeline_path, context.local_path, run_id=None, allow_generate=False, root=ROOT)

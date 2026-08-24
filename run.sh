@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ $# -eq 0 || -z "$1" ]]; then
+  echo "Usage: $0 RUN_ID [pipeline arguments...]" >&2
+  echo "RUN_ID must use YYMMDD_HHmm, for example 260824_1430." >&2
+  exit 2
+fi
+RUN_ID="$1"
+shift
+
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
@@ -16,8 +24,6 @@ ARGS=(
   --local-config "$LOCAL_CONFIG"
 )
 
-if [[ -n "${RUN_ID:-}" ]]; then
-  ARGS+=(--run-id "$RUN_ID")
-fi
+ARGS+=(--run-id "$RUN_ID")
 
 exec python -m viewing_context_pipeline "${ARGS[@]}" "$@"
