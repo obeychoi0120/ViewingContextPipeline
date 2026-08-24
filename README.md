@@ -174,6 +174,21 @@ python -m viewing_context_pipeline run `
   --stage all
 ```
 
+Linux checkout에서는 root `run.sh`을 사용할 수 있습니다. script가 `<repo>/src`를 `PYTHONPATH`에 추가하므로 editable install 없이도 stage subprocess가 같은 package를 import합니다.
+
+```bash
+# 기본값: prepare_data
+bash run.sh
+
+# 전체 pipeline
+STAGE=run bash run.sh --stage all
+
+# 기존 run의 독립 downstream stage
+STAGE=extract_ondevice_graph_context RUN_ID=260824_1313 bash run.sh
+```
+
+`PIPELINE`, `LOCAL_CONFIG`, `STAGE`, `RUN_ID`는 환경변수로 덮어쓸 수 있습니다. `STAGE=run`에서는 추가 인자 `--stage all`을 전달합니다.
+
 새 run의 ID는 Asia/Seoul 기준 `YYMMDD_HHmm`으로 한 번 생성됩니다. 명시적인 `--run-id`가 우선하며 같은 ID의 non-empty artifact directory는 덮어쓰지 않습니다. resume과 독립 downstream 실행에는 `--run-id`가 필요합니다.
 
 ```powershell

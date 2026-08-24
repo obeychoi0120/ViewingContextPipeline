@@ -436,6 +436,13 @@ def command_for_stage(context: PipelineContext, stage: str) -> Command:
     if stage not in context.enabled_stages:
         raise PipelineError(f"stage is disabled for this run: {stage}")
     env = os.environ.copy()
+    source_root = str(context.root / "src")
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        source_root + os.pathsep + existing_pythonpath
+        if existing_pythonpath
+        else source_root
+    )
     argv = (
         sys.executable,
         "-m",

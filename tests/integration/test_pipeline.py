@@ -100,6 +100,18 @@ def test_dry_run_creates_no_artifacts(context: PipelineContext) -> None:
     assert not context.run_root.exists()
 
 
+def test_stage_subprocess_can_import_src_package_without_install(context: PipelineContext) -> None:
+    command = pipeline_module.command_for_stage(context, "prepare_data")
+    assert command.env["PYTHONPATH"].split(pipeline_module.os.pathsep)[0] == str(ROOT / "src")
+    completed = subprocess.run(
+        [pipeline_module.sys.executable, "-c", "import viewing_context_pipeline"],
+        cwd=ROOT,
+        env=command.env,
+        check=False,
+    )
+    assert completed.returncode == 0
+
+
 def test_synthetic_runner_records_only_enabled_stages(context: PipelineContext, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(pipeline_module, "preflight", lambda _: {"schema_version": "pipeline-preflight/v1", "ready": True, "checks": {}})
