@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from conftest import config_data
-from viewing_context_pipeline.validation.cohort import largest_remainder_quotas, prepare_cohort, select_users, split_record
+from viewing_context_pipeline.validation.cohort import CohortError, largest_remainder_quotas, prepare_cohort, select_users, split_record
 from viewing_context_pipeline.validation.config import ValidationConfig
 
 
@@ -35,3 +37,28 @@ def test_prepare_cohort_needs_pairs_and_mp4_not_titles(tmp_path) -> None:
     catalog = [json.loads(line) for line in (config.output_dir / "data/cohort/catalog.jsonl").read_text(encoding="utf-8").splitlines()]
     assert all("title" not in row for row in catalog)
     assert not (config.output_dir / "data/cohort/vce_smoke_selection.jsonl").exists()
+
+
+def test_prepare_cohort_preserves_eligibility_diagnostics_on_failure(tmp_path) -> None:
+    data = config_data(tmp_path, users=2)
+    videos = data["dataset"]["videos_dir"]
+    videos.mkdir()
+    (videos / "1.mp4").write_bytes(b"video")
+    pairs = data["dataset"]["pairs_tsv"]
+    pairs.write_text(
+        "u01\t1 2 3 4 5\n"
+        "u02\t1 2 3 4 5\n",
+        encoding="utf-8",
+    )
+    config = ValidationConfig.model_validate(data)
+
+    with pytest.raises(CohortError, match="eligibility_summary.json"):
+        prepare_cohort(config, probe=lambda _: 2.0)
+
+    cohort_dir = config.output_dir / "data/cohort"
+    summary = json.loads((cohort_dir / "eligibility_summary.json").read_text(encoding="utf-8"))
+    assert summary["requested_users"] == 2
+    assert summary["eligible_users"] == 0
+    assert summary["item_exclusions"] == {"missing_video": 4}
+    assert (cohort_dir / "item_inventory.jsonl").exists()
+    assert (cohort_dir / "failures.jsonl").exists()

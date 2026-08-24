@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -139,8 +139,46 @@ def prepare_cohort(
 ) -> dict[str, Any]:
     output = output_dir or config.output_dir / "data" / "cohort"
     pairs = load_pairs(config.dataset.pairs_tsv)
-    inventory, failures = build_item_inventory({item for _, sequence in pairs for item in sequence}, config.dataset.videos_dir, probe)
+    referenced_items = {item for _, sequence in pairs for item in sequence}
+    inventory, failures = build_item_inventory(referenced_items, config.dataset.videos_dir, probe)
     eligible = {row["item_id"] for row in inventory if row["eligible"]}
+    eligible_user_count = sum(
+        1
+        for _, sequence in pairs
+        if sum(item in eligible for item in sequence) >= config.cohort.min_sequence_length
+    )
+    exclusion_counts = Counter(
+        reason
+        for row in inventory
+        for reason in row["exclusion_reasons"]
+    )
+    eligibility = {
+        "schema_version": "microlens-cohort-eligibility/v1",
+        "requested_users": config.cohort.user_count,
+        "pairs_users": len(pairs),
+        "referenced_items": len(referenced_items),
+        "eligible_items": len(eligible),
+        "eligible_users": eligible_user_count,
+        "min_sequence_length": config.cohort.min_sequence_length,
+        "item_exclusions": dict(sorted(exclusion_counts.items())),
+        "pairs_tsv": str(config.dataset.pairs_tsv),
+        "videos_dir": str(config.dataset.videos_dir),
+    }
+    atomic_write_jsonl(output / "item_inventory.jsonl", inventory)
+    atomic_write_jsonl(output / "failures.jsonl", failures)
+    atomic_write_json(output / "eligibility_summary.json", eligibility)
+    print(
+        "[COHORT] "
+        f"pairs_users={len(pairs)} referenced_items={len(referenced_items)} "
+        f"eligible_items={len(eligible)} eligible_users={eligible_user_count} "
+        f"requested_users={config.cohort.user_count}",
+        flush=True,
+    )
+    if eligible_user_count < config.cohort.user_count:
+        raise CohortError(
+            f"requested {config.cohort.user_count} users but only {eligible_user_count} are eligible; "
+            f"check pairs_tsv/videos_dir and {output / 'eligibility_summary.json'}"
+        )
     selected, quotas = select_users(pairs, eligible, count=config.cohort.user_count, seed=config.cohort.seed, boundaries=config.cohort.history_strata, min_length=config.cohort.min_sequence_length, max_length=config.cohort.max_sequence_length)
     sequences = [split_record(row) for row in selected]
     catalog_ids = sorted({item for row in sequences for item in row["sequence"]}, key=int)
@@ -150,8 +188,6 @@ def prepare_cohort(
     inventory_fp = fingerprint([{key: by_item[item][key] for key in ("item_id", "source_video_path", "duration_seconds", "source_file_size", "source_mtime_ns")} for item in catalog_ids])
     cohort_fp = fingerprint({"config": config.cohort.model_dump(), "sources": source_fingerprints, "inventory_fingerprint": inventory_fp, "sequences": sequences})
     manifest = {"schema_version": "microlens-user-cohort/v2", "run_id": config.run_id, "user_count": len(sequences), "catalog_size": len(catalog), "stratum_quotas": quotas, "source_fingerprints": source_fingerprints, "cohort_fingerprint": cohort_fp, "inventory_fingerprint": inventory_fp}
-    atomic_write_jsonl(output / "item_inventory.jsonl", inventory)
-    atomic_write_jsonl(output / "failures.jsonl", failures)
     atomic_write_jsonl(output / "sequences.jsonl", sequences)
     atomic_write_jsonl(output / "catalog.jsonl", catalog)
     atomic_write_json(output / "cohort_manifest.json", manifest)

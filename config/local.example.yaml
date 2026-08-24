@@ -3,7 +3,7 @@ data:
   videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k-videos
   titles_csv: /home_nvme/shared/data/microlens_100k/MicroLens-100k_title_en.csv
   tags_csv: /home_nvme/shared/data/microlens_100k/tags_to_summary.csv
-  pairs_tsv: /home_nvme/shared/data/microlens_100k/MicroLens-100k_pairs_1k.tsv
+  pairs_tsv: /home_nvme/shared/data/microlens_100k/MicroLens-100k_pairs.tsv
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
