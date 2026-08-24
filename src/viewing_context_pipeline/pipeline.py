@@ -8,7 +8,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -182,8 +181,8 @@ class PipelineContext:
             if not allow_generate:
                 raise PipelineError("--run-id is required for downstream or resumed stage execution")
             selected_run_id = generate_run_id()
-        if not re.fullmatch(r"\d{6}_\d{4}", selected_run_id):
-            raise PipelineError("run_id must use YYMMDD_HHmm, for example 260824_0938")
+        if selected_run_id in {".", ".."} or Path(selected_run_id).name != selected_run_id or "\\" in selected_run_id:
+            raise PipelineError("run_id must be a single directory name, not a path")
         artifact_root = _resolve(repo_root, pipeline.get("artifacts_root", "artifacts"), "artifacts_root")
         return cls(
             root=repo_root,

@@ -48,6 +48,28 @@ def test_run_id_uses_asia_seoul_minute_format() -> None:
     assert generate_run_id(datetime(2026, 8, 24, 9, 38)) == RUN_ID
 
 
+def test_run_id_accepts_user_defined_directory_name(context: PipelineContext) -> None:
+    named = PipelineContext.load(
+        context.pipeline_path,
+        context.local_path,
+        run_id="1k_pilot_260824",
+        allow_generate=False,
+        root=ROOT,
+    )
+    assert named.run_id == "1k_pilot_260824"
+
+
+def test_run_id_rejects_paths(context: PipelineContext) -> None:
+    with pytest.raises(PipelineError, match="single directory name"):
+        PipelineContext.load(
+            context.pipeline_path,
+            context.local_path,
+            run_id="../outside",
+            allow_generate=False,
+            root=ROOT,
+        )
+
+
 def test_run_sh_requires_explicit_positional_run_id() -> None:
     script = (ROOT / "run.sh").read_text(encoding="utf-8")
     assert 'if [[ $# -eq 0 || -z "$1" ]]' in script

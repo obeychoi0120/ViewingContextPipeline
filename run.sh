@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [[ $# -eq 0 || -z "$1" ]]; then
   echo "Usage: $0 RUN_ID [pipeline arguments...]" >&2
-  echo "RUN_ID must use YYMMDD_HHmm, for example 260824_1430." >&2
+  echo "RUN_ID must be an explicit directory name, for example 1k_pilot_260824." >&2
   exit 2
 fi
 RUN_ID="$1"

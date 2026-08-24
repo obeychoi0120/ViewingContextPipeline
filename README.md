@@ -180,18 +180,18 @@ Linux checkout에서는 root `run.sh`을 사용할 수 있습니다. script가 `
 
 ```bash
 # 기본값: prepare_data
-bash run.sh
+bash run.sh 1k_pilot_260824
 
 # 전체 pipeline
-STAGE=run bash run.sh --stage all
+STAGE=run bash run.sh 1k_pilot_260824 --stage all
 
 # 기존 run의 독립 downstream stage
-STAGE=extract_ondevice_graph_context RUN_ID=260824_1313 bash run.sh
+STAGE=extract_ondevice_graph_context bash run.sh 1k_pilot_260824
 ```
 
-`PIPELINE`, `LOCAL_CONFIG`, `STAGE`, `RUN_ID`는 환경변수로 덮어쓸 수 있습니다. `STAGE=run`에서는 추가 인자 `--stage all`을 전달합니다.
+첫 번째 위치 인자 `RUN_ID`는 필수이며 사용자가 정한 단일 디렉터리 이름을 받습니다. `PIPELINE`, `LOCAL_CONFIG`, `STAGE`는 환경변수로 덮어쓸 수 있습니다. `STAGE=run`에서는 추가 인자 `--stage all`을 전달합니다.
 
-새 run의 ID는 Asia/Seoul 기준 `YYMMDD_HHmm`으로 한 번 생성됩니다. 명시적인 `--run-id`가 우선하며 같은 ID의 non-empty artifact directory는 덮어쓰지 않습니다. resume과 독립 downstream 실행에는 `--run-id`가 필요합니다.
+같은 ID의 non-empty artifact directory는 덮어쓰지 않습니다. resume과 독립 downstream 실행에도 같은 `RUN_ID`를 명시해야 합니다.
 
 ```powershell
 $PIPELINE = "config/pipelines/microlens_graph_vs_desc_pilot.yaml"
