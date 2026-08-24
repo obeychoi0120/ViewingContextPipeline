@@ -1,7 +1,0 @@
-{
-  "shot_interval": "fixed_30s",
-  "gemini_location": "global",
-  "gemini_model": "gemini-3.6-flash",
-  "gemini_thinking_level": "high",
-  "ontology_contract_path": "contracts/viewing_ontology_v3.json"
-}

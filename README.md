@@ -1,105 +1,245 @@
 # ViewingContextPipeline
 
-MicroLens interaction으로 실험 cohort를 고정하고, 같은 `fixed_30s` keyframe에서 `VP_graph`와 `VP_desc`를 처음부터 생성한 뒤 독립 SASRec arm으로 비교하는 monorepo입니다.
+MicroLens-100K interaction cohort의 local MP4에서 Viewing Context를 추출하고, 같은 cohort·split·seed의 독립 SASRec arm으로 검증하는 파이프라인입니다. 모든 공개 contract는 현재 기준 `v1`입니다.
 
-현재 canonical protocol은 다음으로 고정합니다.
+이 파이프라인은 지정된 next-item ranking protocol의 차이를 측정합니다. 결과를 CTR, 시청시간, 만족도 또는 인과효과로 해석하지 않습니다.
 
-- 입력: MicroLens MP4와 interaction pairs
-- 시각 입력: `img_only`, 30초 Scene의 실제 midpoint keyframe `5/15/25초`
-- Graph arm: `SC_graph → VC_graph → VP_graph`
-- Description arm: `Scene Description → VP_desc`
-- 평가: 같은 cohort·split·seed를 사용한 ID, Graph, Description SASRec
+## 구현 구성
 
-이 평가는 고정된 protocol에서의 next-item ranking 차이를 측정합니다. CTR, 시청시간, 만족도 또는 인과효과를 주장하지 않습니다.
+메인 구현은 `src/viewing_context_pipeline/` 아래의 두 그룹으로 나뉩니다.
+
+```text
+src/viewing_context_pipeline/
+├─ extraction/    # MicroLens MP4 준비, Qwen/Gemini Context 추출
+└─ validation/    # BGE representation, SASRec 추천, diagnosis
+```
+
+공개 stage의 DAG, resume 및 부분 재실행은 `pipeline.py`가 관리하고, 각 stage의 실제 실행은 `stages.py`가 위 두 구현 그룹을 호출합니다. 별도 `scripts/` wrapper 계층은 없습니다.
 
 ## 전체 흐름
 
-![Viewing Context extraction](docs/extraction_pipeline.png)
-
-![MicroLens SASRec validation](docs/validation_pipeline.png)
-
-그림의 `VC_desc`는 영상 단위 description 표현을 뜻하는 개념명입니다. 실제 저장·handoff 계약의 이름은 `VP_desc`이며 코드와 파일 경로에서는 `VP_desc`만 사용합니다.
-
 ```text
-preflight
-→ prepare-cohort
-→ import-microlens
-→ extract-graph
-→ build-graph-profiles
-→ build-description-profiles
-→ materialize-representations
-→ run-experiment
+(Extraction: src/viewing_context_pipeline/extraction)
+
+prepare_data
+├─ extract_ondevice_graph_context
+├─ extract_ondevice_desc_context
+├─ extract_gemini_graph_context
+└─ extract_gemini_desc_context          # optional, default off
+
+(Validation: src/viewing_context_pipeline/validation)
+
+embed_representations
+        ↓
+run_recommendation
+        ↓
+run_diagnosis
 ```
 
-`validation/`이 먼저 cohort와 `vce_selection.jsonl`을 만들고, `extraction/`이 그 selection 전체의 새 visual artifact를 생성합니다. 마지막으로 `validation/`이 paired profile completeness와 공통 evidence fingerprint를 확인한 뒤 BGE와 SASRec을 실행합니다.
+`modality`는 run 전체에서 `visual_only | multimodal` 중 하나만 사용하며 기본값은 `visual_only`입니다. 활성 Extraction branch가 서로 다른 modality를 섞어 쓰는 것은 허용하지 않습니다. sampling은 `fixed_30s`, on-device VLM은 Qwen, embedding은 BGE, baseline은 `SASRec_ID`로 고정됩니다.
+
+## Extraction 단계
+
+Extraction 구현은 `src/viewing_context_pipeline/extraction/`에 있습니다.
+
+### 1. `prepare_data`
+
+MicroLens cohort와 local MP4를 다음 Extraction branch가 사용할 canonical evidence로 준비합니다.
+
+- MicroLens interaction pairs와 실제 MP4를 검사하여 cohort, sequence split 및 catalog를 확정합니다.
+- cohort catalog에 포함된 MP4만 처리합니다.
+- 각 영상을 `fixed_30s` scene과 10초 reference 구간으로 나누고 resized keyframe을 생성합니다.
+- `visual_manifest.jsonl`과 evidence fingerprint를 생성합니다.
+- `multimodal` run에서만 faster-whisper ASR과 PaddleOCR을 실행하고 `multimodal_ref`를 생성합니다.
+- `visual_only` run은 `multimodal_ref`를 만들거나 읽지 않습니다.
+
+주요 출력:
+
+```text
+data/cohort/catalog.jsonl
+data/cohort/sequences.jsonl
+data/cohort/extraction_manifest.csv
+data/fixed_30s/resized_keyframes/{content_id}/
+data/fixed_30s/visual_manifest.jsonl
+data/fixed_30s/multimodal_ref/{content_id}_multimodal_ref.jsonl  # multimodal only
+```
+
+`multimodal_ref`의 각 timeline record는 이미지와 같은 timestamp를 가지며 `raw_asr`, `raw_ocr`를 string으로 보존합니다. Extraction 전에 image/reference의 개수와 timestamp 정렬을 1:1로 검사합니다.
+
+### 2-A. `extract_ondevice_graph_context`
+
+Qwen으로 각 scene의 visual graph를 추출하고 성공한 scene graph를 영상 단위 `VC_graph`로 집계합니다.
+
+- `visual_only`: resized keyframe만 Qwen payload에 포함합니다.
+- `multimodal`: 각 이미지 직후에 동일 timestamp의 `shot_reference(asr_text, ocr_text)`를 추가합니다.
+- scene extraction, graph aggregation 및 embedding용 deterministic text serialization을 한 stage에서 완료합니다.
+- 불완전한 scene이나 fingerprint가 맞지 않는 결과는 complete Context로 전달하지 않습니다.
+
+### 2-B. `extract_ondevice_desc_context`
+
+같은 keyframe을 Qwen으로 서술하고 scene description을 영상 단위 `VC_desc`로 요약합니다.
+
+- Graph branch와 동일한 visual 또는 multimodal evidence loader를 사용합니다.
+- visual-only prompt에는 ASR, OCR, 제목, 장르 또는 기타 metadata를 넣지 않습니다.
+- multimodal에서는 image/reference 정렬을 다시 검증합니다.
+
+### 2-C. `extract_gemini_graph_context`
+
+Gemini로 scene graph를 추출하고 영상 단위 `VC_graph`를 생성합니다.
+
+- evidence와 modality 계약은 on-device Graph branch와 같습니다.
+- cloud backend의 내부 표기와 output은 `gemini`로 통일됩니다.
+- project, location, model 및 thinking level은 root `config/local.yaml`에서 전달됩니다.
+
+### 2-D. `extract_gemini_desc_context`
+
+Gemini로 descriptive scene context와 영상 단위 `VC_desc`를 생성하는 optional branch입니다. 기본 pipeline config에서는 비활성화되어 있으며, 활성화해도 다른 branch와 동일한 `video-context/v1` handoff를 생성합니다.
+
+네 Extraction branch의 root 출력은 모두 다음 공통 필드를 가집니다.
+
+```text
+schema_version: video-context/v1
+content_id
+context_type: graph | description
+backend: ondevice | gemini
+branch
+modality: visual_only | multimodal
+status: complete
+text
+evidence_fingerprint
+model_fingerprint
+source
+```
+
+## Validation 단계
+
+Validation 구현은 `src/viewing_context_pipeline/validation/`에 있습니다. 동일한 MicroLens cohort와 leave-two-out split에서 ID baseline 및 활성 Context arm을 독립적으로 학습·비교합니다.
+
+### 3. `embed_representations`
+
+활성 Extraction branch를 동적으로 탐색하여 local BGE embedding을 생성합니다.
+
+- catalog의 모든 `content_id`에 complete Context가 있는지 검사합니다.
+- branch 간 modality 혼합을 거부합니다.
+- 같은 콘텐츠의 evidence fingerprint가 branch마다 일치하는지 검사합니다.
+- 각 Context의 `text`를 BGE 1024D L2-normalized vector로 변환합니다.
+- encoder model file manifest와 source fingerprint를 함께 기록합니다.
+
+### 4. `run_recommendation`
+
+`SASRec_ID` baseline과 활성 Context arm을 각각 독립 학습합니다.
+
+- arm별로 별도 SASRec checkpoint를 생성합니다.
+- 동일한 cohort, split, training protocol 및 seeds를 사용합니다.
+- 실제 `item_id`와 `content_id`를 포함한 Top-K recommendation을 저장합니다.
+- Validation 입력은 ordered user-item interaction sequence이며 likes, dwell time 또는 completion event를 가정하지 않습니다.
+
+### 5. `run_diagnosis`
+
+recommendation artifact만 읽어 평가와 readiness를 생성합니다. 모델을 다시 학습하지 않으므로 recommendation 완료 후 diagnosis만 독립 재실행할 수 있습니다.
+
+- HR/NDCG
+- catalog coverage
+- Top-1 concentration
+- item frequency bucket별 결과
+- paired bootstrap
+- `report_ready`
 
 ## 설정
 
+로컬 경로와 credential은 root `config/local.yaml`에서만 관리합니다.
+
 ```powershell
 conda activate llmjg
+python -m pip install -e .
 Copy-Item config/local.example.yaml config/local.yaml
 ```
 
-`config/local.yaml`에는 데이터와 모델의 머신별 경로만 기록합니다. 이 파일과 모든 실행 산출물은 Git에서 제외됩니다.
+`config/local.yaml`에 다음 값을 지정합니다.
 
-- `config/pipelines/microlens_graph_vs_desc_pilot.yaml`: 1K user pilot
-- `config/pipelines/microlens_graph_vs_desc_canonical.yaml`: 100K user canonical
-- `config/local.yaml`: MP4, pairs/title/tag, Qwen, BGE 경로
+- MicroLens videos, titles, tags, interaction pairs 경로
+- Qwen, BGE, faster-whisper local model 경로
+- Gemini project, location, model, thinking level
 
-실행 전에 `extraction/requirements-*.txt`, `validation[train]`, `requirements-orchestration.txt`의 현재 환경용 dependency를 준비해야 합니다.
+pipeline protocol과 활성 branch는 `config/pipelines/`에, component의 모델 처리 설정은 `config/extraction/`, SASRec protocol은 `config/validation/`에 있습니다. run 도중 원본 설정은 수정하지 않으며 `artifacts/{run_id}/runtime/components/`에 실행용 복사본을 만듭니다.
 
-## 통합 실행
+## 실행
+
+전체 pipeline 실행:
 
 ```powershell
-conda activate llmjg
-python -m scripts.run_pipeline `
+python -m viewing_context_pipeline run `
   --config config/pipelines/microlens_graph_vs_desc_pilot.yaml `
   --local-config config/local.yaml `
   --stage all
 ```
 
-새 실행은 비어 있는 `artifacts/{run_id}`만 허용합니다. 기존 run을 자동 삭제하거나 덮어쓰지 않습니다. 중단된 실행은 `--resume`, 특정 단계부터 다시 실행할 때는 `--force-stage STAGE`를 사용합니다.
-
-실행 없이 경로와 component 명령을 확인하려면 `--dry-run`을 사용합니다.
-
-## 단계별 독립 실행
-
-각 단계는 선행 단계를 자동 호출하지 않습니다. 필요한 입력이 없으면 예상 경로와 함께 실패합니다.
+새 run의 ID는 Asia/Seoul 기준 `YYMMDD_HHmm`으로 한 번 생성됩니다. 명시적인 `--run-id`가 우선하며 같은 ID의 non-empty artifact directory는 덮어쓰지 않습니다. resume과 독립 downstream 실행에는 `--run-id`가 필요합니다.
 
 ```powershell
-python -m scripts.preflight --config $PIPELINE --local-config config/local.yaml
-python -m scripts.prepare_cohort --config $PIPELINE --local-config config/local.yaml
-python -m scripts.import_microlens --config $PIPELINE --local-config config/local.yaml
-python -m scripts.extract_graph --config $PIPELINE --local-config config/local.yaml
-python -m scripts.build_graph_profiles --config $PIPELINE --local-config config/local.yaml
-python -m scripts.build_description_profiles --config $PIPELINE --local-config config/local.yaml
-python -m scripts.materialize_representations --config $PIPELINE --local-config config/local.yaml
-python -m scripts.run_experiment --config $PIPELINE --local-config config/local.yaml
+$PIPELINE = "config/pipelines/microlens_graph_vs_desc_pilot.yaml"
+$RUN_ID = "260824_0938"
+
+python -m viewing_context_pipeline run --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID --resume
+python -m viewing_context_pipeline run --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID --stage all --force-stage extract_ondevice_graph_context
 ```
 
-기존 component CLI도 각각 `extraction/`, `validation/`에서 독립 실행할 수 있습니다. 세부 설정과 출력은 [Extraction](extraction/README.md), [Validation](validation/README.md)을 참고합니다.
+`--force-stage`는 지정 branch와 실제 downstream만 무효화하며 독립 Extraction branch는 보존합니다. `--dry-run`은 artifact를 만들지 않고 preflight와 실행 명령을 표시합니다.
 
-## 산출물과 계약
+단계별 독립 실행:
+
+```powershell
+python -m viewing_context_pipeline prepare_data --config $PIPELINE --local-config config/local.yaml
+python -m viewing_context_pipeline extract_ondevice_graph_context --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+python -m viewing_context_pipeline extract_ondevice_desc_context --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+python -m viewing_context_pipeline extract_gemini_graph_context --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+python -m viewing_context_pipeline extract_gemini_desc_context --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+python -m viewing_context_pipeline embed_representations --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+python -m viewing_context_pipeline run_recommendation --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+python -m viewing_context_pipeline run_diagnosis --config $PIPELINE --local-config config/local.yaml --run-id $RUN_ID
+```
+
+각 단계는 선행 단계를 자동 실행하지 않습니다.
+
+## Artifact 구조와 계약
 
 ```text
 artifacts/{run_id}/
-├─ runtime/                 # 실행 시 해석된 component config
-├─ validation/cohort/      # cohort, catalog, vce_selection
-├─ extraction/microlens/   # keyframe, SC/VC Graph, VP_graph, VP_desc
-├─ validation/representations/
-├─ validation/experiment/  # checkpoints, metrics, report, readiness
-└─ pipeline_manifest.json
+├─ data/
+│  ├─ cohort/
+│  └─ fixed_30s/
+│     ├─ resized_keyframes/{content_id}/
+│     ├─ visual_manifest.jsonl
+│     └─ multimodal_ref/{content_id}_multimodal_ref.jsonl
+├─ extraction/contexts/{modality}/{branch}/
+└─ validation/
+   ├─ representations/
+   ├─ recommendations/
+   └─ diagnosis/
 ```
 
-루트 `contracts/`는 component 간 handoff인 `vce_selection`과 `visual_profile`만 소유합니다. Extraction ontology와 Validation report schema는 각 component가 소유합니다.
+Canonical contract:
 
-기존 `ViewingContextExtraction/output/`은 이 pipeline에서 읽거나 수정하지 않습니다.
+- `pipeline/v1`
+- `prepared-data/v1`
+- `visual-manifest/v1`
+- `multimodal-reference/v1`
+- `video-context/v1`
+- `representations/v1`
+- `recommendations/v1`
+- `diagnosis/v1`
+- `validation-config/v1`
+
+새 run은 `artifacts/{run_id}` 밖의 legacy output을 읽거나 수정하지 않으며 compatibility fallback을 제공하지 않습니다.
 
 ## 검증
 
 ```powershell
 conda activate llmjg
-python -m pytest -q tests/integration
-Push-Location extraction; python -m pytest -q; Pop-Location
-Push-Location validation; python -m pytest -q; Pop-Location
+ruff check src tests
+python -m pytest -q tests
+python -m compileall -q src tests
+git diff --check
 ```
+
+synthetic E2E와 contract test 통과는 구현 검증입니다. 실제 MicroLens·GPU·Gemini smoke가 실행되기 전에는 실제 pipeline 실행 검증으로 보고하지 않습니다.

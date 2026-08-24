@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viewing-context-pipeline"
+version = "0.1.0"
+description = "Viewing Context extraction and controlled MicroLens/SASRec validation pipeline."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pydantic>=2.0", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+train = ["torch>=2.2", "transformers>=4.51"]
+
+[project.scripts]
+viewing-context-pipeline = "viewing_context_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

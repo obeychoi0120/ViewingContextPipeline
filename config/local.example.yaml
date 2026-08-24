@@ -7,3 +7,9 @@ data:
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
+  asr: /home_nvme/shared/models/faster-whisper-large-v3
+cloud:
+  gcp_project_id: your-gcp-project
+  gemini_location: global
+  gemini_model: gemini-3.6-flash
+  gemini_thinking_level: high

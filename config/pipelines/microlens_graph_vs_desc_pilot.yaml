@@ -1,17 +1,16 @@
-schema_version: viewing-context-pipeline/v1
-run_id: microlens_1k_graph_vs_desc
-scope: pilot
+schema_version: pipeline/v1
 protocol:
-  modality: img_only
-  shot_interval: fixed_30s
-  graph_profile: VP_graph
-  description_profile: VP_desc
+  modality: visual_only
+  sampling: fixed_30s
+extraction:
+  ondevice_graph: true
+  ondevice_desc: true
+  gemini_graph: true
+  gemini_desc: false
 artifacts_root: artifacts
-extraction_root: extraction
-validation_root: validation
 components:
-  microlens_config: extraction/config/microlens_config.json
-  processing_config: extraction/config/video_data_collection.json
-  graph_config: extraction/config/scene_context_extraction_ondevice.json
-  description_config: extraction/config/scene_description_generation.json
-  validation_config: validation/config/pilot_1k.yaml
+  processing_config: config/extraction/data_preparation.json
+  ondevice_graph_config: config/extraction/scene_context_extraction_ondevice.json
+  ondevice_desc_config: config/extraction/scene_description_generation.json
+  gemini_graph_config: config/extraction/gemini.json
+  validation_config: config/validation/pilot_1k.yaml

@@ -1,9 +1,0 @@
-{
-  "multimodal": false,
-  "MODEL_FAMILY": "qwen3_vl",
-  "MODEL_PATH": "/home_nvme/shared/models/Qwen3-VL-2B-Instruct",
-  "shot_interval": "fixed_30s",
-  "scene_max_new_tokens": 512,
-  "summary_max_new_tokens": 512,
-  "do_sample": false
-}

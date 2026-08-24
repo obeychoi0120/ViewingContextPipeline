@@ -1,0 +1,13 @@
+from pathlib import Path
+
+
+def config_data(root: Path, *, users: int = 2) -> dict:
+    return {
+        "schema_version": "validation-config/v1", "run_id": "test",
+        "dataset": {"pairs_tsv": root / "pairs.tsv", "videos_dir": root / "videos"},
+        "cohort": {"user_count": users, "seed": 42, "min_sequence_length": 5, "max_sequence_length": 13, "history_strata": [5, 10, 20, 50]},
+        "encoder": {"model_id": "BAAI/bge-large-en-v1.5", "model_path": root / "bge", "embedding_dim": 1024, "max_length": 512, "normalize_embeddings": True, "batch_size": 2},
+        "model": {"max_sequence_length": 10, "embedding_dim": 8, "num_blocks": 2, "num_heads": 2, "dropout": 0.0, "batch_size": 2, "max_epochs": 2, "patience": 1, "learning_rate": 0.001, "seeds": [42, 43, 44]},
+        "evaluation": {"cutoffs": [4, 8, 10, 20], "primary_cutoff": 10, "bootstrap_samples": 20, "non_inferiority_margin": 0.05},
+        "output_dir": root / "output",
+    }

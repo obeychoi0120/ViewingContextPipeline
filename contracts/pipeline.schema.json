@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pipeline/v1",
+  "type": "object",
+  "required": ["schema_version", "protocol", "extraction", "components"],
+  "properties": {
+    "schema_version": {"const": "pipeline/v1"},
+    "protocol": {
+      "type": "object",
+      "required": ["modality", "sampling"],
+      "properties": {
+        "modality": {"enum": ["visual_only", "multimodal"]},
+        "sampling": {"const": "fixed_30s"}
+      },
+      "additionalProperties": false
+    },
+    "extraction": {
+      "type": "object",
+      "required": ["ondevice_graph", "ondevice_desc", "gemini_graph", "gemini_desc"],
+      "properties": {
+        "ondevice_graph": {"type": "boolean"},
+        "ondevice_desc": {"type": "boolean"},
+        "gemini_graph": {"type": "boolean"},
+        "gemini_desc": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "components": {"type": "object"}
+  }
+}

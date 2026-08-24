@@ -1,0 +1,35 @@
+schema_version: validation-config/v1
+run_id: microlens_1k_graph_vs_desc
+dataset:
+  pairs_tsv: ../../MicroLens-100k-Dataset/MicroLens-100k_pairs.tsv
+  videos_dir: ../../MicroLens-100k-Dataset/MicroLens-100k-videos
+cohort:
+  user_count: 1000
+  seed: 42
+  min_sequence_length: 5
+  max_sequence_length: 13
+  history_strata: [5, 10, 20, 50]
+encoder:
+  model_id: BAAI/bge-large-en-v1.5
+  model_path: /home_nvme/shared/models/bge-large-en-v1.5
+  embedding_dim: 1024
+  max_length: 512
+  normalize_embeddings: true
+  batch_size: 32
+model:
+  max_sequence_length: 10
+  embedding_dim: 128
+  num_blocks: 2
+  num_heads: 2
+  dropout: 0.1
+  batch_size: 128
+  max_epochs: 50
+  patience: 5
+  learning_rate: 0.0001
+  seeds: [42, 43, 44]
+evaluation:
+  cutoffs: [4, 8, 10, 20]
+  primary_cutoff: 10
+  bootstrap_samples: 10000
+  non_inferiority_margin: 0.05
+output_dir: artifacts/microlens_1k_graph_vs_desc

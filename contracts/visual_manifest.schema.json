@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "visual-manifest/v1",
+  "type": "object",
+  "required": ["schema_version", "content_id", "scenes", "evidence_fingerprint"],
+  "properties": {
+    "schema_version": {"const": "visual-manifest/v1"},
+    "content_id": {"type": "string", "minLength": 1},
+    "scenes": {"type": "array", "minItems": 1},
+    "evidence_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

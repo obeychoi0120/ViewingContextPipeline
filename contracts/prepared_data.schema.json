@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prepared-data/v1",
+  "type": "object",
+  "required": ["schema_version", "run_id", "modality", "sampling", "catalog_size", "visual_manifest", "complete"],
+  "properties": {
+    "schema_version": {"const": "prepared-data/v1"},
+    "run_id": {"type": "string"},
+    "modality": {"enum": ["visual_only", "multimodal"]},
+    "sampling": {"const": "fixed_30s"},
+    "catalog_size": {"type": "integer", "minimum": 1},
+    "visual_manifest": {"type": "string"},
+    "multimodal_ref_dir": {"type": ["string", "null"]},
+    "complete": {"const": true}
+  }
+}
