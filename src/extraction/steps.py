@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from tqdm import tqdm
+
 from extraction.backends import QwenBackend
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.data_preparation.microlens import prepare_catalog
@@ -18,6 +20,7 @@ from extraction.evidence import (
     build_scene_evidence,
     load_images,
 )
+from extraction.monitoring import scene_messages, summary_message, video_names
 from extraction.relational_graph import (
     GRAPH_SCENE_SCHEMA,
     GRAPH_SUMMARY_SCHEMA,
@@ -42,29 +45,55 @@ class ExtractionStepError(RuntimeError):
     pass
 
 
+GenerationCallback = Callable[[str, str], None]
+GenerationFunction = Callable[
+    [list[QwenGenerationTask], GenerationCallback | None],
+    dict[str, str],
+]
+
+
 @contextmanager
 def _qwen_generator(
     *,
     model_path: Path,
     gpus: int | None,
-) -> Iterator[Callable[[list[QwenGenerationTask]], dict[str, str]]]:
+) -> Iterator[GenerationFunction]:
     if gpus is not None:
         with QwenWorkerPool(gpus, str(model_path)) as worker_pool:
             yield worker_pool.generate
         return
     backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
 
-    def generate(tasks: list[QwenGenerationTask]) -> dict[str, str]:
-        return {
-            task.task_id: backend.generate(
+    def generate(
+        tasks: list[QwenGenerationTask],
+        on_task_complete: GenerationCallback | None = None,
+    ) -> dict[str, str]:
+        results: dict[str, str] = {}
+        for task in tasks:
+            text = backend.generate(
                 load_images(list(task.image_paths)),
                 task.prompt,
                 task.max_new_tokens,
             )
-            for task in tasks
-        }
+            results[task.task_id] = text
+            if on_task_complete is not None:
+                on_task_complete(task.task_id, text)
+        return results
 
     yield generate
+
+
+def _completed_progress(description: str, total: int) -> None:
+    with tqdm(total=total, initial=total, desc=description, unit="content"):
+        pass
+
+
+def _write_progress(progress: tqdm, message: str) -> None:
+    tqdm.write(message, file=progress.fp)
+
+
+def _video_name_map(context: RunContext) -> dict[str, str]:
+    return video_names(read_jsonl(context.cohort_dir / "catalog.jsonl"))
 
 
 def _scene_generation_rows(
@@ -258,10 +287,12 @@ def extract_graph_scenes(
         "model": model_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
+    names = _video_name_map(context)
     expected_outputs = [context.graph_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
     if not force:
         current = _current(context, "extract-graph-scenes", sources, expected_outputs)
         if current is not None:
+            _completed_progress("Graph scenes", len(visual_rows))
             return current
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
@@ -285,33 +316,46 @@ def extract_graph_scenes(
         )
         pending.append((visual, input_fp, scene_rows))
 
-    if pending:
-        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-            for visual, input_fp, scene_rows in pending:
-                generated = generate([row["task"] for row in scene_rows])
-                records = [{
-                    "schema_version": GRAPH_SCENE_SCHEMA,
-                    "content_id": visual["content_id"],
-                    "scene_idx": row["scene_idx"],
-                    "keyframes": row["keyframes"],
-                    "image_paths": row["image_paths"],
-                    "triples": parse_graph_output(
-                        generated[row["task"].task_id], ontology
-                    ),
-                } for row in scene_rows]
-                records = [{
-                    **row,
-                    "ontology_id": ontology.ontology_id,
-                    "ontology_status": ontology.status,
-                    "ontology_fingerprint": ontology_fp,
-                    "prompt_fingerprint": prompt_fp,
-                    "model_fingerprint": model_fp,
-                    "evidence_fingerprint": visual["evidence_fingerprint"],
-                    "input_fingerprint": input_fp,
-                } for row in records]
-                path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
-                write_jsonl(path, records)
-                records_by_content[str(visual["content_id"])] = records
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(records_by_content),
+        desc="Graph scenes",
+        unit="content",
+    ) as progress:
+        if pending:
+            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                for visual, input_fp, scene_rows in pending:
+                    generated = generate([row["task"] for row in scene_rows], None)
+                    records = [{
+                        "schema_version": GRAPH_SCENE_SCHEMA,
+                        "content_id": visual["content_id"],
+                        "scene_idx": row["scene_idx"],
+                        "keyframes": row["keyframes"],
+                        "image_paths": row["image_paths"],
+                        "triples": parse_graph_output(
+                            generated[row["task"].task_id], ontology
+                        ),
+                    } for row in scene_rows]
+                    records = [{
+                        **row,
+                        "ontology_id": ontology.ontology_id,
+                        "ontology_status": ontology.status,
+                        "ontology_fingerprint": ontology_fp,
+                        "prompt_fingerprint": prompt_fp,
+                        "model_fingerprint": model_fp,
+                        "evidence_fingerprint": visual["evidence_fingerprint"],
+                        "input_fingerprint": input_fp,
+                    } for row in records]
+                    path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
+                    write_jsonl(path, records)
+                    records_by_content[str(visual["content_id"])] = records
+                    video_name = names.get(
+                        str(visual["content_id"]),
+                        f"{visual['content_id']}.mp4",
+                    )
+                    for message in scene_messages(video_name, records, arm="graph"):
+                        _write_progress(progress, message)
+                    progress.update(1)
     outputs = [
         record
         for visual in visual_rows
@@ -352,6 +396,7 @@ def summarize_graph(
         "model": model_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
+    names = _video_name_map(context)
     scene_paths = [context.graph_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
     if not all(path.is_file() for path in scene_paths):
         raise ExtractionStepError("graph scene outputs are incomplete")
@@ -359,6 +404,7 @@ def summarize_graph(
     if not force:
         current = _current(context, "summarize-graph", sources, expected_outputs)
         if current is not None:
+            _completed_progress("Graph summaries", len(visual_rows))
             return current
     documents_by_content: dict[str, dict[str, Any]] = {}
     pending: list[tuple[list[dict[str, Any]], str, Path, str]] = []
@@ -386,28 +432,50 @@ def summarize_graph(
         )
         pending.append((records, input_fp, output_path, task_id))
 
-    generated: dict[str, str] = {}
-    if tasks:
-        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-            generated = generate(tasks)
-    for records, input_fp, output_path, task_id in pending:
-        summary = validate_graph_summary(generated[task_id])
-        document = {
-            "schema_version": GRAPH_SUMMARY_SCHEMA,
-            "content_id": records[0]["content_id"],
-            "arm": "graph",
-            "status": "complete",
-            "text": summary,
-            "scene_count": len(records),
-            "evidence_fingerprint": records[0]["evidence_fingerprint"],
-            "ontology_fingerprint": records[0]["ontology_fingerprint"],
-            "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
-            "summary_prompt_fingerprint": prompt_fp,
-            "model_fingerprint": model_fp,
-            "input_fingerprint": input_fp,
-        }
-        write_json(output_path, document)
-        documents_by_content[str(records[0]["content_id"])] = document
+    pending_by_task = {
+        task_id: (records, input_fp, output_path)
+        for records, input_fp, output_path, task_id in pending
+    }
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(documents_by_content),
+        desc="Graph summaries",
+        unit="content",
+    ) as progress:
+        def complete_graph_summary(task_id: str, text: str) -> None:
+            records, input_fp, output_path = pending_by_task[task_id]
+            summary = validate_graph_summary(text)
+            content_id = str(records[0]["content_id"])
+            document = {
+                "schema_version": GRAPH_SUMMARY_SCHEMA,
+                "content_id": content_id,
+                "arm": "graph",
+                "status": "complete",
+                "text": summary,
+                "scene_count": len(records),
+                "evidence_fingerprint": records[0]["evidence_fingerprint"],
+                "ontology_fingerprint": records[0]["ontology_fingerprint"],
+                "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
+                "summary_prompt_fingerprint": prompt_fp,
+                "model_fingerprint": model_fp,
+                "input_fingerprint": input_fp,
+            }
+            write_json(output_path, document)
+            documents_by_content[content_id] = document
+            _write_progress(
+                progress,
+                summary_message(
+                    names.get(content_id, f"{content_id}.mp4"),
+                    arm="graph",
+                    scene_count=len(records),
+                    text=summary,
+                ),
+            )
+            progress.update(1)
+
+        if tasks:
+            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                generate(tasks, complete_graph_summary)
     documents = [
         documents_by_content[str(row["content_id"])] for row in visual_rows
     ]
@@ -446,12 +514,14 @@ def extract_description_scenes(
         "model": model_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
+    names = _video_name_map(context)
     expected_outputs = [
         context.description_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows
     ]
     if not force:
         current = _current(context, "extract-description-scenes", sources, expected_outputs)
         if current is not None:
+            _completed_progress("Description scenes", len(visual_rows))
             return current
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
@@ -474,36 +544,51 @@ def extract_description_scenes(
         )
         pending.append((visual, input_fp, scene_rows))
 
-    if pending:
-        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-            for visual, input_fp, scene_rows in pending:
-                generated = generate([row["task"] for row in scene_rows])
-                records = []
-                for row in scene_rows:
-                    description = generated[row["task"].task_id].strip()
-                    if not description:
-                        raise ExtractionStepError(
-                            f"{visual['content_id']} scene {row['scene_idx']} "
-                            "produced an empty description"
-                        )
-                    records.append({
-                        "schema_version": SCENE_SCHEMA_VERSION,
-                        "content_id": visual["content_id"],
-                        "scene_idx": row["scene_idx"],
-                        "keyframes": row["keyframes"],
-                        "image_paths": row["image_paths"],
-                        "description": description,
-                    })
-                records = [{
-                    **row,
-                    "prompt_fingerprint": prompt_fp,
-                    "model_fingerprint": model_fp,
-                    "evidence_fingerprint": visual["evidence_fingerprint"],
-                    "input_fingerprint": input_fp,
-                } for row in records]
-                path = context.description_scene_dir / f"{visual['content_id']}.jsonl"
-                write_jsonl(path, records)
-                records_by_content[str(visual["content_id"])] = records
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(records_by_content),
+        desc="Description scenes",
+        unit="content",
+    ) as progress:
+        if pending:
+            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                for visual, input_fp, scene_rows in pending:
+                    generated = generate([row["task"] for row in scene_rows], None)
+                    records = []
+                    for row in scene_rows:
+                        description = generated[row["task"].task_id].strip()
+                        if not description:
+                            raise ExtractionStepError(
+                                f"{visual['content_id']} scene {row['scene_idx']} "
+                                "produced an empty description"
+                            )
+                        records.append({
+                            "schema_version": SCENE_SCHEMA_VERSION,
+                            "content_id": visual["content_id"],
+                            "scene_idx": row["scene_idx"],
+                            "keyframes": row["keyframes"],
+                            "image_paths": row["image_paths"],
+                            "description": description,
+                        })
+                    records = [{
+                        **row,
+                        "prompt_fingerprint": prompt_fp,
+                        "model_fingerprint": model_fp,
+                        "evidence_fingerprint": visual["evidence_fingerprint"],
+                        "input_fingerprint": input_fp,
+                    } for row in records]
+                    path = context.description_scene_dir / f"{visual['content_id']}.jsonl"
+                    write_jsonl(path, records)
+                    records_by_content[str(visual["content_id"])] = records
+                    video_name = names.get(
+                        str(visual["content_id"]),
+                        f"{visual['content_id']}.mp4",
+                    )
+                    for message in scene_messages(
+                        video_name, records, arm="description"
+                    ):
+                        _write_progress(progress, message)
+                    progress.update(1)
     outputs = [
         record
         for visual in visual_rows
@@ -544,6 +629,7 @@ def summarize_description(
         "model": model_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
+    names = _video_name_map(context)
     scene_paths = [
         context.description_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows
     ]
@@ -555,6 +641,7 @@ def summarize_description(
     if not force:
         current = _current(context, "summarize-description", sources, expected_outputs)
         if current is not None:
+            _completed_progress("Description summaries", len(visual_rows))
             return current
     documents_by_content: dict[str, dict[str, Any]] = {}
     pending: list[tuple[list[dict[str, Any]], str, Path, str]] = []
@@ -582,27 +669,49 @@ def summarize_description(
         )
         pending.append((records, input_fp, output_path, task_id))
 
-    generated: dict[str, str] = {}
-    if tasks:
-        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-            generated = generate(tasks)
-    for records, input_fp, output_path, task_id in pending:
-        summary = validate_description_summary(generated[task_id])
-        document = {
-            "schema_version": SUMMARY_SCHEMA_VERSION,
-            "content_id": records[0]["content_id"],
-            "arm": "description",
-            "status": "complete",
-            "text": summary,
-            "scene_count": len(records),
-            "evidence_fingerprint": records[0]["evidence_fingerprint"],
-            "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
-            "summary_prompt_fingerprint": prompt_fp,
-            "model_fingerprint": model_fp,
-            "input_fingerprint": input_fp,
-        }
-        write_json(output_path, document)
-        documents_by_content[str(records[0]["content_id"])] = document
+    pending_by_task = {
+        task_id: (records, input_fp, output_path)
+        for records, input_fp, output_path, task_id in pending
+    }
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(documents_by_content),
+        desc="Description summaries",
+        unit="content",
+    ) as progress:
+        def complete_description_summary(task_id: str, text: str) -> None:
+            records, input_fp, output_path = pending_by_task[task_id]
+            summary = validate_description_summary(text)
+            content_id = str(records[0]["content_id"])
+            document = {
+                "schema_version": SUMMARY_SCHEMA_VERSION,
+                "content_id": content_id,
+                "arm": "description",
+                "status": "complete",
+                "text": summary,
+                "scene_count": len(records),
+                "evidence_fingerprint": records[0]["evidence_fingerprint"],
+                "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
+                "summary_prompt_fingerprint": prompt_fp,
+                "model_fingerprint": model_fp,
+                "input_fingerprint": input_fp,
+            }
+            write_json(output_path, document)
+            documents_by_content[content_id] = document
+            _write_progress(
+                progress,
+                summary_message(
+                    names.get(content_id, f"{content_id}.mp4"),
+                    arm="description",
+                    scene_count=len(records),
+                    text=summary,
+                ),
+            )
+            progress.update(1)
+
+        if tasks:
+            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                generate(tasks, complete_description_summary)
     documents = [
         documents_by_content[str(row["content_id"])] for row in visual_rows
     ]

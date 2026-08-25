@@ -10,6 +10,7 @@ import extraction.backends.qwen as qwen_module
 import extraction.evidence as evidence_module
 from extraction.backends.qwen_workers import (
     QwenGenerationTask,
+    QwenWorkerPool,
     _visible_gpu_ids,
     _worker_main,
     assign_worker_indices,
@@ -69,3 +70,41 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
 
     assert initialized == [("model", True, "7")]
     assert result_queue.values[0]["text"] == "['a.png']:prompt:32"
+
+
+def test_pool_callback_uses_worker_completion_order() -> None:
+    class TaskQueue:
+        def __init__(self) -> None:
+            self.values = []
+
+        def put(self, value) -> None:
+            self.values.append(value)
+
+    class ResultQueue:
+        def __init__(self) -> None:
+            self.values = [
+                {"ok": True, "task_id": "b", "text": "second"},
+                {"ok": True, "task_id": "a", "text": "first"},
+            ]
+
+        def get(self, timeout):
+            return self.values.pop(0)
+
+    pool = object.__new__(QwenWorkerPool)
+    pool.gpu_count = 2
+    pool._task_queues = [TaskQueue(), TaskQueue()]
+    pool._result_queue = ResultQueue()
+    pool._processes = []
+    tasks = [
+        QwenGenerationTask("a", (), "a", 1),
+        QwenGenerationTask("b", (), "b", 1),
+    ]
+    completed = []
+
+    results = pool.generate(
+        tasks,
+        lambda task_id, text: completed.append((task_id, text)),
+    )
+
+    assert completed == [("b", "second"), ("a", "first")]
+    assert results == {"b": "second", "a": "first"}

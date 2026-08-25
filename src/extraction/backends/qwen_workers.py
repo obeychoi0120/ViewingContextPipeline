@@ -5,7 +5,7 @@ import os
 import queue
 import traceback
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,11 @@ class QwenWorkerPool:
             self._task_queues.append(task_queue)
             self._processes.append(process)
 
-    def generate(self, tasks: Iterable[QwenGenerationTask]) -> dict[str, str]:
+    def generate(
+        self,
+        tasks: Iterable[QwenGenerationTask],
+        on_task_complete: Callable[[str, str], None] | None = None,
+    ) -> dict[str, str]:
         task_list = list(tasks)
         task_ids = [task.task_id for task in task_list]
         if len(set(task_ids)) != len(task_ids):
@@ -85,8 +89,11 @@ class QwenWorkerPool:
                     f"Qwen worker {worker_index} on GPU {gpu_id} failed:\n{error}"
                 )
             if task_id in pending:
-                results[task_id] = str(result["text"])
+                text = str(result["text"])
+                results[task_id] = text
                 del pending[task_id]
+                if on_task_complete is not None:
+                    on_task_complete(task_id, text)
         return results
 
     def close(self) -> None:

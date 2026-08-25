@@ -102,6 +102,8 @@ python -m extraction extract-description-scenes --run-id 1k_pilot_260825 --gpus 
 python -m extraction summarize-description --run-id 1k_pilot_260825 --gpus 2
 ```
 
+네 Extraction step은 content 단위 progress bar를 표시합니다. Scene 결과는 content 내부에서 `scene_idx` 순으로 `[Graph]` 또는 `[Desc]` 블록을 출력하고, summary는 병렬 생성이 완료되는 즉시 `[Summary_graph]` 또는 `[Summary_desc]` 블록으로 출력합니다. Resume된 content는 별도 로그 없이 progress bar의 초기 완료 수에 포함됩니다.
+
 ## 전체 실행
 
 ```powershell
