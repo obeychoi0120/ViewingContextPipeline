@@ -47,18 +47,18 @@ def _current(
 
 
 def validation_config(context: RunContext) -> ValidationConfig:
-    settings = context.pipeline["validation"]
+    settings = context.config["validation"]
     return ValidationConfig.model_validate({
         "schema_version": "validation-config/v1",
         "run_id": context.run_id,
         "dataset": {
-            "pairs_tsv": context.local_path("data", "pairs_tsv"),
-            "videos_dir": context.local_path("data", "videos_dir"),
+            "pairs_tsv": context.path("data", "pairs_tsv"),
+            "videos_dir": context.path("data", "videos_dir"),
         },
         "cohort": settings["cohort"],
         "encoder": {
             **settings["encoder"],
-            "model_path": context.local_path("models", "bge"),
+            "model_path": context.path("models", "bge"),
         },
         "model": settings["model"],
         "evaluation": settings["evaluation"],
@@ -124,8 +124,8 @@ def prepare_cohort_step(context: RunContext, *, force: bool = False) -> dict[str
     context.initialize()
     sources = {
         "config": context.config_fingerprint,
-        "pairs": file_fingerprint(context.local_path("data", "pairs_tsv")),
-        "videos": directory_fingerprint(context.local_path("data", "videos_dir")),
+        "pairs": file_fingerprint(context.path("data", "pairs_tsv")),
+        "videos": directory_fingerprint(context.path("data", "videos_dir")),
     }
     if not force:
         current = _current(context, "prepare-cohort", sources, [context.cohort_dir / "cohort_manifest.json"])
@@ -148,7 +148,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     sources_fp = {
         "summarize-graph": graph["output_fingerprint"],
         "summarize-description": description["output_fingerprint"],
-        "encoder": directory_fingerprint(context.local_path("models", "bge")),
+        "encoder": directory_fingerprint(context.path("models", "bge")),
     }
     if not force:
         required = [context.representations_manifest]

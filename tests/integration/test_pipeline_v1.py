@@ -27,35 +27,37 @@ def context(tmp_path: Path) -> RunContext:
     models = tmp_path / "models"
     for name in ("qwen", "bge"):
         (models / name).mkdir(parents=True)
-    config_dir = tmp_path / "config" / "pipelines"
+    config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)
-    local_dir = tmp_path / "config"
-    pipeline = yaml.safe_load((ROOT / "config/pipelines/microlens_graph_vs_desc_pilot.yaml").read_text(encoding="utf-8"))
-    pipeline["artifacts_root"] = str(tmp_path / "artifacts")
-    pipeline["extraction"]["graph"]["ontology"] = str(ROOT / "contracts/extraction/relational_graph_ontology_v1.json")
+    config = yaml.safe_load(
+        (ROOT / "config/pipeline.example.yaml").read_text(encoding="utf-8")
+    )
+    config["artifacts_root"] = str(tmp_path / "artifacts")
+    config["data"] = {
+        "videos_dir": str(videos),
+        "titles_csv": str(data / "titles.csv"),
+        "tags_csv": str(data / "tags.csv"),
+        "pairs_tsv": str(data / "pairs.tsv"),
+    }
+    config["models"] = {"qwen": str(models / "qwen"), "bge": str(models / "bge")}
+    config["extraction"]["graph"]["ontology"] = str(
+        ROOT / "contracts/extraction/relational_graph_ontology_v1.json"
+    )
     for arm in ("graph", "description"):
         for key in ("scene_prompt", "summary_prompt"):
-            pipeline["extraction"][arm][key] = str(ROOT / pipeline["extraction"][arm][key])
-    (config_dir / "microlens_graph_vs_desc_pilot.yaml").write_text(
-        yaml.safe_dump(pipeline, sort_keys=False), encoding="utf-8"
+            config["extraction"][arm][key] = str(
+                ROOT / config["extraction"][arm][key]
+            )
+    (config_dir / "pipeline.yaml").write_text(
+        yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
     )
-    (local_dir / "local.yaml").write_text(yaml.safe_dump({
-        "schema_version": "viewing-context-local/v1",
-        "data": {
-            "videos_dir": str(videos),
-            "titles_csv": str(data / "titles.csv"),
-            "tags_csv": str(data / "tags.csv"),
-            "pairs_tsv": str(data / "pairs.tsv"),
-        },
-        "models": {"qwen": str(models / "qwen"), "bge": str(models / "bge")},
-    }, sort_keys=False), encoding="utf-8")
     return RunContext.load("test_run", root=tmp_path)
 
 
 def test_public_stage_order_matches_step_first_dag() -> None:
     assert STAGES == (
         "prepare-cohort",
-        "prepare-visual-evidence",
+        "prepare-input-data",
         "extract-graph-scenes",
         "summarize-graph",
         "extract-description-scenes",
@@ -66,9 +68,17 @@ def test_public_stage_order_matches_step_first_dag() -> None:
     )
 
 
-def test_pipeline_and_local_config_contracts_start_at_v1(context: RunContext) -> None:
-    assert context.pipeline["schema_version"] == "viewing-context-pipeline/v1"
-    assert context.local["schema_version"] == "viewing-context-local/v1"
+def test_single_pipeline_config_contract_starts_at_v1(context: RunContext) -> None:
+    assert context.config["schema_version"] == "viewing-context-config/v1"
+    assert set(context.config) == {
+        "schema_version",
+        "protocol",
+        "artifacts_root",
+        "data",
+        "models",
+        "extraction",
+        "validation",
+    }
 
 
 def test_packages_are_top_level_and_old_namespace_is_absent() -> None:
@@ -79,7 +89,7 @@ def test_packages_are_top_level_and_old_namespace_is_absent() -> None:
 
 
 def test_fixed_config_rejects_protocol_drift(context: RunContext) -> None:
-    path = context.root / "config/pipelines/microlens_graph_vs_desc_pilot.yaml"
+    path = context.root / "config/pipeline.yaml"
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     value["protocol"]["modality"] = "multimodal"
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
@@ -87,13 +97,33 @@ def test_fixed_config_rejects_protocol_drift(context: RunContext) -> None:
         RunContext.load("other", root=context.root)
 
 
-def test_fresh_run_refuses_nonempty_collision(context: RunContext) -> None:
+def test_single_config_rejects_wrong_schema(context: RunContext) -> None:
+    path = context.root / "config/pipeline.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["schema_version"] = "viewing-context-config/v2"
+    path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError, match="viewing-context-config/v1"):
+        RunContext.load("other", root=context.root)
+
+
+def test_resume_refuses_nonempty_directory_without_runtime_snapshot(context: RunContext) -> None:
     context.run_root.mkdir(parents=True)
     marker = context.run_root / "keep.txt"
     marker.write_text("keep", encoding="utf-8")
-    with pytest.raises(ConfigError, match="will not be overwritten"):
-        context.initialize(fresh=True)
+    with pytest.raises(ConfigError, match="no v1 runtime snapshot"):
+        context.initialize()
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_resume_rejects_changed_config_for_same_run(context: RunContext) -> None:
+    context.initialize()
+    path = context.root / "config/pipeline.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["validation"]["model"]["dropout"] = 0.2
+    path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+    changed = RunContext.load(context.run_id, root=context.root)
+    with pytest.raises(ConfigError, match="does not match the run snapshot"):
+        changed.initialize()
 
 
 def test_graph_force_does_not_invalidate_description_sibling() -> None:
@@ -139,6 +169,11 @@ def test_root_cli_has_no_config_override_flags() -> None:
         pipeline_cli(["run", "--run-id", "demo", "--config", "other.yaml"])
 
 
+def test_root_cli_has_no_resume_flag() -> None:
+    with pytest.raises(SystemExit):
+        pipeline_cli(["run", "--run-id", "demo", "--resume"])
+
+
 def test_dry_run_writes_no_artifacts(context: RunContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline_module, "preflight", lambda _: {"ready": True, "checks": {}})
     assert run_pipeline(context, dry_run=True) == 0
@@ -152,6 +187,8 @@ def test_synthetic_full_runner_records_exact_v1_dag(context: RunContext, monkeyp
     def fake_handlers():
         def build(stage: str):
             def run(ctx: RunContext, *, force: bool = False):
+                if ctx.stage_manifest(stage).is_file() and not force:
+                    return json.loads(ctx.stage_manifest(stage).read_text(encoding="utf-8"))
                 calls.append(stage)
                 document = {
                     "schema_version": "step-manifest/v1",
@@ -169,6 +206,64 @@ def test_synthetic_full_runner_records_exact_v1_dag(context: RunContext, monkeyp
     monkeypatch.setattr(pipeline_module, "handlers", fake_handlers)
     assert run_pipeline(context) == 0
     assert calls == list(STAGES)
+    assert run_pipeline(context) == 0
+    assert calls == list(STAGES)
     manifest = json.loads(context.pipeline_manifest.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == "pipeline-run/v1"
     assert manifest["complete"] is True
+    snapshot = json.loads(context.runtime_path.read_text(encoding="utf-8"))
+    assert set(snapshot) == {
+        "schema_version",
+        "run_id",
+        "config_path",
+        "config",
+        "config_fingerprint",
+    }
+
+
+def test_resume_runs_only_missing_downstream_stages(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context.initialize()
+    completed = STAGES[:3]
+    for stage in completed:
+        write_json(
+            context.stage_manifest(stage),
+            {
+                "schema_version": "step-manifest/v1",
+                "run_id": context.run_id,
+                "stage": stage,
+                "status": "complete",
+                "source_fingerprints": {},
+                "output_fingerprint": stage,
+            },
+        )
+    calls: list[str] = []
+
+    def fake_handlers():
+        def build(stage: str):
+            def run(ctx: RunContext, *, force: bool = False):
+                path = ctx.stage_manifest(stage)
+                if path.is_file() and not force:
+                    return json.loads(path.read_text(encoding="utf-8"))
+                calls.append(stage)
+                document = {
+                    "schema_version": "step-manifest/v1",
+                    "run_id": ctx.run_id,
+                    "stage": stage,
+                    "status": "complete",
+                    "source_fingerprints": {},
+                    "output_fingerprint": stage,
+                }
+                write_json(path, document)
+                return document
+
+            return run
+
+        return {stage: build(stage) for stage in STAGES}
+
+    monkeypatch.setattr(pipeline_module, "preflight", lambda _: {"ready": True, "checks": {}})
+    monkeypatch.setattr(pipeline_module, "handlers", fake_handlers)
+    assert run_pipeline(context) == 0
+    assert calls == list(STAGES[len(completed):])

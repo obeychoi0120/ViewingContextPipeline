@@ -1,5 +1,5 @@
 /artifacts/
-/config/local.yaml
+/config/pipeline.yaml
 **/*.egg-info/
 **/__pycache__/
 **/*.py[cod]

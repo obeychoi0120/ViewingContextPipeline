@@ -12,14 +12,12 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     run = subparsers.add_parser("run")
     run.add_argument("--run-id", required=True)
-    run.add_argument("--resume", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--force-stage", action="append", choices=STAGES, default=[])
     args = parser.parse_args(argv)
     try:
         return run_pipeline(
             RunContext.load(args.run_id),
-            resume=args.resume,
             dry_run=args.dry_run,
             force_stages=set(args.force_stage),
         )

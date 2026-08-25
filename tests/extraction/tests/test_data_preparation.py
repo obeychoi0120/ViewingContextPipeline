@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
@@ -94,10 +95,16 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         {"item_id": "2", "content_id": "microlens_100k_00002", "source_video_path": str(tmp_path / "2.mp4"), "duration_seconds": 31.0},
     ]
 
-    with mock.patch(
-        "extraction.data_preparation.microlens.prepare_visual_item",
-        side_effect=lambda **kwargs: {"content_id": kwargs["content_id"]},
-    ) as process:
+    with (
+        mock.patch(
+            "extraction.data_preparation.microlens.prepare_visual_item",
+            side_effect=lambda **kwargs: {"content_id": kwargs["content_id"]},
+        ) as process,
+        mock.patch(
+            "extraction.data_preparation.microlens.ThreadPoolExecutor",
+            side_effect=lambda **kwargs: ThreadPoolExecutor(**kwargs),
+        ) as executor,
+    ):
         result = prepare_catalog(
             catalog,
             titles_csv=titles,
@@ -108,7 +115,12 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         )
 
     assert result["succeeded"] == 2 and result["failed"] == 0
-    assert [call.kwargs["source_video_path"].name for call in process.call_args_list] == ["1.mp4", "2.mp4"]
+    assert result["workers"] == 4
+    executor.assert_called_once_with(max_workers=4)
+    assert sorted(call.kwargs["source_video_path"].name for call in process.call_args_list) == [
+        "1.mp4",
+        "2.mp4",
+    ]
     with Path(result["manifest"]).open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     assert rows == [

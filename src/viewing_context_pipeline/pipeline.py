@@ -9,7 +9,7 @@ from viewing_context_pipeline.runtime import RunContext, read_json, write_json
 
 STAGES = (
     "prepare-cohort",
-    "prepare-visual-evidence",
+    "prepare-input-data",
     "extract-graph-scenes",
     "summarize-graph",
     "extract-description-scenes",
@@ -21,10 +21,10 @@ STAGES = (
 
 DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "prepare-cohort": (),
-    "prepare-visual-evidence": ("prepare-cohort",),
-    "extract-graph-scenes": ("prepare-visual-evidence",),
+    "prepare-input-data": ("prepare-cohort",),
+    "extract-graph-scenes": ("prepare-input-data",),
     "summarize-graph": ("extract-graph-scenes",),
-    "extract-description-scenes": ("prepare-visual-evidence",),
+    "extract-description-scenes": ("prepare-input-data",),
     "summarize-description": ("extract-description-scenes",),
     "embed-representations": ("summarize-graph", "summarize-description"),
     "run-recommendation": ("embed-representations",),
@@ -74,12 +74,12 @@ def invalidate_descendants(
 
 def preflight(context: RunContext) -> dict[str, Any]:
     checks = {
-        "data.videos_dir": context.local_path("data", "videos_dir").is_dir(),
-        "data.titles_csv": context.local_path("data", "titles_csv").is_file(),
-        "data.tags_csv": context.local_path("data", "tags_csv").is_file(),
-        "data.pairs_tsv": context.local_path("data", "pairs_tsv").is_file(),
-        "models.qwen": context.local_path("models", "qwen").is_dir(),
-        "models.bge": context.local_path("models", "bge").is_dir(),
+        "data.videos_dir": context.path("data", "videos_dir").is_dir(),
+        "data.titles_csv": context.path("data", "titles_csv").is_file(),
+        "data.tags_csv": context.path("data", "tags_csv").is_file(),
+        "data.pairs_tsv": context.path("data", "pairs_tsv").is_file(),
+        "models.qwen": context.path("models", "qwen").is_dir(),
+        "models.bge": context.path("models", "bge").is_dir(),
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "ffprobe": shutil.which("ffprobe") is not None,
         "python.torch": importlib.util.find_spec("torch") is not None,
@@ -109,7 +109,7 @@ def _pipeline_document(context: RunContext) -> dict[str, Any]:
     return {
         "schema_version": "pipeline-run/v1",
         "run_id": context.run_id,
-        "protocol": context.pipeline["protocol"],
+        "protocol": context.config["protocol"],
         "config_fingerprint": context.config_fingerprint,
         "stages": rows,
         "complete": all(row["status"] == "complete" for row in rows.values()),
@@ -130,7 +130,6 @@ def execute_stage(context: RunContext, stage: str, *, force: bool = False) -> di
 def run_pipeline(
     context: RunContext,
     *,
-    resume: bool = False,
     dry_run: bool = False,
     force_stages: set[str] | None = None,
 ) -> int:
@@ -145,7 +144,7 @@ def run_pipeline(
     if not check["ready"]:
         failed = [name for name, ready in check["checks"].items() if not ready]
         raise RuntimeError("preflight failed: " + ", ".join(failed))
-    context.initialize(fresh=not resume)
+    context.initialize()
     if force_stages:
         invalidate_descendants(context, force_stages, include_roots=True)
     for stage in STAGES:

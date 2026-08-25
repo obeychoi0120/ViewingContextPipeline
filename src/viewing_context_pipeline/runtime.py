@@ -10,10 +10,8 @@ from typing import Any
 import yaml
 
 
-PIPELINE_CONFIG = Path("config/pipelines/microlens_graph_vs_desc_pilot.yaml")
-LOCAL_CONFIG = Path("config/local.yaml")
-PIPELINE_SCHEMA = "viewing-context-pipeline/v1"
-LOCAL_SCHEMA = "viewing-context-local/v1"
+CONFIG_PATH = Path("config/pipeline.yaml")
+CONFIG_SCHEMA = "viewing-context-config/v1"
 RUNTIME_SCHEMA = "viewing-context-runtime/v1"
 
 
@@ -136,8 +134,7 @@ def _resolve(root: Path, value: Any, label: str) -> Path:
 class RunContext:
     root: Path
     run_id: str
-    pipeline: dict[str, Any]
-    local: dict[str, Any]
+    config: dict[str, Any]
     run_root: Path
     config_fingerprint: str
 
@@ -147,17 +144,22 @@ class RunContext:
         selected = str(run_id or "").strip()
         if not selected or selected in {".", ".."} or Path(selected).name != selected or "\\" in selected:
             raise ConfigError("run_id must be a single non-empty directory name")
-        pipeline = _load_yaml(repo_root / PIPELINE_CONFIG)
-        local = _load_yaml(repo_root / LOCAL_CONFIG)
-        _validate_pipeline(pipeline)
-        _validate_local(local)
-        artifact_root = _resolve(repo_root, pipeline.get("artifacts_root", "artifacts"), "artifacts_root")
-        config_fp = fingerprint({"pipeline": pipeline, "local": local})
-        return cls(repo_root, selected, pipeline, local, artifact_root / selected, config_fp)
+        config = _load_yaml(repo_root / CONFIG_PATH)
+        _validate_config(config)
+        artifact_root = _resolve(
+            repo_root,
+            config.get("artifacts_root", "artifacts"),
+            "artifacts_root",
+        )
+        return cls(
+            repo_root,
+            selected,
+            config,
+            artifact_root / selected,
+            fingerprint(config),
+        )
 
-    def initialize(self, *, fresh: bool = False) -> None:
-        if fresh and self.run_root.exists() and any(self.run_root.iterdir()):
-            raise ConfigError(f"run directory is not empty and will not be overwritten: {self.run_root}")
+    def initialize(self) -> None:
         runtime_path = self.runtime_path
         if runtime_path.is_file():
             runtime = read_json(runtime_path)
@@ -169,9 +171,8 @@ class RunContext:
         document = {
             "schema_version": RUNTIME_SCHEMA,
             "run_id": self.run_id,
-            "config_paths": {"pipeline": str(self.root / PIPELINE_CONFIG), "local": str(self.root / LOCAL_CONFIG)},
-            "pipeline": self.pipeline,
-            "local": self.local,
+            "config_path": str(self.root / CONFIG_PATH),
+            "config": self.config,
             "config_fingerprint": self.config_fingerprint,
         }
         write_json(runtime_path, document)
@@ -228,21 +229,32 @@ class RunContext:
         return self.run_root / "validation" / "diagnosis" / "diagnosis.json"
 
     def config_path(self, *keys: str) -> Path:
-        value: Any = self.pipeline
+        value: Any = self.config
         for key in keys:
             if not isinstance(value, dict) or key not in value:
                 raise ConfigError("missing config value: " + ".".join(keys))
             value = value[key]
         return _resolve(self.root, value, ".".join(keys))
 
-    def local_path(self, section: str, key: str) -> Path:
-        values = _require_mapping(self.local, section)
+    def path(self, section: str, key: str) -> Path:
+        values = _require_mapping(self.config, section)
         return _resolve(self.root, values.get(key), f"{section}.{key}")
 
 
-def _validate_pipeline(value: dict[str, Any]) -> None:
-    if value.get("schema_version") != PIPELINE_SCHEMA:
-        raise ConfigError(f"pipeline schema_version must be {PIPELINE_SCHEMA}")
+def _validate_config(value: dict[str, Any]) -> None:
+    expected_keys = {
+        "schema_version",
+        "protocol",
+        "artifacts_root",
+        "data",
+        "models",
+        "extraction",
+        "validation",
+    }
+    if set(value) != expected_keys:
+        raise ConfigError(f"pipeline config must contain exactly {sorted(expected_keys)}")
+    if value.get("schema_version") != CONFIG_SCHEMA:
+        raise ConfigError(f"schema_version must be {CONFIG_SCHEMA}")
     protocol = _require_mapping(value, "protocol")
     expected = {
         "dataset": "microlens_100k",
@@ -260,14 +272,9 @@ def _validate_pipeline(value: dict[str, Any]) -> None:
         if settings.get("do_sample") is not False:
             raise ConfigError(f"extraction.{arm}.do_sample must be false")
     _require_mapping(value, "validation")
-
-
-def _validate_local(value: dict[str, Any]) -> None:
-    if value.get("schema_version") != LOCAL_SCHEMA:
-        raise ConfigError(f"local schema_version must be {LOCAL_SCHEMA}")
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
     if set(data) != {"videos_dir", "titles_csv", "tags_csv", "pairs_tsv"}:
-        raise ConfigError("local.data must contain videos_dir, titles_csv, tags_csv, pairs_tsv")
+        raise ConfigError("data must contain videos_dir, titles_csv, tags_csv, pairs_tsv")
     if set(models) != {"qwen", "bge"}:
-        raise ConfigError("local.models must contain exactly qwen and bge")
+        raise ConfigError("models must contain exactly qwen and bge")

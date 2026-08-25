@@ -33,7 +33,7 @@ src/
 
 ```text
 prepare-cohort
-  → prepare-visual-evidence
+  → prepare-input-data
     ├→ extract-graph-scenes → summarize-graph
     └→ extract-description-scenes → summarize-description
       → embed-representations → run-recommendation → run-diagnosis
@@ -45,16 +45,21 @@ Description arm은 같은 keyframe에서 장면별 factual description을 생성
 
 ## 설정
 
-사용자가 선택할 pipeline config는 없습니다. 다음 두 파일을 고정으로 읽습니다.
-
-- `config/pipelines/microlens_graph_vs_desc_pilot.yaml`: protocol, generation, cohort, BGE, SASRec, evaluation
-- `config/local.yaml`: MicroLens와 Qwen/BGE의 machine-local 경로
+실행 시 `config/pipeline.yaml` 하나를 고정으로 읽습니다. 이 파일에는 protocol, 로컬 data/model 경로, generation, cohort, BGE, SASRec, evaluation 설정이 모두 포함됩니다.
 
 ```powershell
 conda activate llmjg
-Copy-Item config/local.example.yaml config/local.yaml
+Copy-Item config/pipeline.example.yaml config/pipeline.yaml
 python -m pip install -e ".[qwen,train]"
 ```
+
+```bash
+conda activate llmjg
+cp config/pipeline.example.yaml config/pipeline.yaml
+python -m pip install -e ".[qwen,train]"
+```
+
+`config/pipeline.yaml`은 machine-local 경로를 포함하므로 Git에서 제외됩니다. 각 run에 사용된 전체 설정은 runtime snapshot에 저장됩니다.
 
 Graph ontology와 prompt는 고정 pilot YAML에서 명시적으로 참조합니다.
 
@@ -64,7 +69,8 @@ Graph ontology와 prompt는 고정 pilot YAML에서 명시적으로 참조합니
 
 ## 독립 step 실행
 
-모든 명령은 명시적인 `--run-id`를 요구합니다. 선행 단계를 자동 실행하지 않습니다.
+모든 명령은 명시적인 `--run-id`를 요구합니다. 선행 단계를 자동 실행하지 않으며, matching manifest와 output이 있으면 기본적으로 resume합니다.
+`prepare-input-data`는 cohort item을 4개 worker thread로 병렬 처리하며 최종 manifest는 원래 catalog 순서를 유지합니다.
 
 editable install을 하지 않은 Linux checkout에서는 저장소 루트에서 먼저 source root를 등록합니다. `src`는 module 이름이 아니므로 `python -m src.validation`은 사용하지 않습니다.
 
@@ -74,15 +80,15 @@ python -m validation prepare-cohort --run-id 1k_pilot_260825
 ```
 
 ```powershell
-python -m validation prepare-cohort --run-id 1k_pilot_260824
-python -m extraction prepare-visual-evidence --run-id 1k_pilot_260824
-python -m extraction extract-graph-scenes --run-id 1k_pilot_260824
-python -m extraction summarize-graph --run-id 1k_pilot_260824
-python -m extraction extract-description-scenes --run-id 1k_pilot_260824
-python -m extraction summarize-description --run-id 1k_pilot_260824
-python -m validation embed-representations --run-id 1k_pilot_260824
-python -m validation run-recommendation --run-id 1k_pilot_260824
-python -m validation run-diagnosis --run-id 1k_pilot_260824
+python -m validation prepare-cohort --run-id 1k_pilot_260825
+python -m extraction prepare-input-data --run-id 1k_pilot_260825
+python -m extraction extract-graph-scenes --run-id 1k_pilot_260825
+python -m extraction summarize-graph --run-id 1k_pilot_260825
+python -m extraction extract-description-scenes --run-id 1k_pilot_260825
+python -m extraction summarize-description --run-id 1k_pilot_260825
+python -m validation embed-representations --run-id 1k_pilot_260825
+python -m validation run-recommendation --run-id 1k_pilot_260825
+python -m validation run-diagnosis --run-id 1k_pilot_260825
 ```
 
 각 CLI의 `--force`는 요청한 step만 다시 수행하고 실제 downstream manifest만 stale 처리합니다. 반대쪽 Extraction arm의 산출물은 보존합니다.
@@ -99,11 +105,10 @@ bash run.sh 1k_pilot_260824
 
 지원 옵션:
 
-- `--resume`: 같은 v1 config snapshot의 기존 run을 이어서 실행
 - `--force-stage <step>`: 해당 step과 실제 downstream만 재실행
 - `--dry-run`: preflight와 stage 순서만 표시하고 artifact를 쓰지 않음
 
-`--config`, `--local-config` 및 이전 underscore stage 이름은 지원하지 않습니다.
+완전히 새 실행은 새 `run-id`를 사용합니다. 동일한 `run-id`의 config fingerprint가 runtime snapshot과 다르면 실행을 거부합니다. `--resume`, `--config`, `--local-config` 및 이전 underscore stage 이름은 지원하지 않습니다.
 
 ## Artifact 구조
 
@@ -126,11 +131,12 @@ artifacts/{run_id}/
    └─ diagnosis/
 ```
 
-새 run은 기존 v1 artifact나 legacy output을 읽지 않습니다. 각 step manifest는 upstream, ontology, prompt, model 및 output fingerprint를 기록합니다.
+두 파일 기반 runtime snapshot이나 legacy output은 읽지 않습니다. 각 step manifest는 upstream, ontology, prompt, model 및 output fingerprint를 기록합니다.
 
 주요 계약:
 
 - `relational-graph-ontology/v1`
+- `viewing-context-config/v1`
 - `scene-relational-graph/v1`
 - `graph-video-summary/v1`
 - `scene-description/v1`

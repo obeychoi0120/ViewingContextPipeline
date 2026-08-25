@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,9 @@ from .fixed30 import prepare_visual_item
 
 class MicroLensPreparationError(RuntimeError):
     pass
+
+
+PREPARATION_WORKERS = 4
 
 
 def _item_values(path: Path, label: str) -> dict[str, str]:
@@ -51,40 +55,57 @@ def prepare_catalog(
 
     titles = _item_values(Path(titles_csv), "titles")
     tags = _item_values(Path(tags_csv), "tags")
-    failures: list[dict[str, str]] = []
-    manifest_rows: list[dict[str, str]] = []
-    for index, row in enumerate(catalog, start=1):
-        item_id = str(row["item_id"])
-        content_id = str(row["content_id"])
-        source = Path(str(row["source_video_path"]))
-        metadata = {
-            "title": titles.get(item_id, ""),
-            "tags": tags.get(item_id, ""),
-            "dataset_id": "microlens-100k",
-            "source_item_id": item_id,
-            "duration": row.get("duration_seconds"),
-        }
+    results: list[tuple[dict[str, str] | None, dict[str, str] | None]] = [
+        (None, None) for _ in catalog
+    ]
+
+    def prepare(index: int, row: dict[str, Any]) -> tuple[int, str, dict[str, str] | None, dict[str, str] | None]:
+        item_id = str(row.get("item_id", ""))
+        content_id = str(row.get("content_id", ""))
         try:
             prepared = prepare_visual_item(
                 content_id=content_id,
-                source_video_path=source,
+                source_video_path=Path(str(row["source_video_path"])),
                 assets_root=assets_root,
                 output_root=output_root,
-                metadata=metadata,
+                metadata={
+                    "title": titles.get(item_id, ""),
+                    "tags": tags.get(item_id, ""),
+                    "dataset_id": "microlens-100k",
+                    "source_item_id": item_id,
+                    "duration": row.get("duration_seconds"),
+                },
                 image_size=image_size,
                 force=force,
             )
-            manifest_rows.append(prepared)
-            print(
-                f"[PROGRESS] prepare_data {index}/{len(catalog)} {content_id} success",
-                flush=True,
-            )
+            return index, content_id, prepared, None
         except Exception as exc:
-            failures.append({"item_id": item_id, "content_id": content_id, "error": str(exc)})
+            return index, content_id, None, {
+                "item_id": item_id,
+                "content_id": content_id,
+                "error": str(exc),
+            }
+
+    completed = 0
+    with ThreadPoolExecutor(max_workers=PREPARATION_WORKERS) as executor:
+        futures = [executor.submit(prepare, index, row) for index, row in enumerate(catalog)]
+        for future in as_completed(futures):
+            index, content_id, prepared, failure = future.result()
+            results[index] = (prepared, failure)
+            completed += 1
+            if failure is None:
+                status = "success"
+                prefix = "PROGRESS"
+            else:
+                status = failure["error"]
+                prefix = "FAILURE"
             print(
-                f"[FAILURE] prepare_data {index}/{len(catalog)} {content_id}: {exc}",
+                f"[{prefix}] prepare_data {completed}/{len(catalog)} "
+                f"{content_id} {status}",
                 flush=True,
             )
+    manifest_rows = [prepared for prepared, _ in results if prepared is not None]
+    failures = [failure for _, failure in results if failure is not None]
     cohort_root = Path(output_root) / "data" / "cohort"
     cohort_root.mkdir(parents=True, exist_ok=True)
     manifest_path = cohort_root / "extraction_manifest.csv"
@@ -98,6 +119,7 @@ def prepare_catalog(
         "selected": len(catalog),
         "succeeded": len(manifest_rows),
         "failed": len(failures),
+        "workers": PREPARATION_WORKERS,
         "manifest": str(manifest_path),
         "failures": str(failure_path),
     }

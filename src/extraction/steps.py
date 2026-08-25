@@ -98,25 +98,25 @@ def _write_stage(
     return document
 
 
-def prepare_visual_evidence(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def prepare_input_data(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
     cohort = _require_stage(context, "prepare-cohort")
     sources = {"prepare-cohort": cohort["output_fingerprint"]}
     sources.update({
-        "titles": file_fingerprint(context.local_path("data", "titles_csv")),
-        "tags": file_fingerprint(context.local_path("data", "tags_csv")),
-        "settings": fingerprint(context.pipeline["extraction"]["visual_evidence"]),
+        "titles": file_fingerprint(context.path("data", "titles_csv")),
+        "tags": file_fingerprint(context.path("data", "tags_csv")),
+        "settings": fingerprint(context.config["extraction"]["visual_evidence"]),
     })
     if not force:
-        current = _current(context, "prepare-visual-evidence", sources, [context.visual_manifest])
+        current = _current(context, "prepare-input-data", sources, [context.visual_manifest])
         if current is not None:
             return current
     catalog = read_jsonl(context.cohort_dir / "catalog.jsonl")
-    settings = context.pipeline["extraction"]["visual_evidence"]
+    settings = context.config["extraction"]["visual_evidence"]
     result = prepare_catalog(
         catalog,
-        titles_csv=context.local_path("data", "titles_csv"),
-        tags_csv=context.local_path("data", "tags_csv"),
+        titles_csv=context.path("data", "titles_csv"),
+        tags_csv=context.path("data", "tags_csv"),
         assets_root=context.cohort_dir / "source_assets",
         output_root=context.run_root,
         image_size=tuple(settings["image_resolution"]),
@@ -154,7 +154,7 @@ def prepare_visual_evidence(context: RunContext, *, force: bool = False) -> dict
     output_fp = fingerprint(rows)
     return _write_stage(
         context,
-        "prepare-visual-evidence",
+        "prepare-input-data",
         source_fingerprints=sources,
         output_fingerprint=output_fp,
         content_count=len(rows),
@@ -163,8 +163,8 @@ def prepare_visual_evidence(context: RunContext, *, force: bool = False) -> dict
 
 def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
-    evidence = _require_stage(context, "prepare-visual-evidence")
-    settings = context.pipeline["extraction"]["graph"]
+    evidence = _require_stage(context, "prepare-input-data")
+    settings = context.config["extraction"]["graph"]
     ontology_path = context.config_path("extraction", "graph", "ontology")
     prompt_path = context.config_path("extraction", "graph", "scene_prompt")
     ontology_document = read_json(ontology_path)
@@ -172,7 +172,7 @@ def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[st
     prompt = prompt_path.read_text(encoding="utf-8")
     ontology_fp = file_fingerprint(ontology_path)
     prompt_fp = file_fingerprint(prompt_path)
-    model_path = context.local_path("models", "qwen")
+    model_path = context.path("models", "qwen")
     model_fp = fingerprint({
         "path": str(model_path),
         "files": directory_fingerprint(model_path),
@@ -180,7 +180,7 @@ def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[st
         "do_sample": settings["do_sample"],
     })
     sources = {
-        "prepare-visual-evidence": evidence["output_fingerprint"],
+        "prepare-input-data": evidence["output_fingerprint"],
         "ontology": ontology_fp,
         "prompt": prompt_fp,
         "model": model_fp,
@@ -243,11 +243,11 @@ def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[st
 def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
     scenes_manifest = _require_stage(context, "extract-graph-scenes")
-    settings = context.pipeline["extraction"]["graph"]
+    settings = context.config["extraction"]["graph"]
     prompt_path = context.config_path("extraction", "graph", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
     prompt_fp = file_fingerprint(prompt_path)
-    model_path = context.local_path("models", "qwen")
+    model_path = context.path("models", "qwen")
     model_fp = fingerprint({
         "path": str(model_path),
         "files": directory_fingerprint(model_path),
@@ -313,12 +313,12 @@ def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, An
 
 def extract_description_scenes(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
-    evidence = _require_stage(context, "prepare-visual-evidence")
-    settings = context.pipeline["extraction"]["description"]
+    evidence = _require_stage(context, "prepare-input-data")
+    settings = context.config["extraction"]["description"]
     prompt_path = context.config_path("extraction", "description", "scene_prompt")
     prompt = prompt_path.read_text(encoding="utf-8")
     prompt_fp = file_fingerprint(prompt_path)
-    model_path = context.local_path("models", "qwen")
+    model_path = context.path("models", "qwen")
     model_fp = fingerprint({
         "path": str(model_path),
         "files": directory_fingerprint(model_path),
@@ -326,7 +326,7 @@ def extract_description_scenes(context: RunContext, *, force: bool = False) -> d
         "do_sample": settings["do_sample"],
     })
     sources = {
-        "prepare-visual-evidence": evidence["output_fingerprint"],
+        "prepare-input-data": evidence["output_fingerprint"],
         "prompt": prompt_fp,
         "model": model_fp,
     }
@@ -385,11 +385,11 @@ def extract_description_scenes(context: RunContext, *, force: bool = False) -> d
 def summarize_description(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
     scenes_manifest = _require_stage(context, "extract-description-scenes")
-    settings = context.pipeline["extraction"]["description"]
+    settings = context.config["extraction"]["description"]
     prompt_path = context.config_path("extraction", "description", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
     prompt_fp = file_fingerprint(prompt_path)
-    model_path = context.local_path("models", "qwen")
+    model_path = context.path("models", "qwen")
     model_fp = fingerprint({
         "path": str(model_path),
         "files": directory_fingerprint(model_path),
@@ -457,7 +457,7 @@ def summarize_description(context: RunContext, *, force: bool = False) -> dict[s
 
 
 STEP_HANDLERS: dict[str, Callable[[RunContext], dict[str, Any]]] = {
-    "prepare-visual-evidence": prepare_visual_evidence,
+    "prepare-input-data": prepare_input_data,
     "extract-graph-scenes": extract_graph_scenes,
     "summarize-graph": summarize_graph,
     "extract-description-scenes": extract_description_scenes,
