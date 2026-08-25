@@ -45,7 +45,7 @@ def prepare_visual_item(
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
     contract = {
-        "schema_version": "local-video-processing-contract/v4",
+        "schema_version": "local-video-processing-contract/v1",
         "source_sha256": file_sha256(source),
         "sampling": {
             "scene_seconds": SCENE_SECONDS,

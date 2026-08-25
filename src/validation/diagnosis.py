@@ -20,10 +20,10 @@ def _mean_by_user(rows: list[dict[str, Any]], users: list[str], seeds: list[int]
 def diagnose_recommendations(config: ValidationConfig, runtime: dict[str, Any]) -> dict[str, Any]:
     manifest_path = Path(runtime["paths"]["recommendations_manifest"])
     if not manifest_path.is_file():
-        raise RuntimeError("diagnosis requires recommendations/v2")
+        raise RuntimeError("diagnosis requires recommendations/v1")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != "recommendations/v2" or not manifest.get("complete"):
-        raise RuntimeError("diagnosis requires complete recommendations/v2")
+    if manifest.get("schema_version") != "recommendations/v1" or not manifest.get("complete"):
+        raise RuntimeError("diagnosis requires complete recommendations/v1")
     if manifest.get("modality") != runtime["modality"]:
         raise RuntimeError("recommendation modality mismatch")
     rows = read_jsonl(Path(manifest["per_user_metrics"]))
@@ -69,7 +69,7 @@ def diagnose_recommendations(config: ValidationConfig, runtime: dict[str, Any]) 
     checkpoints_complete = len(manifest["runs"]) == len(seeds) * len(arms) and all(Path(run["checkpoint"]).is_file() for run in manifest["runs"])
     report_ready = len(users) == config.cohort.user_count and len(rows) == expected_rows and checkpoints_complete
     document = {
-        "schema_version": "diagnosis/v2", "run_id": runtime["run_id"], "modality": runtime["modality"],
+        "schema_version": "diagnosis/v1", "run_id": runtime["run_id"], "modality": runtime["modality"],
         "metrics": summary, "diagnostics": diagnostics, "paired_bootstrap": comparisons,
         "recommendations_fingerprint": manifest["fingerprint"], "report_ready": report_ready,
         "user_count": len(users), "seed_count": len(seeds), "arm_count": len(arms), "checkpoints_complete": checkpoints_complete,

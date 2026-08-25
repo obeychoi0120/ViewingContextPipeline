@@ -12,9 +12,9 @@ import yaml
 
 PIPELINE_CONFIG = Path("config/pipelines/microlens_graph_vs_desc_pilot.yaml")
 LOCAL_CONFIG = Path("config/local.yaml")
-PIPELINE_SCHEMA = "viewing-context-pipeline/v2"
-LOCAL_SCHEMA = "viewing-context-local/v2"
-RUNTIME_SCHEMA = "viewing-context-runtime/v2"
+PIPELINE_SCHEMA = "viewing-context-pipeline/v1"
+LOCAL_SCHEMA = "viewing-context-local/v1"
+RUNTIME_SCHEMA = "viewing-context-runtime/v1"
 
 
 class ConfigError(RuntimeError):
@@ -165,7 +165,7 @@ class RunContext:
                 raise ConfigError("current fixed config does not match the run snapshot")
             return
         if self.run_root.exists() and any(self.run_root.iterdir()):
-            raise ConfigError(f"run directory has no v2 runtime snapshot: {self.run_root}")
+            raise ConfigError(f"run directory has no v1 runtime snapshot: {self.run_root}")
         document = {
             "schema_version": RUNTIME_SCHEMA,
             "run_id": self.run_id,

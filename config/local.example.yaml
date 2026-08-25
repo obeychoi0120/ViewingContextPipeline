@@ -1,4 +1,4 @@
-schema_version: viewing-context-local/v2
+schema_version: viewing-context-local/v1
 data:
   videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k-videos
   titles_csv: /home_nvme/shared/data/microlens_100k/MicroLens-100k_title_en.csv

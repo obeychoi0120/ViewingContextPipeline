@@ -38,7 +38,7 @@ def _current(
         return None
     value = read_json(path)
     if (
-        value.get("schema_version") == "step-manifest/v2"
+        value.get("schema_version") == "step-manifest/v1"
         and value.get("status") == "complete"
         and value.get("source_fingerprints") == sources
     ):
@@ -85,7 +85,7 @@ def _require_stage(context: RunContext, stage: str) -> dict[str, Any]:
     if not path.is_file():
         raise ValidationStepError(f"required stage is incomplete: {stage}")
     value = read_json(path)
-    if value.get("schema_version") != "step-manifest/v2" or value.get("status") != "complete":
+    if value.get("schema_version") != "step-manifest/v1" or value.get("status") != "complete":
         raise ValidationStepError(f"invalid stage manifest: {path}")
     return value
 
@@ -103,7 +103,7 @@ def _write_stage(
         read_json(manifest_path).get("output_fingerprint") if manifest_path.is_file() else None
     )
     document: dict[str, Any] = {
-        "schema_version": "step-manifest/v2",
+        "schema_version": "step-manifest/v1",
         "run_id": context.run_id,
         "stage": stage,
         "status": "complete",
@@ -166,7 +166,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     content_ids = [row["content_id"] for row in catalog]
     sources = {
         "graph": (context.graph_summary_dir, "graph-video-summary/v1"),
-        "desc": (context.description_summary_dir, "description-video-summary/v2"),
+        "desc": (context.description_summary_dir, "description-video-summary/v1"),
     }
     output = context.representations_manifest.parent
     output.mkdir(parents=True, exist_ok=True)
@@ -197,7 +197,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         "files": encoder_file_manifest(config.encoder.model_path),
     }
     document = {
-        "schema_version": "representations/v2",
+        "schema_version": "representations/v1",
         "run_id": context.run_id,
         "modality": "visual_only",
         "catalog_size": len(catalog),
@@ -228,7 +228,7 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
             runs = existing.get("runs")
             metrics = Path(str(existing.get("per_user_metrics", "")))
             if (
-                existing.get("schema_version") == "recommendations/v2"
+                existing.get("schema_version") == "recommendations/v1"
                 and isinstance(runs, list)
                 and metrics.is_file()
                 and all(Path(row["checkpoint"]).is_file() for row in runs)
@@ -252,7 +252,7 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         current = _current(context, "run-diagnosis", sources_fp, [context.diagnosis_path])
         if current is not None:
             existing = read_json(context.diagnosis_path)
-            if existing.get("schema_version") == "diagnosis/v2" and existing.get("report_ready") is True:
+            if existing.get("schema_version") == "diagnosis/v1" and existing.get("report_ready") is True:
                 return current
     document = diagnose_recommendations(validation_config(context), _runtime(context))
     write_json(context.diagnosis_path, document)

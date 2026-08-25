@@ -66,6 +66,13 @@ Graph ontology와 prompt는 고정 pilot YAML에서 명시적으로 참조합니
 
 모든 명령은 명시적인 `--run-id`를 요구합니다. 선행 단계를 자동 실행하지 않습니다.
 
+editable install을 하지 않은 Linux checkout에서는 저장소 루트에서 먼저 source root를 등록합니다. `src`는 module 이름이 아니므로 `python -m src.validation`은 사용하지 않습니다.
+
+```bash
+export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
+python -m validation prepare-cohort --run-id 1k_pilot_260825
+```
+
 ```powershell
 python -m validation prepare-cohort --run-id 1k_pilot_260824
 python -m extraction prepare-visual-evidence --run-id 1k_pilot_260824
@@ -92,7 +99,7 @@ bash run.sh 1k_pilot_260824
 
 지원 옵션:
 
-- `--resume`: 같은 v2 config snapshot의 기존 run을 이어서 실행
+- `--resume`: 같은 v1 config snapshot의 기존 run을 이어서 실행
 - `--force-stage <step>`: 해당 step과 실제 downstream만 재실행
 - `--dry-run`: preflight와 stage 순서만 표시하고 artifact를 쓰지 않음
 
@@ -126,14 +133,14 @@ artifacts/{run_id}/
 - `relational-graph-ontology/v1`
 - `scene-relational-graph/v1`
 - `graph-video-summary/v1`
-- `scene-description/v2`
-- `description-video-summary/v2`
-- `visual-manifest/v2`
-- `step-manifest/v2`
-- `representations/v2`
-- `recommendations/v2`
-- `diagnosis/v2`
-- `pipeline-run/v2`
+- `scene-description/v1`
+- `description-video-summary/v1`
+- `visual-manifest/v1`
+- `step-manifest/v1`
+- `representations/v1`
+- `recommendations/v1`
+- `diagnosis/v1`
+- `pipeline-run/v1`
 
 ## Optional Extraction API
 

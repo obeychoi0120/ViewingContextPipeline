@@ -50,7 +50,7 @@ def _current(
         return None
     value = read_json(path)
     if (
-        value.get("schema_version") == "step-manifest/v2"
+        value.get("schema_version") == "step-manifest/v1"
         and value.get("status") == "complete"
         and value.get("source_fingerprints") == sources
     ):
@@ -63,7 +63,7 @@ def _require_stage(context: RunContext, stage: str) -> dict[str, Any]:
     if not path.is_file():
         raise ExtractionStepError(f"required stage is incomplete: {stage}")
     value = read_json(path)
-    if value.get("schema_version") != "step-manifest/v2" or value.get("status") != "complete":
+    if value.get("schema_version") != "step-manifest/v1" or value.get("status") != "complete":
         raise ExtractionStepError(f"invalid stage manifest: {path}")
     return value
 
@@ -81,7 +81,7 @@ def _write_stage(
         read_json(manifest_path).get("output_fingerprint") if manifest_path.is_file() else None
     )
     document: dict[str, Any] = {
-        "schema_version": "step-manifest/v2",
+        "schema_version": "step-manifest/v1",
         "run_id": context.run_id,
         "stage": stage,
         "status": "complete",
@@ -141,7 +141,7 @@ def prepare_visual_evidence(context: RunContext, *, force: bool = False) -> dict
             "frames": [file_fingerprint(path) for path in frames],
         })
         rows.append({
-            "schema_version": "visual-manifest/v2",
+            "schema_version": "visual-manifest/v1",
             "content_id": content_id,
             "item_id": str(item["item_id"]),
             "frames_dir": str(frames_dir),

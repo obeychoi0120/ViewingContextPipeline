@@ -86,7 +86,7 @@ def preflight(context: RunContext) -> dict[str, Any]:
         "python.transformers": importlib.util.find_spec("transformers") is not None,
     }
     return {
-        "schema_version": "pipeline-preflight/v2",
+        "schema_version": "pipeline-preflight/v1",
         "run_id": context.run_id,
         "ready": all(checks.values()),
         "checks": checks,
@@ -107,7 +107,7 @@ def _pipeline_document(context: RunContext) -> dict[str, Any]:
         else:
             rows[stage] = {"status": "pending"}
     return {
-        "schema_version": "pipeline-run/v2",
+        "schema_version": "pipeline-run/v1",
         "run_id": context.run_id,
         "protocol": context.pipeline["protocol"],
         "config_fingerprint": context.config_fingerprint,

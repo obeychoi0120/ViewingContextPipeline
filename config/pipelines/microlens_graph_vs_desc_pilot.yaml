@@ -1,4 +1,4 @@
-schema_version: viewing-context-pipeline/v2
+schema_version: viewing-context-pipeline/v1
 protocol:
   dataset: microlens_100k
   modality: visual_only

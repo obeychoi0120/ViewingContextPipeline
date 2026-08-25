@@ -40,7 +40,7 @@ def context(tmp_path: Path) -> RunContext:
         yaml.safe_dump(pipeline, sort_keys=False), encoding="utf-8"
     )
     (local_dir / "local.yaml").write_text(yaml.safe_dump({
-        "schema_version": "viewing-context-local/v2",
+        "schema_version": "viewing-context-local/v1",
         "data": {
             "videos_dir": str(videos),
             "titles_csv": str(data / "titles.csv"),
@@ -64,6 +64,11 @@ def test_public_stage_order_matches_step_first_dag() -> None:
         "run-recommendation",
         "run-diagnosis",
     )
+
+
+def test_pipeline_and_local_config_contracts_start_at_v1(context: RunContext) -> None:
+    assert context.pipeline["schema_version"] == "viewing-context-pipeline/v1"
+    assert context.local["schema_version"] == "viewing-context-local/v1"
 
 
 def test_packages_are_top_level_and_old_namespace_is_absent() -> None:
@@ -103,7 +108,7 @@ def test_changed_graph_fingerprint_marks_only_actual_downstream_stale(context: R
     context.initialize()
     for stage in STAGES:
         write_json(context.stage_manifest(stage), {
-            "schema_version": "step-manifest/v2",
+            "schema_version": "step-manifest/v1",
             "run_id": context.run_id,
             "stage": stage,
             "status": "complete",
@@ -140,7 +145,7 @@ def test_dry_run_writes_no_artifacts(context: RunContext, monkeypatch: pytest.Mo
     assert not context.run_root.exists()
 
 
-def test_synthetic_full_runner_records_exact_v2_dag(context: RunContext, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_synthetic_full_runner_records_exact_v1_dag(context: RunContext, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(pipeline_module, "preflight", lambda _: {"ready": True, "checks": {}})
 
@@ -149,7 +154,7 @@ def test_synthetic_full_runner_records_exact_v2_dag(context: RunContext, monkeyp
             def run(ctx: RunContext, *, force: bool = False):
                 calls.append(stage)
                 document = {
-                    "schema_version": "step-manifest/v2",
+                    "schema_version": "step-manifest/v1",
                     "run_id": ctx.run_id,
                     "stage": stage,
                     "status": "complete",
@@ -165,5 +170,5 @@ def test_synthetic_full_runner_records_exact_v2_dag(context: RunContext, monkeyp
     assert run_pipeline(context) == 0
     assert calls == list(STAGES)
     manifest = json.loads(context.pipeline_manifest.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "pipeline-run/v2"
+    assert manifest["schema_version"] == "pipeline-run/v1"
     assert manifest["complete"] is True

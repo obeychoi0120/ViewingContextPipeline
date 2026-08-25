@@ -35,8 +35,8 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
     require_torch()
     root = Path(runtime["run_root"])
     representations = json.loads(Path(runtime["paths"]["representations_manifest"]).read_text(encoding="utf-8"))
-    if representations.get("schema_version") != "representations/v2" or not representations.get("complete"):
-        raise RuntimeError("recommendation requires complete representations/v2")
+    if representations.get("schema_version") != "representations/v1" or not representations.get("complete"):
+        raise RuntimeError("recommendation requires complete representations/v1")
     if representations.get("modality") != runtime["modality"]:
         raise RuntimeError("representation modality mismatch")
     sequences = read_jsonl(root / "data" / "cohort" / "sequences.jsonl")
@@ -141,7 +141,7 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
     metrics_path = output / "per_user_metrics.jsonl"
     atomic_write_jsonl(metrics_path, rows)
     manifest = {
-        "schema_version": "recommendations/v2", "run_id": runtime["run_id"], "modality": runtime["modality"],
+        "schema_version": "recommendations/v1", "run_id": runtime["run_id"], "modality": runtime["modality"],
         "arms": list(arms), "baseline": "SASRec_ID", "independent_training": True,
         "user_count": len(sequences), "per_user_metrics": str(metrics_path), "runs": runs, "complete": True,
     }

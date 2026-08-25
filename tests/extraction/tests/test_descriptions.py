@@ -52,8 +52,8 @@ def test_description_scene_uses_chronological_images(tmp_path: Path) -> None:
 
 def test_description_summary_preserves_scene_order_and_word_limit() -> None:
     records = [
-        {"schema_version": "scene-description/v2", "scene_idx": 0, "description": "first"},
-        {"schema_version": "scene-description/v2", "scene_idx": 1, "description": "second"},
+        {"schema_version": "scene-description/v1", "scene_idx": 0, "description": "first"},
+        {"schema_version": "scene-description/v1", "scene_idx": 1, "description": "second"},
     ]
     prompt = description_summary_prompt("{scenes}", records)
     assert prompt.index("Scene 0") < prompt.index("Scene 1")

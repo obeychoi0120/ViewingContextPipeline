@@ -13,8 +13,8 @@ from extraction.evidence import (
 )
 
 
-SCENE_SCHEMA_VERSION = "scene-description/v2"
-SUMMARY_SCHEMA_VERSION = "description-video-summary/v2"
+SCENE_SCHEMA_VERSION = "scene-description/v1"
+SUMMARY_SCHEMA_VERSION = "description-video-summary/v1"
 
 
 class DescriptionError(RuntimeError):

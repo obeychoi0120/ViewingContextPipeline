@@ -187,7 +187,7 @@ def prepare_cohort(
     source_fingerprints = [file_fingerprint(config.dataset.pairs_tsv)]
     inventory_fp = fingerprint([{key: by_item[item][key] for key in ("item_id", "source_video_path", "duration_seconds", "source_file_size", "source_mtime_ns")} for item in catalog_ids])
     cohort_fp = fingerprint({"config": config.cohort.model_dump(), "sources": source_fingerprints, "inventory_fingerprint": inventory_fp, "sequences": sequences})
-    manifest = {"schema_version": "microlens-user-cohort/v2", "run_id": config.run_id, "user_count": len(sequences), "catalog_size": len(catalog), "stratum_quotas": quotas, "source_fingerprints": source_fingerprints, "cohort_fingerprint": cohort_fp, "inventory_fingerprint": inventory_fp}
+    manifest = {"schema_version": "microlens-user-cohort/v1", "run_id": config.run_id, "user_count": len(sequences), "catalog_size": len(catalog), "stratum_quotas": quotas, "source_fingerprints": source_fingerprints, "cohort_fingerprint": cohort_fp, "inventory_fingerprint": inventory_fp}
     atomic_write_jsonl(output / "sequences.jsonl", sequences)
     atomic_write_jsonl(output / "catalog.jsonl", catalog)
     atomic_write_json(output / "cohort_manifest.json", manifest)
