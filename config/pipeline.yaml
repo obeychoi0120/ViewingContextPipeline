@@ -7,10 +7,10 @@ protocol:
   arms: [graph, description]
 artifacts_root: artifacts
 data:
-  videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k-videos
-  titles_csv: /home_nvme/shared/data/microlens_100k/MicroLens-100k_title_en.csv
-  tags_csv: /home_nvme/shared/data/microlens_100k/tags_to_summary.csv
-  pairs_tsv: /home_nvme/shared/data/microlens_100k/MicroLens-100k_pairs_1k.tsv
+  videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k_videos
+  titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
+  tags_csv: /home_nvme/shared/data/microlens_100k/Annotations/tags_to_summary.csv
+  pairs_tsv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs_1k.tsv
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
