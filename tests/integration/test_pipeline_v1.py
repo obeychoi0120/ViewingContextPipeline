@@ -174,6 +174,27 @@ def test_root_cli_has_no_resume_flag() -> None:
         pipeline_cli(["run", "--run-id", "demo", "--resume"])
 
 
+def test_root_cli_forwards_gpu_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    received = {}
+    context = object()
+    monkeypatch.setattr(
+        "viewing_context_pipeline.cli.RunContext.load",
+        lambda _: context,
+    )
+
+    def fake_run_pipeline(ctx, **kwargs):
+        received.update(context=ctx, **kwargs)
+        return 0
+
+    monkeypatch.setattr(
+        "viewing_context_pipeline.cli.run_pipeline",
+        fake_run_pipeline,
+    )
+    assert pipeline_cli(["run", "--run-id", "demo", "--gpus", "2"]) == 0
+    assert received["context"] is context
+    assert received["gpus"] == 2
+
+
 def test_dry_run_writes_no_artifacts(context: RunContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline_module, "preflight", lambda _: {"ready": True, "checks": {}})
     assert run_pipeline(context, dry_run=True) == 0

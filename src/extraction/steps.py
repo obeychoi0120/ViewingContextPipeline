@@ -1,24 +1,29 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from extraction.backends import QwenBackend
+from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.descriptions import (
     SCENE_SCHEMA_VERSION,
     SUMMARY_SCHEMA_VERSION,
     description_summary_prompt,
-    extract_scene_descriptions,
     validate_summary as validate_description_summary,
+)
+from extraction.evidence import (
+    build_scene_evidence,
+    load_images,
 )
 from extraction.relational_graph import (
     GRAPH_SCENE_SCHEMA,
     GRAPH_SUMMARY_SCHEMA,
-    extract_scene_graphs,
     graph_summary_prompt,
     ontology_from_document,
+    parse_graph_output,
     validate_summary as validate_graph_summary,
 )
 from viewing_context_pipeline.runtime import (
@@ -35,6 +40,68 @@ from viewing_context_pipeline.runtime import (
 
 class ExtractionStepError(RuntimeError):
     pass
+
+
+@contextmanager
+def _qwen_generator(
+    *,
+    model_path: Path,
+    gpus: int | None,
+) -> Iterator[Callable[[list[QwenGenerationTask]], dict[str, str]]]:
+    if gpus is not None:
+        with QwenWorkerPool(gpus, str(model_path)) as worker_pool:
+            yield worker_pool.generate
+        return
+    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
+
+    def generate(tasks: list[QwenGenerationTask]) -> dict[str, str]:
+        return {
+            task.task_id: backend.generate(
+                load_images(list(task.image_paths)),
+                task.prompt,
+                task.max_new_tokens,
+            )
+            for task in tasks
+        }
+
+    yield generate
+
+
+def _scene_generation_rows(
+    visual: dict[str, Any],
+    *,
+    prompt: str,
+    max_new_tokens: int,
+) -> list[dict[str, Any]]:
+    scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
+    rows: list[dict[str, Any]] = []
+    for scene in build_scene_evidence(
+        scenes, visual["frames_dir"], visual["timestamp_json"]
+    ):
+        fallback_idx = scene["fallback_idx"]
+        scene_idx = scene["scene_idx"]
+        keyframes = scene["keyframes"]
+        image_paths = scene["image_paths"]
+        if not keyframes or len(image_paths) != len(keyframes):
+            raise ExtractionStepError(
+                f"{visual['content_id']} scene {scene_idx} has "
+                f"{len(image_paths)} of {len(keyframes)} keyframes"
+            )
+        task_id = f"{visual['content_id']}:{fallback_idx}"
+        rows.append({
+            "task": QwenGenerationTask(
+                task_id=task_id,
+                image_paths=tuple(image_paths),
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+            ),
+            "scene_idx": scene_idx,
+            "keyframes": keyframes,
+            "image_paths": image_paths,
+        })
+    if not rows:
+        raise ExtractionStepError(f"{visual['content_id']} has no scenes")
+    return rows
 
 
 def _current(
@@ -161,7 +228,12 @@ def prepare_input_data(context: RunContext, *, force: bool = False) -> dict[str,
     )
 
 
-def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def extract_graph_scenes(
+    context: RunContext,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
     context.initialize()
     evidence = _require_stage(context, "prepare-input-data")
     settings = context.config["extraction"]["graph"]
@@ -191,9 +263,8 @@ def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[st
         current = _current(context, "extract-graph-scenes", sources, expected_outputs)
         if current is not None:
             return current
-    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
-
-    outputs: list[dict[str, Any]] = []
+    records_by_content: dict[str, list[dict[str, Any]]] = {}
+    pending: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
     for visual in visual_rows:
         input_fp = fingerprint({
             "evidence": visual["evidence_fingerprint"],
@@ -205,31 +276,47 @@ def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[st
         if path.is_file() and not force:
             existing = read_jsonl(path)
             if existing and all(row.get("input_fingerprint") == input_fp for row in existing):
-                outputs.extend(existing)
+                records_by_content[str(visual["content_id"])] = existing
                 continue
-        scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
-        records = extract_scene_graphs(
-            content_id=visual["content_id"],
-            scenes=scenes,
-            frames_dir=visual["frames_dir"],
-            timestamp_json_path=visual["timestamp_json"],
-            backend=backend,
+        scene_rows = _scene_generation_rows(
+            visual,
             prompt=prompt,
-            ontology=ontology,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
         )
-        records = [{
-            **row,
-            "ontology_id": ontology.ontology_id,
-            "ontology_status": ontology.status,
-            "ontology_fingerprint": ontology_fp,
-            "prompt_fingerprint": prompt_fp,
-            "model_fingerprint": model_fp,
-            "evidence_fingerprint": visual["evidence_fingerprint"],
-            "input_fingerprint": input_fp,
-        } for row in records]
-        write_jsonl(path, records)
-        outputs.extend(records)
+        pending.append((visual, input_fp, scene_rows))
+
+    if pending:
+        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            for visual, input_fp, scene_rows in pending:
+                generated = generate([row["task"] for row in scene_rows])
+                records = [{
+                    "schema_version": GRAPH_SCENE_SCHEMA,
+                    "content_id": visual["content_id"],
+                    "scene_idx": row["scene_idx"],
+                    "keyframes": row["keyframes"],
+                    "image_paths": row["image_paths"],
+                    "triples": parse_graph_output(
+                        generated[row["task"].task_id], ontology
+                    ),
+                } for row in scene_rows]
+                records = [{
+                    **row,
+                    "ontology_id": ontology.ontology_id,
+                    "ontology_status": ontology.status,
+                    "ontology_fingerprint": ontology_fp,
+                    "prompt_fingerprint": prompt_fp,
+                    "model_fingerprint": model_fp,
+                    "evidence_fingerprint": visual["evidence_fingerprint"],
+                    "input_fingerprint": input_fp,
+                } for row in records]
+                path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
+                write_jsonl(path, records)
+                records_by_content[str(visual["content_id"])] = records
+    outputs = [
+        record
+        for visual in visual_rows
+        for record in records_by_content[str(visual["content_id"])]
+    ]
     output_fp = fingerprint(outputs)
     return _write_stage(
         context,
@@ -240,7 +327,12 @@ def extract_graph_scenes(context: RunContext, *, force: bool = False) -> dict[st
     )
 
 
-def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def summarize_graph(
+    context: RunContext,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
     context.initialize()
     scenes_manifest = _require_stage(context, "extract-graph-scenes")
     settings = context.config["extraction"]["graph"]
@@ -268,8 +360,9 @@ def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, An
         current = _current(context, "summarize-graph", sources, expected_outputs)
         if current is not None:
             return current
-    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
-    documents: list[dict[str, Any]] = []
+    documents_by_content: dict[str, dict[str, Any]] = {}
+    pending: list[tuple[list[dict[str, Any]], str, Path, str]] = []
+    tasks: list[QwenGenerationTask] = []
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
         if not records or any(row.get("schema_version") != GRAPH_SCENE_SCHEMA for row in records):
@@ -279,12 +372,26 @@ def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, An
         if output_path.is_file() and not force:
             existing = read_json(output_path)
             if existing.get("input_fingerprint") == input_fp:
-                documents.append(existing)
+                documents_by_content[str(records[0]["content_id"])] = existing
                 continue
         prompt = graph_summary_prompt(template, records)
-        summary = validate_graph_summary(
-            backend.generate([], prompt, int(settings["summary_max_new_tokens"]))
+        task_id = str(records[0]["content_id"])
+        tasks.append(
+            QwenGenerationTask(
+                task_id=task_id,
+                image_paths=(),
+                prompt=prompt,
+                max_new_tokens=int(settings["summary_max_new_tokens"]),
+            )
         )
+        pending.append((records, input_fp, output_path, task_id))
+
+    generated: dict[str, str] = {}
+    if tasks:
+        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            generated = generate(tasks)
+    for records, input_fp, output_path, task_id in pending:
+        summary = validate_graph_summary(generated[task_id])
         document = {
             "schema_version": GRAPH_SUMMARY_SCHEMA,
             "content_id": records[0]["content_id"],
@@ -300,7 +407,10 @@ def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, An
             "input_fingerprint": input_fp,
         }
         write_json(output_path, document)
-        documents.append(document)
+        documents_by_content[str(records[0]["content_id"])] = document
+    documents = [
+        documents_by_content[str(row["content_id"])] for row in visual_rows
+    ]
     output_fp = fingerprint(documents)
     return _write_stage(
         context,
@@ -311,7 +421,12 @@ def summarize_graph(context: RunContext, *, force: bool = False) -> dict[str, An
     )
 
 
-def extract_description_scenes(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def extract_description_scenes(
+    context: RunContext,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
     context.initialize()
     evidence = _require_stage(context, "prepare-input-data")
     settings = context.config["extraction"]["description"]
@@ -338,9 +453,8 @@ def extract_description_scenes(context: RunContext, *, force: bool = False) -> d
         current = _current(context, "extract-description-scenes", sources, expected_outputs)
         if current is not None:
             return current
-    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
-
-    outputs: list[dict[str, Any]] = []
+    records_by_content: dict[str, list[dict[str, Any]]] = {}
+    pending: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
     for visual in visual_rows:
         input_fp = fingerprint({
             "evidence": visual["evidence_fingerprint"],
@@ -351,27 +465,50 @@ def extract_description_scenes(context: RunContext, *, force: bool = False) -> d
         if path.is_file() and not force:
             existing = read_jsonl(path)
             if existing and all(row.get("input_fingerprint") == input_fp for row in existing):
-                outputs.extend(existing)
+                records_by_content[str(visual["content_id"])] = existing
                 continue
-        scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
-        records = extract_scene_descriptions(
-            content_id=visual["content_id"],
-            scenes=scenes,
-            frames_dir=visual["frames_dir"],
-            timestamp_json_path=visual["timestamp_json"],
-            backend=backend,
+        scene_rows = _scene_generation_rows(
+            visual,
             prompt=prompt,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
         )
-        records = [{
-            **row,
-            "prompt_fingerprint": prompt_fp,
-            "model_fingerprint": model_fp,
-            "evidence_fingerprint": visual["evidence_fingerprint"],
-            "input_fingerprint": input_fp,
-        } for row in records]
-        write_jsonl(path, records)
-        outputs.extend(records)
+        pending.append((visual, input_fp, scene_rows))
+
+    if pending:
+        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            for visual, input_fp, scene_rows in pending:
+                generated = generate([row["task"] for row in scene_rows])
+                records = []
+                for row in scene_rows:
+                    description = generated[row["task"].task_id].strip()
+                    if not description:
+                        raise ExtractionStepError(
+                            f"{visual['content_id']} scene {row['scene_idx']} "
+                            "produced an empty description"
+                        )
+                    records.append({
+                        "schema_version": SCENE_SCHEMA_VERSION,
+                        "content_id": visual["content_id"],
+                        "scene_idx": row["scene_idx"],
+                        "keyframes": row["keyframes"],
+                        "image_paths": row["image_paths"],
+                        "description": description,
+                    })
+                records = [{
+                    **row,
+                    "prompt_fingerprint": prompt_fp,
+                    "model_fingerprint": model_fp,
+                    "evidence_fingerprint": visual["evidence_fingerprint"],
+                    "input_fingerprint": input_fp,
+                } for row in records]
+                path = context.description_scene_dir / f"{visual['content_id']}.jsonl"
+                write_jsonl(path, records)
+                records_by_content[str(visual["content_id"])] = records
+    outputs = [
+        record
+        for visual in visual_rows
+        for record in records_by_content[str(visual["content_id"])]
+    ]
     output_fp = fingerprint(outputs)
     return _write_stage(
         context,
@@ -382,7 +519,12 @@ def extract_description_scenes(context: RunContext, *, force: bool = False) -> d
     )
 
 
-def summarize_description(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def summarize_description(
+    context: RunContext,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
     context.initialize()
     scenes_manifest = _require_stage(context, "extract-description-scenes")
     settings = context.config["extraction"]["description"]
@@ -414,8 +556,9 @@ def summarize_description(context: RunContext, *, force: bool = False) -> dict[s
         current = _current(context, "summarize-description", sources, expected_outputs)
         if current is not None:
             return current
-    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
-    documents: list[dict[str, Any]] = []
+    documents_by_content: dict[str, dict[str, Any]] = {}
+    pending: list[tuple[list[dict[str, Any]], str, Path, str]] = []
+    tasks: list[QwenGenerationTask] = []
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
         if not records or any(row.get("schema_version") != SCENE_SCHEMA_VERSION for row in records):
@@ -425,12 +568,26 @@ def summarize_description(context: RunContext, *, force: bool = False) -> dict[s
         if output_path.is_file() and not force:
             existing = read_json(output_path)
             if existing.get("input_fingerprint") == input_fp:
-                documents.append(existing)
+                documents_by_content[str(records[0]["content_id"])] = existing
                 continue
         prompt = description_summary_prompt(template, records)
-        summary = validate_description_summary(
-            backend.generate([], prompt, int(settings["summary_max_new_tokens"]))
+        task_id = str(records[0]["content_id"])
+        tasks.append(
+            QwenGenerationTask(
+                task_id=task_id,
+                image_paths=(),
+                prompt=prompt,
+                max_new_tokens=int(settings["summary_max_new_tokens"]),
+            )
         )
+        pending.append((records, input_fp, output_path, task_id))
+
+    generated: dict[str, str] = {}
+    if tasks:
+        with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            generated = generate(tasks)
+    for records, input_fp, output_path, task_id in pending:
+        summary = validate_description_summary(generated[task_id])
         document = {
             "schema_version": SUMMARY_SCHEMA_VERSION,
             "content_id": records[0]["content_id"],
@@ -445,7 +602,10 @@ def summarize_description(context: RunContext, *, force: bool = False) -> dict[s
             "input_fingerprint": input_fp,
         }
         write_json(output_path, document)
-        documents.append(document)
+        documents_by_content[str(records[0]["content_id"])] = document
+    documents = [
+        documents_by_content[str(row["content_id"])] for row in visual_rows
+    ]
     output_fp = fingerprint(documents)
     return _write_stage(
         context,

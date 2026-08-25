@@ -93,20 +93,30 @@ python -m validation run-diagnosis --run-id 1k_pilot_260825
 
 각 CLI의 `--force`는 요청한 step만 다시 수행하고 실제 downstream manifest만 stale 처리합니다. 반대쪽 Extraction arm의 산출물은 보존합니다.
 
+CUDA를 사용하는 네 Extraction step은 `--gpus N`으로 GPU 개수를 지정할 수 있습니다. 예를 들어 `--gpus 2`는 기본적으로 CUDA 장치 `0`, `1`에 worker process를 하나씩 만들고 각 process에서 Qwen을 한 번 로드합니다. `CUDA_VISIBLE_DEVICES`가 설정되어 있으면 그 목록의 앞에서부터 N개를 사용합니다. Scene 추출은 한 콘텐츠 안의 scene을, summary 생성은 콘텐츠를 worker에 round-robin으로 분배합니다. 옵션을 생략하면 기존 단일 GPU 직렬 실행을 사용합니다.
+
+```powershell
+python -m extraction extract-graph-scenes --run-id 1k_pilot_260825 --gpus 2
+python -m extraction summarize-graph --run-id 1k_pilot_260825 --gpus 2
+python -m extraction extract-description-scenes --run-id 1k_pilot_260825 --gpus 2
+python -m extraction summarize-description --run-id 1k_pilot_260825 --gpus 2
+```
+
 ## 전체 실행
 
 ```powershell
-python -m viewing_context_pipeline run --run-id 1k_pilot_260824
+python -m viewing_context_pipeline run --run-id 1k_pilot_260824 --gpus 2
 ```
 
 ```bash
-bash run.sh 1k_pilot_260824
+bash run.sh 1k_pilot_260824 --gpus 2
 ```
 
 지원 옵션:
 
 - `--force-stage <step>`: 해당 step과 실제 downstream만 재실행
 - `--dry-run`: preflight와 stage 순서만 표시하고 artifact를 쓰지 않음
+- `--gpus N`: 네 Qwen Extraction step에서 사용할 CUDA 장치 개수
 
 완전히 새 실행은 새 `run-id`를 사용합니다. 동일한 `run-id`의 config fingerprint가 runtime snapshot과 다르면 실행을 거부합니다. `--resume`, `--config`, `--local-config` 및 이전 underscore stage 이름은 지원하지 않습니다.
 

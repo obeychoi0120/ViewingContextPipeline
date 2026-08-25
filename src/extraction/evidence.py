@@ -27,6 +27,27 @@ def load_scene_timestamps(path: str | Path | None) -> list[dict[str, Any]]:
     return value if isinstance(value, list) else []
 
 
+def build_scene_evidence(
+    scenes: list[dict[str, Any]],
+    frames_dir: str | Path,
+    timestamp_json_path: str | Path,
+) -> list[dict[str, Any]]:
+    timeline = load_scene_timestamps(timestamp_json_path)
+    rows: list[dict[str, Any]] = []
+    for fallback_idx, scene in enumerate(scenes):
+        rows.append({
+            "fallback_idx": fallback_idx,
+            "scene_idx": int(scene.get("scene_idx", fallback_idx)),
+            "keyframes": normalize_keyframe_timestamps(
+                get_keyframe_timestamps(scene, timeline, fallback_idx)
+            ),
+            "image_paths": select_scene_image_paths(
+                frames_dir, scene, timeline, fallback_idx
+            ),
+        })
+    return rows
+
+
 def select_scene_image_paths(
     frames_dir: str | Path,
     scene: dict[str, Any],

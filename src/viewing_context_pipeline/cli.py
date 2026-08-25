@@ -14,13 +14,26 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--run-id", required=True)
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--force-stage", action="append", choices=STAGES, default=[])
+    run.add_argument(
+        "--gpus",
+        type=_positive_int,
+        help="Number of CUDA devices for the four Qwen extraction stages.",
+    )
     args = parser.parse_args(argv)
     try:
         return run_pipeline(
             RunContext.load(args.run_id),
             dry_run=args.dry_run,
             force_stages=set(args.force_stage),
+            gpus=args.gpus,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[FAILED] {exc}", file=sys.stderr)
         return 1
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed

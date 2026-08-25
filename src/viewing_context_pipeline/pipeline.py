@@ -31,6 +31,13 @@ DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "run-diagnosis": ("run-recommendation",),
 }
 
+GPU_STAGES = {
+    "extract-graph-scenes",
+    "summarize-graph",
+    "extract-description-scenes",
+    "summarize-description",
+}
+
 
 def handlers() -> dict[str, Callable[..., dict[str, Any]]]:
     from extraction.steps import STEP_HANDLERS as extraction_handlers
@@ -116,13 +123,22 @@ def _pipeline_document(context: RunContext) -> dict[str, Any]:
     }
 
 
-def execute_stage(context: RunContext, stage: str, *, force: bool = False) -> dict[str, Any]:
+def execute_stage(
+    context: RunContext,
+    stage: str,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
     missing = [dependency for dependency in DEPENDENCIES[stage] if not context.stage_manifest(dependency).is_file()]
     if missing:
         raise RuntimeError(f"{stage} requires completed stages: {', '.join(missing)}")
-    result = handlers()[stage](context, force=force)
+    kwargs: dict[str, Any] = {"force": force}
+    if stage in GPU_STAGES and gpus is not None:
+        kwargs["gpus"] = gpus
+    result = handlers()[stage](context, **kwargs)
     write_json(context.pipeline_manifest, _pipeline_document(context))
     return result
 
@@ -132,6 +148,7 @@ def run_pipeline(
     *,
     dry_run: bool = False,
     force_stages: set[str] | None = None,
+    gpus: int | None = None,
 ) -> int:
     force_stages = set(force_stages or ())
     unknown = force_stages - set(STAGES)
@@ -139,7 +156,12 @@ def run_pipeline(
         raise ValueError(f"unknown force stages: {sorted(unknown)}")
     check = preflight(context)
     if dry_run:
-        print({"preflight": check, "stages": list(STAGES), "force_stages": sorted(force_stages)})
+        print({
+            "preflight": check,
+            "stages": list(STAGES),
+            "force_stages": sorted(force_stages),
+            "gpus": gpus,
+        })
         return 0 if check["ready"] else 1
     if not check["ready"]:
         failed = [name for name, ready in check["checks"].items() if not ready]
@@ -148,5 +170,5 @@ def run_pipeline(
     if force_stages:
         invalidate_descendants(context, force_stages, include_roots=True)
     for stage in STAGES:
-        execute_stage(context, stage, force=stage in force_stages)
+        execute_stage(context, stage, force=stage in force_stages, gpus=gpus)
     return 0

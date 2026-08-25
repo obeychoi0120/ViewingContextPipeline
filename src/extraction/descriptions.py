@@ -5,11 +5,8 @@ from typing import Any
 
 from extraction.backends import VLMBackend
 from extraction.evidence import (
-    get_keyframe_timestamps,
+    build_scene_evidence,
     load_images,
-    load_scene_timestamps,
-    normalize_keyframe_timestamps,
-    select_scene_image_paths,
 )
 
 
@@ -31,16 +28,11 @@ def extract_scene_descriptions(
     prompt: str,
     max_new_tokens: int,
 ) -> list[dict[str, Any]]:
-    timeline = load_scene_timestamps(timestamp_json_path)
     records: list[dict[str, Any]] = []
-    for fallback_idx, scene in enumerate(scenes):
-        scene_idx = int(scene.get("scene_idx", fallback_idx))
-        keyframes = normalize_keyframe_timestamps(
-            get_keyframe_timestamps(scene, timeline, fallback_idx)
-        )
-        image_paths = select_scene_image_paths(
-            frames_dir, scene, timeline, fallback_idx
-        )
+    for scene in build_scene_evidence(scenes, frames_dir, timestamp_json_path):
+        scene_idx = scene["scene_idx"]
+        keyframes = scene["keyframes"]
+        image_paths = scene["image_paths"]
         if not keyframes or len(image_paths) != len(keyframes):
             raise DescriptionError(
                 f"scene {scene_idx} has {len(image_paths)} of {len(keyframes)} keyframes"
