@@ -1,16 +1,53 @@
-schema_version: pipeline/v1
+schema_version: viewing-context-pipeline/v2
 protocol:
+  dataset: microlens_100k
   modality: visual_only
   sampling: fixed_30s
-extraction:
-  ondevice_graph: true
-  ondevice_desc: true
-  gemini_graph: true
-  gemini_desc: false
+  backend: qwen3_vl_2b
+  arms: [graph, description]
 artifacts_root: artifacts
-components:
-  processing_config: config/extraction/data_preparation.json
-  ondevice_graph_config: config/extraction/scene_context_extraction_ondevice.json
-  ondevice_desc_config: config/extraction/scene_description_generation.json
-  gemini_graph_config: config/extraction/gemini.json
-  validation_config: config/validation/pilot_1k.yaml
+extraction:
+  visual_evidence:
+    image_resolution: [640, 352]
+  graph:
+    ontology: contracts/extraction/relational_graph_ontology_v1.json
+    scene_prompt: config/prompts/graph_scene_v1.md
+    summary_prompt: config/prompts/graph_summary_v1.md
+    scene_max_new_tokens: 2048
+    summary_max_new_tokens: 512
+    do_sample: false
+  description:
+    scene_prompt: config/prompts/description_scene_v1.md
+    summary_prompt: config/prompts/description_summary_v1.md
+    scene_max_new_tokens: 512
+    summary_max_new_tokens: 512
+    do_sample: false
+validation:
+  cohort:
+    user_count: 59
+    seed: 42
+    min_sequence_length: 5
+    max_sequence_length: 13
+    history_strata: [5, 10, 20, 50]
+  encoder:
+    model_id: BAAI/bge-large-en-v1.5
+    embedding_dim: 1024
+    max_length: 512
+    normalize_embeddings: true
+    batch_size: 32
+  model:
+    max_sequence_length: 10
+    embedding_dim: 128
+    num_blocks: 2
+    num_heads: 2
+    dropout: 0.1
+    batch_size: 128
+    max_epochs: 50
+    patience: 5
+    learning_rate: 0.0001
+    seeds: [42, 43, 44]
+  evaluation:
+    cutoffs: [4, 8, 10, 20]
+    primary_cutoff: 10
+    bootstrap_samples: 10000
+    non_inferiority_margin: 0.05

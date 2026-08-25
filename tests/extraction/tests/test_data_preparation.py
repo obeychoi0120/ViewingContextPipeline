@@ -5,12 +5,10 @@ from pathlib import Path
 from unittest import mock
 
 import numpy as np
-import pytest
 
-from viewing_context_pipeline.extraction.common.manifest import read_manifest_rows
-from viewing_context_pipeline.extraction.data_preparation.microlens import prepare_catalog
-from viewing_context_pipeline.extraction.data_preparation.raw_pipeline import normalize_shot_interval
-from viewing_context_pipeline.extraction.data_preparation.video_processor import (
+from extraction.data_preparation.fixed30 import build_fixed_30s_windows
+from extraction.data_preparation.microlens import prepare_catalog
+from extraction.data_preparation.video_processor import (
     _last_decodable_frame_timestamp_seconds,
     extract_resized_keyframes,
 )
@@ -23,10 +21,23 @@ def _write_values(path: Path, rows: list[tuple[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def test_sampling_accepts_fixed_30s_only() -> None:
-    assert normalize_shot_interval("fixed_30s") == "fixed_30s"
-    with pytest.raises(ValueError, match="fixed_30s"):
-        normalize_shot_interval("fixed_15s")
+def test_fixed_30s_sampling_uses_5_15_25_second_keyframes() -> None:
+    assert build_fixed_30s_windows(31) == [
+        {
+            "scene_start": 0,
+            "scene_end": 30,
+            "duration": 30,
+            "shot_change_timestamps": [0, 10, 20],
+            "keyframe_timestamps": [5, 15, 25],
+        },
+        {
+            "scene_start": 30,
+            "scene_end": 31,
+            "duration": 1,
+            "shot_change_timestamps": [30],
+            "keyframe_timestamps": [30],
+        },
+    ]
 
 
 def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_path: Path) -> None:
@@ -41,15 +52,15 @@ def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_p
 
     with (
         mock.patch(
-            "viewing_context_pipeline.extraction.data_preparation.video_processor.subprocess.run",
+            "extraction.data_preparation.video_processor.subprocess.run",
             side_effect=extract_frame,
         ) as run,
         mock.patch(
-            "viewing_context_pipeline.extraction.data_preparation.video_processor.cv2.imread",
+            "extraction.data_preparation.video_processor.cv2.imread",
             side_effect=[None, image],
         ),
         mock.patch(
-            "viewing_context_pipeline.extraction.data_preparation.video_processor._last_decodable_frame_timestamp_seconds",
+            "extraction.data_preparation.video_processor._last_decodable_frame_timestamp_seconds",
             return_value=300.96,
         ),
     ):
@@ -63,7 +74,7 @@ def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_p
 def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path) -> None:
     video = tmp_path / "video.mp4"
     with mock.patch(
-        "viewing_context_pipeline.extraction.data_preparation.video_processor.subprocess.run",
+        "extraction.data_preparation.video_processor.subprocess.run",
         return_value=mock.Mock(stdout="0.000000\n300.960000\n", stderr="", returncode=0),
     ) as run:
         assert _last_decodable_frame_timestamp_seconds(video) == 300.96
@@ -84,8 +95,8 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
     ]
 
     with mock.patch(
-        "viewing_context_pipeline.extraction.data_preparation.microlens.process_local_source",
-        side_effect=lambda **kwargs: {"content_id": kwargs["name"]},
+        "extraction.data_preparation.microlens.prepare_visual_item",
+        side_effect=lambda **kwargs: {"content_id": kwargs["content_id"]},
     ) as process:
         result = prepare_catalog(
             catalog,
@@ -93,12 +104,14 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
             tags_csv=tags,
             assets_root=tmp_path / "assets",
             output_root=tmp_path / "run",
-            processing_config=tmp_path / "processing.json",
+            image_size=(640, 352),
         )
 
     assert result["succeeded"] == 2 and result["failed"] == 0
     assert [call.kwargs["source_video_path"].name for call in process.call_args_list] == ["1.mp4", "2.mp4"]
-    assert read_manifest_rows(result["manifest"]) == [
+    with Path(result["manifest"]).open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows == [
         {"content_id": "microlens_100k_00001"},
         {"content_id": "microlens_100k_00002"},
     ]

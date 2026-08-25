@@ -1,7 +1,0 @@
-{
-  "multimodal": false,
-  "shot_interval": "fixed_30s",
-  "gemini_location": "global",
-  "gemini_model": "gemini-3.7-flash",
-  "gemini_thinking_level": "high"
-}

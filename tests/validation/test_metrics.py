@@ -1,7 +1,7 @@
 import numpy as np
 
-from viewing_context_pipeline.validation.metrics import metrics_from_rank, paired_bootstrap_ci, paired_relative_bootstrap_ci
-from viewing_context_pipeline.validation.scoring import mask_history, rank_of_target
+from validation.metrics import metrics_from_rank, paired_bootstrap_ci, paired_relative_bootstrap_ci
+from validation.scoring import mask_history, rank_of_target
 
 
 def test_metrics_and_repeated_target_history_mask() -> None:

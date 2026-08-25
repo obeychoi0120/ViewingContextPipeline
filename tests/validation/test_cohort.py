@@ -3,8 +3,8 @@ import json
 import pytest
 
 from conftest import config_data
-from viewing_context_pipeline.validation.cohort import CohortError, largest_remainder_quotas, prepare_cohort, select_users, split_record
-from viewing_context_pipeline.validation.config import ValidationConfig
+from validation.cohort import CohortError, largest_remainder_quotas, prepare_cohort, select_users, split_record
+from validation.config import ValidationConfig
 
 
 def test_largest_remainder_is_exact() -> None:

@@ -7,13 +7,31 @@ name = "viewing-context-pipeline"
 version = "0.1.0"
 description = "Viewing Context extraction and controlled MicroLens/SASRec validation pipeline."
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.26", "pydantic>=2.0", "PyYAML>=6.0"]
+dependencies = [
+    "av==16.1.0",
+    "numpy>=1.26",
+    "opencv-python==4.13.0.92",
+    "Pillow==11.3.0",
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
+    "tqdm==4.67.3",
+]
 
 [project.optional-dependencies]
 train = ["torch>=2.2", "transformers>=4.51"]
+qwen = ["accelerate==1.12.0", "torch>=2.2", "transformers>=4.51"]
+gemini = ["google-genai"]
+multimodal = [
+    "faster-whisper==1.2.1",
+    "moviepy==2.2.1",
+    "paddleocr==3.4.0",
+    "torch>=2.2",
+]
 
 [project.scripts]
 viewing-context-pipeline = "viewing_context_pipeline.cli:main"
+viewing-context-extraction = "extraction.cli:main"
+viewing-context-validation = "validation.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

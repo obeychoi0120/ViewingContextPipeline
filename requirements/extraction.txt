@@ -1,2 +1,0 @@
--r requirements-ondevice.txt
--r requirements-cloud.txt

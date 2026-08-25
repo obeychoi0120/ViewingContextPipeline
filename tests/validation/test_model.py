@@ -3,7 +3,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from viewing_context_pipeline.validation.model import SASRec, in_batch_loss  # noqa: E402
+from validation.model import SASRec, in_batch_loss  # noqa: E402
 
 
 @pytest.mark.parametrize("arm", ["id", "graph", "desc"])

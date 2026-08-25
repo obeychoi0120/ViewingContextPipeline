@@ -1,5 +1,6 @@
-"""Viewing Context extraction and validation pipeline."""
+"""Thin orchestration package for the fixed Viewing Context pipeline."""
 
-from .pipeline import STAGES, PipelineContext, PipelineError, generate_run_id
+from .pipeline import STAGES
+from .runtime import ConfigError, RunContext
 
-__all__ = ["STAGES", "PipelineContext", "PipelineError", "generate_run_id"]
+__all__ = ["STAGES", "ConfigError", "RunContext"]

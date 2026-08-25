@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def load_images(image_paths: list[str]) -> list[Any]:
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("image loading requires Pillow") from exc
+    images: list[Any] = []
+    for image_path in image_paths:
+        with Image.open(image_path) as image:
+            images.append(image.convert("RGB"))
+    return images
+
+
+def load_scene_timestamps(path: str | Path | None) -> list[dict[str, Any]]:
+    if not path or not Path(path).is_file():
+        return []
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    return value if isinstance(value, list) else []
+
+
+def select_scene_image_paths(
+    frames_dir: str | Path,
+    scene: dict[str, Any],
+    timestamps: list[dict[str, Any]],
+    fallback_idx: int,
+) -> list[str]:
+    frame_paths = list_frame_images(frames_dir)
+    selected: list[Path] = []
+    seen: set[Path] = set()
+    for timestamp in normalize_keyframe_timestamps(
+        get_keyframe_timestamps(scene, timestamps, fallback_idx)
+    ):
+        match = image_path_for_timestamp(frame_paths, timestamp)
+        if match is not None and match not in seen:
+            selected.append(match)
+            seen.add(match)
+    return [str(path) for path in selected]
+
+
+def list_frame_images(frames_dir: str | Path) -> list[Path]:
+    path = Path(frames_dir)
+    if not path.is_dir():
+        return []
+    return sorted(
+        child
+        for child in path.iterdir()
+        if child.is_file() and child.suffix.lower() in IMAGE_EXTENSIONS
+    )
+
+
+def get_keyframe_timestamps(
+    scene: dict[str, Any],
+    timestamps: list[dict[str, Any]],
+    fallback_idx: int,
+) -> list[Any]:
+    timeline = scene.get("timeline")
+    if isinstance(timeline, list) and timeline:
+        values = [
+            shot.get("timestamp")
+            for shot in timeline
+            if isinstance(shot, dict) and shot.get("timestamp") is not None
+        ]
+        if len(values) == len(timeline):
+            return values
+    direct = scene.get("keyframe_timestamps") or scene.get("keyframes")
+    if isinstance(direct, list) and direct:
+        return direct
+    index = scene.get("scene_idx", fallback_idx)
+    if type(index) is not int:
+        index = fallback_idx
+    if timestamps and 0 <= index < len(timestamps):
+        values = timestamps[index].get("keyframe_timestamps", [])
+        if isinstance(values, list):
+            return values
+    return []
+
+
+def normalize_keyframe_timestamps(values: list[Any]) -> list[int]:
+    normalized: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        try:
+            timestamp = int(round(float(value)))
+        except (TypeError, ValueError):
+            continue
+        if timestamp >= 0 and timestamp not in seen:
+            normalized.append(timestamp)
+            seen.add(timestamp)
+    return normalized
+
+
+def image_path_for_timestamp(paths: list[Path], timestamp: Any) -> Path | None:
+    try:
+        name = f"{int(round(float(timestamp))):04d}"
+    except (TypeError, ValueError):
+        return None
+    return next((path for path in paths if path.stem == name), None)

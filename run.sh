@@ -14,16 +14,9 @@ cd "$REPO_ROOT"
 
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
-PIPELINE="${PIPELINE:-config/pipelines/microlens_graph_vs_desc_pilot.yaml}"
-LOCAL_CONFIG="${LOCAL_CONFIG:-config/local.yaml}"
-STAGE="${STAGE:-prepare_data}"
-
 ARGS=(
-  "$STAGE"
-  --config "$PIPELINE"
-  --local-config "$LOCAL_CONFIG"
+  run
+  --run-id "$RUN_ID"
 )
-
-ARGS+=(--run-id "$RUN_ID")
 
 exec python -m viewing_context_pipeline "${ARGS[@]}" "$@"
