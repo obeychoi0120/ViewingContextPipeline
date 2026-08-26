@@ -7,19 +7,17 @@ protocol:
   arms: [graph, description]
 artifacts_root: artifacts
 data:
-  videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k_videos
-  titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
-  tags_csv: /home_nvme/shared/data/microlens_100k/Annotations/tags_to_summary.csv
-  pairs_tsv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs_1k.tsv
+  videos_dir: /path/to/MicroLens-100k_videos
+  titles_csv: /path/to/MicroLens-100k_title_en.csv
+  tags_csv: /path/to/tags_to_summary.csv
+  pairs_tsv: /path/to/MicroLens-100k_pairs_1k.tsv
 models:
-  qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
-  bge: /home_nvme/shared/models/bge-large-en-v1.5
+  qwen: /path/to/Qwen3-VL-2B-Instruct
+  bge: /path/to/bge-large-en-v1.5
 extraction:
   visual_evidence:
     image_resolution: [640, 352]
   graph:
-    ontology: contracts/extraction/relational_graph_ontology_v1.json
-    scene_prompt: config/prompts/graph_scene_v1.md
     summary_prompt: config/prompts/graph_summary_v1.md
     scene_max_new_tokens: 2048
     summary_max_new_tokens: 512

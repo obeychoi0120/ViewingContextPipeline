@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
 import viewing_context_pipeline.pipeline as pipeline_module
+import extraction.steps as extraction_steps
 from extraction.steps import _write_stage as write_extraction_stage
+import validation.steps as validation_steps
 from viewing_context_pipeline.cli import main as pipeline_cli
 from viewing_context_pipeline.pipeline import STAGES, descendants, execute_stage, run_pipeline
-from viewing_context_pipeline.runtime import ConfigError, RunContext, write_json
+from viewing_context_pipeline.runtime import (
+    ConfigError,
+    RunContext,
+    read_json,
+    read_jsonl,
+    write_json,
+    write_jsonl,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,14 +51,13 @@ def context(tmp_path: Path) -> RunContext:
         "pairs_tsv": str(data / "pairs.tsv"),
     }
     config["models"] = {"qwen": str(models / "qwen"), "bge": str(models / "bge")}
-    config["extraction"]["graph"]["ontology"] = str(
-        ROOT / "contracts/extraction/relational_graph_ontology_v1.json"
+    config["extraction"]["graph"]["summary_prompt"] = str(
+        ROOT / config["extraction"]["graph"]["summary_prompt"]
     )
-    for arm in ("graph", "description"):
-        for key in ("scene_prompt", "summary_prompt"):
-            config["extraction"][arm][key] = str(
-                ROOT / config["extraction"][arm][key]
-            )
+    for key in ("scene_prompt", "summary_prompt"):
+        config["extraction"]["description"][key] = str(
+            ROOT / config["extraction"]["description"][key]
+        )
     (config_dir / "pipeline.yaml").write_text(
         yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
     )
@@ -148,13 +158,188 @@ def test_changed_graph_fingerprint_marks_only_actual_downstream_stale(context: R
     write_extraction_stage(
         context,
         "extract-graph-scenes",
-        source_fingerprints={"ontology": "changed"},
+        source_fingerprints={"taxonomy": "changed"},
         output_fingerprint="b" * 64,
     )
     assert context.stage_manifest("extract-description-scenes").is_file()
     assert context.stage_manifest("summarize-description").is_file()
     assert not context.stage_manifest("summarize-graph").exists()
     assert not context.stage_manifest("embed-representations").exists()
+
+
+def test_embedding_reuses_unchanged_description_branch(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "i1"}],
+    )
+    for stage, output_fingerprint in (
+        ("summarize-graph", "graph-v1"),
+        ("summarize-description", "description-v1"),
+    ):
+        write_json(
+            context.stage_manifest(stage),
+            {
+                "schema_version": "step-manifest/v1",
+                "run_id": context.run_id,
+                "stage": stage,
+                "status": "complete",
+                "source_fingerprints": {},
+                "output_fingerprint": output_fingerprint,
+            },
+        )
+    common = {
+        "content_id": "c1",
+        "status": "complete",
+        "evidence_fingerprint": "same-evidence",
+    }
+    write_json(
+        context.graph_summary_dir / "c1.json",
+        {**common, "schema_version": "graph-video-summary/v1", "text": "graph one"},
+    )
+    write_json(
+        context.description_summary_dir / "c1.json",
+        {
+            **common,
+            "schema_version": "description-video-summary/v1",
+            "text": "description one",
+        },
+    )
+    encoded: list[list[str]] = []
+
+    def fake_encode(config, texts):
+        encoded.append(texts)
+        return np.ones((len(texts), config.embedding_dim), dtype=np.float32)
+
+    monkeypatch.setattr(validation_steps, "encode_bge_texts", fake_encode)
+    validation_steps.embed_representations(context)
+    first = read_json(context.representations_manifest)
+    description_artifact = first["branches"]["desc"]["artifact_fingerprint"]
+    assert encoded == [["graph one"], ["description one"]]
+
+    write_json(
+        context.graph_summary_dir / "c1.json",
+        {**common, "schema_version": "graph-video-summary/v1", "text": "graph two"},
+    )
+    graph_stage = read_json(context.stage_manifest("summarize-graph"))
+    graph_stage["output_fingerprint"] = "graph-v2"
+    write_json(context.stage_manifest("summarize-graph"), graph_stage)
+
+    validation_steps.embed_representations(context)
+    second = read_json(context.representations_manifest)
+
+    assert encoded == [["graph one"], ["description one"], ["graph two"]]
+    assert (
+        second["branches"]["desc"]["artifact_fingerprint"]
+        == description_artifact
+    )
+
+
+def test_graph_steps_write_minimal_graph_and_scene_provenance(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context.initialize()
+    write_json(
+        context.stage_manifest("prepare-input-data"),
+        {
+            "schema_version": "step-manifest/v1",
+            "run_id": context.run_id,
+            "stage": "prepare-input-data",
+            "status": "complete",
+            "source_fingerprints": {},
+            "output_fingerprint": "visual-v1",
+        },
+    )
+    frames = context.evidence_dir / "resized_keyframes" / "c1"
+    frames.mkdir(parents=True)
+    for timestamp in (5, 15, 25):
+        (frames / f"{timestamp:04d}.png").write_bytes(b"fixture")
+    timestamps = context.cohort_dir / "timestamp.json"
+    timestamps.parent.mkdir(parents=True, exist_ok=True)
+    timestamps.write_text(
+        json.dumps(
+            [
+                {
+                    "scene_start": 0,
+                    "scene_end": 30,
+                    "keyframe_timestamps": [5, 15, 25],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    write_jsonl(
+        context.visual_manifest,
+        [
+            {
+                "content_id": "c1",
+                "frames_dir": str(frames),
+                "timestamp_json": str(timestamps),
+                "evidence_fingerprint": "evidence-v1",
+            }
+        ],
+    )
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "i1", "source_video_path": "1.mp4"}],
+    )
+    empty_graph = {
+        "setting_context": "unknown",
+        "entities": [],
+        "events": [],
+        "static_relations": [],
+        "semantic_topics": [],
+        "affect": {
+            "subject_ids": [],
+            "valence": "unknown",
+            "arousal": "unknown",
+        },
+    }
+
+    @contextmanager
+    def fake_generator(**_kwargs):
+        def generate(tasks, on_task_complete=None):
+            results = {}
+            for task in tasks:
+                text = (
+                    "short factual summary"
+                    if not task.image_paths
+                    else json.dumps(empty_graph)
+                )
+                results[task.task_id] = text
+                if on_task_complete is not None:
+                    on_task_complete(task.task_id, text)
+            return results
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
+
+    extraction_steps.extract_graph_scenes(context)
+    scene_path = context.graph_scene_dir / "c1.jsonl"
+    scene = read_jsonl(scene_path)[0]
+    assert scene["schema_version"] == "minimal-semantic-scene/v1"
+    assert scene["scene_start_seconds"] == 0
+    assert scene["scene_end_seconds"] == 30
+    assert scene["keyframes"] == [5, 15, 25]
+    assert scene["graph"] == empty_graph
+    assert {
+        "taxonomy_fingerprint",
+        "prompt_fingerprint",
+        "model_fingerprint",
+        "evidence_fingerprint",
+        "input_fingerprint",
+    }.issubset(scene)
+
+    extraction_steps.summarize_graph(context)
+    summary = read_json(context.graph_summary_dir / "c1.json")
+    assert summary["text"] == "short factual summary"
+    assert summary["scene_graph_path"] == "extraction/graph/scenes/c1.jsonl"
+    assert summary["scene_graph_fingerprint"]
 
 
 def test_independent_step_does_not_auto_run_prerequisites(context: RunContext) -> None:

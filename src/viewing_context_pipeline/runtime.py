@@ -267,8 +267,24 @@ def _validate_config(value: dict[str, Any]) -> None:
         if protocol.get(key) != expected_value:
             raise ConfigError(f"protocol.{key} must be {expected_value!r}")
     extraction = _require_mapping(value, "extraction")
+    if set(extraction) != {"visual_evidence", "graph", "description"}:
+        raise ConfigError(
+            "extraction must contain visual_evidence, graph, and description"
+        )
+    graph_keys = {
+        "summary_prompt",
+        "scene_max_new_tokens",
+        "summary_max_new_tokens",
+        "do_sample",
+    }
+    description_keys = graph_keys | {"scene_prompt"}
     for arm in ("graph", "description"):
         settings = _require_mapping(extraction, arm)
+        expected = graph_keys if arm == "graph" else description_keys
+        if set(settings) != expected:
+            raise ConfigError(
+                f"extraction.{arm} must contain exactly {sorted(expected)}"
+            )
         if settings.get("do_sample") is not False:
             raise ConfigError(f"extraction.{arm}.do_sample must be false")
     _require_mapping(value, "validation")

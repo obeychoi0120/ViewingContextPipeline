@@ -32,7 +32,7 @@ def scene_messages(
         if arm == "graph":
             label = "Graph"
             content = json.dumps(
-                {"triples": record["triples"]},
+                record["graph"],
                 ensure_ascii=False,
                 indent=2,
             )

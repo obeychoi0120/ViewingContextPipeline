@@ -39,7 +39,7 @@ prepare-cohort
       → embed-representations → run-recommendation → run-diagnosis
 ```
 
-Graph arm은 장면별 `subject-relation-object` triple을 만들고 Qwen으로 영상 단위 요약을 생성합니다.
+Graph arm은 fixed-30s 장면의 시간순 keyframe 1–3장을 한 번에 보고 `minimal-semantic-scene/v1` graph를 만든 뒤 Qwen으로 영상 단위 요약을 생성합니다. Graph에는 coarse setting, visible entities/events, optional `WEARING`, grounded semantic topics, visible affect만 포함됩니다.
 
 Description arm은 같은 keyframe에서 장면별 factual description을 생성한 뒤 별도 Qwen 호출로 영상 단위 요약을 생성합니다. 두 arm은 같은 visual evidence fingerprint와 deterministic generation 설정을 사용합니다.
 
@@ -61,11 +61,9 @@ python -m pip install -e ".[qwen,train]"
 
 `config/pipeline.yaml`은 machine-local 경로를 포함하므로 Git에서 제외됩니다. 각 run에 사용된 전체 설정은 runtime snapshot에 저장됩니다.
 
-Graph ontology와 prompt는 고정 pilot YAML에서 명시적으로 참조합니다.
+Graph scene prompt와 minimal taxonomy는 `extraction.semantic_graph`가 코드로 소유합니다. enum과 제한에서 동적으로 렌더링된 prompt 및 taxonomy mapping의 fingerprint를 기록하므로 둘 중 하나가 바뀌면 Graph scene과 실제 downstream만 다시 실행됩니다. 별도의 ontology JSON은 사용하지 않습니다.
 
-- `relational-graph-ontology/v1`은 현재 `provisional`입니다.
-- 최종 팀 taxonomy/prompt가 같은 asset interface로 교체되면 fingerprint가 바뀌어 Graph scene과 downstream만 다시 실행됩니다.
-- `scene_type`, `people_density`, `graphic_density` 및 미사용 필드는 provisional Graph 출력에 포함하지 않습니다.
+Qwen scene analyzer는 category/type, `IS_A`, `INTERACTS_WITH`, relation family, scene function, media/style, confidence/score를 출력하지 않습니다. Facet Projector, PPR, TVTI 축·점수·UI는 이 pilot DAG 범위 밖입니다.
 
 ## 독립 step 실행
 
@@ -143,13 +141,12 @@ artifacts/{run_id}/
    └─ diagnosis/
 ```
 
-두 파일 기반 runtime snapshot이나 legacy output은 읽지 않습니다. 각 step manifest는 upstream, ontology, prompt, model 및 output fingerprint를 기록합니다.
+두 파일 기반 runtime snapshot이나 legacy flat-triple output은 읽지 않습니다. 각 step manifest는 upstream, taxonomy, rendered prompt, model 및 output fingerprint를 기록합니다.
 
 주요 계약:
 
-- `relational-graph-ontology/v1`
 - `viewing-context-config/v1`
-- `scene-relational-graph/v1`
+- `minimal-semantic-scene/v1`
 - `graph-video-summary/v1`
 - `scene-description/v1`
 - `description-video-summary/v1`

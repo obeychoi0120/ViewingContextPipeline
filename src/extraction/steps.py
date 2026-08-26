@@ -21,12 +21,13 @@ from extraction.evidence import (
     load_images,
 )
 from extraction.monitoring import scene_messages, summary_message, video_names
-from extraction.relational_graph import (
-    GRAPH_SCENE_SCHEMA,
+from extraction.semantic_graph import (
     GRAPH_SUMMARY_SCHEMA,
+    SCENE_EXTRACTION_PROMPT,
+    SCENE_SCHEMA_VERSION as GRAPH_SCENE_SCHEMA,
     graph_summary_prompt,
-    ontology_from_document,
     parse_graph_output,
+    taxonomy_contract,
     validate_summary as validate_graph_summary,
 )
 from viewing_context_pipeline.runtime import (
@@ -125,6 +126,8 @@ def _scene_generation_rows(
                 max_new_tokens=max_new_tokens,
             ),
             "scene_idx": scene_idx,
+            "scene_start_seconds": scene["scene_start_seconds"],
+            "scene_end_seconds": scene["scene_end_seconds"],
             "keyframes": keyframes,
             "image_paths": image_paths,
         })
@@ -266,13 +269,9 @@ def extract_graph_scenes(
     context.initialize()
     evidence = _require_stage(context, "prepare-input-data")
     settings = context.config["extraction"]["graph"]
-    ontology_path = context.config_path("extraction", "graph", "ontology")
-    prompt_path = context.config_path("extraction", "graph", "scene_prompt")
-    ontology_document = read_json(ontology_path)
-    ontology = ontology_from_document(ontology_document)
-    prompt = prompt_path.read_text(encoding="utf-8")
-    ontology_fp = file_fingerprint(ontology_path)
-    prompt_fp = file_fingerprint(prompt_path)
+    prompt = SCENE_EXTRACTION_PROMPT
+    taxonomy_fp = fingerprint(taxonomy_contract())
+    prompt_fp = fingerprint(prompt)
     model_path = context.path("models", "qwen")
     model_fp = fingerprint({
         "path": str(model_path),
@@ -282,7 +281,7 @@ def extract_graph_scenes(
     })
     sources = {
         "prepare-input-data": evidence["output_fingerprint"],
-        "ontology": ontology_fp,
+        "taxonomy": taxonomy_fp,
         "prompt": prompt_fp,
         "model": model_fp,
     }
@@ -299,7 +298,7 @@ def extract_graph_scenes(
     for visual in visual_rows:
         input_fp = fingerprint({
             "evidence": visual["evidence_fingerprint"],
-            "ontology": ontology_fp,
+            "taxonomy": taxonomy_fp,
             "prompt": prompt_fp,
             "model": model_fp,
         })
@@ -330,23 +329,22 @@ def extract_graph_scenes(
                         "schema_version": GRAPH_SCENE_SCHEMA,
                         "content_id": visual["content_id"],
                         "scene_idx": row["scene_idx"],
+                        "scene_start_seconds": row["scene_start_seconds"],
+                        "scene_end_seconds": row["scene_end_seconds"],
                         "keyframes": row["keyframes"],
                         "image_paths": row["image_paths"],
-                        "triples": parse_graph_output(
-                            generated[row["task"].task_id], ontology
-                        ),
+                        "graph": parse_graph_output(generated[row["task"].task_id]),
                     } for row in scene_rows]
                     records = [{
                         **row,
-                        "ontology_id": ontology.ontology_id,
-                        "ontology_status": ontology.status,
-                        "ontology_fingerprint": ontology_fp,
+                        "taxonomy_fingerprint": taxonomy_fp,
                         "prompt_fingerprint": prompt_fp,
                         "model_fingerprint": model_fp,
                         "evidence_fingerprint": visual["evidence_fingerprint"],
                         "input_fingerprint": input_fp,
                     } for row in records]
                     path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
+                    records.sort(key=lambda row: int(row["scene_idx"]))
                     write_jsonl(path, records)
                     records_by_content[str(visual["content_id"])] = records
                     video_name = names.get(
@@ -407,13 +405,14 @@ def summarize_graph(
             _completed_progress("Graph summaries", len(visual_rows))
             return current
     documents_by_content: dict[str, dict[str, Any]] = {}
-    pending: list[tuple[list[dict[str, Any]], str, Path, str]] = []
+    pending: list[tuple[list[dict[str, Any]], str, Path, Path, str]] = []
     tasks: list[QwenGenerationTask] = []
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
         if not records or any(row.get("schema_version") != GRAPH_SCENE_SCHEMA for row in records):
             raise ExtractionStepError(f"invalid graph scene file: {scene_path}")
-        input_fp = fingerprint({"scenes": file_fingerprint(scene_path), "prompt": prompt_fp, "model": model_fp})
+        scene_fp = file_fingerprint(scene_path)
+        input_fp = fingerprint({"scenes": scene_fp, "prompt": prompt_fp, "model": model_fp})
         output_path = context.graph_summary_dir / f"{records[0]['content_id']}.json"
         if output_path.is_file() and not force:
             existing = read_json(output_path)
@@ -430,11 +429,11 @@ def summarize_graph(
                 max_new_tokens=int(settings["summary_max_new_tokens"]),
             )
         )
-        pending.append((records, input_fp, output_path, task_id))
+        pending.append((records, input_fp, output_path, scene_path, task_id))
 
     pending_by_task = {
-        task_id: (records, input_fp, output_path)
-        for records, input_fp, output_path, task_id in pending
+        task_id: (records, input_fp, output_path, scene_path)
+        for records, input_fp, output_path, scene_path, task_id in pending
     }
     with tqdm(
         total=len(visual_rows),
@@ -443,7 +442,7 @@ def summarize_graph(
         unit="content",
     ) as progress:
         def complete_graph_summary(task_id: str, text: str) -> None:
-            records, input_fp, output_path = pending_by_task[task_id]
+            records, input_fp, output_path, scene_path = pending_by_task[task_id]
             summary = validate_graph_summary(text)
             content_id = str(records[0]["content_id"])
             document = {
@@ -454,8 +453,10 @@ def summarize_graph(
                 "text": summary,
                 "scene_count": len(records),
                 "evidence_fingerprint": records[0]["evidence_fingerprint"],
-                "ontology_fingerprint": records[0]["ontology_fingerprint"],
+                "taxonomy_fingerprint": records[0]["taxonomy_fingerprint"],
                 "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
+                "scene_graph_path": scene_path.relative_to(context.run_root).as_posix(),
+                "scene_graph_fingerprint": file_fingerprint(scene_path),
                 "summary_prompt_fingerprint": prompt_fp,
                 "model_fingerprint": model_fp,
                 "input_fingerprint": input_fp,

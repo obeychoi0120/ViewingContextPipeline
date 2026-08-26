@@ -35,12 +35,23 @@ def build_scene_evidence(
     timeline = load_scene_timestamps(timestamp_json_path)
     rows: list[dict[str, Any]] = []
     for fallback_idx, scene in enumerate(scenes):
+        keyframes = normalize_keyframe_timestamps(
+            get_keyframe_timestamps(scene, timeline, fallback_idx)
+        )
         rows.append({
             "fallback_idx": fallback_idx,
             "scene_idx": int(scene.get("scene_idx", fallback_idx)),
-            "keyframes": normalize_keyframe_timestamps(
-                get_keyframe_timestamps(scene, timeline, fallback_idx)
+            "scene_start_seconds": _scene_boundary(
+                scene, timeline, fallback_idx, "scene_start", keyframes[0] if keyframes else 0
             ),
+            "scene_end_seconds": _scene_boundary(
+                scene,
+                timeline,
+                fallback_idx,
+                "scene_end",
+                keyframes[-1] if keyframes else 0,
+            ),
+            "keyframes": keyframes,
             "image_paths": select_scene_image_paths(
                 frames_dir, scene, timeline, fallback_idx
             ),
@@ -116,7 +127,24 @@ def normalize_keyframe_timestamps(values: list[Any]) -> list[int]:
         if timestamp >= 0 and timestamp not in seen:
             normalized.append(timestamp)
             seen.add(timestamp)
-    return normalized
+    return sorted(normalized)
+
+
+def _scene_boundary(
+    scene: dict[str, Any],
+    timeline: list[dict[str, Any]],
+    fallback_idx: int,
+    key: str,
+    fallback: int,
+) -> int | float:
+    value = scene.get(key)
+    if value is None and 0 <= fallback_idx < len(timeline):
+        value = timeline[fallback_idx].get(key)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return int(number) if number.is_integer() else number
 
 
 def image_path_for_timestamp(paths: list[Path], timestamp: Any) -> Path | None:

@@ -145,10 +145,11 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     context.initialize()
     graph = _require_stage(context, "summarize-graph")
     description = _require_stage(context, "summarize-description")
+    encoder_fp = directory_fingerprint(context.path("models", "bge"))
     sources_fp = {
         "summarize-graph": graph["output_fingerprint"],
         "summarize-description": description["output_fingerprint"],
-        "encoder": directory_fingerprint(context.path("models", "bge")),
+        "encoder": encoder_fp,
     }
     if not force:
         required = [context.representations_manifest]
@@ -164,12 +165,21 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     config = validation_config(context)
     catalog = read_jsonl(context.cohort_dir / "catalog.jsonl")
     content_ids = [row["content_id"] for row in catalog]
+    content_order_fp = fingerprint(content_ids)
     sources = {
         "graph": (context.graph_summary_dir, "graph-video-summary/v1"),
         "desc": (context.description_summary_dir, "description-video-summary/v1"),
     }
     output = context.representations_manifest.parent
     output.mkdir(parents=True, exist_ok=True)
+    previous_manifest = (
+        read_json(context.representations_manifest)
+        if context.representations_manifest.is_file()
+        else {}
+    )
+    previous_branches = previous_manifest.get("branches", {})
+    if not isinstance(previous_branches, dict):
+        previous_branches = {}
     branches: dict[str, Any] = {}
     evidence_by_content: dict[str, str] = {}
     for branch, (directory, schema) in sources.items():
@@ -180,6 +190,22 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             previous = evidence_by_content.setdefault(row["content_id"], row["evidence_fingerprint"])
             if previous != row["evidence_fingerprint"]:
                 raise ValidationStepError(f"evidence fingerprint mismatch for {row['content_id']}")
+        branch_source_fp = fingerprint(documents)
+        previous_branch = previous_branches.get(branch)
+        if (
+            not force
+            and isinstance(previous_branch, dict)
+            and previous_branch.get("source_fingerprint") == branch_source_fp
+            and previous_branch.get("encoder_fingerprint") == encoder_fp
+            and previous_branch.get("content_order_fingerprint") == content_order_fp
+            and _valid_embedding_artifact(
+                previous_branch,
+                row_count=len(catalog),
+                dimension=config.encoder.embedding_dim,
+            )
+        ):
+            branches[branch] = previous_branch
+            continue
         matrix = np.asarray(encode_bge_texts(config.encoder, [row["text"] for row in documents]), dtype=np.float32)
         if matrix.shape != (len(catalog), config.encoder.embedding_dim) or not np.isfinite(matrix).all():
             raise ValidationStepError(f"invalid embedding matrix for {branch}: {matrix.shape}")
@@ -187,7 +213,10 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         np.savez_compressed(path, values=matrix)
         branches[branch] = {
             "path": str(path),
-            "source_fingerprint": graph["output_fingerprint"] if branch == "graph" else description["output_fingerprint"],
+            "source_fingerprint": branch_source_fp,
+            "encoder_fingerprint": encoder_fp,
+            "content_order_fingerprint": content_order_fp,
+            "artifact_fingerprint": file_fingerprint(path),
         }
     item_index = {row["item_id"]: index for index, row in enumerate(catalog)}
     write_json(output / "item_index.json", item_index)
@@ -206,7 +235,12 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         "encoder": encoder,
         "complete": True,
     }
-    document["fingerprint"] = fingerprint({"branches": branches, "encoder": encoder})
+    document["content_order_fingerprint"] = content_order_fp
+    document["fingerprint"] = fingerprint({
+        "branches": branches,
+        "encoder": encoder,
+        "content_order_fingerprint": content_order_fp,
+    })
     write_json(context.representations_manifest, document)
     return _write_stage(
         context,
@@ -215,6 +249,26 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         output_fingerprint=document["fingerprint"],
         content_count=len(catalog),
     )
+
+
+def _valid_embedding_artifact(
+    branch: dict[str, Any],
+    *,
+    row_count: int,
+    dimension: int,
+) -> bool:
+    path = Path(str(branch.get("path", "")))
+    expected_fingerprint = branch.get("artifact_fingerprint")
+    if not path.is_file() or not isinstance(expected_fingerprint, str):
+        return False
+    if file_fingerprint(path) != expected_fingerprint:
+        return False
+    try:
+        with np.load(path) as payload:
+            values = payload["values"]
+            return values.shape == (row_count, dimension) and np.isfinite(values).all()
+    except (OSError, KeyError, ValueError):
+        return False
 
 
 def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str, Any]:

@@ -19,15 +19,15 @@ def test_video_names_use_source_basename_and_fallback() -> None:
 
 def test_graph_scene_messages_are_sorted_and_use_normalized_json() -> None:
     records = [
-        {"scene_idx": 2, "triples": [{"subject": "later"}]},
-        {"scene_idx": 0, "triples": [{"subject": "first"}]},
+        {"scene_idx": 2, "graph": {"setting_context": "outdoor_urban"}},
+        {"scene_idx": 0, "graph": {"setting_context": "indoor"}},
     ]
     messages = scene_messages("1.mp4", records, arm="graph")
 
     assert messages[0].startswith("[Graph] 1.mp4 | scene #000\n")
     assert messages[1].startswith("[Graph] 1.mp4 | scene #002\n")
     assert json.loads(messages[0].split("\n", 1)[1]) == {
-        "triples": [{"subject": "first"}]
+        "setting_context": "indoor"
     }
 
 

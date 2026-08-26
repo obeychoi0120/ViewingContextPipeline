@@ -58,5 +58,8 @@ def test_description_summary_preserves_scene_order_and_word_limit() -> None:
     prompt = description_summary_prompt("{scenes}", records)
     assert prompt.index("Scene 0") < prompt.index("Scene 1")
     assert len(validate_summary("word " * 150).split()) == 150
-    with pytest.raises(DescriptionError, match="150-300"):
-        validate_summary("short")
+    assert validate_summary("short") == "short"
+    with pytest.raises(DescriptionError, match="1-150"):
+        validate_summary("")
+    with pytest.raises(DescriptionError, match="1-150"):
+        validate_summary("word " * 151)

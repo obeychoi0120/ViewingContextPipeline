@@ -1,3 +1,3 @@
-Using only the chronological scene relational graphs below, write a coherent factual English visual summary of the entire video in single paragraph. Preserve important entities, actions, interactions, settings, scene functions, media form, and mood. Do not add facts absent from the graphs.
+Using only the chronological semantic scene graphs below, write a concise factual English visual summary of the entire video in one paragraph of 1–150 words. Preserve important visible entities, events, settings, wearing relations, topics, and visible affect. Do not add facts absent from the graphs and do not infer provenance or categories.
 
 {scenes}
