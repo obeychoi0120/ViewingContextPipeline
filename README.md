@@ -59,7 +59,7 @@ cp config/pipeline.example.yaml config/pipeline.yaml
 python -m pip install -e ".[qwen,train]"
 ```
 
-`config/pipeline.yaml`은 machine-local 경로를 포함하므로 Git에서 제외됩니다. 각 run에 사용된 전체 설정은 runtime snapshot에 저장됩니다.
+`config/pipeline.yaml`의 현재 설정을 각 step 실행 시 직접 읽습니다.
 
 Graph scene prompt와 minimal taxonomy는 `extraction.semantic_graph`가 코드로 소유합니다. enum과 제한에서 동적으로 렌더링된 prompt 및 taxonomy mapping의 fingerprint를 기록하므로 둘 중 하나가 바뀌면 Graph scene과 실제 downstream만 다시 실행됩니다. 별도의 ontology JSON은 사용하지 않습니다.
 
@@ -120,13 +120,12 @@ bash run.sh 1k_pilot_260824 --gpus 2
 - `--dry-run`: preflight와 stage 순서만 표시하고 artifact를 쓰지 않음
 - `--gpus N`: 네 Qwen Extraction step에서 사용할 CUDA 장치 개수
 
-완전히 새 실행은 새 `run-id`를 사용합니다. 동일한 `run-id`의 config fingerprint가 runtime snapshot과 다르면 실행을 거부합니다. `--resume`, `--config`, `--local-config` 및 이전 underscore stage 이름은 지원하지 않습니다.
+동일한 `run-id`에서도 config를 변경해 다시 실행할 수 있습니다. 각 step은 자신의 입력 fingerprint가 그대로면 resume하고, 관련 설정이나 입력이 달라졌으면 해당 step과 실제 downstream만 다시 실행합니다. `--resume`, `--config`, `--local-config` 및 이전 underscore stage 이름은 지원하지 않습니다.
 
 ## Artifact 구조
 
 ```text
 artifacts/{run_id}/
-├─ runtime/config_snapshot.json
 ├─ pipeline_manifest.json
 ├─ manifests/{step}.json
 ├─ data/
@@ -144,7 +143,7 @@ artifacts/{run_id}/
    └─ diagnosis/
 ```
 
-두 파일 기반 runtime snapshot이나 legacy flat-triple output은 읽지 않습니다. 각 step manifest는 upstream, taxonomy, rendered prompt, model 및 output fingerprint를 기록합니다.
+legacy flat-triple output은 읽지 않습니다. 각 step manifest는 upstream, taxonomy, rendered prompt, model 및 output fingerprint를 기록합니다.
 
 주요 계약:
 

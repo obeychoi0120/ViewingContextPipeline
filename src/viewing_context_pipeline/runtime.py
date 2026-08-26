@@ -12,7 +12,6 @@ import yaml
 
 CONFIG_PATH = Path("config/pipeline.yaml")
 CONFIG_SCHEMA = "viewing-context-config/v1"
-RUNTIME_SCHEMA = "viewing-context-runtime/v1"
 
 
 class ConfigError(RuntimeError):
@@ -136,7 +135,6 @@ class RunContext:
     run_id: str
     config: dict[str, Any]
     run_root: Path
-    config_fingerprint: str
 
     @classmethod
     def load(cls, run_id: str, *, root: Path | None = None) -> "RunContext":
@@ -156,30 +154,10 @@ class RunContext:
             selected,
             config,
             artifact_root / selected,
-            fingerprint(config),
         )
 
     def initialize(self) -> None:
-        runtime_path = self.runtime_path
-        if runtime_path.is_file():
-            runtime = read_json(runtime_path)
-            if runtime.get("config_fingerprint") != self.config_fingerprint:
-                raise ConfigError("current fixed config does not match the run snapshot")
-            return
-        if self.run_root.exists() and any(self.run_root.iterdir()):
-            raise ConfigError(f"run directory has no v1 runtime snapshot: {self.run_root}")
-        document = {
-            "schema_version": RUNTIME_SCHEMA,
-            "run_id": self.run_id,
-            "config_path": str(self.root / CONFIG_PATH),
-            "config": self.config,
-            "config_fingerprint": self.config_fingerprint,
-        }
-        write_json(runtime_path, document)
-
-    @property
-    def runtime_path(self) -> Path:
-        return self.run_root / "runtime" / "config_snapshot.json"
+        self.run_root.mkdir(parents=True, exist_ok=True)
 
     @property
     def pipeline_manifest(self) -> Path:

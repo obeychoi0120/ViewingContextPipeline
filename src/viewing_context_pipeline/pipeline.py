@@ -117,7 +117,6 @@ def _pipeline_document(context: RunContext) -> dict[str, Any]:
         "schema_version": "pipeline-run/v1",
         "run_id": context.run_id,
         "protocol": context.config["protocol"],
-        "config_fingerprint": context.config_fingerprint,
         "stages": rows,
         "complete": all(row["status"] == "complete" for row in rows.values()),
     }

@@ -41,7 +41,7 @@ def context(tmp_path: Path) -> RunContext:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)
     config = yaml.safe_load(
-        (ROOT / "config/pipeline.example.yaml").read_text(encoding="utf-8")
+        (ROOT / "config/pipeline.yaml").read_text(encoding="utf-8")
     )
     config["artifacts_root"] = str(tmp_path / "artifacts")
     config["data"] = {
@@ -116,24 +116,23 @@ def test_single_config_rejects_wrong_schema(context: RunContext) -> None:
         RunContext.load("other", root=context.root)
 
 
-def test_resume_refuses_nonempty_directory_without_runtime_snapshot(context: RunContext) -> None:
+def test_initialize_preserves_existing_run_directory(context: RunContext) -> None:
     context.run_root.mkdir(parents=True)
     marker = context.run_root / "keep.txt"
     marker.write_text("keep", encoding="utf-8")
-    with pytest.raises(ConfigError, match="no v1 runtime snapshot"):
-        context.initialize()
+    context.initialize()
     assert marker.read_text(encoding="utf-8") == "keep"
 
 
-def test_resume_rejects_changed_config_for_same_run(context: RunContext) -> None:
+def test_resume_allows_changed_config_for_same_run(context: RunContext) -> None:
     context.initialize()
     path = context.root / "config/pipeline.yaml"
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     value["validation"]["model"]["dropout"] = 0.2
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
     changed = RunContext.load(context.run_id, root=context.root)
-    with pytest.raises(ConfigError, match="does not match the run snapshot"):
-        changed.initialize()
+    changed.initialize()
+    assert changed.run_root == context.run_root
 
 
 def test_graph_force_does_not_invalidate_description_sibling() -> None:
@@ -568,14 +567,6 @@ def test_synthetic_full_runner_records_exact_v1_dag(context: RunContext, monkeyp
     manifest = json.loads(context.pipeline_manifest.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == "pipeline-run/v1"
     assert manifest["complete"] is True
-    snapshot = json.loads(context.runtime_path.read_text(encoding="utf-8"))
-    assert set(snapshot) == {
-        "schema_version",
-        "run_id",
-        "config_path",
-        "config",
-        "config_fingerprint",
-    }
 
 
 def test_resume_runs_only_missing_downstream_stages(

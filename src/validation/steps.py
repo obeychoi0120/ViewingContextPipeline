@@ -123,7 +123,7 @@ def _write_stage(
 def prepare_cohort_step(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
     sources = {
-        "config": context.config_fingerprint,
+        "cohort": fingerprint(context.config["validation"]["cohort"]),
         "pairs": file_fingerprint(context.path("data", "pairs_tsv")),
         "videos": directory_fingerprint(context.path("data", "videos_dir")),
     }
