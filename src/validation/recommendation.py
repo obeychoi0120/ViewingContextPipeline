@@ -15,6 +15,14 @@ from .model import SASRec, catalog_score_batches, in_batch_loss, require_torch, 
 from .scoring import mask_history, rank_of_target
 
 
+RECOMMENDATION_ARMS: dict[str, str | None] = {
+    "SASRec_ID": None,
+    "SASRec_GRAPH_QWEN": "graph_qwen",
+    "SASRec_GRAPH_GEMINI": "graph_gemini",
+    "SASRec_DESC": "desc",
+}
+
+
 def _internal(items: list[str], item_index: dict[str, int]) -> list[int]:
     return [item_index[item] + 1 for item in items]
 
@@ -48,13 +56,11 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
         branch: np.load(Path(info["path"]))["values"]
         for branch, info in representations["branches"].items()
     }
-    if set(branch_features) != {"graph", "desc"}:
-        raise RuntimeError("representations must contain exactly graph and desc branches")
-    arms: dict[str, str | None] = {
-        "SASRec_ID": None,
-        "SASRec_GRAPH": "graph",
-        "SASRec_DESC": "desc",
-    }
+    if set(branch_features) != {"graph_qwen", "graph_gemini", "desc"}:
+        raise RuntimeError(
+            "representations must contain graph_qwen, graph_gemini, and desc branches"
+        )
+    arms = dict(RECOMMENDATION_ARMS)
     train_sequences = [_internal(row["train"], item_index) for row in sequences]
     valid_internal = train_sequences
     test_internal = [items + [item_index[row["valid_target"]] + 1] for items, row in zip(train_sequences, sequences)]
@@ -79,7 +85,13 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
             print(f"[PHASE] run_recommendation train seed={seed} arm={arm}", flush=True)
             seed_everything(seed)
             features = None if branch is None else branch_features[branch]
-            arm_kind = "id" if branch is None else "graph" if branch.endswith("graph") else "desc"
+            arm_kind = (
+                "id"
+                if branch is None
+                else "graph"
+                if branch.startswith("graph_")
+                else "desc"
+            )
             model = SASRec(len(item_index), config.model.max_sequence_length, config.model.embedding_dim, config.model.num_blocks, config.model.num_heads, config.model.dropout, arm=arm_kind, item_features=features).to(device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=config.model.learning_rate, weight_decay=0.1)
             best_ndcg = -1.0

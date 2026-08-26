@@ -4,7 +4,7 @@ from extraction.semantic_graph.taxonomy import (
     AFFECT_AROUSAL,
     AFFECT_VALENCE,
     ENTITY_ROLES,
-    MAX_ENTITIES,
+    ENTITY_GUIDANCE_MAX,
     MAX_EVENTS,
     MAX_SEMANTIC_TOPICS,
     MAX_STATIC_RELATIONS,
@@ -42,9 +42,13 @@ Allowed values:
 - affect arousal: {_values(AFFECT_AROUSAL)}
 
 Output rules:
-- Emit 0 to {MAX_ENTITIES} meaningful visible entities with sequential IDs
-  e1, e2, ...; use concise lowercase canonical noun phrases and reject vague
-  names such as object, thing, item, something, or stuff.
+- Prefer 0 to {ENTITY_GUIDANCE_MAX} meaningful visible entities, ordered by
+  visual importance, with sequential IDs e1, e2, ... . This is guidance, not a
+  hard limit: preserve additional clearly visible entities rather than omit
+  grounded information. Represent visually indistinguishable entities with the
+  same role as one concise plural group when individual distinction is not
+  needed by an event or relation. Use lowercase canonical noun phrases and
+  reject vague names such as object, thing, item, something, or stuff.
 - Emit at most {MAX_EVENTS} events with sequential IDs ev1, ev2, ... . Use a
   concise lowercase base verb or short verb phrase. Every event must reference
   at least one emitted entity. Reference slots are entity IDs or JSON null.

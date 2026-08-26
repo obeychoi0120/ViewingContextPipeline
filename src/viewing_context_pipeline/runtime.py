@@ -178,21 +178,18 @@ class RunContext:
     def visual_manifest(self) -> Path:
         return self.evidence_dir / "visual_manifest.jsonl"
 
-    @property
-    def graph_scene_dir(self) -> Path:
-        return self.run_root / "extraction" / "graph" / "scenes"
+    def graph_scene_dir(self, source: str) -> Path:
+        return self.run_root / "extraction" / "graph" / source / "scenes"
 
-    @property
-    def graph_failure_dir(self) -> Path:
-        return self.run_root / "extraction" / "graph" / "failures"
+    def graph_failure_dir(self, source: str) -> Path:
+        return self.run_root / "extraction" / "graph" / source / "failures"
 
     @property
     def description_scene_dir(self) -> Path:
         return self.run_root / "extraction" / "description" / "scenes"
 
-    @property
-    def graph_summary_dir(self) -> Path:
-        return self.run_root / "extraction" / "graph" / "summaries"
+    def graph_summary_dir(self, source: str) -> Path:
+        return self.run_root / "extraction" / "graph" / source / "summaries"
 
     @property
     def description_summary_dir(self) -> Path:
@@ -242,8 +239,10 @@ def _validate_config(value: dict[str, Any]) -> None:
         "dataset": "microlens_100k",
         "modality": "visual_only",
         "sampling": "fixed_30s",
-        "backend": "qwen3_vl_2b",
-        "arms": ["graph", "description"],
+        "graph_extractors": ["qwen", "gemini"],
+        "graph_summarizer": "qwen",
+        "description_model": "qwen",
+        "arms": ["graph_qwen", "graph_gemini", "description"],
     }
     for key, expected_value in expected.items():
         if protocol.get(key) != expected_value:
@@ -253,13 +252,14 @@ def _validate_config(value: dict[str, Any]) -> None:
         raise ConfigError(
             "extraction must contain visual_evidence, graph, and description"
         )
-    graph_keys = {
+    generation_keys = {
         "summary_prompt",
         "scene_max_new_tokens",
         "summary_max_new_tokens",
         "do_sample",
     }
-    description_keys = graph_keys | {"scene_prompt"}
+    graph_keys = generation_keys | {"gemini_concurrency"}
+    description_keys = generation_keys | {"scene_prompt"}
     for arm in ("graph", "description"):
         settings = _require_mapping(extraction, arm)
         expected = graph_keys if arm == "graph" else description_keys
@@ -269,10 +269,19 @@ def _validate_config(value: dict[str, Any]) -> None:
             )
         if settings.get("do_sample") is not False:
             raise ConfigError(f"extraction.{arm}.do_sample must be false")
+    concurrency = extraction["graph"].get("gemini_concurrency")
+    if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency <= 0:
+        raise ConfigError("extraction.graph.gemini_concurrency must be a positive integer")
     _require_mapping(value, "validation")
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
     if set(data) != {"videos_dir", "titles_csv", "tags_csv", "pairs_tsv"}:
         raise ConfigError("data must contain videos_dir, titles_csv, tags_csv, pairs_tsv")
-    if set(models) != {"qwen", "bge"}:
-        raise ConfigError("models must contain exactly qwen and bge")
+    if set(models) != {"qwen", "bge", "gemini"}:
+        raise ConfigError("models must contain exactly qwen, bge, and gemini")
+    gemini = _require_mapping(models, "gemini")
+    if set(gemini) != {"project_id", "location", "model_id"}:
+        raise ConfigError("models.gemini must contain project_id, location, and model_id")
+    for key in ("project_id", "location", "model_id"):
+        if not isinstance(gemini.get(key), str) or not gemini[key].strip():
+            raise ConfigError(f"models.gemini.{key} must be a non-empty string")

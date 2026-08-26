@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument(
         "--gpus",
         type=_positive_int,
-        help="Number of CUDA devices for the four Qwen extraction stages.",
+        help="Number of CUDA devices for Qwen extraction and summarization stages.",
     )
     args = parser.parse_args(argv)
     try:

@@ -54,9 +54,11 @@ def diagnose_recommendations(config: ValidationConfig, runtime: dict[str, Any]) 
             continue
         treatment = _mean_by_user(rows, users, seeds, arm, "NDCG@10")
         comparisons[f"{arm}-SASRec_ID"] = paired_bootstrap_ci(treatment - baseline, samples=config.evaluation.bootstrap_samples)
-    graph = "SASRec_GRAPH"
     desc = "SASRec_DESC"
-    if graph in arms and desc in arms:
+    graph_arms = ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI")
+    for graph in graph_arms:
+        if graph not in arms or desc not in arms:
+            continue
         result = paired_relative_bootstrap_ci(
             _mean_by_user(rows, users, seeds, graph, "NDCG@10"),
             _mean_by_user(rows, users, seeds, desc, "NDCG@10"),
@@ -65,6 +67,13 @@ def diagnose_recommendations(config: ValidationConfig, runtime: dict[str, Any]) 
         result["non_inferiority_margin"] = -config.evaluation.non_inferiority_margin
         result["non_inferior"] = result["ci_low"] > -config.evaluation.non_inferiority_margin
         comparisons[f"{graph}-{desc}"] = result
+    qwen_graph, gemini_graph = graph_arms
+    if qwen_graph in arms and gemini_graph in arms:
+        comparisons[f"{gemini_graph}-{qwen_graph}"] = paired_relative_bootstrap_ci(
+            _mean_by_user(rows, users, seeds, gemini_graph, "NDCG@10"),
+            _mean_by_user(rows, users, seeds, qwen_graph, "NDCG@10"),
+            samples=config.evaluation.bootstrap_samples,
+        )
     expected_rows = len(users) * len(seeds) * len(arms)
     checkpoints_complete = len(manifest["runs"]) == len(seeds) * len(arms) and all(Path(run["checkpoint"]).is_file() for run in manifest["runs"])
     report_ready = len(users) == config.cohort.user_count and len(rows) == expected_rows and checkpoints_complete

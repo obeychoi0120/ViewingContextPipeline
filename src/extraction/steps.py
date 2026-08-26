@@ -7,7 +7,7 @@ from typing import Any, Callable, Iterator
 
 from tqdm import tqdm
 
-from extraction.backends import QwenBackend
+from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool, QwenBackend
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.descriptions import (
@@ -27,11 +27,13 @@ from extraction.monitoring import (
     video_names,
 )
 from extraction.semantic_graph import (
+    GRAPH_SOFT_VALIDATION_VERSION,
     GRAPH_SUMMARY_SCHEMA,
     JSON_REPAIR_VERSION,
     SCENE_EXTRACTION_PROMPT,
     SCENE_SCHEMA_VERSION as GRAPH_SCENE_SCHEMA,
     graph_summary_prompt,
+    graph_soft_warnings,
     parse_or_repair_graph,
     taxonomy_contract,
     validate_summary as validate_graph_summary,
@@ -50,6 +52,15 @@ from viewing_context_pipeline.runtime import (
 
 class ExtractionStepError(RuntimeError):
     pass
+
+
+GRAPH_SOURCES = ("qwen", "gemini")
+
+
+def graph_stage_name(stage: str, source: str) -> str:
+    if source not in GRAPH_SOURCES:
+        raise ValueError(f"unsupported graph source: {source}")
+    return f"{stage}-{source}"
 
 
 GenerationCallback = Callable[[str, str], None]
@@ -269,9 +280,15 @@ def prepare_input_data(context: RunContext, *, force: bool = False) -> dict[str,
 def extract_graph_scenes(
     context: RunContext,
     *,
+    model: str,
     force: bool = False,
     gpus: int | None = None,
 ) -> dict[str, Any]:
+    if model not in GRAPH_SOURCES:
+        raise ValueError(f"unsupported graph extractor model: {model}")
+    if model == "gemini" and gpus is not None:
+        raise ValueError("--gpus cannot be used with --model gemini")
+    stage = graph_stage_name("extract-graph-scenes", model)
     context.initialize()
     evidence = _require_stage(context, "prepare-input-data")
     settings = context.config["extraction"]["graph"]
@@ -279,39 +296,58 @@ def extract_graph_scenes(
     taxonomy_fp = fingerprint(taxonomy_contract())
     prompt_fp = fingerprint(prompt)
     repair_fp = fingerprint({"version": JSON_REPAIR_VERSION})
-    model_path = context.path("models", "qwen")
-    model_fp = fingerprint({
-        "path": str(model_path),
-        "files": directory_fingerprint(model_path),
-        "max_new_tokens": settings["scene_max_new_tokens"],
-        "do_sample": settings["do_sample"],
-    })
+    validation_fp = fingerprint({"version": GRAPH_SOFT_VALIDATION_VERSION})
+    model_path: Path | None = None
+    if model == "qwen":
+        model_path = context.path("models", "qwen")
+        model_id = model_path.name
+        model_fp = fingerprint({
+            "source": model,
+            "path": str(model_path),
+            "files": directory_fingerprint(model_path),
+            "max_new_tokens": settings["scene_max_new_tokens"],
+            "do_sample": settings["do_sample"],
+        })
+    else:
+        gemini = context.config["models"]["gemini"]
+        model_id = str(gemini["model_id"])
+        model_fp = fingerprint({
+            "source": model,
+            "project_id": gemini["project_id"],
+            "location": gemini["location"],
+            "model_id": model_id,
+            "max_new_tokens": settings["scene_max_new_tokens"],
+            "temperature": 0.0,
+        })
     sources = {
         "prepare-input-data": evidence["output_fingerprint"],
         "taxonomy": taxonomy_fp,
         "prompt": prompt_fp,
-        "model": model_fp,
+        "extractor": model_fp,
         "repair": repair_fp,
+        "soft_validation": validation_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
     names = _video_name_map(context)
+    scene_dir = context.graph_scene_dir(model)
+    failure_dir = context.graph_failure_dir(model)
     expected_outputs = [
         path
         for row in visual_rows
         for path in (
-            context.graph_scene_dir / f"{row['content_id']}.jsonl",
-            context.graph_failure_dir / f"{row['content_id']}.jsonl",
+            scene_dir / f"{row['content_id']}.jsonl",
+            failure_dir / f"{row['content_id']}.jsonl",
         )
     ]
     if not force:
-        current = _current(context, "extract-graph-scenes", sources, expected_outputs)
+        current = _current(context, stage, sources, expected_outputs)
         if current is not None:
-            _completed_progress("Graph scenes", len(visual_rows))
+            _completed_progress(f"Graph scenes ({model})", len(visual_rows))
             return current
-    context.stage_manifest("extract-graph-scenes").unlink(missing_ok=True)
+    context.stage_manifest(stage).unlink(missing_ok=True)
     from viewing_context_pipeline.pipeline import invalidate_descendants
 
-    invalidate_descendants(context, {"extract-graph-scenes"})
+    invalidate_descendants(context, {stage})
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
@@ -320,10 +356,11 @@ def extract_graph_scenes(
             "evidence": visual["evidence_fingerprint"],
             "taxonomy": taxonomy_fp,
             "prompt": prompt_fp,
-            "model": model_fp,
+            "extractor": model_fp,
+            "graph_source": model,
         })
-        path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
-        failure_path = context.graph_failure_dir / f"{visual['content_id']}.jsonl"
+        path = scene_dir / f"{visual['content_id']}.jsonl"
+        failure_path = failure_dir / f"{visual['content_id']}.jsonl"
         scene_rows = _scene_generation_rows(
             visual,
             prompt=prompt,
@@ -347,6 +384,10 @@ def extract_graph_scenes(
                         **row,
                         "parse_status": row.get("parse_status", "legacy_parser"),
                         "repair_fingerprint": repair_fp,
+                        "validation_fingerprint": validation_fp,
+                        "validation_warnings": graph_soft_warnings(
+                            row.get("graph", {})
+                        ),
                     }
                     for row in existing
                 ]
@@ -361,65 +402,129 @@ def extract_graph_scenes(
     with tqdm(
         total=len(visual_rows),
         initial=len(records_by_content),
-        desc="Graph scenes",
+        desc=f"Graph scenes ({model})",
         unit="content",
     ) as progress:
-        if pending:
+        def complete_content(
+            visual: dict[str, Any],
+            input_fp: str,
+            scene_rows: list[dict[str, Any]],
+            generated: dict[str, tuple[str, str | None]],
+        ) -> None:
+            records: list[dict[str, Any]] = []
+            failures: list[dict[str, Any]] = []
+            for row in scene_rows:
+                raw_response, generation_error = generated[row["task"].task_id]
+                result = (
+                    parse_or_repair_graph(raw_response)
+                    if generation_error is None
+                    else None
+                )
+                common = {
+                    "content_id": visual["content_id"],
+                    "scene_idx": row["scene_idx"],
+                    "scene_start_seconds": row["scene_start_seconds"],
+                    "scene_end_seconds": row["scene_end_seconds"],
+                    "keyframes": row["keyframes"],
+                    "image_paths": row["image_paths"],
+                    "graph_source": model,
+                    "extractor_model_id": model_id,
+                    "extractor_model_fingerprint": model_fp,
+                    "taxonomy_fingerprint": taxonomy_fp,
+                    "prompt_fingerprint": prompt_fp,
+                    "evidence_fingerprint": visual["evidence_fingerprint"],
+                    "input_fingerprint": input_fp,
+                    "repair_fingerprint": repair_fp,
+                    "validation_fingerprint": validation_fp,
+                }
+                if result is not None and result.graph is not None:
+                    records.append({
+                        "schema_version": GRAPH_SCENE_SCHEMA,
+                        **common,
+                        "parse_status": result.status,
+                        "validation_warnings": graph_soft_warnings(result.graph),
+                        "graph": result.graph,
+                    })
+                else:
+                    failures.append({
+                        "schema_version": "semantic-graph-repair-failure/v1",
+                        **common,
+                        "parse_status": "failed",
+                        "failure_kind": (
+                            "generation" if generation_error else "json_repair"
+                        ),
+                        "error": generation_error
+                        or (result.error if result is not None else None)
+                        or "JSON repair failed",
+                        "raw_response": raw_response,
+                    })
+            path = scene_dir / f"{visual['content_id']}.jsonl"
+            failure_path = failure_dir / f"{visual['content_id']}.jsonl"
+            records.sort(key=lambda row: int(row["scene_idx"]))
+            failures.sort(key=lambda row: int(row["scene_idx"]))
+            write_jsonl(path, records)
+            write_jsonl(failure_path, failures)
+            content_id = str(visual["content_id"])
+            records_by_content[content_id] = records
+            failures_by_content[content_id] = failures
+            video_name = names.get(content_id, f"{content_id}.mp4")
+            for message in scene_messages(
+                video_name,
+                records,
+                arm="graph",
+                source=model,
+            ):
+                _write_progress(progress, message)
+            for failure in failures:
+                _write_progress(
+                    progress,
+                    graph_skip_message(video_name, failure, source=model),
+                )
+            progress.update(1)
+
+        if pending and model == "qwen":
+            assert model_path is not None
             with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 for visual, input_fp, scene_rows in pending:
-                    generated = generate([row["task"] for row in scene_rows], None)
-                    records: list[dict[str, Any]] = []
-                    failures: list[dict[str, Any]] = []
-                    for row in scene_rows:
-                        raw_response = generated[row["task"].task_id]
-                        result = parse_or_repair_graph(raw_response)
-                        common = {
-                            "content_id": visual["content_id"],
-                            "scene_idx": row["scene_idx"],
-                            "scene_start_seconds": row["scene_start_seconds"],
-                            "scene_end_seconds": row["scene_end_seconds"],
-                            "keyframes": row["keyframes"],
-                            "image_paths": row["image_paths"],
-                            "taxonomy_fingerprint": taxonomy_fp,
-                            "prompt_fingerprint": prompt_fp,
-                            "model_fingerprint": model_fp,
-                            "evidence_fingerprint": visual["evidence_fingerprint"],
-                            "input_fingerprint": input_fp,
-                            "repair_fingerprint": repair_fp,
-                        }
-                        if result.graph is not None:
-                            records.append({
-                                "schema_version": GRAPH_SCENE_SCHEMA,
-                                **common,
-                                "parse_status": result.status,
-                                "graph": result.graph,
-                            })
-                        else:
-                            failures.append({
-                                "schema_version": "semantic-graph-repair-failure/v1",
-                                **common,
-                                "parse_status": "failed",
-                                "error": result.error or "JSON repair failed",
-                                "raw_response": raw_response,
-                            })
-                    path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
-                    failure_path = context.graph_failure_dir / f"{visual['content_id']}.jsonl"
-                    records.sort(key=lambda row: int(row["scene_idx"]))
-                    failures.sort(key=lambda row: int(row["scene_idx"]))
-                    write_jsonl(path, records)
-                    write_jsonl(failure_path, failures)
-                    content_id = str(visual["content_id"])
-                    records_by_content[content_id] = records
-                    failures_by_content[content_id] = failures
-                    video_name = names.get(
-                        content_id,
-                        f"{visual['content_id']}.mp4",
+                    responses = generate([row["task"] for row in scene_rows], None)
+                    complete_content(
+                        visual,
+                        input_fp,
+                        scene_rows,
+                        {task_id: (text, None) for task_id, text in responses.items()},
                     )
-                    for message in scene_messages(video_name, records, arm="graph"):
-                        _write_progress(progress, message)
-                    for failure in failures:
-                        _write_progress(progress, graph_skip_message(video_name, failure))
-                    progress.update(1)
+        elif pending:
+            gemini = context.config["models"]["gemini"]
+            task_context: dict[str, tuple[str, dict[str, Any], str, list[dict[str, Any]]]] = {}
+            generated_by_content: dict[str, dict[str, tuple[str, str | None]]] = {}
+            tasks: list[QwenGenerationTask] = []
+            for visual, input_fp, scene_rows in pending:
+                content_id = str(visual["content_id"])
+                generated_by_content[content_id] = {}
+                for row in scene_rows:
+                    task = row["task"]
+                    tasks.append(task)
+                    task_context[task.task_id] = (
+                        content_id,
+                        visual,
+                        input_fp,
+                        scene_rows,
+                    )
+
+            def complete_gemini_scene(outcome: GeminiGenerationOutcome) -> None:
+                content_id, visual, input_fp, scene_rows = task_context[outcome.task_id]
+                responses = generated_by_content[content_id]
+                responses[outcome.task_id] = (outcome.text, outcome.error)
+                if len(responses) == len(scene_rows):
+                    complete_content(visual, input_fp, scene_rows, responses)
+
+            pool = GeminiWorkerPool(
+                int(settings["gemini_concurrency"]),
+                project_id=str(gemini["project_id"]),
+                location=str(gemini["location"]),
+                model_id=str(gemini["model_id"]),
+            )
+            pool.generate(tasks, complete_gemini_scene)
     outputs = [
         record
         for visual in visual_rows
@@ -433,13 +538,13 @@ def extract_graph_scenes(
     if failures:
         failed_contents = len({str(row["content_id"]) for row in failures})
         raise ExtractionStepError(
-            f"JSON repair failed for {len(failures)} graph scene(s) across "
-            f"{failed_contents} content(s); see {context.graph_failure_dir}"
+            f"Graph extraction failed for {len(failures)} scene(s) across "
+            f"{failed_contents} content(s); see {failure_dir}"
         )
     output_fp = fingerprint({"scenes": outputs, "failures": failures})
     return _write_stage(
         context,
-        "extract-graph-scenes",
+        stage,
         source_fingerprints=sources,
         output_fingerprint=output_fp,
         content_count=len(visual_rows),
@@ -449,11 +554,16 @@ def extract_graph_scenes(
 def summarize_graph(
     context: RunContext,
     *,
+    source: str,
     force: bool = False,
     gpus: int | None = None,
 ) -> dict[str, Any]:
+    if source not in GRAPH_SOURCES:
+        raise ValueError(f"unsupported graph source: {source}")
+    stage = graph_stage_name("summarize-graph", source)
+    scene_stage = graph_stage_name("extract-graph-scenes", source)
     context.initialize()
-    scenes_manifest = _require_stage(context, "extract-graph-scenes")
+    scenes_manifest = _require_stage(context, scene_stage)
     settings = context.config["extraction"]["graph"]
     prompt_path = context.config_path("extraction", "graph", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
@@ -466,20 +576,22 @@ def summarize_graph(
         "do_sample": settings["do_sample"],
     })
     sources = {
-        "extract-graph-scenes": scenes_manifest["output_fingerprint"],
+        scene_stage: scenes_manifest["output_fingerprint"],
         "prompt": prompt_fp,
-        "model": model_fp,
+        "summary_model": model_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
     names = _video_name_map(context)
-    scene_paths = [context.graph_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
+    scene_dir = context.graph_scene_dir(source)
+    summary_dir = context.graph_summary_dir(source)
+    scene_paths = [scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
     if not all(path.is_file() for path in scene_paths):
         raise ExtractionStepError("graph scene outputs are incomplete")
-    expected_outputs = [context.graph_summary_dir / f"{row['content_id']}.json" for row in visual_rows]
+    expected_outputs = [summary_dir / f"{row['content_id']}.json" for row in visual_rows]
     if not force:
-        current = _current(context, "summarize-graph", sources, expected_outputs)
+        current = _current(context, stage, sources, expected_outputs)
         if current is not None:
-            _completed_progress("Graph summaries", len(visual_rows))
+            _completed_progress(f"Graph summaries ({source})", len(visual_rows))
             return current
     documents_by_content: dict[str, dict[str, Any]] = {}
     pending: list[tuple[list[dict[str, Any]], str, Path, Path, str]] = []
@@ -490,7 +602,9 @@ def summarize_graph(
             raise ExtractionStepError(f"invalid graph scene file: {scene_path}")
         scene_fp = file_fingerprint(scene_path)
         input_fp = fingerprint({"scenes": scene_fp, "prompt": prompt_fp, "model": model_fp})
-        output_path = context.graph_summary_dir / f"{records[0]['content_id']}.json"
+        if any(row.get("graph_source") != source for row in records):
+            raise ExtractionStepError(f"graph source mismatch in {scene_path}")
+        output_path = summary_dir / f"{records[0]['content_id']}.json"
         if output_path.is_file() and not force:
             existing = read_json(output_path)
             if existing.get("input_fingerprint") == input_fp:
@@ -515,7 +629,7 @@ def summarize_graph(
     with tqdm(
         total=len(visual_rows),
         initial=len(documents_by_content),
-        desc="Graph summaries",
+        desc=f"Graph summaries ({source})",
         unit="content",
     ) as progress:
         def complete_graph_summary(task_id: str, text: str) -> None:
@@ -526,16 +640,23 @@ def summarize_graph(
                 "schema_version": GRAPH_SUMMARY_SCHEMA,
                 "content_id": content_id,
                 "arm": "graph",
+                "graph_source": source,
                 "status": "complete",
                 "text": summary,
                 "scene_count": len(records),
                 "evidence_fingerprint": records[0]["evidence_fingerprint"],
                 "taxonomy_fingerprint": records[0]["taxonomy_fingerprint"],
                 "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
+                "extractor_model_id": records[0]["extractor_model_id"],
+                "extractor_model_fingerprint": records[0][
+                    "extractor_model_fingerprint"
+                ],
+                "summary_model": "qwen",
+                "summary_model_id": model_path.name,
                 "scene_graph_path": scene_path.relative_to(context.run_root).as_posix(),
                 "scene_graph_fingerprint": file_fingerprint(scene_path),
                 "summary_prompt_fingerprint": prompt_fp,
-                "model_fingerprint": model_fp,
+                "summary_model_fingerprint": model_fp,
                 "input_fingerprint": input_fp,
             }
             write_json(output_path, document)
@@ -547,6 +668,7 @@ def summarize_graph(
                     arm="graph",
                     scene_count=len(records),
                     text=summary,
+                    source=source,
                 ),
             )
             progress.update(1)
@@ -560,7 +682,7 @@ def summarize_graph(
     output_fp = fingerprint(documents)
     return _write_stage(
         context,
-        "summarize-graph",
+        stage,
         source_fingerprints=sources,
         output_fingerprint=output_fp,
         content_count=len(documents),

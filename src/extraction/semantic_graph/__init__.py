@@ -14,10 +14,15 @@ from extraction.semantic_graph.schema import (
     validate_summary,
 )
 from extraction.semantic_graph.taxonomy import taxonomy_contract
+from extraction.semantic_graph.validation import (
+    GRAPH_SOFT_VALIDATION_VERSION,
+    graph_soft_warnings,
+)
 
 
 __all__ = [
     "GRAPH_SUMMARY_SCHEMA",
+    "GRAPH_SOFT_VALIDATION_VERSION",
     "GraphParseResult",
     "JSON_REPAIR_VERSION",
     "SCENE_EXTRACTION_PROMPT",
@@ -25,6 +30,7 @@ __all__ = [
     "SemanticGraphError",
     "extract_scene_graphs",
     "graph_summary_prompt",
+    "graph_soft_warnings",
     "parse_graph_output",
     "parse_or_repair_graph",
     "taxonomy_contract",

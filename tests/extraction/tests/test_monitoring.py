@@ -61,6 +61,27 @@ def test_graph_skip_message_flattens_error_lines() -> None:
         "1.mp4",
         {"scene_idx": 2, "error": "JSON repair failed\nplain prose"},
     ) == "[Graph_skip] 1.mp4 | scene #002\nJSON repair failed plain prose"
+    assert graph_skip_message(
+        "1.mp4",
+        {"scene_idx": 2, "error": "API failed"},
+        source="gemini",
+    ) == "[Graph_skip_gemini] 1.mp4 | scene #002\nAPI failed"
+
+
+def test_graph_monitoring_can_identify_source() -> None:
+    assert scene_messages(
+        "1.mp4",
+        [{"scene_idx": 0, "graph": {"entities": []}}],
+        arm="graph",
+        source="qwen",
+    )[0].startswith("[Graph_qwen] 1.mp4 | scene #000\n")
+    assert summary_message(
+        "1.mp4",
+        arm="graph",
+        scene_count=1,
+        text="summary",
+        source="gemini",
+    ) == "[Summary_graph_gemini] 1.mp4 | 1 scenes\nsummary"
 
 
 def test_serial_generator_calls_completion_callback_per_task(

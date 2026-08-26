@@ -23,6 +23,7 @@ def scene_messages(
     records: list[dict[str, Any]],
     *,
     arm: str,
+    source: str | None = None,
 ) -> list[str]:
     if arm not in {"graph", "description"}:
         raise ValueError(f"unsupported scene monitor arm: {arm}")
@@ -30,7 +31,7 @@ def scene_messages(
     for record in sorted(records, key=lambda row: int(row["scene_idx"])):
         scene_idx = int(record["scene_idx"])
         if arm == "graph":
-            label = "Graph"
+            label = f"Graph_{source}" if source else "Graph"
             content = json.dumps(
                 record["graph"],
                 ensure_ascii=False,
@@ -49,14 +50,27 @@ def summary_message(
     arm: str,
     scene_count: int,
     text: str,
+    source: str | None = None,
 ) -> str:
     if arm not in {"graph", "description"}:
         raise ValueError(f"unsupported summary monitor arm: {arm}")
-    label = "Summary_graph" if arm == "graph" else "Summary_desc"
+    label = (
+        f"Summary_graph_{source}"
+        if arm == "graph" and source
+        else "Summary_graph"
+        if arm == "graph"
+        else "Summary_desc"
+    )
     return f"[{label}] {video_name} | {scene_count} scenes\n{text.strip()}"
 
 
-def graph_skip_message(video_name: str, record: dict[str, Any]) -> str:
+def graph_skip_message(
+    video_name: str,
+    record: dict[str, Any],
+    *,
+    source: str | None = None,
+) -> str:
     scene_idx = int(record["scene_idx"])
     error = " ".join(str(record.get("error") or "JSON repair failed").splitlines())
-    return f"[Graph_skip] {video_name} | scene #{scene_idx:03d}\n{error}"
+    label = f"Graph_skip_{source}" if source else "Graph_skip"
+    return f"[{label}] {video_name} | scene #{scene_idx:03d}\n{error}"

@@ -143,11 +143,13 @@ def prepare_cohort_step(context: RunContext, *, force: bool = False) -> dict[str
 
 def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
-    graph = _require_stage(context, "summarize-graph")
+    graph_qwen = _require_stage(context, "summarize-graph-qwen")
+    graph_gemini = _require_stage(context, "summarize-graph-gemini")
     description = _require_stage(context, "summarize-description")
     encoder_fp = directory_fingerprint(context.path("models", "bge"))
     sources_fp = {
-        "summarize-graph": graph["output_fingerprint"],
+        "summarize-graph-qwen": graph_qwen["output_fingerprint"],
+        "summarize-graph-gemini": graph_gemini["output_fingerprint"],
         "summarize-description": description["output_fingerprint"],
         "encoder": encoder_fp,
     }
@@ -167,8 +169,21 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     content_ids = [row["content_id"] for row in catalog]
     content_order_fp = fingerprint(content_ids)
     sources = {
-        "graph": (context.graph_summary_dir, "graph-video-summary/v1"),
-        "desc": (context.description_summary_dir, "description-video-summary/v1"),
+        "graph_qwen": (
+            context.graph_summary_dir("qwen"),
+            "graph-video-summary/v1",
+            "qwen",
+        ),
+        "graph_gemini": (
+            context.graph_summary_dir("gemini"),
+            "graph-video-summary/v1",
+            "gemini",
+        ),
+        "desc": (
+            context.description_summary_dir,
+            "description-video-summary/v1",
+            None,
+        ),
     }
     output = context.representations_manifest.parent
     output.mkdir(parents=True, exist_ok=True)
@@ -182,10 +197,16 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         previous_branches = {}
     branches: dict[str, Any] = {}
     evidence_by_content: dict[str, str] = {}
-    for branch, (directory, schema) in sources.items():
+    for branch, (directory, schema, graph_source) in sources.items():
         documents = [read_json(directory / f"{content_id}.json") for content_id in content_ids]
         if any(row.get("schema_version") != schema or row.get("status") != "complete" for row in documents):
             raise ValidationStepError(f"invalid {branch} summaries")
+        if graph_source is not None and any(
+            row.get("graph_source") != graph_source
+            or row.get("summary_model") != "qwen"
+            for row in documents
+        ):
+            raise ValidationStepError(f"graph provenance mismatch for {branch}")
         for row in documents:
             previous = evidence_by_content.setdefault(row["content_id"], row["evidence_fingerprint"])
             if previous != row["evidence_fingerprint"]:

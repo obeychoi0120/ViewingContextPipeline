@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from extraction.steps import STEP_HANDLERS
-from viewing_context_pipeline.pipeline import GPU_STAGES, invalidate_descendants
+from extraction.steps import GRAPH_SOURCES, STEP_HANDLERS, graph_stage_name
+from viewing_context_pipeline.pipeline import invalidate_descendants
 from viewing_context_pipeline.runtime import RunContext
 
 
@@ -13,6 +13,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--model", choices=GRAPH_SOURCES)
+    parser.add_argument("--source", choices=GRAPH_SOURCES)
     parser.add_argument(
         "--gpus",
         type=_positive_int,
@@ -20,15 +22,41 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.step == "extract-graph-scenes":
+            if args.model is None:
+                raise ValueError("extract-graph-scenes requires --model qwen|gemini")
+            if args.source is not None:
+                raise ValueError("--source is only supported by summarize-graph")
+            internal_stage = graph_stage_name(args.step, args.model)
+        elif args.step == "summarize-graph":
+            if args.source is None:
+                raise ValueError("summarize-graph requires --source qwen|gemini")
+            if args.model is not None:
+                raise ValueError("--model is only supported by extract-graph-scenes")
+            internal_stage = graph_stage_name(args.step, args.source)
+        else:
+            if args.model is not None or args.source is not None:
+                raise ValueError("--model/--source are only supported by Graph steps")
+            internal_stage = args.step
+        if args.step == "extract-graph-scenes" and args.model == "gemini" and args.gpus:
+            raise ValueError("--gpus cannot be used with --model gemini")
+        gpu_enabled = (
+            args.step in {"summarize-graph", "extract-description-scenes", "summarize-description"}
+            or args.step == "extract-graph-scenes" and args.model == "qwen"
+        )
+        if args.gpus is not None and not gpu_enabled:
+            raise ValueError("--gpus is not supported for this step")
         context = RunContext.load(args.run_id)
         if args.force:
             context.initialize()
-            invalidate_descendants(context, {args.step})
+            invalidate_descendants(context, {internal_stage})
         kwargs = {"force": args.force}
-        if args.step in GPU_STAGES:
+        if args.step == "extract-graph-scenes":
+            kwargs["model"] = args.model
+        elif args.step == "summarize-graph":
+            kwargs["source"] = args.source
+        if gpu_enabled:
             kwargs["gpus"] = args.gpus
-        elif args.gpus is not None:
-            raise ValueError(f"--gpus is only supported for: {', '.join(sorted(GPU_STAGES))}")
         STEP_HANDLERS[args.step](context, **kwargs)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[FAILED] {args.step}: {exc}", file=sys.stderr)

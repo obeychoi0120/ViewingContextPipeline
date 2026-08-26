@@ -2,6 +2,13 @@
 
 from .base import VLMBackend
 from .gemini import GeminiBackend
+from .gemini_workers import GeminiGenerationOutcome, GeminiWorkerPool
 from .qwen import QwenBackend
 
-__all__ = ["GeminiBackend", "QwenBackend", "VLMBackend"]
+__all__ = [
+    "GeminiBackend",
+    "GeminiGenerationOutcome",
+    "GeminiWorkerPool",
+    "QwenBackend",
+    "VLMBackend",
+]

@@ -10,6 +10,7 @@ from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
     SemanticGraphError,
     extract_scene_graphs,
+    graph_soft_warnings,
     graph_summary_prompt,
     parse_graph_output,
     taxonomy_contract,
@@ -65,11 +66,36 @@ def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
 def test_taxonomy_and_prompt_are_multi_image_and_consistent() -> None:
     taxonomy = taxonomy_contract()
     assert taxonomy["schema_version"] == "minimal-semantic-scene/v1"
-    assert taxonomy["limits"]["entities"] == 6
+    assert taxonomy["guidance"]["entity_max"] == 6
     assert "chronological keyframes" in SCENE_EXTRACTION_PROMPT
     assert "If entities is empty" in SCENE_EXTRACTION_PROMPT
     for value in taxonomy["setting_contexts"]:
         assert value in SCENE_EXTRACTION_PROMPT
+
+
+def test_entity_guidance_warning_preserves_complete_graph() -> None:
+    graph = graph_with_dangling_reference()
+    graph["entities"] = [
+        {"local_id": f"e{index}", "name": "player", "role": "secondary"}
+        for index in range(1, 9)
+    ]
+    original = json.loads(json.dumps(graph))
+
+    assert graph_soft_warnings(graph) == [
+        "entity_guidance_exceeded: observed=8 guidance_max=6"
+    ]
+    assert graph == original
+
+
+def test_entity_guidance_does_not_warn_at_six_entities() -> None:
+    graph = {
+        "entities": [
+            {"local_id": f"e{index}", "name": "player", "role": "secondary"}
+            for index in range(1, 7)
+        ]
+    }
+
+    assert graph_soft_warnings(graph) == []
 
 
 def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:

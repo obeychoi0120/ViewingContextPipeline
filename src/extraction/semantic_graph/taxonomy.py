@@ -38,7 +38,7 @@ AFFECT_AROUSAL: Final[tuple[str, ...]] = (
     "unknown",
 )
 
-MAX_ENTITIES: Final[int] = 6
+ENTITY_GUIDANCE_MAX: Final[int] = 6
 MAX_EVENTS: Final[int] = 4
 MAX_STATIC_RELATIONS: Final[int] = 4
 MAX_SEMANTIC_TOPICS: Final[int] = 3
@@ -59,8 +59,10 @@ def taxonomy_contract() -> dict[str, Any]:
         "static_relation_types": list(STATIC_RELATION_TYPES),
         "affect_valence": list(AFFECT_VALENCE),
         "affect_arousal": list(AFFECT_AROUSAL),
+        "guidance": {
+            "entity_max": ENTITY_GUIDANCE_MAX,
+        },
         "limits": {
-            "entities": MAX_ENTITIES,
             "events": MAX_EVENTS,
             "static_relations": MAX_STATIC_RELATIONS,
             "semantic_topics": MAX_SEMANTIC_TOPICS,
