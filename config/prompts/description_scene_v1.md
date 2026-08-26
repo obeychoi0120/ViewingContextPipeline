@@ -8,4 +8,4 @@ Try to capture, among others, the following aspects in the description:
 - Context and Audience: Highlight the possible intended audience or purpose of the video (e.g., for children, niche hobbyists, general entertainment, etc.) in one sentence.
 - Cultural context: add a few words for cultural context or localization if something might not be clear to the reader.
 
-Create a self-containing text, without subsections. Avoid repetitions.
+Create a self-containing text, without subsections. Avoid repetitions. Write in single paragraph.
