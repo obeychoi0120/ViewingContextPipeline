@@ -205,6 +205,10 @@ class RunContext:
         return self.run_root / "extraction" / "graph" / "scenes"
 
     @property
+    def graph_failure_dir(self) -> Path:
+        return self.run_root / "extraction" / "graph" / "failures"
+
+    @property
     def description_scene_dir(self) -> Path:
         return self.run_root / "extraction" / "description" / "scenes"
 

@@ -6,7 +6,12 @@ import pytest
 
 import extraction.steps as steps_module
 from extraction.backends.qwen_workers import QwenGenerationTask
-from extraction.monitoring import scene_messages, summary_message, video_names
+from extraction.monitoring import (
+    graph_skip_message,
+    scene_messages,
+    summary_message,
+    video_names,
+)
 
 
 def test_video_names_use_source_basename_and_fallback() -> None:
@@ -49,6 +54,13 @@ def test_description_and_summary_message_formats() -> None:
         scene_count=4,
         text="description summary",
     ) == "[Summary_desc] 2.mp4 | 4 scenes\ndescription summary"
+
+
+def test_graph_skip_message_flattens_error_lines() -> None:
+    assert graph_skip_message(
+        "1.mp4",
+        {"scene_idx": 2, "error": "JSON repair failed\nplain prose"},
+    ) == "[Graph_skip] 1.mp4 | scene #002\nJSON repair failed plain prose"
 
 
 def test_serial_generator_calls_completion_callback_per_task(

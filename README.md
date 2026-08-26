@@ -65,7 +65,7 @@ Graph scene prompt와 minimal taxonomy는 `extraction.semantic_graph`가 코드�
 
 Qwen scene analyzer는 category/type, `IS_A`, `INTERACTS_WITH`, relation family, scene function, media/style, confidence/score를 출력하지 않습니다. Facet Projector, PPR, TVTI 축·점수·UI는 이 pilot DAG 범위 밖입니다.
 
-현재 Graph scene 출력은 JSON object 여부만 확인하며 semantic field, enum, ID reference는 검증하지 않습니다. Prompt로 출력 구조를 유도하지만 dangling reference를 포함한 응답도 원문 그대로 artifact에 저장합니다.
+현재 Graph scene 출력은 semantic field, enum, ID reference를 검증하지 않습니다. JSON object 추출에 실패하면 deterministic repair를 한 번 적용하며, 그래도 복구할 수 없는 scene은 raw 응답과 오류를 `extraction/graph/failures/`에 저장하고 나머지 catalog 처리를 계속합니다. 실패 scene이 하나라도 있으면 전체 처리가 끝난 뒤 해당 stage는 실패하며 `--force`만 다시 추론합니다.
 
 ## 독립 step 실행
 
@@ -134,6 +134,7 @@ artifacts/{run_id}/
 │  └─ fixed_30s/visual_manifest.jsonl
 ├─ extraction/
 │  ├─ graph/scenes/{content_id}.jsonl
+│  ├─ graph/failures/{content_id}.jsonl
 │  ├─ graph/summaries/{content_id}.json
 │  ├─ description/scenes/{content_id}.jsonl
 │  └─ description/summaries/{content_id}.json

@@ -327,19 +327,170 @@ def test_graph_steps_write_minimal_graph_and_scene_provenance(
     assert scene["scene_end_seconds"] == 30
     assert scene["keyframes"] == [5, 15, 25]
     assert scene["graph"] == empty_graph
+    assert scene["parse_status"] == "parsed"
     assert {
         "taxonomy_fingerprint",
         "prompt_fingerprint",
         "model_fingerprint",
         "evidence_fingerprint",
         "input_fingerprint",
+        "repair_fingerprint",
     }.issubset(scene)
 
+    legacy = dict(scene)
+    legacy.pop("parse_status")
+    legacy.pop("repair_fingerprint")
+    write_jsonl(scene_path, [legacy])
+    context.stage_manifest("extract-graph-scenes").unlink()
+
+    @contextmanager
+    def unexpected_generator(**_kwargs):
+        raise AssertionError("legacy migration must not load the model")
+        yield
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", unexpected_generator)
+    extraction_steps.extract_graph_scenes(context)
+    migrated = read_jsonl(scene_path)[0]
+    assert migrated["parse_status"] == "legacy_parser"
+    assert migrated["repair_fingerprint"]
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
     extraction_steps.summarize_graph(context)
     summary = read_json(context.graph_summary_dir / "c1.json")
     assert summary["text"] == "short factual summary"
     assert summary["scene_graph_path"] == "extraction/graph/scenes/c1.jsonl"
     assert summary["scene_graph_fingerprint"]
+
+
+def test_graph_json_failure_is_persisted_resumed_and_retried_only_with_force(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context.initialize()
+    write_json(
+        context.stage_manifest("prepare-input-data"),
+        {
+            "schema_version": "step-manifest/v1",
+            "run_id": context.run_id,
+            "stage": "prepare-input-data",
+            "status": "complete",
+            "source_fingerprints": {},
+            "output_fingerprint": "visual-v1",
+        },
+    )
+    visual_rows = []
+    catalog_rows = []
+    for content_id, filename in (("c1", "1.mp4"), ("c2", "2.mp4")):
+        frames = context.evidence_dir / "resized_keyframes" / content_id
+        frames.mkdir(parents=True)
+        for timestamp in (5, 15, 25):
+            (frames / f"{timestamp:04d}.png").write_bytes(b"fixture")
+        timestamp_path = context.cohort_dir / f"{content_id}.json"
+        timestamp_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp_path.write_text(
+            json.dumps([{
+                "scene_start": 0,
+                "scene_end": 30,
+                "keyframe_timestamps": [5, 15, 25],
+            }]),
+            encoding="utf-8",
+        )
+        visual_rows.append({
+            "content_id": content_id,
+            "frames_dir": str(frames),
+            "timestamp_json": str(timestamp_path),
+            "evidence_fingerprint": f"evidence-{content_id}",
+        })
+        catalog_rows.append({
+            "content_id": content_id,
+            "item_id": content_id,
+            "source_video_path": filename,
+        })
+    write_jsonl(context.visual_manifest, visual_rows)
+    write_jsonl(context.cohort_dir / "catalog.jsonl", catalog_rows)
+    for stage in ("extract-graph-scenes", "summarize-graph"):
+        write_json(
+            context.stage_manifest(stage),
+            {
+                "schema_version": "step-manifest/v1",
+                "run_id": context.run_id,
+                "stage": stage,
+                "status": "complete",
+                "source_fingerprints": {},
+                "output_fingerprint": "old-output",
+            },
+        )
+    valid_graph = {"entities": [], "static_relations": []}
+
+    def generator_for(responses: dict[str, str], calls: list[str]):
+        @contextmanager
+        def fake_generator(**_kwargs):
+            def generate(tasks, on_task_complete=None):
+                results = {}
+                for task in tasks:
+                    calls.append(task.task_id)
+                    text = responses[task.task_id]
+                    results[task.task_id] = text
+                    if on_task_complete is not None:
+                        on_task_complete(task.task_id, text)
+                return results
+
+            yield generate
+
+        return fake_generator
+
+    first_calls: list[str] = []
+    monkeypatch.setattr(
+        extraction_steps,
+        "_qwen_generator",
+        generator_for(
+            {"c1:0": "plain prose", "c2:0": json.dumps(valid_graph)},
+            first_calls,
+        ),
+    )
+    with pytest.raises(extraction_steps.ExtractionStepError, match="1 graph scene"):
+        extraction_steps.extract_graph_scenes(context)
+
+    assert first_calls == ["c1:0", "c2:0"]
+    assert read_jsonl(context.graph_scene_dir / "c1.jsonl") == []
+    failure = read_jsonl(context.graph_failure_dir / "c1.jsonl")[0]
+    assert failure["parse_status"] == "failed"
+    assert failure["raw_response"] == "plain prose"
+    assert read_jsonl(context.graph_scene_dir / "c2.jsonl")[0]["parse_status"] == "parsed"
+    assert not context.stage_manifest("extract-graph-scenes").exists()
+    assert not context.stage_manifest("summarize-graph").exists()
+    output = capsys.readouterr()
+    assert "[Graph_skip] 1.mp4 | scene #000" in output.err
+    assert "[Graph] 2.mp4 | scene #000" in output.err
+
+    @contextmanager
+    def unexpected_generator(**_kwargs):
+        raise AssertionError("resume must not load the model")
+        yield
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", unexpected_generator)
+    with pytest.raises(extraction_steps.ExtractionStepError, match="1 graph scene"):
+        extraction_steps.extract_graph_scenes(context)
+
+    force_calls: list[str] = []
+    monkeypatch.setattr(
+        extraction_steps,
+        "_qwen_generator",
+        generator_for(
+            {
+                "c1:0": json.dumps(valid_graph),
+                "c2:0": json.dumps(valid_graph),
+            },
+            force_calls,
+        ),
+    )
+    result = extraction_steps.extract_graph_scenes(context, force=True)
+
+    assert result["status"] == "complete"
+    assert force_calls == ["c1:0", "c2:0"]
+    assert read_jsonl(context.graph_failure_dir / "c1.jsonl") == []
+    assert context.stage_manifest("extract-graph-scenes").is_file()
 
 
 def test_independent_step_does_not_auto_run_prerequisites(context: RunContext) -> None:

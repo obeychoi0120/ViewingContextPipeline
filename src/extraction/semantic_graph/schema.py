@@ -6,7 +6,7 @@ from typing import Any
 
 from extraction.backends import VLMBackend
 from extraction.evidence import build_scene_evidence, load_images
-from extraction.json_repair import extract_json
+from extraction.semantic_graph.json_repair import parse_or_repair_graph
 from extraction.semantic_graph.taxonomy import SCENE_SCHEMA_VERSION
 
 
@@ -19,10 +19,10 @@ class SemanticGraphError(RuntimeError):
 
 def parse_graph_output(text: str) -> dict[str, Any]:
     """Parse a JSON object without enforcing semantic graph fields or references."""
-    payload = extract_json(text)
-    if payload is None:
-        raise SemanticGraphError("VLM output does not contain a JSON object")
-    return payload
+    result = parse_or_repair_graph(text)
+    if result.graph is None:
+        raise SemanticGraphError(result.error or "VLM output does not contain a JSON object")
+    return result.graph
 
 
 def extract_scene_graphs(

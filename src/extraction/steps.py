@@ -20,13 +20,19 @@ from extraction.evidence import (
     build_scene_evidence,
     load_images,
 )
-from extraction.monitoring import scene_messages, summary_message, video_names
+from extraction.monitoring import (
+    graph_skip_message,
+    scene_messages,
+    summary_message,
+    video_names,
+)
 from extraction.semantic_graph import (
     GRAPH_SUMMARY_SCHEMA,
+    JSON_REPAIR_VERSION,
     SCENE_EXTRACTION_PROMPT,
     SCENE_SCHEMA_VERSION as GRAPH_SCENE_SCHEMA,
     graph_summary_prompt,
-    parse_graph_output,
+    parse_or_repair_graph,
     taxonomy_contract,
     validate_summary as validate_graph_summary,
 )
@@ -272,6 +278,7 @@ def extract_graph_scenes(
     prompt = SCENE_EXTRACTION_PROMPT
     taxonomy_fp = fingerprint(taxonomy_contract())
     prompt_fp = fingerprint(prompt)
+    repair_fp = fingerprint({"version": JSON_REPAIR_VERSION})
     model_path = context.path("models", "qwen")
     model_fp = fingerprint({
         "path": str(model_path),
@@ -284,16 +291,29 @@ def extract_graph_scenes(
         "taxonomy": taxonomy_fp,
         "prompt": prompt_fp,
         "model": model_fp,
+        "repair": repair_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
     names = _video_name_map(context)
-    expected_outputs = [context.graph_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
+    expected_outputs = [
+        path
+        for row in visual_rows
+        for path in (
+            context.graph_scene_dir / f"{row['content_id']}.jsonl",
+            context.graph_failure_dir / f"{row['content_id']}.jsonl",
+        )
+    ]
     if not force:
         current = _current(context, "extract-graph-scenes", sources, expected_outputs)
         if current is not None:
             _completed_progress("Graph scenes", len(visual_rows))
             return current
+    context.stage_manifest("extract-graph-scenes").unlink(missing_ok=True)
+    from viewing_context_pipeline.pipeline import invalidate_descendants
+
+    invalidate_descendants(context, {"extract-graph-scenes"})
     records_by_content: dict[str, list[dict[str, Any]]] = {}
+    failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], str, list[dict[str, Any]]]] = []
     for visual in visual_rows:
         input_fp = fingerprint({
@@ -303,16 +323,39 @@ def extract_graph_scenes(
             "model": model_fp,
         })
         path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
-        if path.is_file() and not force:
-            existing = read_jsonl(path)
-            if existing and all(row.get("input_fingerprint") == input_fp for row in existing):
-                records_by_content[str(visual["content_id"])] = existing
-                continue
+        failure_path = context.graph_failure_dir / f"{visual['content_id']}.jsonl"
         scene_rows = _scene_generation_rows(
             visual,
             prompt=prompt,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
         )
+        expected_scene_indices = {int(row["scene_idx"]) for row in scene_rows}
+        if path.is_file() and not force:
+            existing = read_jsonl(path)
+            failures = read_jsonl(failure_path) if failure_path.is_file() else []
+            covered = {
+                int(row["scene_idx"])
+                for row in [*existing, *failures]
+                if row.get("input_fingerprint") == input_fp
+            }
+            if covered == expected_scene_indices and all(
+                row.get("input_fingerprint") == input_fp
+                for row in [*existing, *failures]
+            ):
+                migrated = [
+                    {
+                        **row,
+                        "parse_status": row.get("parse_status", "legacy_parser"),
+                        "repair_fingerprint": repair_fp,
+                    }
+                    for row in existing
+                ]
+                write_jsonl(path, migrated)
+                write_jsonl(failure_path, failures)
+                content_id = str(visual["content_id"])
+                records_by_content[content_id] = migrated
+                failures_by_content[content_id] = failures
+                continue
         pending.append((visual, input_fp, scene_rows))
 
     with tqdm(
@@ -325,47 +368,81 @@ def extract_graph_scenes(
             with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 for visual, input_fp, scene_rows in pending:
                     generated = generate([row["task"] for row in scene_rows], None)
-                    records = [{
-                        "schema_version": GRAPH_SCENE_SCHEMA,
-                        "content_id": visual["content_id"],
-                        "scene_idx": row["scene_idx"],
-                        "scene_start_seconds": row["scene_start_seconds"],
-                        "scene_end_seconds": row["scene_end_seconds"],
-                        "keyframes": row["keyframes"],
-                        "image_paths": row["image_paths"],
-                        "graph": parse_graph_output(generated[row["task"].task_id]),
-                    } for row in scene_rows]
-                    records = [{
-                        **row,
-                        "taxonomy_fingerprint": taxonomy_fp,
-                        "prompt_fingerprint": prompt_fp,
-                        "model_fingerprint": model_fp,
-                        "evidence_fingerprint": visual["evidence_fingerprint"],
-                        "input_fingerprint": input_fp,
-                    } for row in records]
+                    records: list[dict[str, Any]] = []
+                    failures: list[dict[str, Any]] = []
+                    for row in scene_rows:
+                        raw_response = generated[row["task"].task_id]
+                        result = parse_or_repair_graph(raw_response)
+                        common = {
+                            "content_id": visual["content_id"],
+                            "scene_idx": row["scene_idx"],
+                            "scene_start_seconds": row["scene_start_seconds"],
+                            "scene_end_seconds": row["scene_end_seconds"],
+                            "keyframes": row["keyframes"],
+                            "image_paths": row["image_paths"],
+                            "taxonomy_fingerprint": taxonomy_fp,
+                            "prompt_fingerprint": prompt_fp,
+                            "model_fingerprint": model_fp,
+                            "evidence_fingerprint": visual["evidence_fingerprint"],
+                            "input_fingerprint": input_fp,
+                            "repair_fingerprint": repair_fp,
+                        }
+                        if result.graph is not None:
+                            records.append({
+                                "schema_version": GRAPH_SCENE_SCHEMA,
+                                **common,
+                                "parse_status": result.status,
+                                "graph": result.graph,
+                            })
+                        else:
+                            failures.append({
+                                "schema_version": "semantic-graph-repair-failure/v1",
+                                **common,
+                                "parse_status": "failed",
+                                "error": result.error or "JSON repair failed",
+                                "raw_response": raw_response,
+                            })
                     path = context.graph_scene_dir / f"{visual['content_id']}.jsonl"
+                    failure_path = context.graph_failure_dir / f"{visual['content_id']}.jsonl"
                     records.sort(key=lambda row: int(row["scene_idx"]))
+                    failures.sort(key=lambda row: int(row["scene_idx"]))
                     write_jsonl(path, records)
-                    records_by_content[str(visual["content_id"])] = records
+                    write_jsonl(failure_path, failures)
+                    content_id = str(visual["content_id"])
+                    records_by_content[content_id] = records
+                    failures_by_content[content_id] = failures
                     video_name = names.get(
-                        str(visual["content_id"]),
+                        content_id,
                         f"{visual['content_id']}.mp4",
                     )
                     for message in scene_messages(video_name, records, arm="graph"):
                         _write_progress(progress, message)
+                    for failure in failures:
+                        _write_progress(progress, graph_skip_message(video_name, failure))
                     progress.update(1)
     outputs = [
         record
         for visual in visual_rows
         for record in records_by_content[str(visual["content_id"])]
     ]
-    output_fp = fingerprint(outputs)
+    failures = [
+        record
+        for visual in visual_rows
+        for record in failures_by_content[str(visual["content_id"])]
+    ]
+    if failures:
+        failed_contents = len({str(row["content_id"]) for row in failures})
+        raise ExtractionStepError(
+            f"JSON repair failed for {len(failures)} graph scene(s) across "
+            f"{failed_contents} content(s); see {context.graph_failure_dir}"
+        )
+    output_fp = fingerprint({"scenes": outputs, "failures": failures})
     return _write_stage(
         context,
         "extract-graph-scenes",
         source_fingerprints=sources,
         output_fingerprint=output_fp,
-        content_count=len({row["content_id"] for row in outputs}),
+        content_count=len(visual_rows),
     )
 
 

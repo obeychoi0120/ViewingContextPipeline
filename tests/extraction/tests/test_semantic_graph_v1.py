@@ -50,7 +50,7 @@ def test_json_repair_accepts_trailing_comma_but_rejects_empty_output() -> None:
     text = json.dumps(graph_with_dangling_reference())
     repaired = text[:-1] + ",}"
     assert parse_graph_output(repaired)["entities"][0]["local_id"] == "e1"
-    with pytest.raises(SemanticGraphError, match="does not contain"):
+    with pytest.raises(SemanticGraphError, match="empty VLM output"):
         parse_graph_output("")
 
 

@@ -54,3 +54,9 @@ def summary_message(
         raise ValueError(f"unsupported summary monitor arm: {arm}")
     label = "Summary_graph" if arm == "graph" else "Summary_desc"
     return f"[{label}] {video_name} | {scene_count} scenes\n{text.strip()}"
+
+
+def graph_skip_message(video_name: str, record: dict[str, Any]) -> str:
+    scene_idx = int(record["scene_idx"])
+    error = " ".join(str(record.get("error") or "JSON repair failed").splitlines())
+    return f"[Graph_skip] {video_name} | scene #{scene_idx:03d}\n{error}"
