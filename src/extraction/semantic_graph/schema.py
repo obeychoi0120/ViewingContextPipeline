@@ -82,9 +82,6 @@ def graph_summary_prompt(template: str, records: list[dict[str, Any]]) -> str:
 
 def validate_summary(text: str) -> str:
     summary = str(text or "").strip()
-    words = len(summary.split())
-    if not 1 <= words <= 150:
-        raise SemanticGraphError(
-            f"video summary must contain 1-150 words; got {words}"
-        )
+    if not summary:
+        raise SemanticGraphError("video summary must not be empty")
     return summary

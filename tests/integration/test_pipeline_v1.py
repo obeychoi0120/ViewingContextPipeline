@@ -369,6 +369,7 @@ def test_graph_steps_write_minimal_graph_and_scene_provenance(
             "arousal": "unknown",
         },
     }
+    long_summary = " ".join(["word"] * 162)
 
     @contextmanager
     def fake_generator(**_kwargs):
@@ -376,7 +377,7 @@ def test_graph_steps_write_minimal_graph_and_scene_provenance(
             results = {}
             for task in tasks:
                 text = (
-                    "short factual summary"
+                    long_summary
                     if not task.image_paths
                     else json.dumps(graph)
                 )
@@ -438,7 +439,11 @@ def test_graph_steps_write_minimal_graph_and_scene_provenance(
     monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
     extraction_steps.summarize_graph(context, source="qwen")
     summary = read_json(context.graph_summary_dir("qwen") / "c1.json")
-    assert summary["text"] == "short factual summary"
+    assert summary["text"] == long_summary
+    assert summary["validation_warnings"] == [
+        "summary_word_guidance_exceeded: observed=162 guidance_max=150"
+    ]
+    assert summary["validation_fingerprint"]
     assert summary["graph_source"] == "qwen"
     assert summary["summary_model"] == "qwen"
     assert summary["scene_graph_path"] == "extraction/graph/qwen/scenes/c1.jsonl"

@@ -12,6 +12,7 @@ from extraction.descriptions import (
     extract_scene_descriptions,
     validate_summary,
 )
+from extraction.summary_validation import summary_soft_warnings
 
 
 class FakeBackend:
@@ -50,7 +51,7 @@ def test_description_scene_uses_chronological_images(tmp_path: Path) -> None:
     assert backend.calls[0][1:] == ("describe", 128, ())
 
 
-def test_description_summary_preserves_scene_order_and_word_limit() -> None:
+def test_description_summary_preserves_scene_order_and_uses_soft_word_guidance() -> None:
     records = [
         {"schema_version": "scene-description/v1", "scene_idx": 0, "description": "first"},
         {"schema_version": "scene-description/v1", "scene_idx": 1, "description": "second"},
@@ -58,8 +59,10 @@ def test_description_summary_preserves_scene_order_and_word_limit() -> None:
     prompt = description_summary_prompt("{scenes}", records)
     assert prompt.index("Scene 0") < prompt.index("Scene 1")
     assert len(validate_summary("word " * 150).split()) == 150
+    assert len(validate_summary("word " * 162).split()) == 162
     assert validate_summary("short") == "short"
-    with pytest.raises(DescriptionError, match="1-150"):
+    assert summary_soft_warnings("word " * 162) == [
+        "summary_word_guidance_exceeded: observed=162 guidance_max=150"
+    ]
+    with pytest.raises(DescriptionError, match="must not be empty"):
         validate_summary("")
-    with pytest.raises(DescriptionError, match="1-150"):
-        validate_summary("word " * 151)

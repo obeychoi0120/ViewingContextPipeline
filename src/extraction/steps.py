@@ -38,6 +38,10 @@ from extraction.semantic_graph import (
     taxonomy_contract,
     validate_summary as validate_graph_summary,
 )
+from extraction.summary_validation import (
+    SUMMARY_VALIDATION_VERSION,
+    summary_soft_warnings,
+)
 from viewing_context_pipeline.runtime import (
     RunContext,
     directory_fingerprint,
@@ -575,10 +579,12 @@ def summarize_graph(
         "max_new_tokens": settings["summary_max_new_tokens"],
         "do_sample": settings["do_sample"],
     })
+    summary_validation_fp = fingerprint({"version": SUMMARY_VALIDATION_VERSION})
     sources = {
         scene_stage: scenes_manifest["output_fingerprint"],
         "prompt": prompt_fp,
         "summary_model": model_fp,
+        "summary_validation": summary_validation_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
     names = _video_name_map(context)
@@ -608,7 +614,15 @@ def summarize_graph(
         if output_path.is_file() and not force:
             existing = read_json(output_path)
             if existing.get("input_fingerprint") == input_fp:
-                documents_by_content[str(records[0]["content_id"])] = existing
+                migrated = {
+                    **existing,
+                    "validation_fingerprint": summary_validation_fp,
+                    "validation_warnings": summary_soft_warnings(
+                        str(existing.get("text", ""))
+                    ),
+                }
+                write_json(output_path, migrated)
+                documents_by_content[str(records[0]["content_id"])] = migrated
                 continue
         prompt = graph_summary_prompt(template, records)
         task_id = str(records[0]["content_id"])
@@ -657,6 +671,8 @@ def summarize_graph(
                 "scene_graph_fingerprint": file_fingerprint(scene_path),
                 "summary_prompt_fingerprint": prompt_fp,
                 "summary_model_fingerprint": model_fp,
+                "validation_fingerprint": summary_validation_fp,
+                "validation_warnings": summary_soft_warnings(summary),
                 "input_fingerprint": input_fp,
             }
             write_json(output_path, document)
@@ -823,10 +839,12 @@ def summarize_description(
         "max_new_tokens": settings["summary_max_new_tokens"],
         "do_sample": settings["do_sample"],
     })
+    summary_validation_fp = fingerprint({"version": SUMMARY_VALIDATION_VERSION})
     sources = {
         "extract-description-scenes": scenes_manifest["output_fingerprint"],
         "prompt": prompt_fp,
         "model": model_fp,
+        "summary_validation": summary_validation_fp,
     }
     visual_rows = read_jsonl(context.visual_manifest)
     names = _video_name_map(context)
@@ -855,7 +873,15 @@ def summarize_description(
         if output_path.is_file() and not force:
             existing = read_json(output_path)
             if existing.get("input_fingerprint") == input_fp:
-                documents_by_content[str(records[0]["content_id"])] = existing
+                migrated = {
+                    **existing,
+                    "validation_fingerprint": summary_validation_fp,
+                    "validation_warnings": summary_soft_warnings(
+                        str(existing.get("text", ""))
+                    ),
+                }
+                write_json(output_path, migrated)
+                documents_by_content[str(records[0]["content_id"])] = migrated
                 continue
         prompt = description_summary_prompt(template, records)
         task_id = str(records[0]["content_id"])
@@ -894,6 +920,8 @@ def summarize_description(
                 "scene_prompt_fingerprint": records[0]["prompt_fingerprint"],
                 "summary_prompt_fingerprint": prompt_fp,
                 "model_fingerprint": model_fp,
+                "validation_fingerprint": summary_validation_fp,
+                "validation_warnings": summary_soft_warnings(summary),
                 "input_fingerprint": input_fp,
             }
             write_json(output_path, document)

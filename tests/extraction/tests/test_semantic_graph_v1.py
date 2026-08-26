@@ -16,6 +16,7 @@ from extraction.semantic_graph import (
     taxonomy_contract,
     validate_summary,
 )
+from extraction.summary_validation import summary_soft_warnings
 
 
 def graph_with_dangling_reference() -> dict:
@@ -119,13 +120,15 @@ def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
     assert '"object_id": "e4"' in prompt
 
 
-def test_summary_requires_one_to_150_words() -> None:
+def test_summary_rejects_only_empty_text_and_uses_soft_word_guidance() -> None:
     assert validate_summary("one") == "one"
     assert len(validate_summary("word " * 150).split()) == 150
-    with pytest.raises(SemanticGraphError, match="1-150"):
+    assert len(validate_summary("word " * 162).split()) == 162
+    assert summary_soft_warnings("word " * 162) == [
+        "summary_word_guidance_exceeded: observed=162 guidance_max=150"
+    ]
+    with pytest.raises(SemanticGraphError, match="must not be empty"):
         validate_summary("")
-    with pytest.raises(SemanticGraphError, match="1-150"):
-        validate_summary("word " * 151)
 
 
 def test_scene_graph_uses_one_chronological_multi_image_call(tmp_path: Path) -> None:
