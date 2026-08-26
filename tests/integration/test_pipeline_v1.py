@@ -175,10 +175,68 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
     result = extraction_steps.extract_graph_scenes(context, model="qwen")
 
     assert result["failure_count"] == 1
-    assert len(read_jsonl(context.graph_scene_dir("qwen") / "c1.jsonl")) == 1
+    scenes = read_jsonl(context.graph_scene_dir("qwen") / "c1.jsonl")
+    assert len(scenes) == 1
+    assert set(scenes[0]) == {"scene_idx", "keyframes", "graph"}
     failures = read_jsonl(context.graph_failure_dir("qwen") / "c1.jsonl")
     assert failures[0]["scene_idx"] == 1
     assert failures[0]["failure_kind"] == "json_repair"
+
+
+def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
+    context: RunContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    monkeypatch.setattr(
+        extraction_steps,
+        "_visual_rows",
+        lambda _context: [{"content_id": "c1"}],
+    )
+    scene_path = context.graph_scene_dir("qwen") / "c1.jsonl"
+    write_jsonl(
+        scene_path,
+        [
+            {
+                "schema_version": "legacy",
+                "content_id": "c1",
+                "scene_idx": 0,
+                "keyframes": [5, 15, 25],
+                "image_paths": ["a.png", "b.png", "c.png"],
+                "graph_source": "gemini",
+                "input_fingerprint": "legacy",
+                "graph": {"entities": []},
+            }
+        ],
+    )
+
+    @contextmanager
+    def fake_generator(**_kwargs):
+        def generate(tasks, callback=None):
+            results = {task.task_id: "video summary" for task in tasks}
+            if callback is not None:
+                for task_id, text in results.items():
+                    callback(task_id, text)
+            return results
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
+    extraction_steps.summarize_graph(context, source="qwen")
+
+    assert set(read_jsonl(scene_path)[0]) == {"scene_idx", "keyframes", "graph"}
+    summary = json.loads(
+        (context.graph_summary_dir("qwen") / "c1.json").read_text(encoding="utf-8")
+    )
+    assert summary == {
+        "content_id": "c1",
+        "scene_count": 1,
+        "text": "video summary",
+        "validation_warnings": [],
+    }
 
     @contextmanager
     def successful_generator(**_kwargs):
@@ -220,7 +278,6 @@ def test_embedding_uses_fixed_files_and_no_manifest(
             {
                 "schema_version": "graph-video-summary/v1",
                 "status": "complete",
-                "graph_source": source,
                 "text": f"{source} graph",
             },
         )

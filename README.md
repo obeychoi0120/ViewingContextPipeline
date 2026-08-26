@@ -69,7 +69,7 @@ Qwen scene analyzer는 category/type, `IS_A`, `INTERACTS_WITH`, relation family,
 
 현재 Graph scene 출력은 semantic field, enum, ID reference를 검증하지 않습니다. JSON object 추출에 실패하면 로컬 deterministic repair를 적용하며, 복구할 수 없는 scene과 Gemini API 최종 실패는 raw 응답과 오류를 source별 `extraction/graph/{source}/failures/`에 저장합니다. 해당 scene만 제외하고 stage는 끝까지 진행하므로 arm별 실제 사용 scene 수가 다를 수 있습니다. Description의 빈 scene 응답도 `extraction/description/failures/`에 기록하고 같은 방식으로 계속 진행합니다.
 
-entity 6개와 summary 150단어는 강제 제약이 아니라 prompt guidance입니다. 초과 결과는 절단하거나 실패시키지 않고 원문을 보존하며 `validation_warnings`만 기록합니다. 모델 재생성 retry는 하지 않습니다.
+entity 6개와 summary 150단어는 강제 제약이 아니라 prompt guidance입니다. 초과 결과는 절단하거나 실패시키지 않습니다. Graph scene JSONL은 `scene_idx`, `keyframes`, `graph`만 저장하며 summary 길이 초과만 summary의 `validation_warnings`에 기록합니다. 모델 재생성 retry는 하지 않습니다.
 
 ## 독립 step 실행
 
@@ -151,8 +151,6 @@ artifacts/{run_id}/
 주요 계약:
 
 - `viewing-context-config/v1`
-- `minimal-semantic-scene/v1`
-- `graph-video-summary/v1`
 - `scene-description/v1`
 - `description-video-summary/v1`
 - `diagnosis/v1`

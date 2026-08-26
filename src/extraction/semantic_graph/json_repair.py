@@ -4,16 +4,12 @@ import ast
 from dataclasses import dataclass
 import json
 import re
-from typing import Any, Literal
-
-
-JSON_REPAIR_VERSION = "semantic-graph-json-repair/v1"
+from typing import Any
 
 
 @dataclass(frozen=True)
 class GraphParseResult:
     graph: dict[str, Any] | None
-    status: Literal["parsed", "repaired", "failed"]
     error: str | None = None
 
 
@@ -21,14 +17,14 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Parse one JSON object, then apply one deterministic repair pass."""
     raw = str(text or "")
     if not raw.strip():
-        return GraphParseResult(None, "failed", "empty VLM output")
+        return GraphParseResult(None, "empty VLM output")
     parsed = _parse_json_candidates(raw)
     if parsed is not None:
-        return GraphParseResult(parsed, "parsed")
+        return GraphParseResult(parsed)
     repaired = repair_graph_json_once(raw)
     if repaired is not None:
-        return GraphParseResult(repaired, "repaired")
-    return GraphParseResult(None, "failed", "JSON repair failed")
+        return GraphParseResult(repaired)
+    return GraphParseResult(None, "JSON repair failed")
 
 
 def repair_graph_json_once(text: str) -> dict[str, Any] | None:

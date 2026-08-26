@@ -7,12 +7,6 @@ from typing import Any
 from extraction.backends import VLMBackend
 from extraction.evidence import build_scene_evidence, load_images
 from extraction.semantic_graph.json_repair import parse_or_repair_graph
-from extraction.semantic_graph.taxonomy import SCENE_SCHEMA_VERSION
-
-
-GRAPH_SUMMARY_SCHEMA = "graph-video-summary/v1"
-
-
 class SemanticGraphError(RuntimeError):
     pass
 
@@ -27,7 +21,6 @@ def parse_graph_output(text: str) -> dict[str, Any]:
 
 def extract_scene_graphs(
     *,
-    content_id: str,
     scenes: list[dict[str, Any]],
     frames_dir: str | Path,
     timestamp_json_path: str | Path,
@@ -48,13 +41,8 @@ def extract_scene_graphs(
         )
         records.append(
             {
-                "schema_version": SCENE_SCHEMA_VERSION,
-                "content_id": content_id,
                 "scene_idx": scene["scene_idx"],
-                "scene_start_seconds": scene["scene_start_seconds"],
-                "scene_end_seconds": scene["scene_end_seconds"],
                 "keyframes": scene["keyframes"],
-                "image_paths": image_paths,
                 "graph": graph,
             }
         )
@@ -71,7 +59,7 @@ def graph_summary_prompt(template: str, records: list[dict[str, Any]]) -> str:
         "\n".join(
             [
                 f"Scene {int(record['scene_idx'])} "
-                f"({record['scene_start_seconds']}-{record['scene_end_seconds']}s):",
+                f"(keyframes: {', '.join(f'{value}s' for value in record['keyframes'])}):",
                 json.dumps(record["graph"], ensure_ascii=False, sort_keys=True),
             ]
         )

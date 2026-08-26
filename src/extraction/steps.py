@@ -27,11 +27,8 @@ from extraction.monitoring import (
     video_names,
 )
 from extraction.semantic_graph import (
-    GRAPH_SUMMARY_SCHEMA,
     SCENE_EXTRACTION_PROMPT,
-    SCENE_SCHEMA_VERSION as GRAPH_SCENE_SCHEMA,
     graph_summary_prompt,
-    graph_soft_warnings,
     parse_or_repair_graph,
     validate_summary as validate_graph_summary,
 )
@@ -169,6 +166,45 @@ def _require_file(path: Path, label: str) -> Path:
     return path
 
 
+def _minimal_graph_records(
+    records: list[dict[str, Any]],
+    path: Path,
+) -> list[dict[str, Any]]:
+    try:
+        minimal = [
+            {
+                "scene_idx": row["scene_idx"],
+                "keyframes": row["keyframes"],
+                "graph": row["graph"],
+            }
+            for row in records
+        ]
+    except KeyError as exc:
+        raise ExtractionStepError(
+            f"invalid graph scene file, missing {exc.args[0]}: {path}"
+        ) from exc
+    if minimal != records:
+        write_jsonl(path, minimal)
+    return minimal
+
+
+def _minimal_graph_failures(
+    failures: list[dict[str, Any]],
+    path: Path,
+) -> list[dict[str, Any]]:
+    minimal = [
+        {
+            key: row[key]
+            for key in ("scene_idx", "keyframes", "failure_kind", "error", "raw_response")
+            if key in row
+        }
+        for row in failures
+    ]
+    if minimal != failures:
+        _write_failure_jsonl(path, minimal)
+    return minimal
+
+
 def _visual_rows(context: RunContext) -> list[dict[str, Any]]:
     catalog_path = _require_file(
         context.cohort_dir / "catalog.jsonl",
@@ -253,10 +289,6 @@ def extract_graph_scenes(
     model_path: Path | None = None
     if model == "qwen":
         model_path = context.path("models", "qwen")
-        model_id = model_path.name
-    else:
-        gemini = context.config["models"]["gemini"]
-        model_id = str(gemini["model_id"])
     visual_rows = _visual_rows(context)
     names = _video_name_map(context)
     scene_dir = context.graph_scene_dir(model)
@@ -276,6 +308,7 @@ def extract_graph_scenes(
         if path.is_file() and not force:
             existing = read_jsonl(path)
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
+            failures = _minimal_graph_failures(failures, failure_path)
             if not failures:
                 failure_path.unlink(missing_ok=True)
             covered = {
@@ -284,6 +317,7 @@ def extract_graph_scenes(
             }
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
+                existing = _minimal_graph_records(existing, path)
                 records_by_content[content_id] = existing
                 failures_by_content[content_id] = failures
                 continue
@@ -309,29 +343,16 @@ def extract_graph_scenes(
                     if generation_error is None
                     else None
                 )
-                common = {
-                    "content_id": visual["content_id"],
-                    "scene_idx": row["scene_idx"],
-                    "scene_start_seconds": row["scene_start_seconds"],
-                    "scene_end_seconds": row["scene_end_seconds"],
-                    "keyframes": row["keyframes"],
-                    "image_paths": row["image_paths"],
-                    "graph_source": model,
-                    "extractor_model_id": model_id,
-                }
                 if result is not None and result.graph is not None:
                     records.append({
-                        "schema_version": GRAPH_SCENE_SCHEMA,
-                        **common,
-                        "parse_status": result.status,
-                        "validation_warnings": graph_soft_warnings(result.graph),
+                        "scene_idx": row["scene_idx"],
+                        "keyframes": row["keyframes"],
                         "graph": result.graph,
                     })
                 else:
                     failures.append({
-                        "schema_version": "semantic-graph-repair-failure/v1",
-                        **common,
-                        "parse_status": "failed",
+                        "scene_idx": row["scene_idx"],
+                        "keyframes": row["keyframes"],
                         "failure_kind": (
                             "generation" if generation_error else "json_repair"
                         ),
@@ -446,7 +467,7 @@ def summarize_graph(
         missing = next(path for path in scene_paths if not path.is_file())
         raise ExtractionStepError(f"missing graph scene output: {missing}")
     documents_by_content: dict[str, dict[str, Any]] = {}
-    pending: list[tuple[list[dict[str, Any]], Path, Path, str]] = []
+    pending: list[tuple[list[dict[str, Any]], Path, str]] = []
     tasks: list[QwenGenerationTask] = []
     empty_scene_files = 0
     for scene_path in scene_paths:
@@ -454,17 +475,22 @@ def summarize_graph(
         if not records:
             empty_scene_files += 1
             continue
-        if any(row.get("schema_version") != GRAPH_SCENE_SCHEMA for row in records):
-            raise ExtractionStepError(f"invalid graph scene file: {scene_path}")
-        if any(row.get("graph_source") != source for row in records):
-            raise ExtractionStepError(f"graph source mismatch in {scene_path}")
-        output_path = summary_dir / f"{records[0]['content_id']}.json"
+        records = _minimal_graph_records(records, scene_path)
+        content_id = scene_path.stem
+        output_path = summary_dir / f"{content_id}.json"
         if output_path.is_file() and not force:
             existing = read_json(output_path)
-            documents_by_content[str(records[0]["content_id"])] = existing
+            cleaned = {
+                key: existing[key]
+                for key in ("content_id", "text", "scene_count", "validation_warnings")
+                if key in existing
+            }
+            if cleaned != existing:
+                write_json(output_path, cleaned)
+            documents_by_content[content_id] = cleaned
             continue
         prompt = graph_summary_prompt(template, records)
-        task_id = str(records[0]["content_id"])
+        task_id = content_id
         tasks.append(
             QwenGenerationTask(
                 task_id=task_id,
@@ -473,11 +499,11 @@ def summarize_graph(
                 max_new_tokens=int(settings["summary_max_new_tokens"]),
             )
         )
-        pending.append((records, output_path, scene_path, task_id))
+        pending.append((records, output_path, task_id))
 
     pending_by_task = {
-        task_id: (records, output_path, scene_path)
-        for records, output_path, scene_path, task_id in pending
+        task_id: (records, output_path)
+        for records, output_path, task_id in pending
     }
     with tqdm(
         total=len(visual_rows),
@@ -486,21 +512,13 @@ def summarize_graph(
         unit="content",
     ) as progress:
         def complete_graph_summary(task_id: str, text: str) -> None:
-            records, output_path, scene_path = pending_by_task[task_id]
+            records, output_path = pending_by_task[task_id]
             summary = validate_graph_summary(text)
-            content_id = str(records[0]["content_id"])
+            content_id = task_id
             document = {
-                "schema_version": GRAPH_SUMMARY_SCHEMA,
                 "content_id": content_id,
-                "arm": "graph",
-                "graph_source": source,
-                "status": "complete",
                 "text": summary,
                 "scene_count": len(records),
-                "extractor_model_id": records[0]["extractor_model_id"],
-                "summary_model": "qwen",
-                "summary_model_id": model_path.name,
-                "scene_graph_path": scene_path.relative_to(context.run_root).as_posix(),
                 "validation_warnings": summary_soft_warnings(summary),
             }
             write_json(output_path, document)
@@ -675,6 +693,22 @@ def summarize_description(
         output_path = context.description_summary_dir / f"{records[0]['content_id']}.json"
         if output_path.is_file() and not force:
             existing = read_json(output_path)
+            cleaned = {
+                key: existing[key]
+                for key in (
+                    "schema_version",
+                    "content_id",
+                    "arm",
+                    "status",
+                    "text",
+                    "scene_count",
+                    "validation_warnings",
+                )
+                if key in existing
+            }
+            if cleaned != existing:
+                write_json(output_path, cleaned)
+            existing = cleaned
             documents_by_content[str(records[0]["content_id"])] = existing
             continue
         prompt = description_summary_prompt(template, records)

@@ -85,9 +85,9 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     catalog = read_jsonl(catalog_path)
     content_ids = [str(row["content_id"]) for row in catalog]
     sources = {
-        "graph_qwen": (context.graph_summary_dir("qwen"), "graph-video-summary/v1", "qwen"),
-        "graph_gemini": (context.graph_summary_dir("gemini"), "graph-video-summary/v1", "gemini"),
-        "desc": (context.description_summary_dir, "description-video-summary/v1", None),
+        "graph_qwen": context.graph_summary_dir("qwen"),
+        "graph_gemini": context.graph_summary_dir("gemini"),
+        "desc": context.description_summary_dir,
     }
     item_index_path = context.representations_dir / "item_index.json"
     outputs = [_embedding_path(context, branch) for branch in sources]
@@ -95,17 +95,15 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         return _result("embed-representations", content_count=len(catalog))
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)
-    for branch, (directory, schema, graph_source) in sources.items():
+    for branch, directory in sources.items():
         if not directory.is_dir():
             raise ValidationStepError(f"missing {branch} summary directory: {directory}")
         documents = [
             read_json(_require_file(directory / f"{content_id}.json", f"{branch} summary"))
             for content_id in content_ids
         ]
-        if any(row.get("schema_version") != schema or row.get("status") != "complete" for row in documents):
+        if any(not isinstance(row.get("text"), str) or not row["text"].strip() for row in documents):
             raise ValidationStepError(f"invalid {branch} summaries in {directory}")
-        if graph_source is not None and any(row.get("graph_source") != graph_source for row in documents):
-            raise ValidationStepError(f"graph source mismatch for {branch}")
         matrix = np.asarray(
             encode_bge_texts(config.encoder, [str(row["text"]) for row in documents]),
             dtype=np.float32,

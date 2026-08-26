@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, Final
 
 
-SCENE_SCHEMA_VERSION: Final[str] = "minimal-semantic-scene/v1"
-
 SETTING_CONTEXTS: Final[tuple[str, ...]] = (
     "indoor",
     "outdoor_urban",
@@ -50,9 +48,8 @@ DISALLOWED_GENERIC_ENTITY_NAMES: Final[frozenset[str]] = frozenset(
 
 
 def taxonomy_contract() -> dict[str, Any]:
-    """Return the code-owned mapping used to render and fingerprint the prompt."""
+    """Return the code-owned mapping used to render the prompt."""
     return {
-        "schema_version": SCENE_SCHEMA_VERSION,
         "setting_contexts": list(SETTING_CONTEXTS),
         "entity_roles": list(ENTITY_ROLES),
         "event_reference_slots": list(EVENT_REFERENCE_SLOTS),

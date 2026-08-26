@@ -10,7 +10,6 @@ from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
     SemanticGraphError,
     extract_scene_graphs,
-    graph_soft_warnings,
     graph_summary_prompt,
     parse_graph_output,
     taxonomy_contract,
@@ -66,7 +65,6 @@ def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
 
 def test_taxonomy_and_prompt_are_multi_image_and_consistent() -> None:
     taxonomy = taxonomy_contract()
-    assert taxonomy["schema_version"] == "minimal-semantic-scene/v1"
     assert taxonomy["guidance"]["entity_max"] == 6
     assert "chronological keyframes" in SCENE_EXTRACTION_PROMPT
     assert "If entities is empty" in SCENE_EXTRACTION_PROMPT
@@ -74,42 +72,13 @@ def test_taxonomy_and_prompt_are_multi_image_and_consistent() -> None:
         assert value in SCENE_EXTRACTION_PROMPT
 
 
-def test_entity_guidance_warning_preserves_complete_graph() -> None:
-    graph = graph_with_dangling_reference()
-    graph["entities"] = [
-        {"local_id": f"e{index}", "name": "player", "role": "secondary"}
-        for index in range(1, 9)
-    ]
-    original = json.loads(json.dumps(graph))
-
-    assert graph_soft_warnings(graph) == [
-        "entity_guidance_exceeded: observed=8 guidance_max=6"
-    ]
-    assert graph == original
-
-
-def test_entity_guidance_does_not_warn_at_six_entities() -> None:
-    graph = {
-        "entities": [
-            {"local_id": f"e{index}", "name": "player", "role": "secondary"}
-            for index in range(1, 7)
-        ]
-    }
-
-    assert graph_soft_warnings(graph) == []
-
-
 def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
     records = []
     for scene_idx, start in ((1, 30), (0, 0)):
         records.append(
             {
-                "schema_version": "minimal-semantic-scene/v1",
                 "scene_idx": scene_idx,
-                "scene_start_seconds": start,
-                "scene_end_seconds": start + 30,
                 "keyframes": [start + 5, start + 15, start + 25],
-                "image_paths": ["a.png", "b.png", "c.png"],
                 "graph": graph_with_dangling_reference(),
             }
         )
@@ -151,7 +120,6 @@ def test_scene_graph_uses_one_chronological_multi_image_call(tmp_path: Path) -> 
 
     backend = FakeBackend()
     records = extract_scene_graphs(
-        content_id="demo",
         scenes=[
             {
                 "scene_idx": 0,
@@ -168,6 +136,7 @@ def test_scene_graph_uses_one_chronological_multi_image_call(tmp_path: Path) -> 
     )
 
     assert records[0]["graph"]["static_relations"][0]["object_id"] == "e4"
+    assert set(records[0]) == {"scene_idx", "keyframes", "graph"}
     assert records[0]["keyframes"] == [5, 15, 25]
     assert len(backend.calls) == 1
     assert len(backend.calls[0][0]) == 3
