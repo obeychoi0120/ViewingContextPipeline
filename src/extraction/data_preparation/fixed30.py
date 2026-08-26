@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import shutil
@@ -40,25 +39,11 @@ def prepare_visual_item(
         / content_id
     )
     metadata_path = Path(output_root) / "data" / "cohort" / "metadata" / f"{content_id}.json"
-    contract_path = item_assets / "processing_contract_fixed_30s.json"
     width, height = image_size
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
-    contract = {
-        "schema_version": "local-video-processing-contract/v1",
-        "source_sha256": file_sha256(source),
-        "sampling": {
-            "scene_seconds": SCENE_SECONDS,
-            "reference_seconds": REFERENCE_SECONDS,
-            "frames_per_scene": len(KEYFRAME_OFFSETS),
-            "keyframe_offsets_seconds": list(KEYFRAME_OFFSETS),
-        },
-        "image_resolution": [width, height],
-    }
-    current = _read_json(contract_path)
     complete = (
-        current == contract
-        and timestamp_path.is_file()
+        timestamp_path.is_file()
         and resized_keyframes_match_timestamps(timestamp_path, frames_dir, image_size)
     )
     if force or not complete:
@@ -72,7 +57,6 @@ def prepare_visual_item(
             frames_dir,
             image_size,
         )
-        _write_json(contract_path, contract)
     _write_json(
         metadata_path,
         {
@@ -157,26 +141,11 @@ def resized_keyframes_match_timestamps(
     return True
 
 
-def file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
-
-
 def _safe_content_id(value: object) -> str:
     text = str(value or "").strip()
     if not text or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in text):
         raise ValueError(f"content_id is not filesystem-safe: {value!r}")
     return text
-
-
-def _read_json(path: Path) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
 
 
 def _write_json(path: Path, value: Any) -> None:

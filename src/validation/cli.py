@@ -4,7 +4,6 @@ import argparse
 import sys
 
 from validation.steps import STEP_HANDLERS
-from viewing_context_pipeline.pipeline import invalidate_descendants
 from viewing_context_pipeline.runtime import RunContext
 
 
@@ -16,9 +15,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         context = RunContext.load(args.run_id)
-        if args.force:
-            context.initialize()
-            invalidate_descendants(context, {args.step})
         STEP_HANDLERS[args.step](context, force=args.force)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[FAILED] {args.step}: {exc}", file=sys.stderr)

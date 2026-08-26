@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-import json
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -9,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from .config import ValidationConfig
-from .io import atomic_write_json, atomic_write_jsonl, fingerprint, read_jsonl
+from .io import atomic_write_jsonl, read_jsonl
 from .metrics import metrics_from_rank
 from .model import SASRec, catalog_score_batches, in_batch_loss, require_torch, save_checkpoint, seed_everything, torch
 from .scoring import mask_history, rank_of_target
@@ -42,24 +41,17 @@ def _validation_ndcg(model, histories_internal, histories, targets, config, devi
 def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any]) -> dict[str, Any]:
     require_torch()
     root = Path(runtime["run_root"])
-    representations = json.loads(Path(runtime["paths"]["representations_manifest"]).read_text(encoding="utf-8"))
-    if representations.get("schema_version") != "representations/v1" or not representations.get("complete"):
-        raise RuntimeError("recommendation requires complete representations/v1")
-    if representations.get("modality") != runtime["modality"]:
-        raise RuntimeError("representation modality mismatch")
+    representations_dir = Path(runtime["paths"]["representations_dir"])
     sequences = read_jsonl(root / "data" / "cohort" / "sequences.jsonl")
-    item_index = json.loads((Path(runtime["paths"]["representations_manifest"]).parent / "item_index.json").read_text(encoding="utf-8"))
+    import json
+    item_index = json.loads((representations_dir / "item_index.json").read_text(encoding="utf-8"))
     index_item = {index: item_id for item_id, index in item_index.items()}
     catalog = read_jsonl(root / "data" / "cohort" / "catalog.jsonl")
     item_content = {row["item_id"]: row["content_id"] for row in catalog}
     branch_features = {
-        branch: np.load(Path(info["path"]))["values"]
-        for branch, info in representations["branches"].items()
+        branch: np.load(representations_dir / f"{branch}_embeddings.npz")["values"]
+        for branch in ("graph_qwen", "graph_gemini", "desc")
     }
-    if set(branch_features) != {"graph_qwen", "graph_gemini", "desc"}:
-        raise RuntimeError(
-            "representations must contain graph_qwen, graph_gemini, and desc branches"
-        )
     arms = dict(RECOMMENDATION_ARMS)
     train_sequences = [_internal(row["train"], item_index) for row in sequences]
     valid_internal = train_sequences
@@ -72,7 +64,7 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
     nonzero = sorted(frequency.values())
     median = nonzero[len(nonzero) // 2] if nonzero else 0
     buckets = ["cold" if frequency[target] == 0 else "low" if frequency[target] <= median else "warm" for target in test_targets]
-    output = Path(runtime["paths"]["recommendations_manifest"]).parent
+    output = Path(runtime["paths"]["recommendations_dir"])
     output.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
@@ -143,19 +135,16 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
                     })
             checkpoint = output / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
             save_checkpoint(checkpoint, model, {"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg})
-            run = {"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg, "epochs": history, "checkpoint": str(checkpoint)}
-            atomic_write_json(checkpoint.parent / "manifest.json", run)
-            runs.append(run)
+            runs.append({"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg, "epochs": history, "checkpoint": str(checkpoint)})
             completed += 1
             elapsed = perf_counter() - started
             eta = elapsed / completed * (total - completed)
             print(f"[PROGRESS] run_recommendation {completed}/{total} elapsed={elapsed:.1f}s eta={eta:.1f}s arm={arm} seed={seed}", flush=True)
     metrics_path = output / "per_user_metrics.jsonl"
     atomic_write_jsonl(metrics_path, rows)
-    manifest = {
-        "schema_version": "recommendations/v1", "run_id": runtime["run_id"], "modality": runtime["modality"],
-        "arms": list(arms), "baseline": "SASRec_ID", "independent_training": True,
-        "user_count": len(sequences), "per_user_metrics": str(metrics_path), "runs": runs, "complete": True,
+    return {
+        "run_id": runtime["run_id"],
+        "user_count": len(sequences),
+        "per_user_metrics": str(metrics_path),
+        "runs": runs,
     }
-    manifest["fingerprint"] = fingerprint({"arms": manifest["arms"], "runs": runs, "row_count": len(rows), "representations": representations["fingerprint"]})
-    return manifest

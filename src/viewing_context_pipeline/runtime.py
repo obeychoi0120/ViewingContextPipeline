@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -16,35 +15,6 @@ CONFIG_SCHEMA = "viewing-context-config/v1"
 
 class ConfigError(RuntimeError):
     pass
-
-
-def fingerprint(value: Any) -> str:
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def file_fingerprint(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def directory_fingerprint(path: str | Path) -> str:
-    root = Path(path)
-    if not root.is_dir():
-        raise FileNotFoundError(f"model or data directory not found: {root}")
-    rows = [
-        {
-            "path": file.relative_to(root).as_posix(),
-            "size": file.stat().st_size,
-            "mtime_ns": file.stat().st_mtime_ns,
-        }
-        for file in sorted(root.rglob("*"))
-        if file.is_file()
-    ]
-    return fingerprint(rows)
 
 
 def read_json(path: str | Path) -> dict[str, Any]:
@@ -160,23 +130,12 @@ class RunContext:
         self.run_root.mkdir(parents=True, exist_ok=True)
 
     @property
-    def pipeline_manifest(self) -> Path:
-        return self.run_root / "pipeline_manifest.json"
-
-    def stage_manifest(self, stage: str) -> Path:
-        return self.run_root / "manifests" / f"{stage}.json"
-
-    @property
     def cohort_dir(self) -> Path:
         return self.run_root / "data" / "cohort"
 
     @property
     def evidence_dir(self) -> Path:
         return self.run_root / "data" / "fixed_30s"
-
-    @property
-    def visual_manifest(self) -> Path:
-        return self.evidence_dir / "visual_manifest.jsonl"
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.run_root / "extraction" / "graph" / source / "scenes"
@@ -188,6 +147,10 @@ class RunContext:
     def description_scene_dir(self) -> Path:
         return self.run_root / "extraction" / "description" / "scenes"
 
+    @property
+    def description_failure_dir(self) -> Path:
+        return self.run_root / "extraction" / "description" / "failures"
+
     def graph_summary_dir(self, source: str) -> Path:
         return self.run_root / "extraction" / "graph" / source / "summaries"
 
@@ -196,12 +159,12 @@ class RunContext:
         return self.run_root / "extraction" / "description" / "summaries"
 
     @property
-    def representations_manifest(self) -> Path:
-        return self.run_root / "validation" / "representations" / "manifest.json"
+    def representations_dir(self) -> Path:
+        return self.run_root / "validation" / "representations"
 
     @property
-    def recommendations_manifest(self) -> Path:
-        return self.run_root / "validation" / "recommendations" / "manifest.json"
+    def recommendations_dir(self) -> Path:
+        return self.run_root / "validation" / "recommendations"
 
     @property
     def diagnosis_path(self) -> Path:

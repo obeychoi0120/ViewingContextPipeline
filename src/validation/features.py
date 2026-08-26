@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import numpy as np
 
 from .config import EncoderConfig
-from .io import file_fingerprint
 
 
 class FeatureError(RuntimeError):
@@ -46,12 +42,3 @@ def encode_bge_texts(settings: EncoderConfig, texts: list[str]) -> np.ndarray:
         if batches
         else np.empty((0, settings.embedding_dim), dtype=np.float32)
     )
-
-
-def encoder_file_manifest(path: Path) -> list[dict[str, Any]]:
-    allowed = {".json", ".txt", ".model", ".safetensors", ".bin"}
-    return [
-        file_fingerprint(file)
-        for file in sorted(path.rglob("*"))
-        if file.is_file() and file.suffix.lower() in allowed
-    ]

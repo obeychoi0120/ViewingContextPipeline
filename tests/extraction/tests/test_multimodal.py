@@ -40,7 +40,7 @@ def test_merge_scene_evidence_uses_half_open_ocr_intervals() -> None:
     assert shot_references(records[0])[0]["asr_text"] == "hello"
 
 
-def test_prepare_multimodal_evidence_records_fingerprint(tmp_path: Path) -> None:
+def test_prepare_multimodal_evidence_writes_timeline_without_manifest(tmp_path: Path) -> None:
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     timestamps = tmp_path / "timestamps.json"
@@ -71,7 +71,7 @@ def test_prepare_multimodal_evidence_records_fingerprint(tmp_path: Path) -> None
         mock.patch("extraction.data_preparation.video_processor.extract_frames", side_effect=fake_frames),
         mock.patch("extraction.data_preparation.ocr_processor.process_ocr", side_effect=fake_ocr),
     ):
-        manifest = prepare_multimodal_evidence(
+        result = prepare_multimodal_evidence(
             video,
             timestamps,
             tmp_path / "output",
@@ -79,8 +79,8 @@ def test_prepare_multimodal_evidence_records_fingerprint(tmp_path: Path) -> None
             ocr_model_root=model_root,
         )
 
-    assert manifest["schema_version"] == "multimodal-evidence/v1"
-    assert manifest["scene_count"] == 1
+    assert result["scene_count"] == 1
+    assert not (tmp_path / "output/manifest.json").exists()
     record = json.loads(
         (tmp_path / "output/multimodal_timeline.jsonl").read_text(encoding="utf-8")
     )

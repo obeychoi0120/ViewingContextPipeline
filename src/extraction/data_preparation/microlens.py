@@ -104,33 +104,19 @@ def prepare_catalog(
                         file=progress.fp,
                     )
                 progress.update(1)
-    manifest_rows = [prepared for prepared, _ in results if prepared is not None]
+    prepared_rows = [prepared for prepared, _ in results if prepared is not None]
     failures = [failure for _, failure in results if failure is not None]
     cohort_root = Path(output_root) / "data" / "cohort"
     cohort_root.mkdir(parents=True, exist_ok=True)
-    manifest_path = cohort_root / "extraction_manifest.csv"
     failure_path = cohort_root / "preparation_failures.jsonl"
     failure_path.write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in failures),
         encoding="utf-8",
     )
-    _write_manifest(manifest_rows, manifest_path)
     return {
         "selected": len(catalog),
-        "succeeded": len(manifest_rows),
+        "succeeded": len(prepared_rows),
         "failed": len(failures),
         "workers": PREPARATION_WORKERS,
-        "manifest": str(manifest_path),
         "failures": str(failure_path),
     }
-
-
-def _write_manifest(rows: list[dict[str, str]], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content_ids = [str(row.get("content_id") or "").strip() for row in rows]
-    if not all(content_ids) or len(content_ids) != len(set(content_ids)):
-        raise MicroLensPreparationError("extraction manifest requires unique content IDs")
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["content_id"])
-        writer.writeheader()
-        writer.writerows({"content_id": value} for value in content_ids)

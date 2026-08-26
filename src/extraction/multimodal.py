@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import difflib
-import hashlib
 import json
 import re
 import shutil
 from pathlib import Path
 from typing import Any
-
-from extraction.data_preparation.fixed30 import file_sha256
-
 
 def shot_references(scene: dict[str, Any]) -> list[dict[str, Any]]:
     timeline = scene.get("timeline")
@@ -81,24 +77,15 @@ def prepare_multimodal_evidence(
         raise ValueError("ocr_max_chars must be positive")
     output.mkdir(parents=True, exist_ok=True)
     timeline_path = output / "multimodal_timeline.jsonl"
-    manifest_path = output / "manifest.json"
-    inputs = {
-        "video": file_sha256(video),
-        "timestamps": file_sha256(timestamps),
-        "asr_model": asr_model,
-        "language": language,
-        "ocr_model_root": str(ocr_model_root) if ocr_model_root else None,
-        "ocr_max_chars": ocr_max_chars,
-    }
-    input_fingerprint = _fingerprint(inputs)
-    current = _read_json(manifest_path)
-    if (
-        not force
-        and current
-        and current.get("input_fingerprint") == input_fingerprint
-        and timeline_path.is_file()
-    ):
-        return current
+    if not force and timeline_path.is_file():
+        return {
+            "timeline_path": str(timeline_path),
+            "scene_count": sum(
+                1
+                for line in timeline_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ),
+        }
 
     asr_path = output / "asr_words.json"
     ocr_intervals_path = output / "ocr_intervals.json"
@@ -149,16 +136,10 @@ def prepare_multimodal_evidence(
         ocr_max_chars=ocr_max_chars,
     )
     _write_jsonl(timeline_path, records)
-    manifest = {
-        "schema_version": "multimodal-evidence/v1",
-        "status": "complete",
-        "input_fingerprint": input_fingerprint,
-        "output_fingerprint": _fingerprint(records),
+    return {
         "timeline_path": str(timeline_path),
         "scene_count": len(records),
     }
-    _write_json(manifest_path, manifest)
-    return manifest
 
 
 def intervalize_ocr(
@@ -284,21 +265,6 @@ def _deduplicate(values: list[str]) -> list[str]:
             seen.add(normalized)
             result.append(value.strip())
     return result
-
-
-def _fingerprint(value: Any) -> str:
-    payload = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
-
-
-def _read_json(path: Path) -> dict[str, Any] | None:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
 
 
 def _write_json(path: Path, value: Any) -> None:

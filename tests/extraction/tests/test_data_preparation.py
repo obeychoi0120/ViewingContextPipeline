@@ -130,9 +130,4 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         "1.mp4",
         "2.mp4",
     ]
-    with Path(result["manifest"]).open(encoding="utf-8", newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    assert rows == [
-        {"content_id": "microlens_100k_00001"},
-        {"content_id": "microlens_100k_00002"},
-    ]
+    assert not (tmp_path / "run/data/cohort/extraction_manifest.csv").exists()
