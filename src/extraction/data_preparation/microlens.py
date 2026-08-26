@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from tqdm import tqdm
+
 from .fixed30 import prepare_visual_item
 
 
@@ -86,24 +88,22 @@ def prepare_catalog(
                 "error": str(exc),
             }
 
-    completed = 0
     with ThreadPoolExecutor(max_workers=PREPARATION_WORKERS) as executor:
         futures = [executor.submit(prepare, index, row) for index, row in enumerate(catalog)]
-        for future in as_completed(futures):
-            index, content_id, prepared, failure = future.result()
-            results[index] = (prepared, failure)
-            completed += 1
-            if failure is None:
-                status = "success"
-                prefix = "PROGRESS"
-            else:
-                status = failure["error"]
-                prefix = "FAILURE"
-            print(
-                f"[{prefix}] prepare_data {completed}/{len(catalog)} "
-                f"{content_id} {status}",
-                flush=True,
-            )
+        with tqdm(
+            total=len(catalog),
+            desc="Prepare input data",
+            unit="content",
+        ) as progress:
+            for future in as_completed(futures):
+                index, content_id, prepared, failure = future.result()
+                results[index] = (prepared, failure)
+                if failure is not None:
+                    tqdm.write(
+                        f"[FAILURE] prepare_data {content_id} {failure['error']}",
+                        file=progress.fp,
+                    )
+                progress.update(1)
     manifest_rows = [prepared for prepared, _ in results if prepared is not None]
     failures = [failure for _, failure in results if failure is not None]
     cohort_root = Path(output_root) / "data" / "cohort"

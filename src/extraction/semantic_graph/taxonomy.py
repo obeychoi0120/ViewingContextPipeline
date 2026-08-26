@@ -50,7 +50,7 @@ DISALLOWED_GENERIC_ENTITY_NAMES: Final[frozenset[str]] = frozenset(
 
 
 def taxonomy_contract() -> dict[str, Any]:
-    """Return the complete code-owned mapping used for prompting and validation."""
+    """Return the code-owned mapping used to render and fingerprint the prompt."""
     return {
         "schema_version": SCENE_SCHEMA_VERSION,
         "setting_contexts": list(SETTING_CONTEXTS),

@@ -65,10 +65,12 @@ Graph scene prompt와 minimal taxonomy는 `extraction.semantic_graph`가 코드�
 
 Qwen scene analyzer는 category/type, `IS_A`, `INTERACTS_WITH`, relation family, scene function, media/style, confidence/score를 출력하지 않습니다. Facet Projector, PPR, TVTI 축·점수·UI는 이 pilot DAG 범위 밖입니다.
 
+현재 Graph scene 출력은 JSON object 여부만 확인하며 semantic field, enum, ID reference는 검증하지 않습니다. Prompt로 출력 구조를 유도하지만 dangling reference를 포함한 응답도 원문 그대로 artifact에 저장합니다.
+
 ## 독립 step 실행
 
 모든 명령은 명시적인 `--run-id`를 요구합니다. 선행 단계를 자동 실행하지 않으며, matching manifest와 output이 있으면 기본적으로 resume합니다.
-`prepare-input-data`는 cohort item을 4개 worker thread로 병렬 처리하며 최종 manifest는 원래 catalog 순서를 유지합니다.
+`prepare-input-data`는 cohort item을 4개 worker thread로 병렬 처리하고 content 단위 progress bar를 표시하며, 최종 manifest는 원래 catalog 순서를 유지합니다.
 
 editable install을 하지 않은 Linux checkout에서는 저장소 루트에서 먼저 source root를 등록합니다. `src`는 module 이름이 아니므로 `python -m src.validation`은 사용하지 않습니다.
 

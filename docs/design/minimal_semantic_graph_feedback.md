@@ -1,5 +1,7 @@
 # Minimal Semantic Scene Graph 팀 피드백
 
+> 현재 canonical 구현에서는 운영 데이터 수집을 우선하기 위해 이 문서가 제안한 semantic validator를 임시로 비활성화했습니다. Graph scene은 JSON object 여부만 확인합니다.
+
 ## 문제 상황
 
 기존에 억지로 TVTI를 위해서 PPR 등의 내용을 도입하였는데 그것보다는 확실한 scene에 대한 근거를 바탕으로 TVTI를 만드는 것을 추진해보기로 하였음
