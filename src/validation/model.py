@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
 import random
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+
+# PyTorch requires this to make CUDA matrix multiplications deterministic. Keep
+# an explicit caller choice when one is already configured.
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 try:
     import torch
@@ -107,7 +112,7 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.use_deterministic_algorithms(True)
 
 
 def pad_sequences(sequences: list[list[int]], max_length: int, device: "torch.device") -> "torch.Tensor":
@@ -115,7 +120,10 @@ def pad_sequences(sequences: list[list[int]], max_length: int, device: "torch.de
     for index, sequence in enumerate(sequences):
         values = sequence[-max_length:]
         if values:
-            result[index, -len(values):] = torch.tensor(values, dtype=torch.long, device=device)
+            # Right padding avoids fully masked queries under a causal attention
+            # mask. Left-padded queries can produce NaNs in the CUDA Transformer,
+            # which were previously misreported as rank-one predictions.
+            result[index, :len(values)] = torch.tensor(values, dtype=torch.long, device=device)
     return result
 
 
@@ -141,7 +149,12 @@ def in_batch_loss(model: SASRec, batch: list[list[int]], device: "torch.device")
             mask = torch.tensor([int(item) in history for item in target_list], dtype=torch.bool, device=device)
             mask[row_index] = False
             logits[row_index, mask] = -1e4
-    return nn.functional.cross_entropy(logits, torch.arange(len(target_ids), device=device))
+    if not torch.isfinite(logits).all():
+        raise RuntimeError("training produced non-finite logits")
+    loss = nn.functional.cross_entropy(logits, torch.arange(len(target_ids), device=device))
+    if not torch.isfinite(loss):
+        raise RuntimeError("training produced a non-finite loss")
+    return loss
 
 
 def catalog_score_batches(model: SASRec, histories: list[list[int]], *, batch_size: int, device: "torch.device"):
@@ -149,7 +162,10 @@ def catalog_score_batches(model: SASRec, histories: list[list[int]], *, batch_si
     with torch.no_grad():
         for start in range(0, len(histories), batch_size):
             batch = pad_sequences(histories[start:start + batch_size], model.max_length, device)
-            yield start, model.score_catalog(batch).cpu().numpy().astype(np.float32)
+            scores = model.score_catalog(batch)
+            if not torch.isfinite(scores).all():
+                raise RuntimeError("catalog scoring produced non-finite values")
+            yield start, scores.cpu().numpy().astype(np.float32)
 
 
 def save_checkpoint(path: Path, model: SASRec, metadata: dict[str, Any]) -> None:

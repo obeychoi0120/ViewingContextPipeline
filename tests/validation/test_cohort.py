@@ -39,6 +39,28 @@ def test_prepare_cohort_needs_pairs_and_mp4_not_titles(tmp_path) -> None:
     assert not (config.output_dir / "data/cohort/vce_smoke_selection.jsonl").exists()
 
 
+def test_prepare_cohort_uses_full_eligible_catalog_not_selected_user_union(tmp_path) -> None:
+    data = config_data(tmp_path, users=1)
+    videos = data["dataset"]["videos_dir"]
+    videos.mkdir()
+    for item in range(1, 11):
+        (videos / f"{item}.mp4").write_bytes(b"video")
+    data["dataset"]["pairs_tsv"].write_text(
+        "u01\t1 2 3 4 5\n"
+        "u02\t6 7 8 9 10\n",
+        encoding="utf-8",
+    )
+    config = ValidationConfig.model_validate(data)
+
+    prepare_cohort(config, probe=lambda _: 2.0)
+
+    cohort_dir = config.output_dir / "data/cohort"
+    sequences = [json.loads(line) for line in (cohort_dir / "sequences.jsonl").read_text(encoding="utf-8").splitlines()]
+    catalog = [json.loads(line) for line in (cohort_dir / "catalog.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len({item for row in sequences for item in row["sequence"]}) == 5
+    assert [row["item_id"] for row in catalog] == [str(item) for item in range(1, 11)]
+
+
 def test_prepare_cohort_preserves_eligibility_diagnostics_on_failure(tmp_path) -> None:
     data = config_data(tmp_path, users=2)
     videos = data["dataset"]["videos_dir"]
