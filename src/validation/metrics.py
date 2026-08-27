@@ -50,14 +50,29 @@ def paired_relative_bootstrap_ci(
     rng = np.random.default_rng(seed)
     estimates = np.empty(samples, dtype=np.float64)
     chunk = max(1, min(samples, 256))
-    for start in range(0, samples, chunk):
-        count = min(chunk, samples - start)
+    accepted = 0
+    draws = 0
+    zero_control_resamples = 0
+    max_draws = max(samples * 10, 10_000)
+    while accepted < samples:
+        remaining = samples - accepted
+        count = min(4096, max(chunk, remaining * 2))
         indices = rng.integers(0, len(treatment), size=(count, len(treatment)))
         treatment_means = treatment[indices].mean(axis=1)
         control_means = control[indices].mean(axis=1)
-        if np.any(control_means <= 0):
-            raise ValueError("bootstrap resample has zero control mean")
-        estimates[start:start + count] = (treatment_means - control_means) / control_means
+        valid = control_means > 0
+        zero_control_resamples += int(np.count_nonzero(~valid))
+        valid_estimates = (
+            (treatment_means[valid] - control_means[valid]) / control_means[valid]
+        )
+        take = min(remaining, len(valid_estimates))
+        estimates[accepted:accepted + take] = valid_estimates[:take]
+        accepted += take
+        draws += count
+        if draws >= max_draws and accepted < samples:
+            raise ValueError(
+                "relative paired bootstrap could not collect enough positive-control resamples"
+            )
     point = (treatment.mean() - control.mean()) / control.mean()
     return {
         "relative_delta": float(point),
@@ -65,4 +80,8 @@ def paired_relative_bootstrap_ci(
         "ci_high": float(np.quantile(estimates, 0.975)),
         "n_users": int(len(treatment)),
         "bootstrap_samples": samples,
+        "bootstrap_draws": draws,
+        "zero_control_resamples": zero_control_resamples,
+        "control_nonzero_users": int(np.count_nonzero(control)),
+        "conditional_on_positive_control": zero_control_resamples > 0,
     }

@@ -39,3 +39,22 @@ def test_relative_noninferiority_boundary() -> None:
     above_margin = paired_relative_bootstrap_ci(np.full(20, 0.48), desc, samples=200)
     assert np.isclose(exactly_margin["ci_low"], -0.05)
     assert above_margin["ci_low"] > -0.05
+
+
+def test_relative_bootstrap_resamples_sparse_positive_control() -> None:
+    control = np.array([1.0] + [0.0] * 19)
+    treatment = control.copy()
+
+    result = paired_relative_bootstrap_ci(treatment, control, samples=500, seed=42)
+
+    assert result["relative_delta"] == result["ci_low"] == result["ci_high"] == 0.0
+    assert result["bootstrap_samples"] == 500
+    assert result["bootstrap_draws"] > result["bootstrap_samples"]
+    assert result["zero_control_resamples"] > 0
+    assert result["control_nonzero_users"] == 1
+    assert result["conditional_on_positive_control"] is True
+
+
+def test_relative_bootstrap_rejects_zero_full_control_mean() -> None:
+    with pytest.raises(ValueError, match="positive control mean"):
+        paired_relative_bootstrap_ci(np.ones(20), np.zeros(20), samples=100)
