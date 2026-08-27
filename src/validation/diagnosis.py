@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,12 @@ def diagnose_recommendations(config: ValidationConfig, runtime: dict[str, Any]) 
     seeds = config.model.seeds
     metrics = [f"{name}@{cutoff}" for cutoff in config.evaluation.cutoffs for name in ("HR", "NDCG")]
     summary = {arm: {metric: float(np.mean([row[metric] for row in rows if row["arm"] == arm])) for metric in metrics} for arm in arms}
-    catalog_size = len(read_jsonl(Path(runtime["paths"]["cohort_dir"]) / "catalog.jsonl"))
+    cohort_dir = Path(runtime["paths"]["cohort_dir"])
+    catalog_size = len(read_jsonl(cohort_dir / "catalog.jsonl"))
+    eligibility = json.loads((cohort_dir / "eligibility_summary.json").read_text(encoding="utf-8"))
+    eligible_catalog_size = int(eligibility["eligible_items"])
+    catalog_complete = catalog_size == eligible_catalog_size
+    ranking_catalog_complete = {row.get("candidate_count") for row in rows} == {catalog_size}
     diagnostics: dict[str, Any] = {}
     for arm in arms:
         arm_rows = [row for row in rows if row["arm"] == arm]
@@ -82,13 +88,26 @@ def diagnose_recommendations(config: ValidationConfig, runtime: dict[str, Any]) 
         for seed in seeds
         for arm in arms
     )
-    report_ready = len(users) == config.cohort.user_count and len(rows) == expected_rows and checkpoints_complete
+    report_ready = (
+        len(users) == config.cohort.user_count
+        and len(rows) == expected_rows
+        and checkpoints_complete
+        and catalog_complete
+        and ranking_catalog_complete
+    )
     document = {
         "schema_version": "diagnosis/v1", "run_id": runtime["run_id"], "modality": runtime["modality"],
         "metrics": summary, "diagnostics": diagnostics, "paired_bootstrap": comparisons,
         "report_ready": report_ready,
-        "user_count": len(users), "seed_count": len(seeds), "arm_count": len(arms), "checkpoints_complete": checkpoints_complete,
+        "user_count": len(users), "seed_count": len(seeds), "arm_count": len(arms),
+        "checkpoints_complete": checkpoints_complete, "catalog_size": catalog_size,
+        "eligible_catalog_size": eligible_catalog_size, "catalog_complete": catalog_complete,
+        "ranking_catalog_complete": ranking_catalog_complete,
     }
     if not report_ready:
-        raise RuntimeError("diagnosis artifacts are incomplete; report_ready=false")
+        raise RuntimeError(
+            "diagnosis artifacts are incomplete; report_ready=false "
+            f"catalog_size={catalog_size} eligible_catalog_size={eligible_catalog_size} "
+            f"ranking_catalog_complete={ranking_catalog_complete}"
+        )
     return document

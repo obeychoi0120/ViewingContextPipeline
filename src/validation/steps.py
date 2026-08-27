@@ -78,6 +78,27 @@ def _embedding_path(context: RunContext, branch: str) -> Path:
     return context.representations_dir / f"{branch}_embeddings.npz"
 
 
+def _representations_match_catalog(
+    item_index_path: Path,
+    outputs: list[Path],
+    catalog: list[dict[str, Any]],
+    embedding_dim: int,
+) -> bool:
+    if not item_index_path.is_file() or not all(path.is_file() for path in outputs):
+        return False
+    expected_index = {str(row["item_id"]): index for index, row in enumerate(catalog)}
+    try:
+        if read_json(item_index_path) != expected_index:
+            return False
+        for path in outputs:
+            values = np.load(path)["values"]
+            if values.shape != (len(catalog), embedding_dim) or not np.isfinite(values).all():
+                return False
+    except (OSError, KeyError, ValueError):
+        return False
+    return True
+
+
 def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
     config = validation_config(context)
@@ -91,7 +112,12 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     }
     item_index_path = context.representations_dir / "item_index.json"
     outputs = [_embedding_path(context, branch) for branch in sources]
-    if not force and item_index_path.is_file() and all(path.is_file() for path in outputs):
+    if not force and _representations_match_catalog(
+        item_index_path,
+        outputs,
+        catalog,
+        config.encoder.embedding_dim,
+    ):
         return _result("embed-representations", content_count=len(catalog))
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)

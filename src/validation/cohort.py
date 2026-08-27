@@ -181,7 +181,10 @@ def prepare_cohort(
         )
     selected, quotas = select_users(pairs, eligible, count=config.cohort.user_count, seed=config.cohort.seed, boundaries=config.cohort.history_strata, min_length=config.cohort.min_sequence_length, max_length=config.cohort.max_sequence_length)
     sequences = [split_record(row) for row in selected]
-    catalog_ids = sorted({item for row in sequences for item in row["sequence"]}, key=int)
+    # Ranking is defined over the complete eligible item catalog. Restricting this
+    # to items observed in the selected users silently turns the fixed item-1K
+    # protocol into a much smaller cohort-union evaluation.
+    catalog_ids = sorted(eligible, key=int)
     by_item = {row["item_id"]: row for row in inventory}
     catalog = [{key: by_item[item][key] for key in ("item_id", "content_id", "source_video_path", "duration_seconds")} for item in catalog_ids]
     atomic_write_jsonl(output / "sequences.jsonl", sequences)

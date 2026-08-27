@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from validation.metrics import metrics_from_rank, paired_bootstrap_ci, paired_relative_bootstrap_ci
 from validation.recommendation import _metric
@@ -20,6 +21,11 @@ def test_recommendation_metric_passes_target_row_to_ranker() -> None:
     metrics = _metric(scores, history=[0, 2], target=2, cutoffs=[10])
 
     assert metrics["NDCG@10"] == metrics_from_rank(2, [10])["NDCG@10"]
+
+
+def test_ranker_rejects_non_finite_scores_instead_of_reporting_rank_one() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        rank_of_target(np.array([0.5, np.nan, 0.1]), target_row=1)
 
 
 def test_paired_bootstrap_positive_ci() -> None:

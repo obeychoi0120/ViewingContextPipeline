@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from validation.config import ValidationConfig
 from validation.diagnosis import diagnose_recommendations
 from validation.recommendation import RECOMMENDATION_ARMS
-from viewing_context_pipeline.runtime import write_jsonl
+from viewing_context_pipeline.runtime import write_json, write_jsonl
 
 from conftest import config_data
 
@@ -25,6 +27,10 @@ def test_four_arm_contract_and_paired_comparisons(tmp_path) -> None:
             {"content_id": "c2", "item_id": "i2"},
         ],
     )
+    write_json(
+        cohort_dir / "eligibility_summary.json",
+        {"schema_version": "microlens-cohort-eligibility/v1", "eligible_items": 2},
+    )
     scores = {
         "SASRec_ID": 0.30,
         "SASRec_GRAPH_QWEN": 0.40,
@@ -39,6 +45,7 @@ def test_four_arm_contract_and_paired_comparisons(tmp_path) -> None:
                     "seed": seed,
                     "user_id": user_id,
                     "arm": arm,
+                    "candidate_count": 2,
                     "target_frequency_bucket": "warm",
                     "top_item_ids": ["i1", "i2"],
                     **{
@@ -67,6 +74,8 @@ def test_four_arm_contract_and_paired_comparisons(tmp_path) -> None:
     result = diagnose_recommendations(config, runtime)
 
     assert result["report_ready"] is True
+    assert result["catalog_complete"] is True
+    assert result["ranking_catalog_complete"] is True
     assert result["arm_count"] == 4
     assert set(result["paired_bootstrap"]) == {
         "SASRec_GRAPH_QWEN-SASRec_ID",
@@ -76,3 +85,7 @@ def test_four_arm_contract_and_paired_comparisons(tmp_path) -> None:
         "SASRec_GRAPH_GEMINI-SASRec_DESC",
         "SASRec_GRAPH_GEMINI-SASRec_GRAPH_QWEN",
     }
+
+    write_jsonl(cohort_dir / "catalog.jsonl", [{"content_id": "c1", "item_id": "i1"}])
+    with pytest.raises(RuntimeError, match="catalog_size=1 eligible_catalog_size=2"):
+        diagnose_recommendations(config, runtime)

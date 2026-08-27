@@ -48,11 +48,20 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
     item_index = json.loads((representations_dir / "item_index.json").read_text(encoding="utf-8"))
     index_item = {index: item_id for item_id, index in item_index.items()}
     catalog = read_jsonl(root / "data" / "cohort" / "catalog.jsonl")
+    expected_item_index = {row["item_id"]: index for index, row in enumerate(catalog)}
+    if item_index != expected_item_index:
+        raise RuntimeError(
+            "representation item index does not match the cohort catalog; "
+            "rerun embed-representations"
+        )
     item_content = {row["item_id"]: row["content_id"] for row in catalog}
     branch_features = {
         branch: np.load(representations_dir / f"{branch}_embeddings.npz")["values"]
         for branch in ("graph_qwen", "graph_gemini", "desc")
     }
+    for branch, values in branch_features.items():
+        if values.ndim != 2 or values.shape[0] != len(catalog) or not np.isfinite(values).all():
+            raise RuntimeError(f"invalid {branch} representations for catalog size {len(catalog)}")
     arms = dict(RECOMMENDATION_ARMS)
     train_sequences = [_internal(row["train"], item_index) for row in sequences]
     valid_internal = train_sequences
@@ -129,13 +138,14 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
                     top_item_ids = [index_item[value] for value in top]
                     rows.append({
                         "seed": seed, "user_id": sequences[index]["user_id"], "arm": arm, "branch": branch,
+                        "candidate_count": len(item_index),
                         "history_stratum": sequences[index]["stratum"], "target_frequency_bucket": buckets[index], "rank": rank,
                         "target_item_id": index_item[test_targets[index]], "target_content_id": item_content[index_item[test_targets[index]]],
                         "top_item_ids": top_item_ids, "top_content_ids": [item_content[item] for item in top_item_ids],
                         **metrics_from_rank(rank, config.evaluation.cutoffs),
                     })
             checkpoint = output / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
-            save_checkpoint(checkpoint, model, {"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg})
+            save_checkpoint(checkpoint, model, {"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg, "candidate_count": len(item_index)})
             runs.append({"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg, "epochs": history, "checkpoint": str(checkpoint)})
             completed += 1
             elapsed = perf_counter() - started
