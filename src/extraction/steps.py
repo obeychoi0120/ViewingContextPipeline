@@ -427,6 +427,9 @@ def extract_graph_scenes(
                 project_id=str(gemini["project_id"]),
                 location=str(gemini["location"]),
                 model_id=str(gemini["model_id"]),
+                temperature=float(gemini["temperature"]),
+                max_output_tokens=int(gemini["max_output_tokens"]),
+                thinking_level=str(gemini["thinking_level"]),
             )
             pool.generate(tasks, complete_gemini_scene)
     failures = [

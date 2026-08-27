@@ -89,6 +89,8 @@ def test_gemini_backend_interleaves_references(monkeypatch) -> None:
     backend = GeminiBackend(
         client=SimpleNamespace(models=models),
         model_id="gemini",
+        temperature=0.25,
+        thinking_level="low",
     )
     references = [
         {
@@ -103,4 +105,8 @@ def test_gemini_backend_interleaves_references(monkeypatch) -> None:
     contents = models.call["contents"]
     assert [part["kind"] for part in contents] == ["image", "text", "text"]
     assert '"asr_text":"speech"' in contents[1]["text"]
-    assert models.call["config"] == {"temperature": 0.0, "max_output_tokens": 64}
+    assert models.call["config"] == {
+        "temperature": 0.25,
+        "max_output_tokens": 64,
+        "thinking_config": {"thinking_level": "low"},
+    }

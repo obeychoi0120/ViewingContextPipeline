@@ -51,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         if gpu_enabled:
             kwargs["gpus"] = args.gpus
         STEP_HANDLERS[args.step](context, **kwargs)
+    except KeyboardInterrupt:
+        print(f"[INTERRUPTED] {args.step}", file=sys.stderr)
+        return 130
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[FAILED] {args.step}: {exc}", file=sys.stderr)
         return 1

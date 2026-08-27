@@ -25,6 +25,9 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             gpus=args.gpus,
         )
+    except KeyboardInterrupt:
+        print("[INTERRUPTED] pipeline", file=sys.stderr)
+        return 130
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[FAILED] {exc}", file=sys.stderr)
         return 1

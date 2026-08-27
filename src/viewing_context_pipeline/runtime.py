@@ -243,8 +243,34 @@ def _validate_config(value: dict[str, Any]) -> None:
     if set(models) != {"qwen", "bge", "gemini"}:
         raise ConfigError("models must contain exactly qwen, bge, and gemini")
     gemini = _require_mapping(models, "gemini")
-    if set(gemini) != {"project_id", "location", "model_id"}:
-        raise ConfigError("models.gemini must contain project_id, location, and model_id")
+    gemini_keys = {
+        "project_id",
+        "location",
+        "model_id",
+        "temperature",
+        "max_output_tokens",
+        "thinking_level",
+    }
+    if set(gemini) != gemini_keys:
+        raise ConfigError(f"models.gemini must contain exactly {sorted(gemini_keys)}")
     for key in ("project_id", "location", "model_id"):
         if not isinstance(gemini.get(key), str) or not gemini[key].strip():
             raise ConfigError(f"models.gemini.{key} must be a non-empty string")
+    temperature = gemini.get("temperature")
+    if (
+        not isinstance(temperature, (int, float))
+        or isinstance(temperature, bool)
+        or not 0 <= temperature <= 2
+    ):
+        raise ConfigError("models.gemini.temperature must be a number from 0 to 2")
+    max_output_tokens = gemini.get("max_output_tokens")
+    if (
+        not isinstance(max_output_tokens, int)
+        or isinstance(max_output_tokens, bool)
+        or max_output_tokens <= 0
+    ):
+        raise ConfigError("models.gemini.max_output_tokens must be a positive integer")
+    if gemini.get("thinking_level") not in {"low", "medium", "high"}:
+        raise ConfigError(
+            "models.gemini.thinking_level must be low, medium, or high"
+        )

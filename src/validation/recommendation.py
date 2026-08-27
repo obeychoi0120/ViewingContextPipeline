@@ -27,7 +27,8 @@ def _internal(items: list[str], item_index: dict[str, int]) -> list[int]:
 
 
 def _metric(scores: np.ndarray, history: list[int], target: int, cutoffs: list[int]) -> dict[str, float]:
-    return metrics_from_rank(rank_of_target(mask_history(scores, history, target)), cutoffs)
+    masked = mask_history(scores, history, target)
+    return metrics_from_rank(rank_of_target(masked, target), cutoffs)
 
 
 def _validation_ndcg(model, histories_internal, histories, targets, config, device) -> float:

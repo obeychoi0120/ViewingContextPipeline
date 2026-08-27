@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import _thread
 import threading
+from time import monotonic, sleep
 
 from PIL import Image
+import pytest
 
 from extraction.backends.gemini_workers import GeminiWorkerPool
 from extraction.backends.qwen_workers import QwenGenerationTask
@@ -37,6 +40,7 @@ def test_gemini_pool_completes_out_of_order_and_captures_errors(tmp_path) -> Non
         project_id="project",
         location="global",
         model_id="gemini",
+        max_output_tokens=32,
         backend_factory=factory,
     )
     tasks = [
@@ -72,3 +76,36 @@ def test_gemini_pool_rejects_duplicate_task_ids() -> None:
         assert "unique" in str(exc)
     else:
         raise AssertionError("duplicate task ids must fail")
+
+
+def test_gemini_pool_propagates_ctrl_c_without_waiting_for_http_call() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingBackend:
+        def generate(self, images, prompt, max_new_tokens, references=()):
+            started.set()
+            release.wait(timeout=5)
+            return "late result"
+
+    pool = GeminiWorkerPool(
+        1,
+        project_id="project",
+        location="global",
+        model_id="gemini",
+        backend_factory=BlockingBackend,
+    )
+
+    def interrupt_after_start() -> None:
+        assert started.wait(timeout=1)
+        sleep(0.1)
+        _thread.interrupt_main()
+
+    threading.Thread(target=interrupt_after_start, daemon=True).start()
+    began = monotonic()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            pool.generate([QwenGenerationTask("blocked", (), "prompt", 8)])
+        assert monotonic() - began < 1.0
+    finally:
+        release.set()

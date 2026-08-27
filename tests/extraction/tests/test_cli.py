@@ -100,3 +100,15 @@ def test_gpu_count_must_be_positive() -> None:
             "--gpus",
             "0",
         ])
+
+
+def test_keyboard_interrupt_returns_shell_interrupt_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_module.RunContext, "load", lambda _: SimpleNamespace())
+
+    def interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setitem(cli_module.STEP_HANDLERS, "prepare-input-data", interrupt)
+    assert cli_module.main(["prepare-input-data", "--run-id", "demo"]) == 130
