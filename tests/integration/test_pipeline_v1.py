@@ -46,6 +46,9 @@ def context(tmp_path: Path) -> RunContext:
             "project_id": "test-project",
             "location": "global",
             "model_id": "test-gemini",
+            "temperature": 0.0,
+            "max_output_tokens": 1024,
+            "thinking_level": "low",
         },
     }
     config["extraction"]["graph"]["summary_prompt"] = str(
@@ -85,6 +88,28 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
     with pytest.raises(ConfigError, match="protocol.modality"):
         RunContext.load("other", root=context.root)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("temperature", -0.1, "temperature"),
+        ("max_output_tokens", 0, "max_output_tokens"),
+        ("thinking_level", "minimal", "thinking_level"),
+    ],
+)
+def test_config_rejects_invalid_gemini_generation_settings(
+    context: RunContext,
+    key: str,
+    value: object,
+    message: str,
+) -> None:
+    path = context.root / "config/pipeline.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["models"]["gemini"][key] = value
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        RunContext.load("invalid", root=context.root)
 
 
 def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> None:

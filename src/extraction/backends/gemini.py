@@ -17,6 +17,7 @@ RETRYABLE_HTTP_STATUS_CODES = [408, 429, 500, 502, 503, 504]
 class GeminiBackend:
     client: Any
     model_id: str
+    temperature: float = 0.0
     thinking_level: str | None = None
 
     @classmethod
@@ -26,6 +27,7 @@ class GeminiBackend:
         project_id: str,
         model_id: str,
         location: str = "global",
+        temperature: float = 0.0,
         thinking_level: str | None = None,
     ) -> GeminiBackend:
         genai, types = _google_genai()
@@ -43,7 +45,12 @@ class GeminiBackend:
             location=location,
             http_options=types.HttpOptions(timeout=300_000, retry_options=retry),
         )
-        return cls(client=client, model_id=model_id, thinking_level=thinking_level)
+        return cls(
+            client=client,
+            model_id=model_id,
+            temperature=temperature,
+            thinking_level=thinking_level,
+        )
 
     def generate(
         self,
@@ -64,7 +71,7 @@ class GeminiBackend:
                 )
         contents.append(types.Part.from_text(text=prompt))
         config_kwargs: dict[str, Any] = {
-            "temperature": 0.0,
+            "temperature": self.temperature,
             "max_output_tokens": max_new_tokens,
         }
         if self.thinking_level:

@@ -61,7 +61,7 @@ python -m pip install -e ".[qwen,gemini,train]"
 gcloud auth application-default login
 ```
 
-`config/pipeline.yaml`의 data/model 경로와 `models.gemini.project_id`, `location`, `model_id`를 실행 환경에 맞게 수정합니다. Gemini는 API key가 아닌 Vertex AI Application Default Credentials를 사용합니다.
+`config/pipeline.yaml`의 data/model 경로와 `models.gemini`의 `project_id`, `location`, `model_id`, `temperature`, `max_output_tokens`, `thinking_level`을 실행 환경에 맞게 수정합니다. Gemini는 API key가 아닌 Vertex AI Application Default Credentials를 사용합니다. Graph JSON 추출의 기본값은 `temperature: 0.0`, `max_output_tokens: 1024`, `thinking_level: low`입니다.
 
 Graph scene prompt와 minimal taxonomy는 `extraction.semantic_graph`가 코드로 소유합니다. 별도의 ontology JSON은 사용하지 않습니다.
 
@@ -100,6 +100,8 @@ python -m validation run-diagnosis --run-id 1k_pilot_260825
 Graph 명령의 `--model`과 `--source`는 필수입니다. 각 CLI의 `--force`는 선택한 step의 실제 출력만 다시 생성합니다. downstream을 자동 삭제하거나 재실행하지 않습니다.
 
 Qwen을 사용하는 stage는 `--gpus N`으로 GPU 개수를 지정할 수 있습니다. 예를 들어 `--gpus 2`는 CUDA 장치 `0`, `1`에 worker process를 하나씩 만들고 각 process에서 Qwen을 한 번 로드합니다. Gemini extraction에는 `--gpus`를 사용할 수 없으며 `extraction.graph.gemini_concurrency`의 기본 4개 thread로 Vertex API를 호출합니다.
+
+Gemini extraction 중 `Ctrl+C`를 누르면 대기 중 요청은 폐기하고 즉시 exit code 130으로 종료합니다. 이미 Vertex에 전달된 HTTP 요청은 서버에서 잠시 계속될 수 있지만 CLI는 해당 요청의 timeout을 기다리지 않습니다.
 
 ```powershell
 python -m extraction extract-graph-scenes --run-id 1k_pilot_260825 --model qwen --gpus 2

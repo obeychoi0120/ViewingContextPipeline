@@ -20,6 +20,9 @@ models:
     project_id: insight-dev-490002
     location: global
     model_id: gemini-3.7-flash
+    temperature: 0.0
+    max_output_tokens: 1024
+    thinking_level: medium
 extraction:
   visual_evidence:
     image_resolution: [640, 352]
