@@ -17,9 +17,9 @@ models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
   gemini:
-    project_id: replace-with-gcp-project-id
+    project_id: insight-dev-490002
     location: global
-    model_id: gemini-3.5-flash
+    model_id: gemini-3.7-flash
 extraction:
   visual_evidence:
     image_resolution: [640, 352]

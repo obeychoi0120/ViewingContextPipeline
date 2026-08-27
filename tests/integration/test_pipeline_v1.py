@@ -182,6 +182,33 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
     assert failures[0]["scene_idx"] == 1
     assert failures[0]["failure_kind"] == "json_repair"
 
+    @contextmanager
+    def successful_generator(**_kwargs):
+        def generate(tasks, _callback=None):
+            return {task.task_id: json.dumps(graph) for task in tasks}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", successful_generator)
+    result = extraction_steps.extract_graph_scenes(context, model="qwen", force=True)
+
+    assert result["failure_count"] == 0
+    failure_path = context.graph_failure_dir("qwen") / "c1.jsonl"
+    assert not failure_path.exists()
+
+    write_jsonl(failure_path, [])
+
+    @contextmanager
+    def unexpected_generator(**_kwargs):
+        raise AssertionError("completed scenes must be reused")
+        yield
+
+    monkeypatch.setattr(extraction_steps, "_qwen_generator", unexpected_generator)
+    result = extraction_steps.extract_graph_scenes(context, model="qwen")
+
+    assert result["failure_count"] == 0
+    assert not failure_path.exists()
+
 
 def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
     context: RunContext, monkeypatch: pytest.MonkeyPatch
@@ -237,33 +264,6 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
         "text": "video summary",
         "validation_warnings": [],
     }
-
-    @contextmanager
-    def successful_generator(**_kwargs):
-        def generate(tasks, _callback=None):
-            return {task.task_id: json.dumps(graph) for task in tasks}
-
-        yield generate
-
-    monkeypatch.setattr(extraction_steps, "_qwen_generator", successful_generator)
-    result = extraction_steps.extract_graph_scenes(context, model="qwen", force=True)
-
-    assert result["failure_count"] == 0
-    failure_path = context.graph_failure_dir("qwen") / "c1.jsonl"
-    assert not failure_path.exists()
-
-    write_jsonl(failure_path, [])
-
-    @contextmanager
-    def unexpected_generator(**_kwargs):
-        raise AssertionError("completed scenes must be reused")
-        yield
-
-    monkeypatch.setattr(extraction_steps, "_qwen_generator", unexpected_generator)
-    result = extraction_steps.extract_graph_scenes(context, model="qwen")
-
-    assert result["failure_count"] == 0
-    assert not failure_path.exists()
 
 
 def test_embedding_uses_fixed_files_and_no_manifest(
