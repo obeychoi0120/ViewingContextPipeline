@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
@@ -11,43 +10,12 @@ from tqdm import tqdm
 from .fixed30 import prepare_visual_item
 
 
-class MicroLensPreparationError(RuntimeError):
-    pass
-
-
 PREPARATION_WORKERS = 4
-
-
-def _item_values(path: Path, label: str) -> dict[str, str]:
-    values: dict[str, str] = {}
-    try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
-            for line_number, row in enumerate(csv.reader(handle), start=1):
-                if not row or not any(cell.strip() for cell in row):
-                    continue
-                item_id = row[0].strip()
-                if line_number == 1 and not item_id.isdigit():
-                    continue
-                if not item_id.isdigit() or int(item_id) <= 0 or len(row) < 2:
-                    raise MicroLensPreparationError(f"invalid {label} row {line_number}")
-                item_id = str(int(item_id))
-                if item_id in values:
-                    raise MicroLensPreparationError(f"duplicate {label} item {item_id}")
-                value = ",".join(row[1:]).strip()
-                if value:
-                    values[item_id] = value
-    except OSError as exc:
-        raise MicroLensPreparationError(f"failed to read {label}: {path}") from exc
-    if not values:
-        raise MicroLensPreparationError(f"{label} contains no values: {path}")
-    return values
 
 
 def prepare_catalog(
     catalog: list[dict[str, Any]],
     *,
-    titles_csv: str | Path,
-    tags_csv: str | Path,
     assets_root: str | Path,
     output_root: str | Path,
     image_size: tuple[int, int],
@@ -55,8 +23,6 @@ def prepare_catalog(
 ) -> dict[str, Any]:
     """Prepare exactly the cohort catalog from caller-owned MicroLens MP4 files."""
 
-    titles = _item_values(Path(titles_csv), "titles")
-    tags = _item_values(Path(tags_csv), "tags")
     results: list[tuple[dict[str, str] | None, dict[str, str] | None]] = [
         (None, None) for _ in catalog
     ]
@@ -70,13 +36,7 @@ def prepare_catalog(
                 source_video_path=Path(str(row["source_video_path"])),
                 assets_root=assets_root,
                 output_root=output_root,
-                metadata={
-                    "title": titles.get(item_id, ""),
-                    "tags": tags.get(item_id, ""),
-                    "dataset_id": "microlens-100k",
-                    "source_item_id": item_id,
-                    "duration": row.get("duration_seconds"),
-                },
+                duration_seconds=row.get("duration_seconds"),
                 image_size=image_size,
                 force=force,
             )
@@ -109,10 +69,13 @@ def prepare_catalog(
     cohort_root = Path(output_root) / "data" / "cohort"
     cohort_root.mkdir(parents=True, exist_ok=True)
     failure_path = cohort_root / "preparation_failures.jsonl"
-    failure_path.write_text(
-        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in failures),
-        encoding="utf-8",
-    )
+    if failures:
+        failure_path.write_text(
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in failures),
+            encoding="utf-8",
+        )
+    else:
+        failure_path.unlink(missing_ok=True)
     return {
         "selected": len(catalog),
         "succeeded": len(prepared_rows),

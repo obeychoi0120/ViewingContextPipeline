@@ -11,20 +11,21 @@ from typing import Any
 class GraphParseResult:
     graph: dict[str, Any] | None
     error: str | None = None
+    parse_mode: str | None = None
 
 
 def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Parse one JSON object, then apply one deterministic repair pass."""
     raw = str(text or "")
     if not raw.strip():
-        return GraphParseResult(None, "empty VLM output")
+        return GraphParseResult(graph=None, error="empty VLM output")
     parsed = _parse_json_candidates(raw)
     if parsed is not None:
-        return GraphParseResult(parsed)
+        return GraphParseResult(graph=parsed, parse_mode="native")
     repaired = repair_graph_json_once(raw)
     if repaired is not None:
-        return GraphParseResult(repaired)
-    return GraphParseResult(None, "JSON repair failed")
+        return GraphParseResult(graph=repaired, parse_mode="repaired")
+    return GraphParseResult(graph=None, error="JSON repair failed")
 
 
 def repair_graph_json_once(text: str) -> dict[str, Any] | None:

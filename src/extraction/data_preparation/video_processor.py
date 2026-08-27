@@ -50,26 +50,6 @@ def _last_decodable_frame_timestamp_seconds(video_path: Path) -> float:
     return max(frame_timestamps)
 
 
-def get_video_duration_seconds(video_path: str | Path) -> float:
-    path = Path(video_path)
-    if not path.is_file():
-        raise FileNotFoundError(f"Video source is missing: {path}")
-    try:
-        completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        duration = float(completed.stdout.strip())
-    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
-        raise RuntimeError(f"Could not determine video duration: {path}") from exc
-    if not math.isfinite(duration) or duration <= 0:
-        raise RuntimeError(f"Video duration must be positive: {path}")
-    return duration
-
-
 def extract_resized_keyframes(
     video_path: str | Path,
     timestamps: list[int],

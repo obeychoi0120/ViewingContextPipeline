@@ -47,8 +47,28 @@ def test_description_scene_uses_chronological_images(tmp_path: Path) -> None:
     )
 
     assert records[0]["keyframes"] == [5, 15, 25]
+    assert set(records[0]) == {
+        "schema_version",
+        "content_id",
+        "scene_idx",
+        "keyframes",
+        "description",
+    }
     assert len(backend.calls[0][0]) == 3
     assert backend.calls[0][1:] == ("describe", 128, ())
+
+
+def test_description_scene_prompt_uses_strict_visible_only_grounding() -> None:
+    root = Path(__file__).resolve().parents[3]
+    prompt = (root / "config/prompts/description_scene_v1.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "using only facts directly" in prompt
+    assert "Do not infer story, intent, identity, demographics" in prompt
+    assert "purpose, audience" in prompt
+    assert "cultural context, or actual" in prompt
+    assert "Do not read or transcribe visible text" in prompt
 
 
 def test_description_summary_preserves_scene_order_and_uses_soft_word_guidance() -> None:

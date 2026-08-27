@@ -10,6 +10,7 @@ from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
     SemanticGraphError,
     extract_scene_graphs,
+    graph_semantic_warnings,
     graph_summary_prompt,
     parse_graph_output,
     taxonomy_contract,
@@ -58,9 +59,16 @@ def test_json_repair_accepts_trailing_comma_but_rejects_empty_output() -> None:
 def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
     dangling = graph_with_dangling_reference()
     assert parse_graph_output(json.dumps(dangling)) == dangling
+    assert graph_semantic_warnings(dangling) == [
+        "unresolved_reference:static_relations[0].object_id='e4'"
+    ]
 
     arbitrary = {"triples": [], "extra": "preserved"}
     assert parse_graph_output(json.dumps(arbitrary)) == arbitrary
+    assert graph_semantic_warnings(arbitrary) == [
+        "missing_top_level_fields:setting_context,entities,events,static_relations,semantic_topics,affect",
+        "unexpected_top_level_fields:extra,triples",
+    ]
 
 
 def test_taxonomy_and_prompt_are_multi_image_and_consistent() -> None:
@@ -136,7 +144,17 @@ def test_scene_graph_uses_one_chronological_multi_image_call(tmp_path: Path) -> 
     )
 
     assert records[0]["graph"]["static_relations"][0]["object_id"] == "e4"
-    assert set(records[0]) == {"scene_idx", "keyframes", "graph"}
+    assert set(records[0]) == {
+        "scene_idx",
+        "keyframes",
+        "graph",
+        "parse_mode",
+        "semantic_warnings",
+    }
     assert records[0]["keyframes"] == [5, 15, 25]
+    assert records[0]["parse_mode"] == "native"
+    assert records[0]["semantic_warnings"] == [
+        "unresolved_reference:static_relations[0].object_id='e4'"
+    ]
     assert len(backend.calls) == 1
     assert len(backend.calls[0][0]) == 3

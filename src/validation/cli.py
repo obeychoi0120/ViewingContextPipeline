@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from validation.steps import STEP_HANDLERS
-from viewing_context_pipeline.runtime import RunContext
+from pipeline_runtime import RunContext
 
 
 def main(argv: list[str] | None = None) -> int:

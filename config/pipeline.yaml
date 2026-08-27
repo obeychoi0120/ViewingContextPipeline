@@ -10,8 +10,6 @@ protocol:
 artifacts_root: artifacts
 data:
   videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k_videos
-  titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
-  tags_csv: /home_nvme/shared/data/microlens_100k/Annotations/tags_to_summary.csv
   pairs_tsv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs_1k.tsv
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
@@ -30,14 +28,12 @@ extraction:
     summary_prompt: config/prompts/graph_summary_v1.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
-    do_sample: false
     gemini_concurrency: 4
   description:
     scene_prompt: config/prompts/description_scene_v1.md
     summary_prompt: config/prompts/description_summary_v1.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
-    do_sample: false
 validation:
   cohort:
     user_count: 59
@@ -46,10 +42,8 @@ validation:
     max_sequence_length: 13
     history_strata: [5, 10, 20, 50]
   encoder:
-    model_id: BAAI/bge-large-en-v1.5
     embedding_dim: 1024
     max_length: 512
-    normalize_embeddings: true
     batch_size: 32
   model:
     max_sequence_length: 10
@@ -67,3 +61,8 @@ validation:
     primary_cutoff: 10
     bootstrap_samples: 10000
     non_inferiority_margin: 0.05
+    familywise_alpha: 0.05
+    multiple_comparison_correction: bonferroni
+    # Provisional PoC gates: confirm these before interpreting a pilot result.
+    min_scene_coverage: 0.95
+    max_arm_coverage_gap: 0.05

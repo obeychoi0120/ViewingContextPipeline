@@ -1,25 +1,21 @@
 from __future__ import annotations
 
-import csv
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 from unittest import mock
 
 import numpy as np
 
-from extraction.data_preparation.fixed30 import build_fixed_30s_windows
+from extraction.data_preparation.fixed30 import (
+    build_fixed_30s_windows,
+    prepare_visual_item,
+)
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.data_preparation.video_processor import (
     _last_decodable_frame_timestamp_seconds,
     extract_resized_keyframes,
 )
-
-
-def _write_values(path: Path, rows: list[tuple[str, str]]) -> None:
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["item_id", "value"])
-        writer.writerows(rows)
 
 
 def test_fixed_30s_sampling_uses_5_15_25_second_keyframes() -> None:
@@ -85,15 +81,45 @@ def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path
     assert "-show_frames" in command
 
 
+def test_prepare_visual_item_reuses_catalog_duration_and_removes_legacy_metadata(
+    tmp_path: Path,
+) -> None:
+    video = tmp_path / "video.mp4"
+    video.touch()
+    output_root = tmp_path / "run"
+    metadata_path = output_root / "data/cohort/metadata/content-1.json"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text('{"title": "stale"}\n', encoding="utf-8")
+
+    with mock.patch(
+        "extraction.data_preparation.fixed30.extract_resized_keyframes"
+    ) as extract:
+        result = prepare_visual_item(
+            content_id="content-1",
+            source_video_path=video,
+            assets_root=tmp_path / "assets",
+            output_root=output_root,
+            duration_seconds=30.1,
+            image_size=(640, 352),
+        )
+
+    assert result == {"content_id": "content-1"}
+    timestamp_path = tmp_path / "assets/content-1/assets/timestamp_fixed_30s.json"
+    scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
+    assert scenes[-1]["scene_end"] == 31
+    assert extract.call_args.args[1] == [5, 15, 25, 30]
+    assert not metadata_path.exists()
+    assert not metadata_path.parent.exists()
+
+
 def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
-    titles = tmp_path / "titles.csv"
-    tags = tmp_path / "tags.csv"
-    _write_values(titles, [("1", "one"), ("2", "two")])
-    _write_values(tags, [("1", "tag-a"), ("2", "tag-b")])
     catalog = [
         {"item_id": "1", "content_id": "microlens_100k_00001", "source_video_path": str(tmp_path / "1.mp4"), "duration_seconds": 30.0},
         {"item_id": "2", "content_id": "microlens_100k_00002", "source_video_path": str(tmp_path / "2.mp4"), "duration_seconds": 31.0},
     ]
+    failure_path = tmp_path / "run/data/cohort/preparation_failures.jsonl"
+    failure_path.parent.mkdir(parents=True)
+    failure_path.write_text('{"error": "stale"}\n', encoding="utf-8")
 
     with (
         mock.patch(
@@ -109,8 +135,6 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         progress = progress_factory.return_value.__enter__.return_value
         result = prepare_catalog(
             catalog,
-            titles_csv=titles,
-            tags_csv=tags,
             assets_root=tmp_path / "assets",
             output_root=tmp_path / "run",
             image_size=(640, 352),
@@ -130,4 +154,10 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         "1.mp4",
         "2.mp4",
     ]
+    assert sorted(call.kwargs["duration_seconds"] for call in process.call_args_list) == [
+        30.0,
+        31.0,
+    ]
+    assert all("metadata" not in call.kwargs for call in process.call_args_list)
+    assert not failure_path.exists()
     assert not (tmp_path / "run/data/cohort/extraction_manifest.csv").exists()

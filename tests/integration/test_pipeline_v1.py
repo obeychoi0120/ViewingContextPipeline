@@ -9,11 +9,9 @@ import pytest
 import yaml
 
 import extraction.steps as extraction_steps
-import viewing_context_pipeline.pipeline as pipeline_module
 import validation.steps as validation_steps
 from extraction.backends.qwen_workers import QwenGenerationTask
-from viewing_context_pipeline.pipeline import STAGES, execute_stage, run_pipeline
-from viewing_context_pipeline.runtime import ConfigError, RunContext, read_jsonl, write_json, write_jsonl
+from pipeline_runtime import ConfigError, RunContext, read_jsonl, write_json, write_jsonl
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,8 +22,7 @@ def context(tmp_path: Path) -> RunContext:
     data = tmp_path / "data"
     videos = data / "videos"
     videos.mkdir(parents=True)
-    for name in ("titles.csv", "tags.csv", "pairs.tsv"):
-        (data / name).write_text("fixture\n", encoding="utf-8")
+    (data / "pairs.tsv").write_text("fixture\n", encoding="utf-8")
     models = tmp_path / "models"
     for name in ("qwen", "bge"):
         (models / name).mkdir(parents=True)
@@ -35,8 +32,6 @@ def context(tmp_path: Path) -> RunContext:
     config["artifacts_root"] = str(tmp_path / "artifacts")
     config["data"] = {
         "videos_dir": str(videos),
-        "titles_csv": str(data / "titles.csv"),
-        "tags_csv": str(data / "tags.csv"),
         "pairs_tsv": str(data / "pairs.tsv"),
     }
     config["models"] = {
@@ -64,24 +59,16 @@ def context(tmp_path: Path) -> RunContext:
     return RunContext.load("test_run", root=tmp_path)
 
 
-def test_public_stage_order_is_fixed() -> None:
-    assert STAGES == (
-        "prepare-cohort",
-        "prepare-input-data",
-        "extract-graph-scenes-qwen",
-        "summarize-graph-qwen",
-        "extract-graph-scenes-gemini",
-        "summarize-graph-gemini",
-        "extract-description-scenes",
-        "summarize-description",
-        "embed-representations",
-        "run-recommendation",
-        "run-diagnosis",
-    )
-
-
 def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert context.config["schema_version"] == "viewing-context-config/v1"
+    assert set(context.config["data"]) == {"videos_dir", "pairs_tsv"}
+    assert "do_sample" not in context.config["extraction"]["graph"]
+    assert "do_sample" not in context.config["extraction"]["description"]
+    assert set(context.config["validation"]["encoder"]) == {
+        "embedding_dim",
+        "max_length",
+        "batch_size",
+    }
     path = context.root / "config/pipeline.yaml"
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     value["protocol"]["modality"] = "multimodal"
@@ -118,40 +105,6 @@ def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> Non
     assert not hasattr(context, "visual_manifest")
     assert not hasattr(context, "representations_manifest")
     assert not hasattr(context, "recommendations_manifest")
-
-
-def test_execute_stage_calls_handler_without_manifest_gate(
-    context: RunContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[tuple[RunContext, bool]] = []
-
-    def handler(selected: RunContext, *, force: bool = False) -> dict:
-        calls.append((selected, force))
-        return {"stage": "prepare-cohort"}
-
-    monkeypatch.setattr(pipeline_module, "handlers", lambda: {"prepare-cohort": handler})
-    assert execute_stage(context, "prepare-cohort", force=True)["stage"] == "prepare-cohort"
-    assert calls == [(context, True)]
-
-
-def test_root_pipeline_runs_every_stage_in_order(
-    context: RunContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(
-        pipeline_module,
-        "preflight",
-        lambda _context: {"ready": True, "checks": {}},
-    )
-    monkeypatch.setattr(
-        pipeline_module,
-        "execute_stage",
-        lambda _context, stage, **_kwargs: calls.append(stage) or {"stage": stage},
-    )
-    assert run_pipeline(context) == 0
-    assert calls == list(STAGES)
-    assert not (context.run_root / "pipeline_manifest.json").exists()
-    assert not (context.run_root / "manifests").exists()
 
 
 def test_graph_scene_failure_is_recorded_and_stage_continues(
@@ -202,7 +155,14 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
     assert result["failure_count"] == 1
     scenes = read_jsonl(context.graph_scene_dir("qwen") / "c1.jsonl")
     assert len(scenes) == 1
-    assert set(scenes[0]) == {"scene_idx", "keyframes", "graph"}
+    assert set(scenes[0]) == {
+        "scene_idx",
+        "keyframes",
+        "graph",
+        "parse_mode",
+        "semantic_warnings",
+    }
+    assert scenes[0]["parse_mode"] == "native"
     failures = read_jsonl(context.graph_failure_dir("qwen") / "c1.jsonl")
     assert failures[0]["scene_idx"] == 1
     assert failures[0]["failure_kind"] == "json_repair"
@@ -279,7 +239,15 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
     monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
     extraction_steps.summarize_graph(context, source="qwen")
 
-    assert set(read_jsonl(scene_path)[0]) == {"scene_idx", "keyframes", "graph"}
+    compacted = read_jsonl(scene_path)[0]
+    assert set(compacted) == {
+        "scene_idx",
+        "keyframes",
+        "graph",
+        "parse_mode",
+        "semantic_warnings",
+    }
+    assert compacted["parse_mode"] == "unknown"
     summary = json.loads(
         (context.graph_summary_dir("qwen") / "c1.json").read_text(encoding="utf-8")
     )
@@ -302,6 +270,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
             context.graph_summary_dir(source) / f"{content_id}.json",
             {
                 "schema_version": "graph-video-summary/v1",
+                "content_id": content_id,
                 "status": "complete",
                 "text": f"{source} graph",
             },
@@ -310,22 +279,65 @@ def test_embedding_uses_fixed_files_and_no_manifest(
         context.description_summary_dir / f"{content_id}.json",
         {
             "schema_version": "description-video-summary/v1",
+            "content_id": content_id,
             "status": "complete",
             "text": "description",
         },
     )
     dimension = validation_steps.validation_config(context).encoder.embedding_dim
-    monkeypatch.setattr(
-        validation_steps,
-        "encode_bge_texts",
-        lambda _settings, texts: np.ones((len(texts), dimension), dtype=np.float32),
-    )
+    loads: list[object] = []
+    encoded_texts: list[list[str]] = []
+
+    class FakeEncoder:
+        def __init__(self, settings):
+            loads.append(settings)
+
+        def encode(self, texts):
+            encoded_texts.append(list(texts))
+            return np.ones((len(texts), dimension), dtype=np.float32)
+
+    monkeypatch.setattr(validation_steps, "BGETextEncoder", FakeEncoder)
 
     validation_steps.embed_representations(context)
 
     assert (context.representations_dir / "item_index.json").is_file()
     for branch in ("graph_qwen", "graph_gemini", "desc"):
         assert (context.representations_dir / f"{branch}_embeddings.npz").is_file()
+    assert len(loads) == 1
+    assert len(encoded_texts) == 3
+
+    (context.representations_dir / "desc_embeddings.npz").unlink()
+    validation_steps.embed_representations(context)
+
+    assert len(loads) == 2
+    assert len(encoded_texts) == 4
+    assert encoded_texts[-1] == ["description"]
+
+    stable = {
+        branch: np.load(
+            context.representations_dir / f"{branch}_embeddings.npz"
+        )["values"].copy()
+        for branch in ("graph_qwen", "graph_gemini", "desc")
+    }
+
+    class FailingEncoder:
+        def __init__(self, _settings):
+            self.calls = 0
+
+        def encode(self, texts):
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("simulated second-branch failure")
+            return np.full((len(texts), dimension), 2.0, dtype=np.float32)
+
+    monkeypatch.setattr(validation_steps, "BGETextEncoder", FailingEncoder)
+    with pytest.raises(RuntimeError, match="second-branch failure"):
+        validation_steps.embed_representations(context, force=True)
+    for branch, expected in stable.items():
+        actual = np.load(
+            context.representations_dir / f"{branch}_embeddings.npz"
+        )["values"]
+        assert np.array_equal(actual, expected)
     assert not (context.representations_dir / "manifest.json").exists()
 
 
@@ -336,3 +348,24 @@ def test_missing_summary_error_names_the_actual_path(context: RunContext) -> Non
     with pytest.raises(validation_steps.ValidationStepError, match="missing graph_qwen summary directory") as raised:
         validation_steps.embed_representations(context)
     assert str(expected) in str(raised.value)
+
+
+def test_diagnosis_recomputes_runtime_data_and_overwrites_stale_pass(
+    context: RunContext,
+) -> None:
+    context.initialize()
+    write_json(
+        context.diagnosis_path,
+        {
+            "schema_version": "diagnosis/v2",
+            "runtime_decision": {"status": "pass", "checks": {}, "errors": []},
+        },
+    )
+
+    with pytest.raises(validation_steps.ValidationStepError, match="runtime diagnosis failed"):
+        validation_steps.run_diagnosis(context)
+
+    diagnosis = json.loads(context.diagnosis_path.read_text(encoding="utf-8"))
+    assert diagnosis["schema_version"] == "diagnosis/v2"
+    assert diagnosis["runtime_decision"]["status"] == "fail"
+    assert "report_ready" not in diagnosis

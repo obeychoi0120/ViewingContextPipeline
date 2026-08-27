@@ -165,7 +165,11 @@ def prepare_cohort(
         "videos_dir": str(config.dataset.videos_dir),
     }
     atomic_write_jsonl(output / "item_inventory.jsonl", inventory)
-    atomic_write_jsonl(output / "failures.jsonl", failures)
+    failure_path = output / "failures.jsonl"
+    if failures:
+        atomic_write_jsonl(failure_path, failures)
+    else:
+        failure_path.unlink(missing_ok=True)
     atomic_write_json(output / "eligibility_summary.json", eligibility)
     print(
         "[COHORT] "

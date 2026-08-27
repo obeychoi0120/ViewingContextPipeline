@@ -28,12 +28,13 @@ from extraction.monitoring import (
 )
 from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
+    graph_semantic_warnings,
     graph_summary_prompt,
     parse_or_repair_graph,
     validate_summary as validate_graph_summary,
 )
 from extraction.summary_validation import summary_soft_warnings
-from viewing_context_pipeline.runtime import (
+from pipeline_runtime import (
     RunContext,
     read_json,
     read_jsonl,
@@ -176,12 +177,38 @@ def _minimal_graph_records(
                 "scene_idx": row["scene_idx"],
                 "keyframes": row["keyframes"],
                 "graph": row["graph"],
+                "parse_mode": row.get("parse_mode", "unknown"),
+                "semantic_warnings": row.get(
+                    "semantic_warnings", graph_semantic_warnings(row["graph"])
+                ),
             }
             for row in records
         ]
     except KeyError as exc:
         raise ExtractionStepError(
             f"invalid graph scene file, missing {exc.args[0]}: {path}"
+        ) from exc
+    if minimal != records:
+        write_jsonl(path, minimal)
+    return minimal
+
+
+def _minimal_description_records(
+    records: list[dict[str, Any]],
+    path: Path,
+) -> list[dict[str, Any]]:
+    required = (
+        "schema_version",
+        "content_id",
+        "scene_idx",
+        "keyframes",
+        "description",
+    )
+    try:
+        minimal = [{key: row[key] for key in required} for row in records]
+    except KeyError as exc:
+        raise ExtractionStepError(
+            f"invalid description scene file, missing {exc.args[0]}: {path}"
         ) from exc
     if minimal != records:
         write_jsonl(path, minimal)
@@ -258,8 +285,6 @@ def prepare_input_data(context: RunContext, *, force: bool = False) -> dict[str,
     settings = context.config["extraction"]["visual_evidence"]
     result = prepare_catalog(
         catalog,
-        titles_csv=context.path("data", "titles_csv"),
-        tags_csv=context.path("data", "tags_csv"),
         assets_root=context.cohort_dir / "source_assets",
         output_root=context.run_root,
         image_size=tuple(settings["image_resolution"]),
@@ -348,6 +373,8 @@ def extract_graph_scenes(
                         "scene_idx": row["scene_idx"],
                         "keyframes": row["keyframes"],
                         "graph": result.graph,
+                        "parse_mode": result.parse_mode,
+                        "semantic_warnings": graph_semantic_warnings(result.graph),
                     })
                 else:
                     failures.append({
@@ -584,6 +611,7 @@ def extract_description_scenes(
             }
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
+                existing = _minimal_description_records(existing, path)
                 records_by_content[content_id] = existing
                 failures_by_content[content_id] = failures
                 continue
@@ -606,10 +634,7 @@ def extract_description_scenes(
                         common = {
                             "content_id": visual["content_id"],
                             "scene_idx": row["scene_idx"],
-                            "scene_start_seconds": row["scene_start_seconds"],
-                            "scene_end_seconds": row["scene_end_seconds"],
                             "keyframes": row["keyframes"],
-                            "image_paths": row["image_paths"],
                         }
                         if not description:
                             failures.append({
@@ -691,6 +716,7 @@ def summarize_description(
         if not records:
             empty_scene_files += 1
             continue
+        records = _minimal_description_records(records, scene_path)
         if any(row.get("schema_version") != SCENE_SCHEMA_VERSION for row in records):
             raise ExtractionStepError(f"invalid description scene file: {scene_path}")
         output_path = context.description_summary_dir / f"{records[0]['content_id']}.json"

@@ -48,7 +48,6 @@ def extract_scene_descriptions(
                 "content_id": content_id,
                 "scene_idx": scene_idx,
                 "keyframes": keyframes,
-                "image_paths": image_paths,
                 "description": description,
             }
         )

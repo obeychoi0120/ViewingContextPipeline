@@ -108,7 +108,7 @@ class RunContext:
 
     @classmethod
     def load(cls, run_id: str, *, root: Path | None = None) -> "RunContext":
-        repo_root = (root or Path(__file__).resolve().parents[2]).resolve()
+        repo_root = (root or Path(__file__).resolve().parents[1]).resolve()
         selected = str(run_id or "").strip()
         if not selected or selected in {".", ".."} or Path(selected).name != selected or "\\" in selected:
             raise ConfigError("run_id must be a single non-empty directory name")
@@ -215,11 +215,25 @@ def _validate_config(value: dict[str, Any]) -> None:
         raise ConfigError(
             "extraction must contain visual_evidence, graph, and description"
         )
+    visual_evidence = _require_mapping(extraction, "visual_evidence")
+    if set(visual_evidence) != {"image_resolution"}:
+        raise ConfigError("extraction.visual_evidence must contain image_resolution")
+    resolution = visual_evidence.get("image_resolution")
+    if (
+        not isinstance(resolution, list)
+        or len(resolution) != 2
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            for value in resolution
+        )
+    ):
+        raise ConfigError(
+            "extraction.visual_evidence.image_resolution must be two positive integers"
+        )
     generation_keys = {
         "summary_prompt",
         "scene_max_new_tokens",
         "summary_max_new_tokens",
-        "do_sample",
     }
     graph_keys = generation_keys | {"gemini_concurrency"}
     description_keys = generation_keys | {"scene_prompt"}
@@ -230,16 +244,27 @@ def _validate_config(value: dict[str, Any]) -> None:
             raise ConfigError(
                 f"extraction.{arm} must contain exactly {sorted(expected)}"
             )
-        if settings.get("do_sample") is not False:
-            raise ConfigError(f"extraction.{arm}.do_sample must be false")
+        for key in ("scene_max_new_tokens", "summary_max_new_tokens"):
+            setting = settings.get(key)
+            if (
+                not isinstance(setting, int)
+                or isinstance(setting, bool)
+                or setting <= 0
+            ):
+                raise ConfigError(f"extraction.{arm}.{key} must be a positive integer")
+        for key in ("summary_prompt", "scene_prompt"):
+            if key in settings and (
+                not isinstance(settings.get(key), str) or not settings[key].strip()
+            ):
+                raise ConfigError(f"extraction.{arm}.{key} must be a non-empty path")
     concurrency = extraction["graph"].get("gemini_concurrency")
     if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency <= 0:
         raise ConfigError("extraction.graph.gemini_concurrency must be a positive integer")
     _require_mapping(value, "validation")
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
-    if set(data) != {"videos_dir", "titles_csv", "tags_csv", "pairs_tsv"}:
-        raise ConfigError("data must contain videos_dir, titles_csv, tags_csv, pairs_tsv")
+    if set(data) != {"videos_dir", "pairs_tsv"}:
+        raise ConfigError("data must contain exactly videos_dir and pairs_tsv")
     if set(models) != {"qwen", "bge", "gemini"}:
         raise ConfigError("models must contain exactly qwen, bge, and gemini")
     gemini = _require_mapping(models, "gemini")

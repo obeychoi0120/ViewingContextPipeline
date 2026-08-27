@@ -11,7 +11,11 @@ from .config import ValidationConfig
 from .io import atomic_write_jsonl, read_jsonl
 from .metrics import metrics_from_rank
 from .model import SASRec, catalog_score_batches, in_batch_loss, require_torch, save_checkpoint, seed_everything, torch
-from .scoring import mask_history, rank_of_target
+from .scoring import mask_history, rank_of_target, top_k_rows
+
+
+TRAINING_RUNS_FILENAME = "training_runs.jsonl"
+TRAINING_RUN_SCHEMA_VERSION = "sasrec-training-run/v1"
 
 
 RECOMMENDATION_ARMS: dict[str, str | None] = {
@@ -37,6 +41,44 @@ def _validation_ndcg(model, histories_internal, histories, targets, config, devi
         for offset, scores in enumerate(batch_scores):
             values.append(_metric(scores, histories[start + offset], targets[start + offset], [10])["NDCG@10"])
     return float(np.mean(values))
+
+
+def _training_run_record(
+    *,
+    run_id: str,
+    seed: int,
+    arm: str,
+    branch: str | None,
+    history: list[dict[str, Any]],
+    best_ndcg: float,
+    best_epoch: int,
+    checkpoint: Path,
+    candidate_count: int,
+    elapsed_seconds: float,
+    max_epochs: int,
+) -> dict[str, Any]:
+    return {
+        "schema_version": TRAINING_RUN_SCHEMA_VERSION,
+        "run_id": run_id,
+        "seed": seed,
+        "arm": arm,
+        "branch": branch,
+        "candidate_count": candidate_count,
+        "checkpoint": str(checkpoint),
+        "epochs_completed": len(history),
+        "early_stopped": len(history) < max_epochs,
+        "elapsed_seconds": elapsed_seconds,
+        "best_validation": {
+            "metric": "NDCG@10",
+            "value": best_ndcg,
+            "epoch": best_epoch,
+        },
+        "epochs": history,
+    }
+
+
+def _persist_training_runs(path: Path, runs: list[dict[str, Any]]) -> None:
+    atomic_write_jsonl(path, runs)
 
 
 def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any]) -> dict[str, Any]:
@@ -78,6 +120,8 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
     output.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
+    training_runs_path = output / TRAINING_RUNS_FILENAME
+    _persist_training_runs(training_runs_path, runs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     total = len(config.model.seeds) * len(arms)
     completed = 0
@@ -85,6 +129,7 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
     for seed in config.model.seeds:
         for arm, branch in arms.items():
             print(f"[PHASE] run_recommendation train seed={seed} arm={arm}", flush=True)
+            arm_started = perf_counter()
             seed_everything(seed)
             features = None if branch is None else branch_features[branch]
             arm_kind = (
@@ -97,6 +142,7 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
             model = SASRec(len(item_index), config.model.max_sequence_length, config.model.embedding_dim, config.model.num_blocks, config.model.num_heads, config.model.dropout, arm=arm_kind, item_features=features).to(device)
             optimizer = torch.optim.AdamW(model.parameters(), lr=config.model.learning_rate, weight_decay=0.1)
             best_ndcg = -1.0
+            best_epoch = 0
             best_state = None
             stale = 0
             rng = np.random.default_rng(seed)
@@ -118,7 +164,7 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
                 ndcg = _validation_ndcg(model, valid_internal, valid_history, valid_targets, config, device)
                 history.append({"epoch": epoch, "loss": float(np.mean(losses)), "NDCG@10": ndcg})
                 if ndcg > best_ndcg:
-                    best_ndcg, stale = ndcg, 0
+                    best_ndcg, best_epoch, stale = ndcg, epoch, 0
                     best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
                 else:
                     stale += 1
@@ -133,8 +179,7 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
                     masked = mask_history(scores, test_history[index], test_targets[index])
                     rank = rank_of_target(masked, test_targets[index])
                     count = min(20, len(masked))
-                    top = np.argpartition(-masked, count - 1)[:count]
-                    top = top[np.argsort(-masked[top], kind="stable")].tolist()
+                    top = top_k_rows(masked, count)
                     top_item_ids = [index_item[value] for value in top]
                     rows.append({
                         "seed": seed, "user_id": sequences[index]["user_id"], "arm": arm, "branch": branch,
@@ -145,8 +190,35 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
                         **metrics_from_rank(rank, config.evaluation.cutoffs),
                     })
             checkpoint = output / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
-            save_checkpoint(checkpoint, model, {"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg, "candidate_count": len(item_index)})
-            runs.append({"seed": seed, "arm": arm, "branch": branch, "best_ndcg_at_10": best_ndcg, "epochs": history, "checkpoint": str(checkpoint)})
+            save_checkpoint(
+                checkpoint,
+                model,
+                {
+                    "seed": seed,
+                    "arm": arm,
+                    "branch": branch,
+                    "best_ndcg_at_10": best_ndcg,
+                    "best_epoch": best_epoch,
+                    "epochs_completed": len(history),
+                    "candidate_count": len(item_index),
+                },
+            )
+            runs.append(
+                _training_run_record(
+                    run_id=runtime["run_id"],
+                    seed=seed,
+                    arm=arm,
+                    branch=branch,
+                    history=history,
+                    best_ndcg=best_ndcg,
+                    best_epoch=best_epoch,
+                    checkpoint=checkpoint,
+                    candidate_count=len(item_index),
+                    elapsed_seconds=perf_counter() - arm_started,
+                    max_epochs=config.model.max_epochs,
+                )
+            )
+            _persist_training_runs(training_runs_path, runs)
             completed += 1
             elapsed = perf_counter() - started
             eta = elapsed / completed * (total - completed)
@@ -157,5 +229,6 @@ def train_recommendation_arms(config: ValidationConfig, runtime: dict[str, Any])
         "run_id": runtime["run_id"],
         "user_count": len(sequences),
         "per_user_metrics": str(metrics_path),
+        "training_runs": str(training_runs_path),
         "runs": runs,
     }

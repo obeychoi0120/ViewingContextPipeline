@@ -25,6 +25,9 @@ gemini = ["google-genai"]
 multimodal = ["faster-whisper", "moviepy", "paddleocr"]
 dev = ["pytest", "ruff"]
 
+[tool.setuptools]
+py-modules = ["pipeline_runtime"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

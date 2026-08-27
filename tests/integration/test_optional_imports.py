@@ -23,7 +23,7 @@ sys.meta_path.insert(0, Blocker())
 import extraction
 import extraction.cli
 import validation.cli
-import viewing_context_pipeline.cli
+import pipeline_runtime
 
 loaded = set(sys.modules)
 assert not any(name in loaded for name in blocked)

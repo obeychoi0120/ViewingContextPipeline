@@ -6,6 +6,7 @@ from extraction.semantic_graph.json_repair import (
 from extraction.semantic_graph.schema import (
     SemanticGraphError,
     extract_scene_graphs,
+    graph_semantic_warnings,
     graph_summary_prompt,
     parse_graph_output,
     validate_summary,
@@ -16,6 +17,7 @@ __all__ = [
     "SCENE_EXTRACTION_PROMPT",
     "SemanticGraphError",
     "extract_scene_graphs",
+    "graph_semantic_warnings",
     "graph_summary_prompt",
     "parse_graph_output",
     "parse_or_repair_graph",
