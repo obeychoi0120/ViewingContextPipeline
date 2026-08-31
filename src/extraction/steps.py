@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -424,12 +425,72 @@ def summarize_graph(
 
         retry_count = 0
         if tasks:
-            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            total_attempts = 1 + len(retry_settings["seeds"])
+            last_wait_log = 0.0
+
+            def report_qwen_status(
+                event: str,
+                payload: dict[str, Any],
+            ) -> None:
+                nonlocal last_wait_log
+                if event == "worker_ready":
+                    _write_progress(
+                        progress,
+                        f"[Qwen_summary_graph_{source}] worker "
+                        f"{payload.get('worker_index')} ready on GPU "
+                        f"{payload.get('gpu_id')}",
+                    )
+                elif event == "task_started":
+                    task_id = str(payload.get("task_id"))
+                    _write_progress(
+                        progress,
+                        f"[Qwen_summary_graph_{source}] "
+                        f"{names.get(task_id, f'{task_id}.mp4')} | generation started "
+                        f"on GPU {payload.get('gpu_id')}",
+                    )
+                elif event == "waiting":
+                    now = time.monotonic()
+                    if now - last_wait_log >= 30:
+                        last_wait_log = now
+                        _write_progress(
+                            progress,
+                            f"[Qwen_summary_graph_{source}] waiting for "
+                            f"{payload.get('pending_count')} generation(s); "
+                            "workers are alive",
+                        )
+
+            def report_validation_failure(
+                task_id: str,
+                attempt: int,
+                seed: int | None,
+                error: Exception,
+            ) -> None:
+                seed_note = "greedy" if seed is None else f"seed={seed}"
+                message = " ".join(str(error).splitlines())
+                _write_progress(
+                    progress,
+                    f"[Qwen_summary_graph_{source}_retry] "
+                    f"{names.get(task_id, f'{task_id}.mp4')} | "
+                    f"attempt {attempt}/{total_attempts} ({seed_note}) rejected | "
+                    f"{message}",
+                )
+
+            _write_progress(
+                progress,
+                f"[Qwen_summary_graph_{source}] initializing "
+                f"{gpus or 1} CUDA worker(s) for {len(tasks)} pending content(s)",
+            )
+            with qwen_generator(
+                model_path=model_path,
+                gpus=gpus,
+                on_status=report_qwen_status,
+            ) as generate:
                 retry_count = generate_summaries_with_retry(
                     generate,
                     tasks,
                     complete_graph_summary,
                     retry_settings,
+                    report_validation_failure,
                 )
     return _result(
         stage,

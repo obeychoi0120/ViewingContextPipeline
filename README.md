@@ -128,6 +128,8 @@ failure JSONL은 append-only history가 아니라 **현재 unresolved failure st
 
 Qwen scene 단계는 GPU worker 시작을 알린 뒤 scene이 하나 끝날 때마다 결과를 출력하고, 해당 content에서 지금까지 완료된 scene subset을 원자적으로 JSONL에 checkpoint합니다. content progress bar는 그 content의 모든 scene이 끝나야 1 증가합니다. GPU가 사용 중이어도 새 scene 로그와 파일 수정 시각이 모두 멈춰 있다면 현재 generation이 아직 반환되지 않은 상태이며, worker가 살아 있는 동안 별도의 generation timeout은 적용하지 않습니다. Ctrl+C 전까지 저장된 partial checkpoint는 남지만 같은 명령을 재실행하면 incomplete content 전체를 다시 생성하고, 완료 content만 cache에서 재사용합니다.
 
+`summarize-graph`는 Qwen worker 초기화·준비, content generation 시작, 결과 대기 heartbeat, schema validation rejection과 retry를 진행 로그로 구분합니다. summary JSON은 정확한 7-field v3 validation을 통과한 content만 callback 즉시 저장합니다. 거부된 raw output은 정상 summary처럼 저장하지 않으며, 로그의 `attempt N/4 ... rejected` 뒤에 다음 retry seed가 적용됩니다.
+
 ## Artifact map
 
 ```text

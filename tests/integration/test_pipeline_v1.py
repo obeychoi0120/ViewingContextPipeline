@@ -155,6 +155,7 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
         return {task.task_id: text}
 
     completed = []
+    validation_failures = []
 
     def complete(task_id, text):
             completed.append((task_id, parse_summary_sections(text)))
@@ -169,11 +170,19 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
             "top_p": 0.8,
             "top_k": 20,
         },
+        lambda task_id, attempt, seed, error: validation_failures.append(
+            (task_id, attempt, seed, str(error))
+        ),
     )
 
     assert retry_count == 3
     assert completed == [("c1", sections)]
     assert [task.seed for task in submitted] == [None, 42, 43, 44]
+    assert [(row[1], row[2]) for row in validation_failures] == [
+        (1, None),
+        (2, 42),
+        (3, 43),
+    ]
     assert [task.do_sample for task in submitted] == [False, True, True, True]
     for task in submitted[1:]:
         assert (task.temperature, task.top_p, task.top_k) == (0.1, 0.8, 20)
@@ -619,6 +628,78 @@ def test_gemini_scene_stage_aggregates_out_of_order_errors(
     failure = read_jsonl(context.graph_failure_dir("gemini") / "c1.jsonl")[0]
     assert failure["scene_idx"] == 1
     assert failure["failure_kind"] == "generation"
+
+
+def test_graph_summary_logs_worker_retry_and_saves_from_callback(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    monkeypatch.setattr(
+        extraction_steps,
+        "_visual_rows",
+        lambda _context: [{"content_id": "c1"}],
+    )
+    write_jsonl(
+        context.graph_scene_dir("qwen") / "c1.jsonl",
+        [
+            {
+                "scene_idx": 0,
+                "keyframes": [5, 15, 25],
+                "graph": {"setting_context": "indoor"},
+                "parse_mode": "native",
+                "semantic_warnings": [],
+            }
+        ],
+    )
+    sections = {
+        "setting_and_environments": "An indoor setting.",
+        "main_characters_and_objects": "",
+        "chronological_events": "",
+        "relations": "",
+        "visual_atmosphere": "",
+        "visible_affect": "",
+        "semantic_topics": "",
+    }
+    output_path = context.graph_summary_dir("qwen") / "c1.json"
+    calls = 0
+
+    @contextmanager
+    def observable_generator(**kwargs):
+        on_status = kwargs["on_status"]
+        on_status("worker_ready", {"worker_index": 0, "gpu_id": "0"})
+
+        def generate(tasks, callback):
+            nonlocal calls
+            calls += 1
+            on_status(
+                "task_started",
+                {"worker_index": 0, "gpu_id": "0", "task_id": tasks[0].task_id},
+            )
+            text = "not json" if calls == 1 else json.dumps(sections)
+            callback(tasks[0].task_id, text)
+            if calls == 2:
+                assert output_path.is_file()
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", observable_generator)
+    result = extraction_steps.summarize_graph(context, source="qwen", gpus=1)
+
+    assert result["content_count"] == 1
+    assert result["retry_count"] == 1
+    assert json.loads(output_path.read_text(encoding="utf-8"))["sections"] == sections
+    stderr = capsys.readouterr().err
+    assert "initializing 1 CUDA worker(s) for 1 pending content(s)" in stderr
+    assert "worker 0 ready on GPU 0" in stderr
+    assert "generation started on GPU 0" in stderr
+    assert "attempt 1/4 (greedy) rejected" in stderr
 
 
 def test_graph_summary_rejects_legacy_scene_shape(

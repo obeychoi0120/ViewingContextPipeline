@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from extraction.backends import QwenBackend
-from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
+from extraction.backends.qwen_workers import (
+    QwenGenerationTask,
+    QwenStatusCallback,
+    QwenWorkerPool,
+)
 from extraction.descriptions import DescriptionError
 from extraction.errors import ExtractionStepError
 from extraction.evidence import load_images
@@ -21,6 +25,7 @@ from pipeline_runtime import read_json
 
 
 GenerationCallback = Callable[[str, str], None]
+ValidationFailureCallback = Callable[[str, int, int | None, Exception], None]
 GenerationFunction = Callable[
     [list[QwenGenerationTask], GenerationCallback | None],
     dict[str, str],
@@ -68,10 +73,16 @@ def generate_summaries_with_retry(
     tasks: list[QwenGenerationTask],
     complete: GenerationCallback,
     retry_settings: dict[str, Any],
+    on_validation_failure: ValidationFailureCallback | None = None,
 ) -> int:
     last_errors: dict[str, Exception] = {}
 
-    def run_attempt(attempt_tasks: list[QwenGenerationTask]) -> list[QwenGenerationTask]:
+    def run_attempt(
+        attempt_tasks: list[QwenGenerationTask],
+        *,
+        attempt: int,
+        seed: int | None,
+    ) -> list[QwenGenerationTask]:
         tasks_by_id = {task.task_id: task for task in attempt_tasks}
         handled: set[str] = set()
         failed: list[QwenGenerationTask] = []
@@ -87,6 +98,8 @@ def generate_summaries_with_retry(
             except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
                 failed.append(task)
                 last_errors[task_id] = exc
+                if on_validation_failure is not None:
+                    on_validation_failure(task_id, attempt, seed, exc)
 
         results = generate(attempt_tasks, handle_result)
         # Local test generators may return a mapping without invoking the callback.
@@ -95,9 +108,9 @@ def generate_summaries_with_retry(
                 handle_result(task.task_id, results[task.task_id])
         return failed
 
-    pending = run_attempt(tasks)
+    pending = run_attempt(tasks, attempt=1, seed=None)
     retry_count = 0
-    for seed in retry_settings["seeds"]:
+    for attempt, seed in enumerate(retry_settings["seeds"], start=2):
         if not pending:
             break
         retry_tasks = [
@@ -112,7 +125,7 @@ def generate_summaries_with_retry(
             for task in pending
         ]
         retry_count += len(retry_tasks)
-        pending = run_attempt(retry_tasks)
+        pending = run_attempt(retry_tasks, attempt=attempt, seed=int(seed))
 
     if pending:
         task_ids = [task.task_id for task in pending]
@@ -129,12 +142,19 @@ def qwen_generator(
     *,
     model_path: Path,
     gpus: int | None,
+    on_status: QwenStatusCallback | None = None,
 ) -> Iterator[GenerationFunction]:
     if gpus is not None:
-        with QwenWorkerPool(gpus, str(model_path)) as worker_pool:
+        with QwenWorkerPool(
+            gpus,
+            str(model_path),
+            on_status=on_status,
+        ) as worker_pool:
             yield worker_pool.generate
         return
     backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
+    if on_status is not None:
+        on_status("worker_ready", {"worker_index": 0, "gpu_id": "default"})
 
     def generate(
         tasks: list[QwenGenerationTask],
@@ -142,6 +162,15 @@ def qwen_generator(
     ) -> dict[str, str]:
         results: dict[str, str] = {}
         for task in tasks:
+            if on_status is not None:
+                on_status(
+                    "task_started",
+                    {
+                        "worker_index": 0,
+                        "gpu_id": "default",
+                        "task_id": task.task_id,
+                    },
+                )
             text = backend.generate(
                 load_images(list(task.image_paths)),
                 task.prompt,
