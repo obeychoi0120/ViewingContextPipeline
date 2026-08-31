@@ -126,6 +126,8 @@ test pass는 구현 계약, runtime pass는 artifact 완전성, comparison decis
 
 failure JSONL은 append-only history가 아니라 **현재 unresolved failure state**입니다. 성공한 force retry 또는 완전한 cache reuse 뒤에는 stale·empty failure 파일을 삭제합니다. failure 파일 부재만으로 완전성을 판단하지 말고 diagnosis를 확인해야 합니다.
 
+Qwen scene 단계는 GPU worker 시작을 알린 뒤 scene이 하나 끝날 때마다 결과를 출력하고, 해당 content에서 지금까지 완료된 scene subset을 원자적으로 JSONL에 checkpoint합니다. content progress bar는 그 content의 모든 scene이 끝나야 1 증가합니다. GPU가 사용 중이어도 새 scene 로그와 파일 수정 시각이 모두 멈춰 있다면 현재 generation이 아직 반환되지 않은 상태이며, worker가 살아 있는 동안 별도의 generation timeout은 적용하지 않습니다. Ctrl+C 전까지 저장된 partial checkpoint는 남지만 같은 명령을 재실행하면 incomplete content 전체를 다시 생성하고, 완료 content만 cache에서 재사용합니다.
+
 ## Artifact map
 
 ```text

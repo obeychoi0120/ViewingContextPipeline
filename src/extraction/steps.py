@@ -46,14 +46,13 @@ from extraction.step_support import (
     scene_generation_rows as _scene_generation_rows,
     video_name_map as _video_name_map,
     visual_rows as _visual_rows,
-    write_failure_jsonl as _write_failure_jsonl,
     write_progress as _write_progress,
+    write_scene_checkpoint as _write_scene_checkpoint,
 )
 from pipeline_runtime import (
     RunContext,
     read_jsonl,
     write_json,
-    write_jsonl,
 )
 
 
@@ -160,10 +159,7 @@ def extract_graph_scenes(
                     })
             path = scene_dir / f"{visual['content_id']}.jsonl"
             failure_path = failure_dir / f"{visual['content_id']}.jsonl"
-            records.sort(key=lambda row: int(row["scene_idx"]))
-            failures.sort(key=lambda row: int(row["scene_idx"]))
-            write_jsonl(path, records)
-            _write_failure_jsonl(failure_path, failures)
+            _write_scene_checkpoint(path, failure_path, records, failures)
             content_id = str(visual["content_id"])
             records_by_content[content_id] = records
             failures_by_content[content_id] = failures
@@ -184,14 +180,101 @@ def extract_graph_scenes(
 
         if pending and model == "qwen":
             assert model_path is not None
+            _write_progress(
+                progress,
+                "[Qwen] starting GPU workers; each completed scene is checkpointed immediately",
+            )
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 for visual, scene_rows in pending:
-                    responses = generate([row["task"] for row in scene_rows], None)
-                    complete_content(
-                        visual,
-                        scene_rows,
-                        {task_id: (text, None) for task_id, text in responses.items()},
+                    content_id = str(visual["content_id"])
+                    video_name = names.get(content_id, f"{content_id}.mp4")
+                    path = scene_dir / f"{content_id}.jsonl"
+                    failure_path = failure_dir / f"{content_id}.jsonl"
+                    rows_by_task = {
+                        row["task"].task_id: row for row in scene_rows
+                    }
+                    records_by_task: dict[str, dict[str, Any]] = {}
+                    failures_by_task: dict[str, dict[str, Any]] = {}
+
+                    _write_progress(
+                        progress,
+                        f"[Qwen_graph] {video_name} | submitted "
+                        f"{len(scene_rows)} scenes",
                     )
+
+                    def complete_qwen_scene(task_id: str, text: str) -> None:
+                        row = rows_by_task[task_id]
+                        result = parse_or_repair_graph(text)
+                        if result.graph is not None:
+                            record = {
+                                "scene_idx": row["scene_idx"],
+                                "keyframes": row["keyframes"],
+                                "graph": result.graph,
+                                "parse_mode": result.parse_mode,
+                                "semantic_warnings": graph_semantic_warnings(
+                                    result.graph
+                                ),
+                            }
+                            records_by_task[task_id] = record
+                            _write_progress(
+                                progress,
+                                scene_messages(
+                                    video_name,
+                                    [record],
+                                    arm="graph",
+                                    source=model,
+                                )[0],
+                            )
+                        else:
+                            failure = {
+                                "scene_idx": row["scene_idx"],
+                                "keyframes": row["keyframes"],
+                                "failure_kind": "json_repair",
+                                "error": result.error or "JSON repair failed",
+                                "raw_response": text,
+                            }
+                            failures_by_task[task_id] = failure
+                            _write_progress(
+                                progress,
+                                graph_skip_message(
+                                    video_name,
+                                    failure,
+                                    source=model,
+                                ),
+                            )
+
+                        records = list(records_by_task.values())
+                        failures = list(failures_by_task.values())
+                        _write_scene_checkpoint(
+                            path,
+                            failure_path,
+                            records,
+                            failures,
+                        )
+                        if len(records_by_task) + len(failures_by_task) == len(
+                            scene_rows
+                        ):
+                            records_by_content[content_id] = records
+                            failures_by_content[content_id] = failures
+                            _complete_content_progress(progress)
+
+                    returned = generate(
+                        [row["task"] for row in scene_rows],
+                        complete_qwen_scene,
+                    )
+                    # Test doubles and custom in-process generators may return a
+                    # mapping instead of invoking the completion callback.
+                    for task_id, text in returned.items():
+                        if (
+                            task_id not in records_by_task
+                            and task_id not in failures_by_task
+                        ):
+                            complete_qwen_scene(task_id, text)
+                    if not scene_rows:
+                        _write_scene_checkpoint(path, failure_path, [], [])
+                        records_by_content[content_id] = []
+                        failures_by_content[content_id] = []
+                        _complete_content_progress(progress)
         elif pending:
             gemini = context.config["models"]["gemini"]
             task_context: dict[
@@ -405,55 +488,102 @@ def extract_description_scenes(
         unit="content",
     ) as progress:
         if pending:
+            _write_progress(
+                progress,
+                "[Qwen] starting GPU workers; each completed scene is checkpointed immediately",
+            )
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 for visual, scene_rows in pending:
-                    generated = generate([row["task"] for row in scene_rows], None)
-                    records: list[dict[str, Any]] = []
-                    failures: list[dict[str, Any]] = []
-                    for row in scene_rows:
-                        description = generated[row["task"].task_id].strip()
+                    content_id = str(visual["content_id"])
+                    video_name = names.get(content_id, f"{content_id}.mp4")
+                    path = context.description_scene_dir / f"{content_id}.jsonl"
+                    failure_path = (
+                        context.description_failure_dir / f"{content_id}.jsonl"
+                    )
+                    rows_by_task = {
+                        row["task"].task_id: row for row in scene_rows
+                    }
+                    records_by_task: dict[str, dict[str, Any]] = {}
+                    failures_by_task: dict[str, dict[str, Any]] = {}
+
+                    _write_progress(
+                        progress,
+                        f"[Qwen_desc] {video_name} | submitted "
+                        f"{len(scene_rows)} scenes",
+                    )
+
+                    def complete_description_scene(task_id: str, text: str) -> None:
+                        row = rows_by_task[task_id]
+                        description = text.strip()
                         common = {
                             "content_id": visual["content_id"],
                             "scene_idx": row["scene_idx"],
                             "keyframes": row["keyframes"],
                         }
                         if not description:
-                            failures.append({
+                            failure = {
                                 "schema_version": "description-generation-failure/v1",
                                 **common,
                                 "failure_kind": "empty_response",
                                 "error": "model produced an empty description",
-                            })
-                            continue
-                        records.append({
-                            "schema_version": SCENE_SCHEMA_VERSION,
-                            **common,
-                            "description": description,
-                        })
-                    path = context.description_scene_dir / f"{visual['content_id']}.jsonl"
-                    failure_path = context.description_failure_dir / f"{visual['content_id']}.jsonl"
-                    records.sort(key=lambda row: int(row["scene_idx"]))
-                    failures.sort(key=lambda row: int(row["scene_idx"]))
-                    write_jsonl(path, records)
-                    _write_failure_jsonl(failure_path, failures)
-                    content_id = str(visual["content_id"])
-                    records_by_content[content_id] = records
-                    failures_by_content[content_id] = failures
-                    video_name = names.get(
-                        content_id,
-                        f"{visual['content_id']}.mp4",
+                            }
+                            failures_by_task[task_id] = failure
+                            _write_progress(
+                                progress,
+                                f"[SKIPPED] {video_name} | description scene "
+                                f"#{int(failure['scene_idx']):03d} | "
+                                f"{failure['error']}",
+                            )
+                        else:
+                            record = {
+                                "schema_version": SCENE_SCHEMA_VERSION,
+                                **common,
+                                "description": description,
+                            }
+                            records_by_task[task_id] = record
+                            _write_progress(
+                                progress,
+                                scene_messages(
+                                    video_name,
+                                    [record],
+                                    arm="description",
+                                )[0],
+                            )
+
+                        records = list(records_by_task.values())
+                        failures = list(failures_by_task.values())
+                        _write_scene_checkpoint(
+                            path,
+                            failure_path,
+                            records,
+                            failures,
+                        )
+                        if len(records_by_task) + len(failures_by_task) == len(
+                            scene_rows
+                        ):
+                            records_by_content[content_id] = records
+                            failures_by_content[content_id] = failures
+                            _complete_content_progress(progress)
+
+                    returned = generate(
+                        [row["task"] for row in scene_rows],
+                        complete_description_scene,
                     )
-                    for message in scene_messages(
-                        video_name, records, arm="description"
-                    ):
-                        _write_progress(progress, message)
-                    for failure in failures:
+                    for task_id, text in returned.items():
+                        if (
+                            task_id not in records_by_task
+                            and task_id not in failures_by_task
+                        ):
+                            complete_description_scene(task_id, text)
+                    if not scene_rows:
+                        _write_scene_checkpoint(path, failure_path, [], [])
+                        records_by_content[content_id] = []
+                        failures_by_content[content_id] = []
                         _write_progress(
                             progress,
-                            f"[SKIPPED] {video_name} | description scene "
-                            f"#{int(failure['scene_idx']):03d} | {failure['error']}",
+                            f"[SKIPPED] {video_name} | no scenes to extract",
                         )
-                    _complete_content_progress(progress)
+                        _complete_content_progress(progress)
     failures = [
         record
         for visual in visual_rows

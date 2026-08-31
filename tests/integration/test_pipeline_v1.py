@@ -460,6 +460,106 @@ def test_description_failure_force_retry_and_cache_reuse(
     assert not failure_path.exists()
 
 
+def test_qwen_graph_scene_is_checkpointed_before_content_finishes(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
+    scene_rows = [
+        {
+            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "scene_idx": index,
+            "keyframes": [index * 30 + 5],
+        }
+        for index in range(2)
+    ]
+    monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _context: [visual])
+    monkeypatch.setattr(
+        extraction_steps,
+        "_scene_generation_rows",
+        lambda *_args, **_kwargs: scene_rows,
+    )
+    graph = {
+        "setting_context": "indoor",
+        "entities": [],
+        "events": [],
+        "static_relations": [],
+        "semantic_topics": [],
+        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+    }
+    scene_path = context.graph_scene_dir("qwen") / "c1.jsonl"
+
+    @contextmanager
+    def streaming_generator(**_kwargs):
+        def generate(tasks, callback):
+            callback(tasks[1].task_id, json.dumps(graph))
+            assert [row["scene_idx"] for row in read_jsonl(scene_path)] == [1]
+            callback(tasks[0].task_id, json.dumps(graph))
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", streaming_generator)
+    result = extraction_steps.extract_graph_scenes(context, model="qwen")
+
+    assert result["failure_count"] == 0
+    assert [row["scene_idx"] for row in read_jsonl(scene_path)] == [0, 1]
+    assert "each completed scene is checkpointed immediately" in capsys.readouterr().err
+
+
+def test_qwen_description_scene_is_checkpointed_before_content_finishes(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
+    scene_rows = [
+        {
+            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "scene_idx": index,
+            "keyframes": [index * 30 + 5],
+        }
+        for index in range(2)
+    ]
+    monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _context: [visual])
+    monkeypatch.setattr(
+        extraction_steps,
+        "_scene_generation_rows",
+        lambda *_args, **_kwargs: scene_rows,
+    )
+    scene_path = context.description_scene_dir / "c1.jsonl"
+    failure_path = context.description_failure_dir / "c1.jsonl"
+
+    @contextmanager
+    def streaming_generator(**_kwargs):
+        def generate(tasks, callback):
+            callback(tasks[1].task_id, "visible action")
+            assert [row["scene_idx"] for row in read_jsonl(scene_path)] == [1]
+            callback(tasks[0].task_id, "")
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", streaming_generator)
+    result = extraction_steps.extract_description_scenes(context)
+
+    assert result["failure_count"] == 1
+    assert [row["scene_idx"] for row in read_jsonl(scene_path)] == [1]
+    assert [row["scene_idx"] for row in read_jsonl(failure_path)] == [0]
+    assert "each completed scene is checkpointed immediately" in capsys.readouterr().err
+
+
 def test_gemini_scene_stage_aggregates_out_of_order_errors(
     context: RunContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

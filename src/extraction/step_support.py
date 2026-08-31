@@ -29,6 +29,19 @@ def write_failure_jsonl(path: Path, failures: list[dict[str, Any]]) -> None:
         path.unlink(missing_ok=True)
 
 
+def write_scene_checkpoint(
+    scene_path: Path,
+    failure_path: Path,
+    records: list[dict[str, Any]],
+    failures: list[dict[str, Any]],
+) -> None:
+    """Atomically persist the completed subset of one content's scenes."""
+    records.sort(key=lambda row: int(row["scene_idx"]))
+    failures.sort(key=lambda row: int(row["scene_idx"]))
+    write_jsonl(scene_path, records)
+    write_failure_jsonl(failure_path, failures)
+
+
 def video_name_map(context: RunContext) -> dict[str, str]:
     return video_names(read_jsonl(context.cohort_dir / "catalog.jsonl"))
 
