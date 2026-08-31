@@ -25,7 +25,10 @@ from pipeline_runtime import read_json
 
 
 GenerationCallback = Callable[[str, str], None]
-ValidationFailureCallback = Callable[[str, int, int | None, Exception], None]
+ValidationFailureCallback = Callable[
+    [str, int, int | None, str, Exception],
+    None,
+]
 GenerationFunction = Callable[
     [list[QwenGenerationTask], GenerationCallback | None],
     dict[str, str],
@@ -74,7 +77,11 @@ def generate_summaries_with_retry(
     complete: GenerationCallback,
     retry_settings: dict[str, Any],
     on_validation_failure: ValidationFailureCallback | None = None,
+    *,
+    batch_size: int = 1,
 ) -> int:
+    if batch_size <= 0:
+        raise ValueError("summary retry batch_size must be positive")
     last_errors: dict[str, Exception] = {}
 
     def run_attempt(
@@ -99,7 +106,7 @@ def generate_summaries_with_retry(
                 failed.append(task)
                 last_errors[task_id] = exc
                 if on_validation_failure is not None:
-                    on_validation_failure(task_id, attempt, seed, exc)
+                    on_validation_failure(task_id, attempt, seed, text, exc)
 
         results = generate(attempt_tasks, handle_result)
         # Local test generators may return a mapping without invoking the callback.
@@ -108,27 +115,38 @@ def generate_summaries_with_retry(
                 handle_result(task.task_id, results[task.task_id])
         return failed
 
-    pending = run_attempt(tasks, attempt=1, seed=None)
     retry_count = 0
-    for attempt, seed in enumerate(retry_settings["seeds"], start=2):
-        if not pending:
-            break
-        retry_tasks = [
-            replace(
-                task,
-                do_sample=True,
+    exhausted: list[QwenGenerationTask] = []
+    for start in range(0, len(tasks), batch_size):
+        pending = run_attempt(
+            tasks[start : start + batch_size],
+            attempt=1,
+            seed=None,
+        )
+        for attempt, seed in enumerate(retry_settings["seeds"], start=2):
+            if not pending:
+                break
+            retry_tasks = [
+                replace(
+                    task,
+                    do_sample=True,
+                    seed=int(seed),
+                    temperature=float(retry_settings["temperature"]),
+                    top_p=float(retry_settings["top_p"]),
+                    top_k=int(retry_settings["top_k"]),
+                )
+                for task in pending
+            ]
+            retry_count += len(retry_tasks)
+            pending = run_attempt(
+                retry_tasks,
+                attempt=attempt,
                 seed=int(seed),
-                temperature=float(retry_settings["temperature"]),
-                top_p=float(retry_settings["top_p"]),
-                top_k=int(retry_settings["top_k"]),
             )
-            for task in pending
-        ]
-        retry_count += len(retry_tasks)
-        pending = run_attempt(retry_tasks, attempt=attempt, seed=int(seed))
+        exhausted.extend(pending)
 
-    if pending:
-        task_ids = [task.task_id for task in pending]
+    if exhausted:
+        task_ids = [task.task_id for task in exhausted]
         cause = last_errors[task_ids[0]]
         raise ExtractionStepError(
             f"structured summary failed after {len(retry_settings['seeds'])} retries: "
@@ -169,6 +187,8 @@ def qwen_generator(
                         "worker_index": 0,
                         "gpu_id": "default",
                         "task_id": task.task_id,
+                        "do_sample": task.do_sample,
+                        "seed": task.seed,
                     },
                 )
             text = backend.generate(

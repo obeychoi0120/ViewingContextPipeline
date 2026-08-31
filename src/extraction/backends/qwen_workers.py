@@ -272,6 +272,8 @@ def _worker_main(
                 "worker_index": worker_index,
                 "gpu_id": gpu_id,
                 "task_id": task.task_id,
+                "do_sample": task.do_sample,
+                "seed": task.seed,
             }
         )
         try:
