@@ -100,7 +100,7 @@ def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
     assert '"object_id": "e4"' in prompt
 
 
-def test_summary_requires_five_fields_and_repairs_json_syntax_once() -> None:
+def test_summary_requires_seven_fields_and_repairs_json_syntax_once() -> None:
     sections = {name: f"visible {name}" for name in SUMMARY_SECTIONS}
     parsed = validate_summary(json.dumps(sections))
 
@@ -110,7 +110,9 @@ def test_summary_requires_five_fields_and_repairs_json_syntax_once() -> None:
         "Main characters and objects: visible main_characters_and_objects.",
         "Chronological events: visible chronological_events.",
         "Relations: visible relations.",
-        "Affect or topic: visible affect_or_topic.",
+        "Visual atmosphere: visible visual_atmosphere.",
+        "Visible affect: visible visible_affect.",
+        "Semantic topics: visible semantic_topics.",
     ]
     repaired = validate_summary(json.dumps(sections)[:-1] + ",}")
     assert repaired == sections

@@ -136,7 +136,9 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
         "main_characters_and_objects": "A person",
         "chronological_events": "The person walks",
         "relations": "The person is inside the room",
-        "affect_or_topic": "Neutral",
+        "visual_atmosphere": "A calm indoor atmosphere",
+        "visible_affect": "Neutral visible affect",
+        "semantic_topics": "Indoor activity",
     }
     responses = ["not json", "still not json", "also not json", json.dumps(sections)]
     submitted: list[QwenGenerationTask] = []
@@ -180,7 +182,9 @@ def test_summary_is_completed_from_worker_callback_before_batch_returns() -> Non
         "main_characters_and_objects": "A person",
         "chronological_events": "The person walks",
         "relations": "The person is inside the room",
-        "affect_or_topic": "Neutral",
+        "visual_atmosphere": "A calm indoor atmosphere",
+        "visible_affect": "Neutral visible affect",
+        "semantic_topics": "Indoor activity",
     }
     structured = json.dumps(sections)
     completed = []
@@ -223,13 +227,15 @@ def test_reused_summary_normalizes_single_line_text_to_section_lines(
         "main_characters_and_objects": "A person",
         "chronological_events": "The person walks",
         "relations": "The person is inside the room",
-        "affect_or_topic": "Neutral",
+        "visual_atmosphere": "A calm indoor atmosphere",
+        "visible_affect": "Neutral visible affect",
+        "semantic_topics": "Indoor activity",
     }
     path = tmp_path / "summary.json"
     write_json(
         path,
         {
-            "schema_version": "graph-video-summary/v2",
+            "schema_version": "graph-video-summary/v3",
             "content_id": "c1",
             "arm": "graph_qwen",
             "status": "complete",
@@ -241,7 +247,7 @@ def test_reused_summary_normalizes_single_line_text_to_section_lines(
 
     document = extraction_steps._reuse_summary_document(
         path,
-        schema_version="graph-video-summary/v2",
+        schema_version="graph-video-summary/v3",
         content_id="c1",
         arm="graph_qwen",
         scene_count=1,
@@ -252,7 +258,9 @@ def test_reused_summary_normalizes_single_line_text_to_section_lines(
         "Main characters and objects: A person.",
         "Chronological events: The person walks.",
         "Relations: The person is inside the room.",
-        "Affect or topic: Neutral.",
+        "Visual atmosphere: A calm indoor atmosphere.",
+        "Visible affect: Neutral visible affect.",
+        "Semantic topics: Indoor activity.",
     ]
     assert json.loads(path.read_text(encoding="utf-8")) == document
 
@@ -392,7 +400,9 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
                     "main_characters_and_objects": "A person and an object",
                     "chronological_events": "The person approaches the object",
                     "relations": "The person stands beside the object",
-                    "affect_or_topic": "A neutral visible affect",
+                    "visual_atmosphere": "A calm indoor atmosphere",
+                    "visible_affect": "A neutral visible affect",
+                    "semantic_topics": "An indoor interaction",
                 }
             )
             results = {task.task_id: structured for task in tasks}
@@ -419,7 +429,7 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
         (context.graph_summary_dir("qwen") / "c1.json").read_text(encoding="utf-8")
     )
     assert summary == {
-        "schema_version": "graph-video-summary/v2",
+        "schema_version": "graph-video-summary/v3",
         "content_id": "c1",
         "arm": "graph_qwen",
         "status": "complete",
@@ -428,7 +438,9 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
             "main_characters_and_objects": "A person and an object",
             "chronological_events": "The person approaches the object",
             "relations": "The person stands beside the object",
-            "affect_or_topic": "A neutral visible affect",
+            "visual_atmosphere": "A calm indoor atmosphere",
+            "visible_affect": "A neutral visible affect",
+            "semantic_topics": "An indoor interaction",
         },
         "scene_count": 1,
         "text": (
@@ -436,7 +448,9 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
             "Main characters and objects: A person and an object.\n"
             "Chronological events: The person approaches the object.\n"
             "Relations: The person stands beside the object.\n"
-            "Affect or topic: A neutral visible affect."
+            "Visual atmosphere: A calm indoor atmosphere.\n"
+            "Visible affect: A neutral visible affect.\n"
+            "Semantic topics: An indoor interaction."
         ),
     }
 
@@ -451,7 +465,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
         write_json(
             context.graph_summary_dir(source) / f"{content_id}.json",
             {
-                "schema_version": "graph-video-summary/v2",
+                "schema_version": "graph-video-summary/v3",
                 "content_id": content_id,
                 "status": "complete",
                 "text": f"{source} graph",
@@ -460,7 +474,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
     write_json(
         context.description_summary_dir / f"{content_id}.json",
         {
-            "schema_version": "description-video-summary/v2",
+            "schema_version": "description-video-summary/v3",
             "content_id": content_id,
             "status": "complete",
             "text": "description",

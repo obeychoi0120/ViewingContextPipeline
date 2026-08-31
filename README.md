@@ -55,7 +55,7 @@ Graph JSON은 native object를 우선 사용하고 실패 시 deterministic repa
 
 ### 영상 Summary 계약
 
-Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으로 직접 생성하지 않습니다. 두 branch 모두 다음과 같은 동일한 5개 필드의 JSON object를 생성합니다.
+Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으로 직접 생성하지 않습니다. 두 branch 모두 다음과 같은 동일한 7개 필드의 JSON object를 생성합니다.
 
 ```json
 {
@@ -63,15 +63,19 @@ Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으
   "main_characters_and_objects": "...",
   "chronological_events": "...",
   "relations": "...",
-  "affect_or_topic": "..."
+  "visual_atmosphere": "...",
+  "visible_affect": "...",
+  "semantic_topics": "..."
 }
 ```
+
+`visual_atmosphere`는 전체적으로 직접 확인되는 시각 분위기, `visible_affect`는 사람·동물의 가시적 표정·자세·상호작용·행동 톤, `semantic_topics`는 명시적 entity·object·event·setting 근거가 있는 주제를 기록합니다. Graph Summary의 분위기는 scene graph에 보존된 setting, event, topic, visible-affect 근거로만 작성하며 graph에 없는 조명·색상·날씨·구도는 추론하지 않습니다. Description Summary는 scene description에 그러한 시각 단서가 명시된 경우에만 사용합니다.
 
 필드명과 분류는 Qwen 출력 계약에 포함됩니다. 후처리는 자유 문장을 필드로 재분류하지 않습니다. 먼저 native JSON object를 읽고 실패하면 `json_repair.py`의 deterministic syntax-only repair를 한 번 적용한 뒤, exact field set·문자열 타입·비어 있지 않은 전체 evidence를 검증합니다. 근거가 없는 개별 필드는 빈 문자열로 출력합니다. 유효한 필드는 위 순서대로 `Setting and environments: ...` 형태로 결정적으로 직렬화하고 각 section 끝에 줄바꿈을 넣습니다. summary artifact에는 원래 `sections`와 BGE 입력용 `text`를 함께 저장합니다. BGE에는 raw JSON이나 Markdown이 아니라 줄 단위 section으로 구성된 `text`만 입력합니다.
 
 Graph와 Description은 같은 필드·repair·검증·직렬화기를 사용하므로 출력 형식 차이가 representation arm 비교의 교란변수가 되지 않도록 합니다. 최종 summary JSON에는 `validation_warnings`를 저장하지 않습니다. 이 구조화 summary 계약을 변경하는 실험은 새 `run_id`를 사용해야 합니다.
 
-최초 Summary 생성은 기존과 같이 greedy decoding(`do_sample=false`)을 사용합니다. JSON repair 또는 5필드 계약 검증이 실패한 content만 같은 Qwen model worker에서 다시 생성하며 모델을 재로딩하지 않습니다. retry는 순서대로 seed `42`, `43`, `44`를 사용하고 각 시도에 `do_sample=true`, `temperature=0.1`, `top_p=0.8`, `top_k=20`을 적용합니다. 세 번 모두 실패하면 malformed summary를 저장하지 않고 해당 summary Step을 실패 처리합니다. 이 retry 정책은 영상 Summary에만 적용하며 Graph scene의 1회 생성·실패 artifact 계약은 변경하지 않습니다.
+최초 Summary 생성은 기존과 같이 greedy decoding(`do_sample=false`)을 사용합니다. JSON repair 또는 7필드 계약 검증이 실패한 content만 같은 Qwen model worker에서 다시 생성하며 모델을 재로딩하지 않습니다. retry는 순서대로 seed `42`, `43`, `44`를 사용하고 각 시도에 `do_sample=true`, `temperature=0.1`, `top_p=0.8`, `top_k=20`을 적용합니다. 세 번 모두 실패하면 malformed summary를 저장하지 않고 해당 summary Step을 실패 처리합니다. 이 retry 정책은 영상 Summary에만 적용하며 Graph scene의 1회 생성·실패 artifact 계약은 변경하지 않습니다.
 
 4-arm 평가는 `validation.evaluation`의 family-wise alpha와 Bonferroni 정책을 사용합니다. confirmatory family는 세 Viewing Context arm과 `SASRec_ID`의 superiority 비교 3개, 두 Graph arm과 `SASRec_DESC`의 non-inferiority 비교 2개입니다. Qwen–Gemini 직접 비교는 exploratory입니다.
 
@@ -125,7 +129,7 @@ Graph scene, Description scene, Graph Summary, Description Summary의 콘솔 출
 - `diagnosis.json`은 `report_ready`를 사용하지 않습니다. `run-diagnosis`가 매번 실제 artifact를 집계해 `runtime_decision.status`, `checks`, `errors`를 기록하고 기준 미달이면 파일을 기록한 뒤 실패합니다.
 - runtime artifact 통과와 통계적 superiority/non-inferiority 결론은 별개입니다.
 
-주요 계약은 `viewing-context-config/v1`, `scene-description/v1`, `graph-video-summary/v2`, `description-video-summary/v2`, `diagnosis/v2`입니다.
+주요 계약은 `viewing-context-config/v1`, `scene-description/v1`, `graph-video-summary/v3`, `description-video-summary/v3`, `diagnosis/v2`입니다.
 
 ## 검증
 

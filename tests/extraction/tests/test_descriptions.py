@@ -71,7 +71,7 @@ def test_description_scene_prompt_uses_strict_visible_only_grounding() -> None:
     assert "Do not read or transcribe visible text" in prompt
 
 
-def test_description_summary_preserves_scene_order_and_requires_five_fields() -> None:
+def test_description_summary_preserves_scene_order_and_requires_seven_fields() -> None:
     records = [
         {"schema_version": "scene-description/v1", "scene_idx": 0, "description": "first"},
         {"schema_version": "scene-description/v1", "scene_idx": 1, "description": "second"},

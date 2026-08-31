@@ -5,7 +5,9 @@ SUMMARY_SECTIONS = (
     "main_characters_and_objects",
     "chronological_events",
     "relations",
-    "affect_or_topic",
+    "visual_atmosphere",
+    "visible_affect",
+    "semantic_topics",
 )
 
 _SECTION_LABELS = {
@@ -13,7 +15,9 @@ _SECTION_LABELS = {
     "main_characters_and_objects": "Main characters and objects",
     "chronological_events": "Chronological events",
     "relations": "Relations",
-    "affect_or_topic": "Affect or topic",
+    "visual_atmosphere": "Visual atmosphere",
+    "visible_affect": "Visible affect",
+    "semantic_topics": "Semantic topics",
 }
 
 
@@ -22,7 +26,7 @@ class SummaryContractError(ValueError):
 
 
 def parse_summary_sections(text: str) -> dict[str, str]:
-    """Parse the model-authored five-field JSON without semantic reclassification."""
+    """Parse the model-authored seven-field JSON without semantic reclassification."""
     from extraction.semantic_graph.json_repair import parse_or_repair_graph
 
     raw = str(text or "").strip()
