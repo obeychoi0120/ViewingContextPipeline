@@ -105,9 +105,13 @@ def test_summary_requires_five_fields_and_repairs_json_syntax_once() -> None:
     parsed = validate_summary(json.dumps(sections))
 
     assert parsed == sections
-    assert serialize_summary_sections(parsed).startswith(
-        "Setting and environments: visible setting_and_environments."
-    )
+    assert serialize_summary_sections(parsed).splitlines() == [
+        "Setting and environments: visible setting_and_environments.",
+        "Main characters and objects: visible main_characters_and_objects.",
+        "Chronological events: visible chronological_events.",
+        "Relations: visible relations.",
+        "Affect or topic: visible affect_or_topic.",
+    ]
     repaired = validate_summary(json.dumps(sections)[:-1] + ",}")
     assert repaired == sections
     with pytest.raises(SemanticGraphError, match="must be one JSON object"):

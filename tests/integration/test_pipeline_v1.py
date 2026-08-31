@@ -215,6 +215,48 @@ def test_summary_is_completed_from_worker_callback_before_batch_returns() -> Non
     assert completed == ["c2", "c1"]
 
 
+def test_reused_summary_normalizes_single_line_text_to_section_lines(
+    tmp_path: Path,
+) -> None:
+    sections = {
+        "setting_and_environments": "An indoor room",
+        "main_characters_and_objects": "A person",
+        "chronological_events": "The person walks",
+        "relations": "The person is inside the room",
+        "affect_or_topic": "Neutral",
+    }
+    path = tmp_path / "summary.json"
+    write_json(
+        path,
+        {
+            "schema_version": "graph-video-summary/v2",
+            "content_id": "c1",
+            "arm": "graph_qwen",
+            "status": "complete",
+            "sections": sections,
+            "text": "legacy single-line text",
+            "scene_count": 1,
+        },
+    )
+
+    document = extraction_steps._reuse_summary_document(
+        path,
+        schema_version="graph-video-summary/v2",
+        content_id="c1",
+        arm="graph_qwen",
+        scene_count=1,
+    )
+
+    assert document["text"].splitlines() == [
+        "Setting and environments: An indoor room.",
+        "Main characters and objects: A person.",
+        "Chronological events: The person walks.",
+        "Relations: The person is inside the room.",
+        "Affect or topic: Neutral.",
+    ]
+    assert json.loads(path.read_text(encoding="utf-8")) == document
+
+
 def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> None:
     assert not hasattr(context, "pipeline_manifest")
     assert not hasattr(context, "stage_manifest")
@@ -390,10 +432,10 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
         },
         "scene_count": 1,
         "text": (
-            "Setting and environments: An indoor setting. "
-            "Main characters and objects: A person and an object. "
-            "Chronological events: The person approaches the object. "
-            "Relations: The person stands beside the object. "
+            "Setting and environments: An indoor setting.\n"
+            "Main characters and objects: A person and an object.\n"
+            "Chronological events: The person approaches the object.\n"
+            "Relations: The person stands beside the object.\n"
             "Affect or topic: A neutral visible affect."
         ),
     }
