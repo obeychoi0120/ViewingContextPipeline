@@ -54,13 +54,11 @@ def context(tmp_path: Path) -> RunContext:
             "media_resolution": "MEDIA_RESOLUTION_MEDIUM",
         },
     }
-    config["extraction"]["graph"]["summary_prompt"] = str(
-        ROOT / config["extraction"]["graph"]["summary_prompt"]
-    )
-    for key in ("scene_prompt", "summary_prompt"):
-        config["extraction"]["description"][key] = str(
-            ROOT / config["extraction"]["description"][key]
-        )
+    for arm in ("graph", "description"):
+        for key in ("scene_prompt", "summary_prompt"):
+            config["extraction"][arm][key] = str(
+                ROOT / config["extraction"][arm][key]
+            )
     (config_dir / "pipeline.yaml").write_text(
         yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
     )
@@ -73,16 +71,16 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
     assert context.config["extraction"]["greedy_decoding"] is True
-    assert context.config["extraction"]["summary_repetition_penalty"] == 1.1
+    assert context.config["extraction"]["summary_repetition_penalty"] == 1.0
     assert context.config["extraction"]["summary_sampling"] == {
         "temperature": 0.2,
         "top_p": 0.8,
         "top_k": 20,
     }
-    assert context.config["extraction"]["graph"]["summary_max_new_tokens"] == 320
+    assert context.config["extraction"]["graph"]["summary_max_new_tokens"] == 512
     assert (
         context.config["extraction"]["description"]["summary_max_new_tokens"]
-        == 320
+        == 512
     )
     assert set(context.config["validation"]["encoder"]) == {
         "embedding_dim",
@@ -101,11 +99,11 @@ def test_greedy_decoding_switches_summary_generation_mode(
     context: RunContext,
 ) -> None:
     assert extraction_steps._summary_generation_settings(context) == {
-        "repetition_penalty": 1.1,
+        "repetition_penalty": 1.0,
     }
     context.config["extraction"]["greedy_decoding"] = False
     assert extraction_steps._summary_generation_settings(context) == {
-        "repetition_penalty": 1.1,
+        "repetition_penalty": 1.0,
         "do_sample": True,
         "temperature": 0.2,
         "top_p": 0.8,
@@ -710,8 +708,8 @@ def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
     def invalid_generator(**_kwargs):
         def generate(tasks, callback):
             assert tasks[0].do_sample is False
-            assert tasks[0].repetition_penalty == 1.1
-            assert tasks[0].max_new_tokens == 320
+            assert tasks[0].repetition_penalty == 1.0
+            assert tasks[0].max_new_tokens == 512
             callback(tasks[0].task_id, "not labeled text")
             return {}
 

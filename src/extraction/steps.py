@@ -20,7 +20,6 @@ from extraction.monitoring import (
 )
 from extraction.preparation import prepare_input_data
 from extraction.semantic_graph import (
-    SCENE_EXTRACTION_PROMPT,
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
     graph_semantic_warnings,
     graph_summary_prompt,
@@ -119,7 +118,8 @@ def extract_graph_scenes(
     stage = graph_stage_name("extract-graph-scenes", model)
     context.initialize()
     settings = context.config["extraction"]["graph"]
-    prompt = SCENE_EXTRACTION_PROMPT
+    prompt_path = context.config_path("extraction", "graph", "scene_prompt")
+    prompt = prompt_path.read_text(encoding="utf-8")
     model_path: Path | None = None
     if model == "qwen":
         model_path = context.path("models", "qwen")

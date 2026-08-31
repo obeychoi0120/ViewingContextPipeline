@@ -3,12 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from extraction.semantic_graph.taxonomy import (
-    AFFECT_AROUSAL,
-    AFFECT_VALENCE,
-    EVENT_REFERENCE_SLOTS,
-    SETTING_CONTEXTS,
-)
 from extraction.summary_validation import SummaryContractError, parse_summary_sections
 
 
@@ -19,6 +13,21 @@ GRAPH_FIELDS = (
     "static_relations",
     "semantic_topics",
     "affect",
+)
+SETTING_CONTEXTS = (
+    "indoor",
+    "outdoor_urban",
+    "outdoor_nature",
+    "transport",
+    "unknown",
+)
+AFFECT_VALENCE = ("positive", "neutral", "negative", "unknown")
+AFFECT_AROUSAL = ("low", "medium", "high", "unknown")
+EVENT_REFERENCE_SLOTS = (
+    "actor_id",
+    "target_id",
+    "instrument_id",
+    "location_id",
 )
 SUMMARY_SCHEMA_VERSION = "graph-video-summary/v3"
 

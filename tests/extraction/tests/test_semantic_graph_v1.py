@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from extraction.semantic_graph import (
-    SCENE_EXTRACTION_PROMPT,
     SemanticGraphError,
     graph_semantic_warnings,
     graph_summary_prompt,
     validate_summary,
 )
-from extraction.semantic_graph.taxonomy import ENTITY_GUIDANCE_MAX, SETTING_CONTEXTS
 from extraction.summary_validation import (
     SUMMARY_SECTIONS,
     serialize_summary_sections,
 )
+
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def graph_with_dangling_reference() -> dict:
@@ -48,12 +51,25 @@ def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
     ]
 
 
-def test_taxonomy_and_prompt_are_multi_image_and_consistent() -> None:
-    assert ENTITY_GUIDANCE_MAX == 6
-    assert "chronological keyframes" in SCENE_EXTRACTION_PROMPT
-    assert "If entities is empty" in SCENE_EXTRACTION_PROMPT
-    for value in SETTING_CONTEXTS:
-        assert value in SCENE_EXTRACTION_PROMPT
+def test_graph_scene_prompt_is_file_backed_and_contains_the_contract() -> None:
+    prompt = (ROOT / "config/prompts/graph_scene_v1.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "one to three chronological keyframes" in prompt
+    assert "If entities is empty" in prompt
+    assert "Prefer 0 to 6 meaningful visible entities" in prompt
+    assert (
+        "Extract only facts directly visible in at least one keyframe." in prompt
+    )
+    for value in (
+        "indoor",
+        "outdoor_urban",
+        "outdoor_nature",
+        "transport",
+        "unknown",
+    ):
+        assert value in prompt
 
 
 def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
