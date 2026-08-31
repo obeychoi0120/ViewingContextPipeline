@@ -29,11 +29,9 @@ class CohortConfig(StrictModel):
 
 
 class EncoderConfig(StrictModel):
-    model_id: Literal["BAAI/bge-large-en-v1.5"]
     model_path: Path
     embedding_dim: Literal[1024]
     max_length: Literal[512]
-    normalize_embeddings: Literal[True]
     batch_size: int = Field(default=32, gt=0)
 
 
@@ -63,6 +61,10 @@ class EvaluationConfig(StrictModel):
     primary_cutoff: Literal[10]
     bootstrap_samples: int = Field(gt=0)
     non_inferiority_margin: Literal[0.05]
+    familywise_alpha: float = Field(gt=0, lt=1)
+    multiple_comparison_correction: Literal["bonferroni"]
+    min_scene_coverage: float = Field(ge=0, le=1)
+    max_arm_coverage_gap: float = Field(ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_cutoffs(self) -> "EvaluationConfig":

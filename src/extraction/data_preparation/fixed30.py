@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .video_processor import extract_resized_keyframes, get_video_duration_seconds
+from .video_processor import extract_resized_keyframes
 
 
 SCENE_SECONDS = 30
@@ -20,7 +20,7 @@ def prepare_visual_item(
     source_video_path: str | Path,
     assets_root: str | Path,
     output_root: str | Path,
-    metadata: dict[str, Any],
+    duration_seconds: object,
     image_size: tuple[int, int],
     force: bool = False,
 ) -> dict[str, str]:
@@ -38,7 +38,14 @@ def prepare_visual_item(
         / "resized_keyframes"
         / content_id
     )
-    metadata_path = Path(output_root) / "data" / "cohort" / "metadata" / f"{content_id}.json"
+    legacy_metadata_path = (
+        Path(output_root) / "data" / "cohort" / "metadata" / f"{content_id}.json"
+    )
+    legacy_metadata_path.unlink(missing_ok=True)
+    try:
+        legacy_metadata_path.parent.rmdir()
+    except OSError:
+        pass
     width, height = image_size
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
@@ -48,7 +55,7 @@ def prepare_visual_item(
     )
     if force or not complete:
         shutil.rmtree(frames_dir, ignore_errors=True)
-        duration = max(1, math.ceil(get_video_duration_seconds(source)))
+        duration = _ceil_duration_seconds(duration_seconds)
         scenes = build_fixed_30s_windows(duration)
         _write_json(timestamp_path, scenes)
         extract_resized_keyframes(
@@ -57,15 +64,6 @@ def prepare_visual_item(
             frames_dir,
             image_size,
         )
-    _write_json(
-        metadata_path,
-        {
-            **metadata,
-            "content_id": content_id,
-            "title": str(metadata.get("title") or ""),
-            "tags": str(metadata.get("tags") or ""),
-        },
-    )
     return {"content_id": content_id}
 
 
@@ -146,6 +144,16 @@ def _safe_content_id(value: object) -> str:
     if not text or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in text):
         raise ValueError(f"content_id is not filesystem-safe: {value!r}")
     return text
+
+
+def _ceil_duration_seconds(value: object) -> int:
+    try:
+        duration = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"duration_seconds must be a positive finite number: {value!r}") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError(f"duration_seconds must be a positive finite number: {value!r}")
+    return max(1, math.ceil(duration))
 
 
 def _write_json(path: Path, value: Any) -> None:

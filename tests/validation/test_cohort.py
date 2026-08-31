@@ -32,10 +32,14 @@ def test_prepare_cohort_needs_pairs_and_mp4_not_titles(tmp_path) -> None:
     pairs = data["dataset"]["pairs_tsv"]
     pairs.write_text("".join(f"u{user:02d}\t" + " ".join(str((user + step) % 20 + 1) for step in range(8)) + "\n" for user in range(12)), encoding="utf-8")
     config = ValidationConfig.model_validate(data)
+    stale_failure = config.output_dir / "data/cohort/failures.jsonl"
+    stale_failure.parent.mkdir(parents=True)
+    stale_failure.write_text('{"reason":"stale"}\n', encoding="utf-8")
     manifest = prepare_cohort(config, probe=lambda _: 2.0)
     assert manifest["user_count"] == 10
     catalog = [json.loads(line) for line in (config.output_dir / "data/cohort/catalog.jsonl").read_text(encoding="utf-8").splitlines()]
     assert all("title" not in row for row in catalog)
+    assert not (config.output_dir / "data/cohort/failures.jsonl").exists()
     assert not (config.output_dir / "data/cohort/vce_smoke_selection.jsonl").exists()
 
 

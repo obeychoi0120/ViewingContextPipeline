@@ -31,6 +31,7 @@ class GeminiWorkerPool:
         temperature: float = 0.0,
         max_output_tokens: int | None = None,
         thinking_level: str | None = None,
+        media_resolution: str | None = None,
         backend_factory: Callable[[], VLMBackend] | None = None,
     ) -> None:
         if concurrency <= 0:
@@ -46,6 +47,7 @@ class GeminiWorkerPool:
                 model_id=model_id,
                 temperature=temperature,
                 thinking_level=thinking_level,
+                media_resolution=media_resolution,
             )
         )
 

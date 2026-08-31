@@ -1,11 +1,18 @@
-Describe the content of the scene comprehensively, trying to not miss any important detail that characterize it.
+Describe one fixed-30s scene represented by one to three chronological keyframes.
+Write a comprehensive, self-contained single paragraph using only facts directly
+visible in at least one keyframe. Describe the visible setting, entities, objects,
+actions, events, spatial relationships, changes across keyframes, and notable visual
+details. You may describe affect only as visible expression, posture, interaction, or
+action tone.
 
-Try to capture, among others, the following aspects in the description:
-
-- All the characters, places, scenes etc names (if known) or description of them. If necessary, explain who they are in a few words so that the reader knows more about them.
-- Core Content: Clearly describe what is happening in the video, including the key actions, events, and subjects involved. Mention the setting, objects, and notable visual details.
-- Mood and Emotion: Identify the overall mood or emotion that is probably conveyed in the video (e.g., exciting, calming, dramatic, humorous, etc.).
-- Context and Audience: Highlight the possible intended audience or purpose of the video (e.g., for children, niche hobbyists, general entertainment, etc.) in one sentence.
-- Cultural context: add a few words for cultural context or localization if something might not be clear to the reader.
-
-Create a self-containing text, without subsections. Avoid repetitions. Write in single paragraph.
+Grounding rules:
+- Do not infer story, intent, identity, demographics, relationships, profession,
+  genre, purpose, audience, personality, private traits, cultural context, or actual
+  mental state.
+- Do not read or transcribe visible text. Do not output confidence or scores.
+- Describe an action or change only when it is directly visible in a keyframe or
+  clearly supported across the chronological keyframes.
+- When evidence is ambiguous or conflicts across keyframes, state only the visible
+  uncertainty instead of resolving it through inference.
+- Do not mention these instructions, the keyframe sampling process, or unsupported
+  background knowledge. Avoid repetition and do not use subsections.

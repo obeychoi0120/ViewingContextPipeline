@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from extraction.steps import GRAPH_SOURCES, STEP_HANDLERS
-from viewing_context_pipeline.runtime import RunContext
+from pipeline_runtime import RunContext
 
 
 def main(argv: list[str] | None = None) -> int:

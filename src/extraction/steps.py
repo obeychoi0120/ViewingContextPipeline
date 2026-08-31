@@ -28,12 +28,19 @@ from extraction.monitoring import (
 )
 from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
+    SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
+    graph_semantic_warnings,
     graph_summary_prompt,
     parse_or_repair_graph,
     validate_summary as validate_graph_summary,
 )
-from extraction.summary_validation import summary_soft_warnings
-from viewing_context_pipeline.runtime import (
+from extraction.summary_validation import (
+    SummaryContractError,
+    parse_summary_sections,
+    serialize_summary_sections,
+    summary_soft_warnings,
+)
+from pipeline_runtime import (
     RunContext,
     read_json,
     read_jsonl,
@@ -53,6 +60,45 @@ def graph_stage_name(stage: str, source: str) -> str:
     if source not in GRAPH_SOURCES:
         raise ValueError(f"unsupported graph source: {source}")
     return f"{stage}-{source}"
+
+
+def _reuse_summary_document(
+    output_path: Path,
+    *,
+    schema_version: str,
+    content_id: str,
+    arm: str,
+    scene_count: int,
+) -> dict[str, Any]:
+    existing = read_json(output_path)
+    try:
+        sections = parse_summary_sections(
+            json.dumps(existing.get("sections"), ensure_ascii=False)
+        )
+        text = serialize_summary_sections(sections)
+    except (AttributeError, SummaryContractError, TypeError) as exc:
+        raise ExtractionStepError(
+            f"incompatible structured summary output: {output_path}; "
+            "use --force or a new run_id"
+        ) from exc
+    expected = {
+        "schema_version": schema_version,
+        "content_id": content_id,
+        "arm": arm,
+        "status": "complete",
+        "sections": sections,
+        "text": text,
+        "scene_count": scene_count,
+        "validation_warnings": summary_soft_warnings(" ".join(sections.values())),
+    }
+    if any(existing.get(key) != value for key, value in expected.items()):
+        raise ExtractionStepError(
+            f"incompatible structured summary output: {output_path}; "
+            "use --force or a new run_id"
+        )
+    if existing != expected:
+        write_json(output_path, expected)
+    return expected
 
 
 GenerationCallback = Callable[[str, str], None]
@@ -176,12 +222,38 @@ def _minimal_graph_records(
                 "scene_idx": row["scene_idx"],
                 "keyframes": row["keyframes"],
                 "graph": row["graph"],
+                "parse_mode": row.get("parse_mode", "unknown"),
+                "semantic_warnings": row.get(
+                    "semantic_warnings", graph_semantic_warnings(row["graph"])
+                ),
             }
             for row in records
         ]
     except KeyError as exc:
         raise ExtractionStepError(
             f"invalid graph scene file, missing {exc.args[0]}: {path}"
+        ) from exc
+    if minimal != records:
+        write_jsonl(path, minimal)
+    return minimal
+
+
+def _minimal_description_records(
+    records: list[dict[str, Any]],
+    path: Path,
+) -> list[dict[str, Any]]:
+    required = (
+        "schema_version",
+        "content_id",
+        "scene_idx",
+        "keyframes",
+        "description",
+    )
+    try:
+        minimal = [{key: row[key] for key in required} for row in records]
+    except KeyError as exc:
+        raise ExtractionStepError(
+            f"invalid description scene file, missing {exc.args[0]}: {path}"
         ) from exc
     if minimal != records:
         write_jsonl(path, minimal)
@@ -258,8 +330,6 @@ def prepare_input_data(context: RunContext, *, force: bool = False) -> dict[str,
     settings = context.config["extraction"]["visual_evidence"]
     result = prepare_catalog(
         catalog,
-        titles_csv=context.path("data", "titles_csv"),
-        tags_csv=context.path("data", "tags_csv"),
         assets_root=context.cohort_dir / "source_assets",
         output_root=context.run_root,
         image_size=tuple(settings["image_resolution"]),
@@ -348,6 +418,8 @@ def extract_graph_scenes(
                         "scene_idx": row["scene_idx"],
                         "keyframes": row["keyframes"],
                         "graph": result.graph,
+                        "parse_mode": result.parse_mode,
+                        "semantic_warnings": graph_semantic_warnings(result.graph),
                     })
                 else:
                     failures.append({
@@ -430,6 +502,7 @@ def extract_graph_scenes(
                 temperature=float(gemini["temperature"]),
                 max_output_tokens=int(gemini["max_output_tokens"]),
                 thinking_level=str(gemini["thinking_level"]),
+                media_resolution=str(gemini["media_resolution"]),
             )
             pool.generate(tasks, complete_gemini_scene)
     failures = [
@@ -482,15 +555,13 @@ def summarize_graph(
         content_id = scene_path.stem
         output_path = summary_dir / f"{content_id}.json"
         if output_path.is_file() and not force:
-            existing = read_json(output_path)
-            cleaned = {
-                key: existing[key]
-                for key in ("content_id", "text", "scene_count", "validation_warnings")
-                if key in existing
-            }
-            if cleaned != existing:
-                write_json(output_path, cleaned)
-            documents_by_content[content_id] = cleaned
+            documents_by_content[content_id] = _reuse_summary_document(
+                output_path,
+                schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
+                content_id=content_id,
+                arm=f"graph_{source}",
+                scene_count=len(records),
+            )
             continue
         prompt = graph_summary_prompt(template, records)
         task_id = content_id
@@ -516,13 +587,18 @@ def summarize_graph(
     ) as progress:
         def complete_graph_summary(task_id: str, text: str) -> None:
             records, output_path = pending_by_task[task_id]
-            summary = validate_graph_summary(text)
+            sections = validate_graph_summary(text)
+            summary = serialize_summary_sections(sections)
             content_id = task_id
             document = {
+                "schema_version": GRAPH_SUMMARY_SCHEMA_VERSION,
                 "content_id": content_id,
+                "arm": f"graph_{source}",
+                "status": "complete",
+                "sections": sections,
                 "text": summary,
                 "scene_count": len(records),
-                "validation_warnings": summary_soft_warnings(summary),
+                "validation_warnings": summary_soft_warnings(" ".join(sections.values())),
             }
             write_json(output_path, document)
             documents_by_content[content_id] = document
@@ -584,6 +660,7 @@ def extract_description_scenes(
             }
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
+                existing = _minimal_description_records(existing, path)
                 records_by_content[content_id] = existing
                 failures_by_content[content_id] = failures
                 continue
@@ -606,10 +683,7 @@ def extract_description_scenes(
                         common = {
                             "content_id": visual["content_id"],
                             "scene_idx": row["scene_idx"],
-                            "scene_start_seconds": row["scene_start_seconds"],
-                            "scene_end_seconds": row["scene_end_seconds"],
                             "keyframes": row["keyframes"],
-                            "image_paths": row["image_paths"],
                         }
                         if not description:
                             failures.append({
@@ -691,28 +765,19 @@ def summarize_description(
         if not records:
             empty_scene_files += 1
             continue
+        records = _minimal_description_records(records, scene_path)
         if any(row.get("schema_version") != SCENE_SCHEMA_VERSION for row in records):
             raise ExtractionStepError(f"invalid description scene file: {scene_path}")
         output_path = context.description_summary_dir / f"{records[0]['content_id']}.json"
         if output_path.is_file() and not force:
-            existing = read_json(output_path)
-            cleaned = {
-                key: existing[key]
-                for key in (
-                    "schema_version",
-                    "content_id",
-                    "arm",
-                    "status",
-                    "text",
-                    "scene_count",
-                    "validation_warnings",
-                )
-                if key in existing
-            }
-            if cleaned != existing:
-                write_json(output_path, cleaned)
-            existing = cleaned
-            documents_by_content[str(records[0]["content_id"])] = existing
+            content_id = str(records[0]["content_id"])
+            documents_by_content[content_id] = _reuse_summary_document(
+                output_path,
+                schema_version=SUMMARY_SCHEMA_VERSION,
+                content_id=content_id,
+                arm="description",
+                scene_count=len(records),
+            )
             continue
         prompt = description_summary_prompt(template, records)
         task_id = str(records[0]["content_id"])
@@ -738,16 +803,18 @@ def summarize_description(
     ) as progress:
         def complete_description_summary(task_id: str, text: str) -> None:
             records, output_path = pending_by_task[task_id]
-            summary = validate_description_summary(text)
+            sections = validate_description_summary(text)
+            summary = serialize_summary_sections(sections)
             content_id = str(records[0]["content_id"])
             document = {
                 "schema_version": SUMMARY_SCHEMA_VERSION,
                 "content_id": content_id,
                 "arm": "description",
                 "status": "complete",
+                "sections": sections,
                 "text": summary,
                 "scene_count": len(records),
-                "validation_warnings": summary_soft_warnings(summary),
+                "validation_warnings": summary_soft_warnings(" ".join(sections.values())),
             }
             write_json(output_path, document)
             documents_by_content[content_id] = document
