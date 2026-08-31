@@ -211,9 +211,14 @@ def _validate_config(value: dict[str, Any]) -> None:
         if protocol.get(key) != expected_value:
             raise ConfigError(f"protocol.{key} must be {expected_value!r}")
     extraction = _require_mapping(value, "extraction")
-    if set(extraction) != {"visual_evidence", "graph", "description"}:
+    if set(extraction) != {
+        "visual_evidence",
+        "summary_retry",
+        "graph",
+        "description",
+    }:
         raise ConfigError(
-            "extraction must contain visual_evidence, graph, and description"
+            "extraction must contain visual_evidence, summary_retry, graph, and description"
         )
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution"}:
@@ -230,6 +235,45 @@ def _validate_config(value: dict[str, Any]) -> None:
         raise ConfigError(
             "extraction.visual_evidence.image_resolution must be two positive integers"
         )
+    summary_retry = _require_mapping(extraction, "summary_retry")
+    if set(summary_retry) != {"seeds", "temperature", "top_p", "top_k"}:
+        raise ConfigError(
+            "extraction.summary_retry must contain seeds, temperature, top_p, and top_k"
+        )
+    retry_seeds = summary_retry.get("seeds")
+    if (
+        not isinstance(retry_seeds, list)
+        or not retry_seeds
+        or any(
+            not isinstance(seed, int) or isinstance(seed, bool) or seed < 0
+            for seed in retry_seeds
+        )
+        or len(set(retry_seeds)) != len(retry_seeds)
+    ):
+        raise ConfigError(
+            "extraction.summary_retry.seeds must be unique non-negative integers"
+        )
+    retry_temperature = summary_retry.get("temperature")
+    if (
+        not isinstance(retry_temperature, (int, float))
+        or isinstance(retry_temperature, bool)
+        or not 0 < float(retry_temperature) <= 2
+    ):
+        raise ConfigError("extraction.summary_retry.temperature must be in (0, 2]")
+    retry_top_p = summary_retry.get("top_p")
+    if (
+        not isinstance(retry_top_p, (int, float))
+        or isinstance(retry_top_p, bool)
+        or not 0 < float(retry_top_p) <= 1
+    ):
+        raise ConfigError("extraction.summary_retry.top_p must be in (0, 1]")
+    retry_top_k = summary_retry.get("top_k")
+    if (
+        not isinstance(retry_top_k, int)
+        or isinstance(retry_top_k, bool)
+        or retry_top_k <= 0
+    ):
+        raise ConfigError("extraction.summary_retry.top_k must be a positive integer")
     generation_keys = {
         "summary_prompt",
         "scene_max_new_tokens",

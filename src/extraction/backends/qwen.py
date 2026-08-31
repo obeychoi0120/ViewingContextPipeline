@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Iterator, Sequence
 
 from extraction.multimodal import (
     shot_reference_text,
@@ -47,6 +48,12 @@ class QwenBackend:
         prompt: str,
         max_new_tokens: int,
         references: Sequence[dict[str, Any]] = (),
+        *,
+        do_sample: bool = False,
+        seed: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
     ) -> str:
         if references:
             validate_image_reference_alignment(len(images), list(references))
@@ -66,11 +73,27 @@ class QwenBackend:
             return_dict=True,
             return_tensors="pt",
         ).to(self.model.device)
-        generated = self.model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
+        generation = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": do_sample,
+        }
+        if do_sample:
+            if seed is None or temperature is None or top_p is None or top_k is None:
+                raise ValueError(
+                    "sampled Qwen generation requires seed, temperature, top_p, and top_k"
+                )
+            generation.update(
+                {
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "top_k": top_k,
+                }
+            )
+        seed_context = (
+            _seeded_rng(seed, self.model.device) if do_sample else nullcontext()
         )
+        with seed_context:
+            generated = self.model.generate(**inputs, **generation)
         trimmed = [
             output[len(source):]
             for source, output in zip(inputs.input_ids, generated)
@@ -80,6 +103,23 @@ class QwenBackend:
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )[0].strip()
+
+
+@contextmanager
+def _seeded_rng(seed: int, device: Any) -> Iterator[None]:
+    import torch
+
+    selected = torch.device(device)
+    devices = []
+    if selected.type == "cuda":
+        devices = [
+            selected.index if selected.index is not None else torch.cuda.current_device()
+        ]
+    with torch.random.fork_rng(devices=devices):
+        torch.manual_seed(seed)
+        if devices:
+            torch.cuda.manual_seed_all(seed)
+        yield
 
 
 def _convert_to_fc_patch(model: Any) -> None:

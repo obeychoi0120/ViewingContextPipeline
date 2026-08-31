@@ -65,6 +65,12 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert set(context.config["data"]) == {"videos_dir", "pairs_tsv"}
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
+    assert context.config["extraction"]["summary_retry"] == {
+        "seeds": [42, 43, 44],
+        "temperature": 0.1,
+        "top_p": 0.8,
+        "top_k": 20,
+    }
     assert set(context.config["validation"]["encoder"]) == {
         "embedding_dim",
         "max_length",
@@ -99,6 +105,70 @@ def test_config_rejects_invalid_gemini_generation_settings(
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     with pytest.raises(ConfigError, match=message):
         RunContext.load("invalid", root=context.root)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("seeds", [42, 42], "seeds"),
+        ("temperature", 0.0, "temperature"),
+        ("top_p", 1.1, "top_p"),
+        ("top_k", 0, "top_k"),
+    ],
+)
+def test_config_rejects_invalid_summary_retry_settings(
+    context: RunContext,
+    key: str,
+    value: object,
+    message: str,
+) -> None:
+    path = context.root / "config/pipeline.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["extraction"]["summary_retry"][key] = value
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        RunContext.load("invalid-summary-retry", root=context.root)
+
+
+def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
+    sections = {
+        "setting_and_environments": "An indoor room",
+        "main_characters_and_objects": "A person",
+        "chronological_events": "The person walks",
+        "relations": "The person is inside the room",
+        "affect_or_topic": "Neutral",
+    }
+    responses = ["not json", "still not json", "also not json", json.dumps(sections)]
+    submitted: list[QwenGenerationTask] = []
+
+    def generate(tasks, _callback=None):
+        task = tasks[0]
+        submitted.append(task)
+        return {task.task_id: responses[len(submitted) - 1]}
+
+    completed = []
+
+    def complete(task_id, text):
+        completed.append((task_id, extraction_steps.parse_summary_sections(text)))
+
+    retry_count = extraction_steps._generate_summaries_with_retry(
+        generate,
+        [QwenGenerationTask("c1", (), "prompt", 512)],
+        complete,
+        {
+            "seeds": [42, 43, 44],
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "top_k": 20,
+        },
+    )
+
+    assert retry_count == 3
+    assert completed == [("c1", sections)]
+    assert [task.seed for task in submitted] == [None, 42, 43, 44]
+    assert [task.do_sample for task in submitted] == [False, True, True, True]
+    for task in submitted[1:]:
+        assert (task.temperature, task.top_p, task.top_k) == (0.1, 0.8, 20)
 
 
 def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> None:
@@ -282,7 +352,6 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
             "Relations: The person stands beside the object. "
             "Affect or topic: A neutral visible affect."
         ),
-        "validation_warnings": [],
     }
 
 

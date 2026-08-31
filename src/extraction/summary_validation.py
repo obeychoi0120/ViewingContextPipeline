@@ -1,12 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
-from typing import Any
-
-
-SUMMARY_VALIDATION_VERSION = "summary-soft-validation/v2"
-SUMMARY_WORD_GUIDANCE_MAX = 256
 SUMMARY_SECTIONS = (
     "setting_and_environments",
     "main_characters_and_objects",
@@ -30,10 +23,12 @@ class SummaryContractError(ValueError):
 
 def parse_summary_sections(text: str) -> dict[str, str]:
     """Parse the model-authored five-field JSON without semantic reclassification."""
+    from extraction.semantic_graph.json_repair import parse_or_repair_graph
+
     raw = str(text or "").strip()
     if not raw:
         raise SummaryContractError("structured video summary must not be empty")
-    value = _load_summary_object(raw)
+    value = parse_or_repair_graph(raw).graph
     if value is None:
         raise SummaryContractError("structured video summary must be one JSON object")
     if set(value) != set(SUMMARY_SECTIONS):
@@ -62,36 +57,6 @@ def serialize_summary_sections(sections: dict[str, str]) -> str:
     if not parts:
         raise SummaryContractError("structured video summary must contain visible evidence")
     return " ".join(parts)
-
-
-def summary_soft_warnings(text: str) -> list[str]:
-    """Report advisory summary-length deviations without rejecting output."""
-    word_count = len(str(text or "").strip().split())
-    if word_count <= SUMMARY_WORD_GUIDANCE_MAX:
-        return []
-    return [
-        "summary_word_guidance_exceeded: "
-        f"observed={word_count} guidance_max={SUMMARY_WORD_GUIDANCE_MAX}"
-    ]
-
-
-def _load_summary_object(text: str) -> dict[str, Any] | None:
-    candidates = [text]
-    candidates.extend(
-        match.strip()
-        for match in re.findall(
-            r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL | re.IGNORECASE
-        )
-        if match.strip()
-    )
-    for candidate in candidates:
-        try:
-            value = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-    return None
 
 
 def _with_terminal_punctuation(value: str) -> str:
