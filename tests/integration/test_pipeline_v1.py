@@ -73,7 +73,7 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
     assert context.config["extraction"]["greedy_decoding"] is True
-    assert context.config["extraction"]["summary_repetition_penalty"] == 1.05
+    assert context.config["extraction"]["summary_repetition_penalty"] == 1.1
     assert context.config["extraction"]["summary_sampling"] == {
         "temperature": 0.2,
         "top_p": 0.8,
@@ -101,11 +101,11 @@ def test_greedy_decoding_switches_summary_generation_mode(
     context: RunContext,
 ) -> None:
     assert extraction_steps._summary_generation_settings(context) == {
-        "repetition_penalty": 1.05,
+        "repetition_penalty": 1.1,
     }
     context.config["extraction"]["greedy_decoding"] = False
     assert extraction_steps._summary_generation_settings(context) == {
-        "repetition_penalty": 1.05,
+        "repetition_penalty": 1.1,
         "do_sample": True,
         "temperature": 0.2,
         "top_p": 0.8,
@@ -125,12 +125,15 @@ def test_summary_prompts_require_bounded_single_line_values(
 ) -> None:
     prompt = (ROOT / relative_path).read_text(encoding="utf-8")
 
-    assert "Output exactly seven physical lines." in prompt
-    assert "Never insert a newline after a label." in prompt
+    assert "Output exactly seven physical lines in the required order." in prompt
+    assert "Every non-empty value must be one natural, complete English sentence." in prompt
+    assert "long comma-separated inventories" in prompt
+    assert "not an exhaustive inventory" in prompt
+    assert "Never create combinations by pairing every person" in prompt
     assert "Use at most 25 English words per field." in prompt
     assert "Stop immediately after the semantic_topics line." in prompt
     for name in SUMMARY_SECTIONS:
-        assert f"{name}: <one concise single-line value or empty>" in prompt
+        assert f"{name}: <one complete sentence or empty>" in prompt
 
 
 def test_config_rejects_non_boolean_greedy_decoding(context: RunContext) -> None:
@@ -707,7 +710,7 @@ def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
     def invalid_generator(**_kwargs):
         def generate(tasks, callback):
             assert tasks[0].do_sample is False
-            assert tasks[0].repetition_penalty == 1.05
+            assert tasks[0].repetition_penalty == 1.1
             assert tasks[0].max_new_tokens == 320
             callback(tasks[0].task_id, "not labeled text")
             return {}
