@@ -1,61 +1,194 @@
 # ViewingContextPipeline
 
+MicroLens-100K의 동일한 시각 evidence를 Graph와 Description으로 표현했을 때,
+고정된 next-item ranking protocol에서 어떤 차이가 생기는지 측정하는 PoC 파이프라인입니다.
+
+> 현재 저장소가 검증하는 것은 **코드와 artifact 계약**입니다. 실제 MicroLens 데이터, Linux GPU, Qwen checkpoint, Vertex Gemini를 사용한 전체 pilot을 실행하기 전에는 추천 품질 결과가 검증된 것이 아닙니다.
+
+## 이 PoC의 의도
+
+| 비교                        | 역할                         | 해석                                                                                                |
+| --------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| 각 VC arm vs SASRec_ID      | confirmatory superiority     | ID embedding을 대체한 visual representation이 이 protocol에서 standalone ranking utility를 보이는가 |
+| 두 Graph arm vs SASRec_DESC | confirmatory non-inferiority | 선언된 margin 안에서 Description 대비 ranking utility를 보존하는가                                  |
+| GRAPH_GEMINI vs GRAPH_QWEN  | exploratory                  | downstream 결과가 Graph extractor source에 얼마나 민감한가                                          |
+
+VC feature는 ID embedding에 더해지는 것이 아니라 이를 **대체**합니다. 따라서 VC-vs-ID 결과는 ID에 visual context를 추가했을 때의 incremental uplift가 아닙니다.
+Gemini Graph-vs-Description 비교에는 extractor와 representation 차이가 함께 포함됩니다.
+이 PoC는 CTR, watch time, 만족도, 온라인 효과, 인과효과, VLM 자체의 보편적 우열을 주장하지 않습니다.
+
 ## Pipeline Overview
 
-MicroLens-100K local MP4에서 동일한 visual evidence를 사용해 Graph와 Description 표현을 만들고, 같은 cohort·split·seed의 독립 SASRec arm으로 비교하는 파이프라인입니다. 전체 구조는 [Pipeline Overview PPTX](ViewingContextPipeline_Overview.pptx)에 정리되어 있습니다.
+![ViewingContextPipeline design snapshot](docs/design/ViewingContextPipeline_260827.png)
+
+| Arm                 | item representation                       | scene extractor          | summarizer |
+| ------------------- | ----------------------------------------- | ------------------------ | ---------- |
+| SASRec_ID           | trainable ID embedding                    | 없음                     | 없음       |
+| SASRec_GRAPH_QWEN   | frozen BGE feature + trainable projection | Qwen Graph               | Qwen       |
+| SASRec_GRAPH_GEMINI | frozen BGE feature + trainable projection | Gemini Graph             | Qwen       |
+| SASRec_DESC         | frozen BGE feature + trainable projection | Qwen visible description | Qwen       |
+
+## 설계 근거
+
+아래 표의 “통제 의도”는 설계 가설이며 repo 자체가 그 타당성을 증명하지는 않습니다.
+
+| 설계 선택                          | 현재 구현                                                                        | 통제 의도                                           | 남는 한계                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| visual_only                        | audio, OCR, metadata를 VLM evidence로 사용하지 않음                              | 시각 representation 차이를 격리                     | multimodal 성능을 말할 수 없음                                                |
+| 동일 fixed_30s evidence            | 30초 window마다 최대 3개의 10초 구간 midpoint 사용. 완전한 window는 +5/+15/+25초 | branch별 입력 차이 제거                             | 마지막 partial window의 midpoint는 달라지며 keyframe 사이 사건을 놓칠 수 있음 |
+| source-qualified Graph             | Qwen/Gemini scene·failure·summary 경로 분리                                    | artifact 혼합 방지와 extractor 민감도 측정          | API 설정, generation, repair율 영향도 함께 포함                               |
+| scene 후 video summary             | scene artifact와 failure를 먼저 저장한 뒤 video 단위 summary 생성                | scene 근거를 감사하면서 BGE 입력 단위를 통일        | partial failure가 체계적이면 branch별 evidence subset이 달라질 수 있음        |
+| 공통 Qwen summary·7-field v3·BGE | 세 VC branch의 output shape와 encoder 고정                                       | 형식·요약기 차이의 교란을 줄임                     | 공통 Qwen summarizer가 중립적이지 않을 수 있음                                |
+| 독립 4-arm SASRec                  | 같은 cohort, split, seeds, backbone, hyperparameters                             | representation 외 학습 조건 고정                    | ID+VC 결합 효과가 아닌 replacement 비교                                       |
+| full eligible catalog              | pairs에서 참조되고 local MP4 validation을 통과한 전체 item                       | selected-user union으로 후보군이 축소되는 오류 방지 | 제외 video가 estimand에 미치는 영향은 별도 판단 필요                          |
+| actual-artifact diagnosis          | completion marker 대신 실제 artifact 재검사                                      | 누락·손상·stale artifact 발견                     | config/prompt/model provenance와 downstream invalidation은 자동화하지 않음    |
+
+> **[직접 결정 필요]** 실제 pilot 해석 전 min_scene_coverage=0.95, max_arm_coverage_gap=0.05, partial summary 허용 여부, primary NDCG@10, non-inferiority margin 0.05, comparison family와 multiplicity 정책을 확정해야 합니다. 
+> 현재 값은 provisional PoC 계약입니다.
+
+## 실행 전 준비
+
+### 공통 조건
+
+- Python 3.11 이상과 conda 환경 llmjg
+- ffmpeg와 ffprobe가 PATH에 존재
+- config/pipeline.yaml의 data/model 경로가 실행 host에서 유효
+- MP4 filename stem은 양의 정수
+- pairs TSV는 user_id, TAB, space-separated item ids 형식
+
+```powershell
+conda activate llmjg
+
+# 코드·계약 검증용
+python -m pip install -e ".[dev]"
+
+# 실제 Qwen/Gemini/BGE/SASRec pilot용
+python -m pip install -e ".[qwen,gemini,train,dev]"
+```
+
+Qwen extraction은 device_map=cuda와 bfloat16을 사용하므로 --gpus 생략이 CPU  실행을 의미하지 않습니다. 실제 pilot은 Linux/CUDA 환경에서 checkpoint 경로와 GPU memory를 확인해야 합니다.
+
+## E2E 실행 방법
+
+아래 예시는 Bash입니다. PowerShell에서는 RUN_ID 대신 $env:RUN_ID 변수를 사용합니다. 모든 단계는 같은 run_id를 사용합니다.
+
+```bash
+export RUN_ID=pilot_1k_v3_YYYYMMDD
+
+# Phase 1: cohort
+python -m validation prepare-cohort --run-id "$RUN_ID"
+
+# Phase 2: shared visual evidence
+python -m extraction prepare-input-data --run-id "$RUN_ID"
+
+# Phase 3: three independent extraction branches
+python -m extraction extract-graph-scenes --model qwen --run-id "$RUN_ID" --gpus 1
+python -m extraction summarize-graph --source qwen --run-id "$RUN_ID" --gpus 1
+python -m extraction extract-graph-scenes --model gemini --run-id "$RUN_ID"
+python -m extraction summarize-graph --source gemini --run-id "$RUN_ID" --gpus 1
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --gpus 1
+python -m extraction summarize-description --run-id "$RUN_ID" --gpus 1
+
+# Phase 4: representation, recommendation, diagnosis
+python -m validation embed-representations --run-id "$RUN_ID"
+python -m validation run-recommendation --run-id "$RUN_ID"
+python -m validation run-diagnosis --run-id "$RUN_ID"
+```
+
+## 결과를 읽는 순서
+
+artifacts/{run_id}/validation/diagnosis/diagnosis.json을 다음 순서로 봅니다.
+
+1. runtime_decision.status, checks, errors
+   - catalog, sequence, scene, embedding, metric, training run, checkpoint의 현재 artifact 완전성을 뜻합니다. 실패하면 통계 결과를 해석하지 않습니다.
+2. statistical_analysis.status, errors, warnings
+   - computed_with_warnings는 계산은 완료됐지만 조건부 해석이 필요하다는 뜻입니다.
+   - sparse Description control에서는 non-inferiority가 not_evaluable_sparse_control로 남으며 결론을 내리지 않습니다.
+3. comparisons
+   - superiority, non-inferiority, exploratory family의 선언된 decision을 봅니다.
+   - 단순 평균은 metrics, coverage·concentration·frequency bucket은 diagnostics에서 확인합니다.
+4. 외적·제품 타당성
+   - 이 고정 protocol의 결과를 CTR, 인과효과 또는 일반 영상 이해 성능으로 확대하지 않습니다.
+
+test pass는 구현 계약, runtime pass는 artifact 완전성, comparison decision은 이 protocol 안의 통계 결과입니다. 세 단계는 서로 대체되지 않습니다.
+
+## 재사용·실패·재실행
+
+이 저장소는 manifest/fingerprint로 config, prompt, model 변경을 자동 감지하지 않습니다. --force도 downstream artifact를 자동 무효화하지 않습니다.
+
+| 상황                                                       | 조치                                                                                         |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 동일한 현재 v3 계약에서 중단 또는 누락                     | 같은 명령 재실행. 완료 content는 재사용                                                      |
+| failure scene을 다시 생성                                  | 해당 extraction에 --force, 이어서 summary → embedding → recommendation → diagnosis 재실행 |
+| data, cohort, config, model, prompt, schema, protocol 변경 | 새 run_id로 처음부터 실행                                                                    |
+| v2, 추가 필드, 비정규 text 등 legacy artifact              | migration하지 않음. 새 run_id가 기본이며 같은 실험의 단순 재생성만 --force 사용              |
+| diagnosis만 현재 파일 기준으로 재검사                      | run-diagnosis 재실행. 기존 diagnosis를 신뢰하지 않고 덮어씀                                  |
+
+failure JSONL은 append-only history가 아니라 **현재 unresolved failure state**입니다. 성공한 force retry 또는 완전한 cache reuse 뒤에는 stale·empty failure 파일을 삭제합니다. failure 파일 부재만으로 완전성을 판단하지 말고 diagnosis를 확인해야 합니다.
+
+## Artifact map
 
 ```text
-MicroLens-100K
-  + visual_only
-  + fixed_30s (5s, 15s, 25s keyframes)
-  + Graph Extractor: Qwen3-VL-2B | Gemini 3.7 Flash
-  + Graph/Description Summarizer: Qwen3-VL-2B
-  + Recommendation Arms:
-      SASRec_ID
-      SASRec_GRAPH_QWEN
-      SASRec_GRAPH_GEMINI
-      SASRec_DESC
+artifacts/{run_id}/
+├─ data/cohort/
+│  ├─ item_inventory.jsonl
+│  ├─ catalog.jsonl
+│  ├─ sequences.jsonl
+│  ├─ eligibility_summary.json
+│  └─ source_assets/{content_id}/assets/timestamp_fixed_30s.json
+├─ data/fixed_30s/resized_keyframes/{content_id}/*.png
+├─ extraction/
+│  ├─ graph/{qwen,gemini}/{scenes,failures,summaries}/
+│  └─ description/{scenes,failures,summaries}/
+└─ validation/
+   ├─ representations/
+   ├─ recommendations/
+   └─ diagnosis/diagnosis.json
 ```
 
-이 파이프라인은 지정된 next-item ranking protocol에서 representation arm 간 차이를 측정합니다. 결과를 CTR, 시청시간, 만족도 또는 인과효과로 해석하지 않습니다.
+<details>
+<summary>단계별 대표 출력</summary>
 
-구성은 다음 세 부분으로 나뉩니다.
+| Phase          | Step                  | 대표 출력                                     |
+| -------------- | --------------------- | --------------------------------------------- |
+| Cohort         | prepare-cohort        | catalog, sequences, eligibility summary       |
+| Evidence       | prepare-input-data    | timestamp JSON, resized keyframes             |
+| Extraction     | scene 단계            | source-qualified scene과 선택적 failure JSONL |
+| Summary        | summary 단계          | content별 v3 summary JSON                     |
+| Representation | embed-representations | 세 branch NPZ와 item index                    |
+| Recommendation | run-recommendation    | per-user metrics, training runs, checkpoints  |
+| Diagnosis      | run-diagnosis         | diagnosis/v2 document                         |
 
-- `src/extraction/`: fixed-30s keyframe, Graph/Description scene, 영상 단위 summary
-- `src/validation/`: cohort, BGE embedding, 4-arm SASRec, runtime diagnosis
-- `src/pipeline_runtime.py`: 공통 config 검증, run 경로, JSON I/O
+</details>
 
-`extraction`과 `validation`은 각각 독립 CLI를 제공합니다. 전체 실행 스크립트에서는 아래 11개 명령을 같은 `run_id`로 순서대로 호출해야 합니다.
+## 핵심 데이터 계약
 
-## 환경 설정
+### Graph scene
 
-```bash
-conda activate llmjg
-python -m pip install -e ".[qwen,gemini,train]"
-gcloud auth application-default login
+각 row는 정확히 다음 5개 필드만 가집니다.
+
+```text
+scene_idx, keyframes, graph, parse_mode, semantic_warnings
 ```
 
-`config/pipeline.yaml`에서 다음 값만 실행 환경에 맞게 설정합니다.
+Graph output은 native JSON object를 먼저 읽고 실패 시 deterministic syntax-only repair를 한 번 적용합니다.
+유효하지만 entity가 많은 JSON을 semantic deduplication하거나 임의로 축약하지 않습니다.
+structural/reference 문제는 semantic_warnings에 기록하고 scene 실패와 분리합니다.
 
-- `data.videos_dir`, `data.pairs_tsv`
-- `models.qwen`, `models.bge`
-- `models.gemini.project_id`, `location`, `model_id`, `temperature`, `max_output_tokens`, `thinking_level`
+### Description scene
 
-Gemini는 Vertex AI Application Default Credentials를 사용합니다. editable install을 하지 않은 checkout에서는 저장소 루트에서 `PYTHONPATH`에 `src`를 추가합니다.
+각 row는 정확히 다음 5개 필드만 가집니다.
 
-```bash
-export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"
+```text
+schema_version, content_id, scene_idx, keyframes, description
 ```
 
-## 실험 계약
+Description prompt는 직접 보이는 사실만 허용하며 story, intent, identity, demographics, purpose, audience, cultural context, OCR transcription을 금지합니다.
+Graph prompt와 공통 원칙은 visible-only grounding이지만 세부 규칙은 branch별 prompt가 source of truth입니다.
 
-Qwen Graph, Gemini Graph, Description은 같은 fixed-30s 장면과 시간순 keyframe을 입력으로 사용합니다. 두 Graph source의 scene graph는 각각 보존하고, 영상 단위 summary는 모두 Qwen으로 생성합니다. Description도 직접 보이는 사실만 기술하는 strict visible-only prompt를 사용하며, Graph와 마찬가지로 story, identity, demographics, 직업, 관계, 목적, audience, private trait, 실제 mental state 또는 화면 text를 추론하지 않습니다.
+### Video summary v3
 
-Graph JSON은 native object를 우선 사용하고 실패 시 deterministic repair를 한 번 적용합니다. 복구할 수 없는 Graph scene, Gemini API 최종 실패, 빈 Description scene만 해당 scene의 failure artifact로 남기고 나머지는 계속 처리합니다. 실제 success/failure scene 수와 arm별 coverage는 `run-diagnosis`가 다시 집계합니다.
-
-### 영상 Summary 계약
-
-Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으로 직접 생성하지 않습니다. 두 branch 모두 다음과 같은 동일한 7개 필드의 JSON object를 생성합니다.
+Graph와 Description은 동일한 7개 문자열 필드와 순서를 사용합니다.
 
 ```json
 {
@@ -69,76 +202,41 @@ Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으
 }
 ```
 
-`visual_atmosphere`는 전체적으로 직접 확인되는 시각 분위기, `visible_affect`는 사람·동물의 가시적 표정·자세·상호작용·행동 톤, `semantic_topics`는 명시적 entity·object·event·setting 근거가 있는 주제를 기록합니다. Graph Summary의 분위기는 scene graph에 보존된 setting, event, topic, visible-affect 근거로만 작성하며 graph에 없는 조명·색상·날씨·구도는 추론하지 않습니다. Description Summary는 scene description에 그러한 시각 단서가 명시된 경우에만 사용합니다.
+개별 필드는 근거가 없으면 빈 문자열일 수 있지만 7개 전체가 비어 있으면 실패합니다. 추가·누락 필드와 비문자열 값은 거부합니다. BGE에는 raw JSON이나 Markdown이 아니라 canonical section line으로 직렬화한 text만 입력합니다.
 
-필드명과 분류는 Qwen 출력 계약에 포함됩니다. 후처리는 자유 문장을 필드로 재분류하지 않습니다. 먼저 native JSON object를 읽고 실패하면 `json_repair.py`의 deterministic syntax-only repair를 한 번 적용한 뒤, exact field set·문자열 타입·비어 있지 않은 전체 evidence를 검증합니다. 근거가 없는 개별 필드는 빈 문자열로 출력합니다. 유효한 필드는 위 순서대로 `Setting and environments: ...` 형태로 결정적으로 직렬화하고 각 section 끝에 줄바꿈을 넣습니다. summary artifact에는 원래 `sections`와 BGE 입력용 `text`를 함께 저장합니다. BGE에는 raw JSON이나 Markdown이 아니라 줄 단위 section으로 구성된 `text`만 입력합니다.
+summary 생성은 greedy 최초 1회 후 계약 검증에 실패한 content만 seed 42, 43, 44의 sampled retry를 수행합니다. 총 최대 4회이며 모두 실패하면 malformed summary를 저장하지 않고 summary 단계를 실패 처리합니다.
 
-Graph와 Description은 같은 필드·repair·검증·직렬화기를 사용하므로 출력 형식 차이가 representation arm 비교의 교란변수가 되지 않도록 합니다. 최종 summary JSON에는 `validation_warnings`를 저장하지 않습니다. 이 구조화 summary 계약을 변경하는 실험은 새 `run_id`를 사용해야 합니다.
+주요 schema version은 viewing-context-config/v1, scene-description/v1, graph-video-summary/v3, description-video-summary/v3, sasrec-training-run/v1, diagnosis/v2입니다.
 
-최초 Summary 생성은 기존과 같이 greedy decoding(`do_sample=false`)을 사용합니다. JSON repair 또는 7필드 계약 검증이 실패한 content만 같은 Qwen model worker에서 다시 생성하며 모델을 재로딩하지 않습니다. retry는 순서대로 seed `42`, `43`, `44`를 사용하고 각 시도에 `do_sample=true`, `temperature=0.1`, `top_p=0.8`, `top_k=20`을 적용합니다. 세 번 모두 실패하면 malformed summary를 저장하지 않고 해당 summary Step을 실패 처리합니다. 이 retry 정책은 영상 Summary에만 적용하며 Graph scene의 1회 생성·실패 artifact 계약은 변경하지 않습니다.
+## 검증 수준
 
-4-arm 평가는 `validation.evaluation`의 family-wise alpha와 Bonferroni 정책을 사용합니다. confirmatory family는 세 Viewing Context arm과 `SASRec_ID`의 superiority 비교 3개, 두 Graph arm과 `SASRec_DESC`의 non-inferiority 비교 2개입니다. Qwen–Gemini 직접 비교는 exploratory입니다.
+### 코드·계약 검증
 
-`min_scene_coverage`와 `max_arm_coverage_gap`은 runtime 통과 기준입니다. `[직접 결정 필요]` 현재 `0.95`와 `0.05`는 provisional PoC gate이므로 실제 pilot 결과를 해석하기 전에 확정해야 합니다.
-
-## 독립 Step 실행
-
-모든 명령은 `--run-id`를 요구하며 선행 Step을 자동 실행하지 않습니다. `run-diagnosis`를 제외한 Step은 필요한 실제 출력이 이미 있으면 재사용하고, `--force`는 선택한 Step의 출력만 다시 생성합니다.
-
-아래 경로는 모두 `artifacts/{run_id}/` 기준입니다. `failures/*.jsonl`과 `data/cohort/{failures,preparation_failures}.jsonl`은 실패가 있을 때만 생성됩니다.
-
-| Step | Ingest artifact | Output artifact |
-| --- | --- | --- |
-| `prepare-cohort` | `data.pairs_tsv`, `data.videos_dir`의 MP4 | `data/cohort/{item_inventory,catalog,sequences}.jsonl`, `eligibility_summary.json`, 선택적 `failures.jsonl` |
-| `prepare-input-data` | `data/cohort/catalog.jsonl`, catalog의 `source_video_path`, `duration_seconds` | `data/cohort/source_assets/{content_id}/assets/timestamp_fixed_30s.json`, `data/fixed_30s/resized_keyframes/{content_id}/*.png`, 선택적 `preparation_failures.jsonl` |
-| `extract-graph-scenes --model qwen` | cohort catalog, fixed-30s timestamp/keyframe, `models.qwen` | `extraction/graph/qwen/scenes/{content_id}.jsonl`, 선택적 `failures/{content_id}.jsonl` |
-| `summarize-graph --source qwen` | Qwen Graph scene JSONL, Graph summary prompt, `models.qwen` | `extraction/graph/qwen/summaries/{content_id}.json` |
-| `extract-graph-scenes --model gemini` | cohort catalog, fixed-30s timestamp/keyframe, Vertex ADC와 `models.gemini` | `extraction/graph/gemini/scenes/{content_id}.jsonl`, 선택적 `failures/{content_id}.jsonl` |
-| `summarize-graph --source gemini` | Gemini Graph scene JSONL, Graph summary prompt, `models.qwen` | `extraction/graph/gemini/summaries/{content_id}.json` |
-| `extract-description-scenes` | cohort catalog, fixed-30s timestamp/keyframe, Description scene prompt, `models.qwen` | `extraction/description/scenes/{content_id}.jsonl`, 선택적 `failures/{content_id}.jsonl` |
-| `summarize-description` | Description scene JSONL, Description summary prompt, `models.qwen` | `extraction/description/summaries/{content_id}.json` |
-| `embed-representations` | cohort catalog, Qwen/Gemini Graph summary, Description summary, `models.bge` | `validation/representations/{graph_qwen_embeddings,graph_gemini_embeddings,desc_embeddings}.npz`, `item_index.json` |
-| `run-recommendation` | cohort `catalog.jsonl`, `sequences.jsonl`, 세 branch embedding과 `item_index.json` | `validation/recommendations/per_user_metrics.jsonl`, `training_runs.jsonl`, `checkpoints/` |
-| `run-diagnosis` | cohort, scene success/failure, representation, metric, training run, checkpoint의 실제 파일 | `validation/diagnosis/diagnosis.json` |
-
-```bash
-python -m validation prepare-cohort --run-id 1k_pilot_260827
-python -m extraction prepare-input-data --run-id 1k_pilot_260827
-python -m extraction extract-graph-scenes --run-id 1k_pilot_260827 --model qwen
-python -m extraction summarize-graph --run-id 1k_pilot_260827 --source qwen
-python -m extraction extract-graph-scenes --run-id 1k_pilot_260827 --model gemini
-python -m extraction summarize-graph --run-id 1k_pilot_260827 --source gemini
-python -m extraction extract-description-scenes --run-id 1k_pilot_260827
-python -m extraction summarize-description --run-id 1k_pilot_260827
-python -m validation embed-representations --run-id 1k_pilot_260827
-python -m validation run-recommendation --run-id 1k_pilot_260827
-python -m validation run-diagnosis --run-id 1k_pilot_260827
-```
-
-Qwen을 사용하는 Step은 `--gpus N`을 지원합니다. 멀티-GPU 실행의 Qwen worker는 부모 process가 수명주기를 관리합니다. Linux local에서 `Ctrl+C`가 들어오면 대기 중인 작업을 버리고 모든 GPU worker에 즉시 종료를 요청하며, 짧은 유예 뒤에도 남은 worker는 강제 종료해 CUDA memory를 해제합니다. CLI는 이 경우 exit code `130`을 반환합니다. Gemini scene extraction은 `--gpus` 대신 `extraction.graph.gemini_concurrency`만 사용합니다. `embed-representations`는 유효한 branch embedding을 재사용하고, 인코딩이 필요한 branch들은 한 번 로드한 BGE runtime을 공유합니다.
-
-Graph scene, Description scene, Graph Summary, Description Summary의 콘솔 출력은 한 content의 모든 메시지가 끝날 때마다 빈 줄 한 줄을 추가해 다음 content와 구분합니다.
-
-## Runtime 판정과 저장 정책
-
-- config, prompt, model, summary schema 또는 protocol이 달라지는 새 실험은 새 `run_id`를 사용합니다.
-- manifest와 fingerprint는 생성하지 않으며 고정 경로의 실제 파일을 직접 읽습니다.
-- content별 title/tag metadata와 빈 failure JSONL은 생성하지 않습니다.
-- Description scene에는 `schema_version`, `content_id`, `scene_idx`, `keyframes`, `description`만 저장합니다.
-- `training_runs.jsonl`에는 seed×arm별 epoch history, best validation, checkpoint와 실행 정보를 저장합니다.
-- `diagnosis.json`은 `report_ready`를 사용하지 않습니다. `run-diagnosis`가 매번 실제 artifact를 집계해 `runtime_decision.status`, `checks`, `errors`를 기록하고 기준 미달이면 파일을 기록한 뒤 실패합니다.
-- runtime artifact 통과와 통계적 superiority/non-inferiority 결론은 별개입니다.
-
-주요 계약은 `viewing-context-config/v1`, `scene-description/v1`, `graph-video-summary/v3`, `description-video-summary/v3`, `diagnosis/v2`입니다.
-
-## 검증
-
-```bash
+```powershell
 conda activate llmjg
-ruff check src tests
-python -m pytest -q tests
+ruff check .
+pytest -q
 python -m compileall -q src tests
-git diff --check
 ```
 
-synthetic test와 contract test 통과는 구현 검증입니다. 실제 MicroLens·GPU pilot이 실행되기 전에는 추천 품질 결과로 보고하지 않습니다.
+core suite에서 Torch test가 skip되면 전체 검증 성공으로 간주하지 않습니다. Torch가 설치된 train profile에서는 4개 arm, 3개 seed의 학습 smoke와 right-padding·finite score를 별도로 통과해야 합니다.
+
+```powershell
+python -c "import torch"
+pytest -q tests/validation/test_model.py
+```
+
+### 실제 pilot 검증
+
+다음은 synthetic/unit test로 대체할 수 없습니다.
+
+- 새 run_id의 실제 11단계 실행
+- Linux GPU에서 Qwen scene·summary와 BGE/SASRec 실행
+- Vertex ADC·quota·비용 조건에서 Gemini branch 실행
+- 실제 MicroLens cohort의 runtime/coverage pass
+- statistical status, warning, comparison decision의 명시적 해석
+
+## 설계 자료
+
+- [Pipeline overview PPTX](docs/design/ViewingContextPipeline_Overview.pptx)
+- [2026-08-27 design snapshot](docs/design/ViewingContextPipeline_260827.png)

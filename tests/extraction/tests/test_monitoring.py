@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-import extraction.steps as steps_module
+import extraction.step_support as step_support
+import extraction.summary_executor as summary_executor
 from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.monitoring import (
     graph_skip_message,
@@ -96,19 +97,19 @@ def test_serial_generator_calls_completion_callback_per_task(
         def generate(self, images, prompt, max_new_tokens, **_generation):
             return f"result:{prompt}"
 
-    monkeypatch.setattr(steps_module, "QwenBackend", Backend)
-    monkeypatch.setattr(steps_module, "load_images", lambda paths: paths)
+    monkeypatch.setattr(summary_executor, "QwenBackend", Backend)
+    monkeypatch.setattr(summary_executor, "load_images", lambda paths: paths)
     tasks = [
         QwenGenerationTask("a", (), "first", 10),
         QwenGenerationTask("b", (), "second", 10),
     ]
     completed = []
 
-    with steps_module._qwen_generator(model_path=tmp_path, gpus=None) as generate:
+    with summary_executor.qwen_generator(model_path=tmp_path, gpus=None) as generate:
         results = generate(tasks, lambda task_id, text: completed.append((task_id, text)))
 
     assert completed == [("a", "result:first"), ("b", "result:second")]
-    assert results == {"a": "result:first", "b": "result:second"}
+    assert results == {}
 
 
 def test_complete_content_progress_updates_then_writes_blank_separator(
@@ -121,11 +122,11 @@ def test_complete_content_progress_updates_then_writes_blank_separator(
             events.append(("update", amount))
 
     monkeypatch.setattr(
-        steps_module,
-        "_write_progress",
+        step_support,
+        "write_progress",
         lambda _progress, message: events.append(("write", message)),
     )
 
-    steps_module._complete_content_progress(Progress())
+    step_support.complete_content_progress(Progress())
 
     assert events == [("update", 1), ("write", "")]

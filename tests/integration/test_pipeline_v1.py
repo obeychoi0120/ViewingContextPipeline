@@ -9,8 +9,11 @@ import pytest
 import yaml
 
 import extraction.steps as extraction_steps
+import extraction.summary_executor as summary_executor
+import validation.features as validation_features
 import validation.steps as validation_steps
 from extraction.backends.qwen_workers import QwenGenerationTask
+from extraction.summary_validation import parse_summary_sections
 from pipeline_runtime import ConfigError, RunContext, read_jsonl, write_json, write_jsonl
 
 
@@ -154,9 +157,9 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
     completed = []
 
     def complete(task_id, text):
-        completed.append((task_id, extraction_steps.parse_summary_sections(text)))
+            completed.append((task_id, parse_summary_sections(text)))
 
-    retry_count = extraction_steps._generate_summaries_with_retry(
+    retry_count = summary_executor.generate_summaries_with_retry(
         generate,
         [QwenGenerationTask("c1", (), "prompt", 512)],
         complete,
@@ -197,10 +200,10 @@ def test_summary_is_completed_from_worker_callback_before_batch_returns() -> Non
         return {task.task_id: structured for task in tasks}
 
     def complete(task_id, text):
-        extraction_steps.parse_summary_sections(text)
+        parse_summary_sections(text)
         completed.append(task_id)
 
-    retry_count = extraction_steps._generate_summaries_with_retry(
+    retry_count = summary_executor.generate_summaries_with_retry(
         generate,
         [
             QwenGenerationTask("c1", (), "prompt", 512),
@@ -219,7 +222,7 @@ def test_summary_is_completed_from_worker_callback_before_batch_returns() -> Non
     assert completed == ["c2", "c1"]
 
 
-def test_reused_summary_normalizes_single_line_text_to_section_lines(
+def test_reused_summary_rejects_noncanonical_text(
     tmp_path: Path,
 ) -> None:
     sections = {
@@ -245,24 +248,54 @@ def test_reused_summary_normalizes_single_line_text_to_section_lines(
         },
     )
 
-    document = extraction_steps._reuse_summary_document(
+    with pytest.raises(
+        summary_executor.ExtractionStepError,
+        match="use --force or a new run_id",
+    ):
+        summary_executor.reuse_summary_document(
+            path,
+            schema_version="graph-video-summary/v3",
+            content_id="c1",
+            arm="graph_qwen",
+            scene_count=1,
+        )
+
+
+def test_reused_summary_rejects_v2_and_requires_new_run_or_force(tmp_path: Path) -> None:
+    sections = {
+        "setting_and_environments": "An indoor room",
+        "main_characters_and_objects": "A person",
+        "chronological_events": "The person walks",
+        "relations": "The person is inside the room",
+        "visual_atmosphere": "A calm indoor atmosphere",
+        "visible_affect": "Neutral visible affect",
+        "semantic_topics": "Indoor activity",
+    }
+    path = tmp_path / "summary.json"
+    write_json(
         path,
-        schema_version="graph-video-summary/v3",
-        content_id="c1",
-        arm="graph_qwen",
-        scene_count=1,
+        {
+            "schema_version": "graph-video-summary/v2",
+            "content_id": "c1",
+            "arm": "graph_qwen",
+            "status": "complete",
+            "sections": sections,
+            "text": "legacy",
+            "scene_count": 1,
+        },
     )
 
-    assert document["text"].splitlines() == [
-        "Setting and environments: An indoor room.",
-        "Main characters and objects: A person.",
-        "Chronological events: The person walks.",
-        "Relations: The person is inside the room.",
-        "Visual atmosphere: A calm indoor atmosphere.",
-        "Visible affect: Neutral visible affect.",
-        "Semantic topics: Indoor activity.",
-    ]
-    assert json.loads(path.read_text(encoding="utf-8")) == document
+    with pytest.raises(
+        summary_executor.ExtractionStepError,
+        match="use --force or a new run_id",
+    ):
+        summary_executor.reuse_summary_document(
+            path,
+            schema_version="graph-video-summary/v3",
+            content_id="c1",
+            arm="graph_qwen",
+            scene_count=1,
+        )
 
 
 def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> None:
@@ -315,7 +348,7 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
 
         yield generate
 
-    monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
+    monkeypatch.setattr(extraction_steps, "qwen_generator", fake_generator)
     result = extraction_steps.extract_graph_scenes(context, model="qwen")
 
     assert result["failure_count"] == 1
@@ -340,7 +373,7 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
 
         yield generate
 
-    monkeypatch.setattr(extraction_steps, "_qwen_generator", successful_generator)
+    monkeypatch.setattr(extraction_steps, "qwen_generator", successful_generator)
     result = extraction_steps.extract_graph_scenes(context, model="qwen", force=True)
 
     assert result["failure_count"] == 0
@@ -354,14 +387,141 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
         raise AssertionError("completed scenes must be reused")
         yield
 
-    monkeypatch.setattr(extraction_steps, "_qwen_generator", unexpected_generator)
+    monkeypatch.setattr(extraction_steps, "qwen_generator", unexpected_generator)
     result = extraction_steps.extract_graph_scenes(context, model="qwen")
 
     assert result["failure_count"] == 0
     assert not failure_path.exists()
 
 
-def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
+def test_description_failure_force_retry_and_cache_reuse(
+    context: RunContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
+    scene_rows = [
+        {
+            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "scene_idx": index,
+            "scene_start_seconds": index * 30,
+            "scene_end_seconds": (index + 1) * 30,
+            "keyframes": [index * 30 + 5],
+            "image_paths": ["unused.png"],
+        }
+        for index in range(2)
+    ]
+    monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _context: [visual])
+    monkeypatch.setattr(
+        extraction_steps,
+        "_scene_generation_rows",
+        lambda *_args, **_kwargs: scene_rows,
+    )
+
+    @contextmanager
+    def failing_generator(**_kwargs):
+        def generate(tasks, _callback=None):
+            return {tasks[0].task_id: "visible action", tasks[1].task_id: ""}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", failing_generator)
+    result = extraction_steps.extract_description_scenes(context)
+    assert result["failure_count"] == 1
+    failure_path = context.description_failure_dir / "c1.jsonl"
+    assert read_jsonl(failure_path)[0]["failure_kind"] == "empty_response"
+
+    @contextmanager
+    def successful_generator(**_kwargs):
+        def generate(tasks, _callback=None):
+            return {task.task_id: f"visible action {task.task_id}" for task in tasks}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", successful_generator)
+    result = extraction_steps.extract_description_scenes(context, force=True)
+    assert result["failure_count"] == 0
+    assert not failure_path.exists()
+    assert len(read_jsonl(context.description_scene_dir / "c1.jsonl")) == 2
+
+    write_jsonl(failure_path, [])
+
+    @contextmanager
+    def unexpected_generator(**_kwargs):
+        raise AssertionError("completed description scenes must be reused")
+        yield
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", unexpected_generator)
+    result = extraction_steps.extract_description_scenes(context)
+    assert result["failure_count"] == 0
+    assert not failure_path.exists()
+
+
+def test_gemini_scene_stage_aggregates_out_of_order_errors(
+    context: RunContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
+    scene_rows = [
+        {
+            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "scene_idx": index,
+            "scene_start_seconds": index * 30,
+            "scene_end_seconds": (index + 1) * 30,
+            "keyframes": [index * 30 + 5],
+            "image_paths": ["unused.png"],
+        }
+        for index in range(2)
+    ]
+    monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _context: [visual])
+    monkeypatch.setattr(
+        extraction_steps,
+        "_scene_generation_rows",
+        lambda *_args, **_kwargs: scene_rows,
+    )
+    graph = {
+        "setting_context": "indoor",
+        "entities": [],
+        "events": [],
+        "static_relations": [],
+        "semantic_topics": [],
+        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+    }
+
+    class Pool:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, tasks, callback):
+            outcomes = {
+                tasks[1].task_id: extraction_steps.GeminiGenerationOutcome(
+                    tasks[1].task_id, "", "RuntimeError: quota"
+                ),
+                tasks[0].task_id: extraction_steps.GeminiGenerationOutcome(
+                    tasks[0].task_id, json.dumps(graph), None
+                ),
+            }
+            for task_id in (tasks[1].task_id, tasks[0].task_id):
+                callback(outcomes[task_id])
+            return outcomes
+
+    monkeypatch.setattr(extraction_steps, "GeminiWorkerPool", Pool)
+    result = extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert result["failure_count"] == 1
+    assert len(read_jsonl(context.graph_scene_dir("gemini") / "c1.jsonl")) == 1
+    failure = read_jsonl(context.graph_failure_dir("gemini") / "c1.jsonl")[0]
+    assert failure["scene_idx"] == 1
+    assert failure["failure_kind"] == "generation"
+
+
+def test_graph_summary_rejects_legacy_scene_shape(
     context: RunContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     context.initialize()
@@ -391,68 +551,11 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
         ],
     )
 
-    @contextmanager
-    def fake_generator(**_kwargs):
-        def generate(tasks, callback=None):
-            structured = json.dumps(
-                {
-                    "setting_and_environments": "An indoor setting",
-                    "main_characters_and_objects": "A person and an object",
-                    "chronological_events": "The person approaches the object",
-                    "relations": "The person stands beside the object",
-                    "visual_atmosphere": "A calm indoor atmosphere",
-                    "visible_affect": "A neutral visible affect",
-                    "semantic_topics": "An indoor interaction",
-                }
-            )
-            results = {task.task_id: structured for task in tasks}
-            if callback is not None:
-                for task_id, text in results.items():
-                    callback(task_id, text)
-            return results
-
-        yield generate
-
-    monkeypatch.setattr(extraction_steps, "_qwen_generator", fake_generator)
-    extraction_steps.summarize_graph(context, source="qwen")
-
-    compacted = read_jsonl(scene_path)[0]
-    assert set(compacted) == {
-        "scene_idx",
-        "keyframes",
-        "graph",
-        "parse_mode",
-        "semantic_warnings",
-    }
-    assert compacted["parse_mode"] == "unknown"
-    summary = json.loads(
-        (context.graph_summary_dir("qwen") / "c1.json").read_text(encoding="utf-8")
-    )
-    assert summary == {
-        "schema_version": "graph-video-summary/v3",
-        "content_id": "c1",
-        "arm": "graph_qwen",
-        "status": "complete",
-        "sections": {
-            "setting_and_environments": "An indoor setting",
-            "main_characters_and_objects": "A person and an object",
-            "chronological_events": "The person approaches the object",
-            "relations": "The person stands beside the object",
-            "visual_atmosphere": "A calm indoor atmosphere",
-            "visible_affect": "A neutral visible affect",
-            "semantic_topics": "An indoor interaction",
-        },
-        "scene_count": 1,
-        "text": (
-            "Setting and environments: An indoor setting.\n"
-            "Main characters and objects: A person and an object.\n"
-            "Chronological events: The person approaches the object.\n"
-            "Relations: The person stands beside the object.\n"
-            "Visual atmosphere: A calm indoor atmosphere.\n"
-            "Visible affect: A neutral visible affect.\n"
-            "Semantic topics: An indoor interaction."
-        ),
-    }
+    with pytest.raises(
+        extraction_steps.ExtractionStepError,
+        match="use --force or a new run_id",
+    ):
+        extraction_steps.summarize_graph(context, source="qwen")
 
 
 def test_embedding_uses_fixed_files_and_no_manifest(
@@ -492,7 +595,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
             encoded_texts.append(list(texts))
             return np.ones((len(texts), dimension), dtype=np.float32)
 
-    monkeypatch.setattr(validation_steps, "BGETextEncoder", FakeEncoder)
+    monkeypatch.setattr(validation_features, "BGETextEncoder", FakeEncoder)
 
     validation_steps.embed_representations(context)
 
@@ -526,7 +629,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
                 raise RuntimeError("simulated second-branch failure")
             return np.full((len(texts), dimension), 2.0, dtype=np.float32)
 
-    monkeypatch.setattr(validation_steps, "BGETextEncoder", FailingEncoder)
+    monkeypatch.setattr(validation_features, "BGETextEncoder", FailingEncoder)
     with pytest.raises(RuntimeError, match="second-branch failure"):
         validation_steps.embed_representations(context, force=True)
     for branch, expected in stable.items():

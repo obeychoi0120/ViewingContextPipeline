@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from unittest import mock
 
-import numpy as np
+from PIL import Image
 
 from extraction.data_preparation.fixed30 import (
     build_fixed_30s_windows,
@@ -40,7 +40,6 @@ def test_fixed_30s_sampling_uses_5_15_25_second_keyframes() -> None:
 def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_path: Path) -> None:
     video = tmp_path / "video.mp4"
     video.touch()
-    image = np.zeros((48, 64, 3), dtype=np.uint8)
     destination = tmp_path / ".keyframes.direct_tmp" / "0301.png"
 
     def extract_frame(command: list[str], **kwargs: object) -> mock.Mock:
@@ -53,8 +52,8 @@ def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_p
             side_effect=extract_frame,
         ) as run,
         mock.patch(
-            "extraction.data_preparation.video_processor.cv2.imread",
-            side_effect=[None, image],
+            "extraction.data_preparation.video_processor.verified_image_size",
+            side_effect=[None, (64, 48)],
         ),
         mock.patch(
             "extraction.data_preparation.video_processor._last_decodable_frame_timestamp_seconds",
@@ -66,6 +65,33 @@ def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_p
     assert run.call_count == 2
     assert run.call_args_list[0].args[0][6] == "301"
     assert run.call_args_list[1].args[0][6] == "300.96"
+
+
+def test_verified_keyframe_cache_rejects_corrupt_or_wrong_size_images(tmp_path: Path) -> None:
+    from extraction.data_preparation.fixed30 import resized_keyframes_match_timestamps
+
+    timestamp_path = tmp_path / "timestamps.json"
+    timestamp_path.write_text('[{"keyframe_timestamps": [5]}]', encoding="utf-8")
+    frames = tmp_path / "frames"
+    frames.mkdir()
+    image_path = frames / "0005.png"
+
+    Image.new("RGB", (64, 48), "white").save(image_path)
+    assert resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
+
+    Image.new("RGB", (32, 24), "white").save(image_path)
+    assert not resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
+
+    image_path.write_bytes(b"not-a-png")
+    assert not resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
+
+    image_path.write_bytes(b"")
+    assert not resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
+
+    Image.new("RGB", (64, 48), "white").save(image_path)
+    payload = image_path.read_bytes()
+    image_path.write_bytes(payload[: len(payload) // 2])
+    assert not resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
 
 
 def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path) -> None:

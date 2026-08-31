@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
-from extraction.backends import VLMBackend
-from extraction.evidence import build_scene_evidence, load_images
-from extraction.semantic_graph.json_repair import parse_or_repair_graph
 from extraction.semantic_graph.taxonomy import (
     AFFECT_AROUSAL,
     AFFECT_VALENCE,
@@ -29,14 +25,6 @@ SUMMARY_SCHEMA_VERSION = "graph-video-summary/v3"
 
 class SemanticGraphError(RuntimeError):
     pass
-
-
-def parse_graph_output(text: str) -> dict[str, Any]:
-    """Parse a JSON object without enforcing semantic graph fields or references."""
-    result = parse_or_repair_graph(text)
-    if result.graph is None:
-        raise SemanticGraphError(result.error or "VLM output does not contain a JSON object")
-    return result.graph
 
 
 def graph_semantic_warnings(graph: dict[str, Any]) -> list[str]:
@@ -155,44 +143,6 @@ def _warn_reference_list(
         return
     for reference in value:
         _warn_unresolved_reference(reference, identifiers, path, warnings)
-
-
-def extract_scene_graphs(
-    *,
-    scenes: list[dict[str, Any]],
-    frames_dir: str | Path,
-    timestamp_json_path: str | Path,
-    backend: VLMBackend,
-    prompt: str,
-    max_new_tokens: int,
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for scene in build_scene_evidence(scenes, frames_dir, timestamp_json_path):
-        image_paths = scene["image_paths"]
-        if not scene["keyframes"] or len(image_paths) != len(scene["keyframes"]):
-            raise SemanticGraphError(
-                f"scene {scene['scene_idx']} has {len(image_paths)} of "
-                f"{len(scene['keyframes'])} keyframes"
-            )
-        result = parse_or_repair_graph(
-            backend.generate(load_images(image_paths), prompt, max_new_tokens)
-        )
-        if result.graph is None:
-            raise SemanticGraphError(
-                result.error or "VLM output does not contain a JSON object"
-            )
-        records.append(
-            {
-                "scene_idx": scene["scene_idx"],
-                "keyframes": scene["keyframes"],
-                "graph": result.graph,
-                "parse_mode": result.parse_mode,
-                "semantic_warnings": graph_semantic_warnings(result.graph),
-            }
-        )
-    if not records:
-        raise SemanticGraphError("video has no scenes")
-    return records
 
 
 def graph_summary_prompt(template: str, records: list[dict[str, Any]]) -> str:

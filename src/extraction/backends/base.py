@@ -13,5 +13,4 @@ class VLMBackend(Protocol):
         images: Sequence[Any],
         prompt: str,
         max_new_tokens: int,
-        references: Sequence[dict[str, Any]] = (),
     ) -> str: ...

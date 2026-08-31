@@ -4,12 +4,6 @@ import io
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from extraction.multimodal import (
-    shot_reference_text,
-    validate_image_reference_alignment,
-)
-
-
 RETRYABLE_HTTP_STATUS_CODES = [408, 429, 500, 502, 503, 504]
 
 
@@ -60,18 +54,11 @@ class GeminiBackend:
         images: Sequence[Any],
         prompt: str,
         max_new_tokens: int,
-        references: Sequence[dict[str, Any]] = (),
     ) -> str:
         _, types = _google_genai()
-        if references:
-            validate_image_reference_alignment(len(images), list(references))
         contents: list[Any] = []
-        for index, image in enumerate(images):
+        for image in images:
             contents.append(_image_part(image, types))
-            if references:
-                contents.append(
-                    types.Part.from_text(text=shot_reference_text(references[index]))
-                )
         contents.append(types.Part.from_text(text=prompt))
         config_kwargs: dict[str, Any] = {
             "temperature": self.temperature,

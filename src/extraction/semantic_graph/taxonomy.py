@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Final
+from typing import Final
 
 
 SETTING_CONTEXTS: Final[tuple[str, ...]] = (
@@ -45,27 +45,3 @@ MAX_TOPIC_WORDS: Final[int] = 4
 DISALLOWED_GENERIC_ENTITY_NAMES: Final[frozenset[str]] = frozenset(
     {"object", "thing", "item", "something", "stuff"}
 )
-
-
-def taxonomy_contract() -> dict[str, Any]:
-    """Return the code-owned mapping used to render the prompt."""
-    return {
-        "setting_contexts": list(SETTING_CONTEXTS),
-        "entity_roles": list(ENTITY_ROLES),
-        "event_reference_slots": list(EVENT_REFERENCE_SLOTS),
-        "static_relation_types": list(STATIC_RELATION_TYPES),
-        "affect_valence": list(AFFECT_VALENCE),
-        "affect_arousal": list(AFFECT_AROUSAL),
-        "guidance": {
-            "entity_max": ENTITY_GUIDANCE_MAX,
-        },
-        "limits": {
-            "events": MAX_EVENTS,
-            "static_relations": MAX_STATIC_RELATIONS,
-            "semantic_topics": MAX_SEMANTIC_TOPICS,
-            "topic_words": MAX_TOPIC_WORDS,
-        },
-        "disallowed_generic_entity_names": sorted(
-            DISALLOWED_GENERIC_ENTITY_NAMES
-        ),
-    }

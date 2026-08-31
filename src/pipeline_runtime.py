@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import tempfile
 from typing import Any
 
 import yaml
+
+from artifact_io import atomic_write_json, atomic_write_jsonl
 
 
 CONFIG_PATH = Path("config/pipeline.yaml")
@@ -38,41 +39,11 @@ def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
 
 
 def write_json(path: str | Path, value: dict[str, Any]) -> None:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", newline="\n", dir=target.parent,
-            prefix=f".{target.name}.", suffix=".tmp", delete=False,
-        ) as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            temporary = Path(handle.name)
-        temporary.replace(target)
-    finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
+    atomic_write_json(path, value, durable=False)
 
 
 def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", newline="\n", dir=target.parent,
-            prefix=f".{target.name}.", suffix=".tmp", delete=False,
-        ) as handle:
-            for row in rows:
-                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
-            handle.flush()
-            temporary = Path(handle.name)
-        temporary.replace(target)
-    finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
+    atomic_write_jsonl(path, rows, durable=False)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

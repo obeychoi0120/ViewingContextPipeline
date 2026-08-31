@@ -7,6 +7,16 @@ import pytest
 import extraction.cli as cli_module
 
 
+def test_documented_extraction_step_matrix_is_stable() -> None:
+    assert tuple(cli_module.STEP_HANDLERS) == (
+        "prepare-input-data",
+        "extract-graph-scenes",
+        "summarize-graph",
+        "extract-description-scenes",
+        "summarize-description",
+    )
+
+
 def test_gpu_count_is_forwarded_to_cuda_step(monkeypatch: pytest.MonkeyPatch) -> None:
     received = {}
 

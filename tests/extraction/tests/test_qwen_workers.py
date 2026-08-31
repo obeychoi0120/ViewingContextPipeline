@@ -114,7 +114,7 @@ def test_pool_callback_uses_worker_completion_order() -> None:
     )
 
     assert completed == [("b", "second"), ("a", "first")]
-    assert results == {"b": "second", "a": "first"}
+    assert results == {}
 
 
 def test_pool_interrupt_terminates_then_kills_stubborn_workers() -> None:

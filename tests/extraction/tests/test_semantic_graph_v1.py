@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-from PIL import Image
 import pytest
 
 from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
     SemanticGraphError,
-    extract_scene_graphs,
     graph_semantic_warnings,
     graph_summary_prompt,
-    parse_graph_output,
-    taxonomy_contract,
     validate_summary,
 )
+from extraction.semantic_graph.taxonomy import ENTITY_GUIDANCE_MAX, SETTING_CONTEXTS
 from extraction.summary_validation import (
     SUMMARY_SECTIONS,
     serialize_summary_sections,
@@ -41,33 +36,13 @@ def graph_with_dangling_reference() -> dict:
     }
 
 
-def test_parse_fenced_graph_without_semantic_normalization() -> None:
-    value = graph_with_dangling_reference()
-    value["setting_context"] = " Indoor "
-    value["static_relations"][0]["relation"] = "wearing"
-
-    parsed = parse_graph_output(f"```json\n{json.dumps(value)}\n```")
-
-    assert parsed == value
-
-
-def test_json_repair_accepts_trailing_comma_but_rejects_empty_output() -> None:
-    text = json.dumps(graph_with_dangling_reference())
-    repaired = text[:-1] + ",}"
-    assert parse_graph_output(repaired)["entities"][0]["local_id"] == "e1"
-    with pytest.raises(SemanticGraphError, match="empty VLM output"):
-        parse_graph_output("")
-
-
 def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
     dangling = graph_with_dangling_reference()
-    assert parse_graph_output(json.dumps(dangling)) == dangling
     assert graph_semantic_warnings(dangling) == [
         "unresolved_reference:static_relations[0].object_id='e4'"
     ]
 
     arbitrary = {"triples": [], "extra": "preserved"}
-    assert parse_graph_output(json.dumps(arbitrary)) == arbitrary
     assert graph_semantic_warnings(arbitrary) == [
         "missing_top_level_fields:setting_context,entities,events,static_relations,semantic_topics,affect",
         "unexpected_top_level_fields:extra,triples",
@@ -75,11 +50,10 @@ def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
 
 
 def test_taxonomy_and_prompt_are_multi_image_and_consistent() -> None:
-    taxonomy = taxonomy_contract()
-    assert taxonomy["guidance"]["entity_max"] == 6
+    assert ENTITY_GUIDANCE_MAX == 6
     assert "chronological keyframes" in SCENE_EXTRACTION_PROMPT
     assert "If entities is empty" in SCENE_EXTRACTION_PROMPT
-    for value in taxonomy["setting_contexts"]:
+    for value in SETTING_CONTEXTS:
         assert value in SCENE_EXTRACTION_PROMPT
 
 
@@ -120,55 +94,5 @@ def test_summary_requires_seven_fields_and_repairs_json_syntax_once() -> None:
         validate_summary("free-form summary")
     with pytest.raises(SemanticGraphError, match="fields mismatch"):
         validate_summary(json.dumps({"setting_and_environments": "indoor"}))
-
-
-def test_scene_graph_uses_one_chronological_multi_image_call(tmp_path: Path) -> None:
-    frames = tmp_path / "frames"
-    frames.mkdir()
-    for timestamp in (5, 15, 25):
-        Image.new("RGB", (8, 6), "white").save(frames / f"{timestamp:04d}.png")
-    timestamps = tmp_path / "timestamps.json"
-    timestamps.write_text("[]", encoding="utf-8")
-
-    class FakeBackend:
-        model_id = "fake"
-
-        def __init__(self) -> None:
-            self.calls = []
-
-        def generate(self, images, prompt, max_new_tokens, references=()):
-            self.calls.append((images, prompt, max_new_tokens, references))
-            return json.dumps(graph_with_dangling_reference())
-
-    backend = FakeBackend()
-    records = extract_scene_graphs(
-        scenes=[
-            {
-                "scene_idx": 0,
-                "scene_start": 0,
-                "scene_end": 30,
-                "keyframes": [25, 5, 15],
-            }
-        ],
-        frames_dir=frames,
-        timestamp_json_path=timestamps,
-        backend=backend,
-        prompt="extract",
-        max_new_tokens=128,
-    )
-
-    assert records[0]["graph"]["static_relations"][0]["object_id"] == "e4"
-    assert set(records[0]) == {
-        "scene_idx",
-        "keyframes",
-        "graph",
-        "parse_mode",
-        "semantic_warnings",
-    }
-    assert records[0]["keyframes"] == [5, 15, 25]
-    assert records[0]["parse_mode"] == "native"
-    assert records[0]["semantic_warnings"] == [
-        "unresolved_reference:static_relations[0].object_id='e4'"
-    ]
-    assert len(backend.calls) == 1
-    assert len(backend.calls[0][0]) == 3
+    with pytest.raises(SemanticGraphError, match="fields mismatch"):
+        validate_summary(json.dumps({**sections, "legacy_field": "not allowed"}))
