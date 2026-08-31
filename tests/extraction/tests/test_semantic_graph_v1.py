@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import pytest
 
 from extraction.semantic_graph import (
@@ -74,9 +73,10 @@ def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
     assert '"object_id": "e4"' in prompt
 
 
-def test_summary_requires_seven_fields_and_repairs_json_syntax_once() -> None:
+def test_summary_requires_seven_labeled_lines_in_canonical_order() -> None:
     sections = {name: f"visible {name}" for name in SUMMARY_SECTIONS}
-    parsed = validate_summary(json.dumps(sections))
+    labeled_text = "\n".join(f"{name}: {value}" for name, value in sections.items())
+    parsed = validate_summary(labeled_text)
 
     assert parsed == sections
     assert serialize_summary_sections(parsed).splitlines() == [
@@ -88,11 +88,11 @@ def test_summary_requires_seven_fields_and_repairs_json_syntax_once() -> None:
         "Visible affect: visible visible_affect.",
         "Semantic topics: visible semantic_topics.",
     ]
-    repaired = validate_summary(json.dumps(sections)[:-1] + ",}")
-    assert repaired == sections
-    with pytest.raises(SemanticGraphError, match="must be one JSON object"):
+    with pytest.raises(SemanticGraphError, match="exactly seven"):
         validate_summary("free-form summary")
-    with pytest.raises(SemanticGraphError, match="fields mismatch"):
-        validate_summary(json.dumps({"setting_and_environments": "indoor"}))
-    with pytest.raises(SemanticGraphError, match="fields mismatch"):
-        validate_summary(json.dumps({**sections, "legacy_field": "not allowed"}))
+    wrong_order = list(sections.items())
+    wrong_order[0], wrong_order[1] = wrong_order[1], wrong_order[0]
+    with pytest.raises(SemanticGraphError, match="canonical order"):
+        validate_summary("\n".join(f"{name}: {value}" for name, value in wrong_order))
+    with pytest.raises(SemanticGraphError, match="exactly seven"):
+        validate_summary(labeled_text + "\nlegacy_field: not allowed")

@@ -57,7 +57,7 @@ def test_qwen_backend_uses_native_images_and_deterministic_generation() -> None:
     assert "temperature" not in model.kwargs
 
 
-def test_qwen_backend_uses_seeded_sampling_for_retry(monkeypatch) -> None:
+def test_qwen_backend_uses_optional_seed_for_sampling(monkeypatch) -> None:
     seeds = []
 
     @contextmanager
@@ -86,6 +86,32 @@ def test_qwen_backend_uses_seeded_sampling_for_retry(monkeypatch) -> None:
     assert model.kwargs["temperature"] == 0.1
     assert model.kwargs["top_p"] == 0.8
     assert model.kwargs["top_k"] == 20
+
+
+def test_qwen_backend_allows_unseeded_sampling(monkeypatch) -> None:
+    def fail_if_seeded(*_args, **_kwargs):
+        raise AssertionError("unseeded sampling must use the ambient RNG state")
+
+    monkeypatch.setattr(qwen_module, "_seeded_rng", fail_if_seeded)
+    model = FakeModel()
+    backend = QwenBackend(
+        model=model,
+        processor=FakeProcessor(),
+        model_id="qwen",
+    )
+
+    assert backend.generate(
+        [],
+        "summary prompt",
+        64,
+        do_sample=True,
+        temperature=0.2,
+        top_p=0.8,
+        top_k=20,
+    ) == "generated text"
+
+    assert model.kwargs["do_sample"] is True
+    assert model.kwargs["temperature"] == 0.2
 
 
 class FakePart:

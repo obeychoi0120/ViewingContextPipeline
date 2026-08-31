@@ -2,8 +2,8 @@ Using only the chronological semantic scene graphs below, summarize the visible 
 
 Rules:
 
-- Every field value must be a factual English string grounded only in the graphs.
-- Use concise complete sentences. Use an empty string when the graphs contain no grounded evidence for a field.
+- Every field value must be factual English text grounded only in the graphs.
+- Use concise complete sentences. Leave the value after the colon empty when the graphs contain no grounded evidence for a field.
 - setting_and_environments: visible locations, scene types, environmental context, and visual setting.
 - main_characters_and_objects: important visible people, animals, and objects with visible attributes. Do not infer identity or demographics.
 - chronological_events: important visible actions and changes in temporal order.
@@ -12,17 +12,15 @@ Rules:
 - visible_affect: visible expression, posture, interaction, or action tone linked to graph subjects. Do not infer private or actual mental state.
 - semantic_topics: important graph-grounded semantic topics supported by explicit entity or event evidence.
 - Each value should be concise and factual.
-- Do not add facts absent from the graphs. Do not output Markdown, commentary, or fields other than the seven fields above.
+- Do not add facts absent from the graphs. Do not output JSON, Markdown, bullets, commentary, or fields other than the seven fields above.
 
-Return exactly one JSON object with these seven fields in this order:
-{{
-  "setting_and_environments": "",
-  "main_characters_and_objects": "",
-  "chronological_events": "",
-  "relations": "",
-  "visual_atmosphere": "",
-  "visible_affect": "",
-  "semantic_topics": ""
-}}
+Return exactly these seven single-line labels in this order. Put each value after the first colon:
+setting_and_environments:
+main_characters_and_objects:
+chronological_events:
+relations:
+visual_atmosphere:
+visible_affect:
+semantic_topics:
 
 {scenes}

@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from extraction.backends import QwenBackend
-from extraction.backends.qwen_workers import (
-    QwenGenerationTask,
-    QwenStatusCallback,
-    QwenWorkerPool,
-)
+from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import DescriptionError
 from extraction.errors import ExtractionStepError
 from extraction.evidence import load_images
 from extraction.semantic_graph import SemanticGraphError
 from extraction.summary_validation import (
+    SUMMARY_SECTIONS,
     SummaryContractError,
     parse_summary_sections,
     serialize_summary_sections,
@@ -45,11 +40,17 @@ def reuse_summary_document(
 ) -> dict[str, Any]:
     existing = read_json(output_path)
     try:
+        raw_sections = existing.get("sections")
+        if not isinstance(raw_sections, dict):
+            raise SummaryContractError("summary sections must be an object")
         sections = parse_summary_sections(
-            json.dumps(existing.get("sections"), ensure_ascii=False)
+            "\n".join(
+                f"{name}: {raw_sections[name]}"
+                for name in SUMMARY_SECTIONS
+            )
         )
         text = serialize_summary_sections(sections)
-    except (AttributeError, SummaryContractError, TypeError) as exc:
+    except (AttributeError, KeyError, SummaryContractError, TypeError) as exc:
         raise ExtractionStepError(
             f"incompatible structured summary output: {output_path}; "
             "use --force or a new run_id"
@@ -71,88 +72,40 @@ def reuse_summary_document(
     return expected
 
 
-def generate_summaries_with_retry(
+def generate_summaries_once(
     generate: GenerationFunction,
     tasks: list[QwenGenerationTask],
     complete: GenerationCallback,
-    retry_settings: dict[str, Any],
     on_validation_failure: ValidationFailureCallback | None = None,
-    *,
-    batch_size: int = 1,
-) -> int:
-    if batch_size <= 0:
-        raise ValueError("summary retry batch_size must be positive")
+) -> None:
     last_errors: dict[str, Exception] = {}
+    tasks_by_id = {task.task_id: task for task in tasks}
+    handled: set[str] = set()
 
-    def run_attempt(
-        attempt_tasks: list[QwenGenerationTask],
-        *,
-        attempt: int,
-        seed: int | None,
-    ) -> list[QwenGenerationTask]:
-        tasks_by_id = {task.task_id: task for task in attempt_tasks}
-        handled: set[str] = set()
-        failed: list[QwenGenerationTask] = []
+    def handle_result(task_id: str, text: str) -> None:
+        if task_id in handled:
+            return
+        task = tasks_by_id[task_id]
+        handled.add(task_id)
+        try:
+            complete(task_id, text)
+        except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
+            last_errors[task_id] = exc
+            if on_validation_failure is not None:
+                on_validation_failure(task_id, 1, task.seed, text, exc)
 
-        def handle_result(task_id: str, text: str) -> None:
-            if task_id in handled:
-                return
-            task = tasks_by_id[task_id]
-            handled.add(task_id)
-            try:
-                complete(task_id, text)
-                last_errors.pop(task_id, None)
-            except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
-                failed.append(task)
-                last_errors[task_id] = exc
-                if on_validation_failure is not None:
-                    on_validation_failure(task_id, attempt, seed, text, exc)
+    results = generate(tasks, handle_result)
+    # Local test generators may return a mapping without invoking the callback.
+    for task in tasks:
+        if task.task_id not in handled:
+            handle_result(task.task_id, results[task.task_id])
 
-        results = generate(attempt_tasks, handle_result)
-        # Local test generators may return a mapping without invoking the callback.
-        for task in attempt_tasks:
-            if task.task_id not in handled:
-                handle_result(task.task_id, results[task.task_id])
-        return failed
-
-    retry_count = 0
-    exhausted: list[QwenGenerationTask] = []
-    for start in range(0, len(tasks), batch_size):
-        pending = run_attempt(
-            tasks[start : start + batch_size],
-            attempt=1,
-            seed=None,
-        )
-        for attempt, seed in enumerate(retry_settings["seeds"], start=2):
-            if not pending:
-                break
-            retry_tasks = [
-                replace(
-                    task,
-                    do_sample=True,
-                    seed=int(seed),
-                    temperature=float(retry_settings["temperature"]),
-                    top_p=float(retry_settings["top_p"]),
-                    top_k=int(retry_settings["top_k"]),
-                )
-                for task in pending
-            ]
-            retry_count += len(retry_tasks)
-            pending = run_attempt(
-                retry_tasks,
-                attempt=attempt,
-                seed=int(seed),
-            )
-        exhausted.extend(pending)
-
-    if exhausted:
-        task_ids = [task.task_id for task in exhausted]
+    if last_errors:
+        task_ids = [task.task_id for task in tasks if task.task_id in last_errors]
         cause = last_errors[task_ids[0]]
         raise ExtractionStepError(
-            f"structured summary failed after {len(retry_settings['seeds'])} retries: "
-            f"task_ids={task_ids}"
+            f"structured summary failed: task_ids={task_ids}"
         ) from cause
-    return retry_count
 
 
 @contextmanager
@@ -160,19 +113,12 @@ def qwen_generator(
     *,
     model_path: Path,
     gpus: int | None,
-    on_status: QwenStatusCallback | None = None,
 ) -> Iterator[GenerationFunction]:
     if gpus is not None:
-        with QwenWorkerPool(
-            gpus,
-            str(model_path),
-            on_status=on_status,
-        ) as worker_pool:
+        with QwenWorkerPool(gpus, str(model_path)) as worker_pool:
             yield worker_pool.generate
         return
     backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
-    if on_status is not None:
-        on_status("worker_ready", {"worker_index": 0, "gpu_id": "default"})
 
     def generate(
         tasks: list[QwenGenerationTask],
@@ -180,17 +126,6 @@ def qwen_generator(
     ) -> dict[str, str]:
         results: dict[str, str] = {}
         for task in tasks:
-            if on_status is not None:
-                on_status(
-                    "task_started",
-                    {
-                        "worker_index": 0,
-                        "gpu_id": "default",
-                        "task_id": task.task_id,
-                        "do_sample": task.do_sample,
-                        "seed": task.seed,
-                    },
-                )
             text = backend.generate(
                 load_images(list(task.image_paths)),
                 task.prompt,

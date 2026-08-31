@@ -13,11 +13,15 @@ import extraction.summary_executor as summary_executor
 import validation.features as validation_features
 import validation.steps as validation_steps
 from extraction.backends.qwen_workers import QwenGenerationTask
-from extraction.summary_validation import parse_summary_sections
+from extraction.summary_validation import SUMMARY_SECTIONS, parse_summary_sections
 from pipeline_runtime import ConfigError, RunContext, read_jsonl, write_json, write_jsonl
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _summary_lines(sections: dict[str, str]) -> str:
+    return "\n".join(f"{name}: {sections[name]}" for name in SUMMARY_SECTIONS)
 
 
 @pytest.fixture()
@@ -68,9 +72,9 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert set(context.config["data"]) == {"videos_dir", "pairs_tsv"}
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
-    assert context.config["extraction"]["summary_retry"] == {
-        "seeds": [42, 43, 44],
-        "temperature": 0.1,
+    assert context.config["extraction"]["greedy_decoding"] is True
+    assert context.config["extraction"]["summary_sampling"] == {
+        "temperature": 0.2,
         "top_p": 0.8,
         "top_k": 20,
     }
@@ -85,6 +89,28 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
     with pytest.raises(ConfigError, match="protocol.modality"):
         RunContext.load("other", root=context.root)
+
+
+def test_greedy_decoding_switches_summary_generation_mode(
+    context: RunContext,
+) -> None:
+    assert extraction_steps._summary_generation_settings(context) == {}
+    context.config["extraction"]["greedy_decoding"] = False
+    assert extraction_steps._summary_generation_settings(context) == {
+        "do_sample": True,
+        "temperature": 0.2,
+        "top_p": 0.8,
+        "top_k": 20,
+    }
+
+
+def test_config_rejects_non_boolean_greedy_decoding(context: RunContext) -> None:
+    path = context.root / "config/pipeline.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["extraction"]["greedy_decoding"] = "true"
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError, match="greedy_decoding"):
+        RunContext.load("invalid-greedy", root=context.root)
 
 
 @pytest.mark.parametrize(
@@ -113,13 +139,12 @@ def test_config_rejects_invalid_gemini_generation_settings(
 @pytest.mark.parametrize(
     ("key", "value", "message"),
     [
-        ("seeds", [42, 42], "seeds"),
         ("temperature", 0.0, "temperature"),
         ("top_p", 1.1, "top_p"),
         ("top_k", 0, "top_k"),
     ],
 )
-def test_config_rejects_invalid_summary_retry_settings(
+def test_config_rejects_invalid_summary_sampling_settings(
     context: RunContext,
     key: str,
     value: object,
@@ -127,13 +152,13 @@ def test_config_rejects_invalid_summary_retry_settings(
 ) -> None:
     path = context.root / "config/pipeline.yaml"
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    config["extraction"]["summary_retry"][key] = value
+    config["extraction"]["summary_sampling"][key] = value
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     with pytest.raises(ConfigError, match=message):
-        RunContext.load("invalid-summary-retry", root=context.root)
+        RunContext.load("invalid-summary-sampling", root=context.root)
 
 
-def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
+def test_summary_batch_saves_valid_callbacks_and_reports_failure_once() -> None:
     sections = {
         "setting_and_environments": "An indoor room",
         "main_characters_and_objects": "A person",
@@ -143,195 +168,43 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
         "visible_affect": "Neutral visible affect",
         "semantic_topics": "Indoor activity",
     }
-    responses = ["not json", "still not json", "also not json", json.dumps(sections)]
-    submitted: list[QwenGenerationTask] = []
-
-    def generate(tasks, callback=None):
-        task = tasks[0]
-        submitted.append(task)
-        text = responses[len(submitted) - 1]
-        if callback is not None:
-            callback(task.task_id, text)
-        return {task.task_id: text}
-
+    structured = _summary_lines(sections)
     completed = []
-    validation_failures = []
-
-    def complete(task_id, text):
-            completed.append((task_id, parse_summary_sections(text)))
-
-    retry_count = summary_executor.generate_summaries_with_retry(
-        generate,
-        [QwenGenerationTask("c1", (), "prompt", 512)],
-        complete,
-        {
-            "seeds": [42, 43, 44],
-            "temperature": 0.1,
-            "top_p": 0.8,
-            "top_k": 20,
-        },
-        lambda task_id, attempt, seed, raw_response, error: validation_failures.append(
-            (task_id, attempt, seed, raw_response, str(error))
-        ),
-    )
-
-    assert retry_count == 3
-    assert completed == [("c1", sections)]
-    assert [task.seed for task in submitted] == [None, 42, 43, 44]
-    assert [(row[1], row[2], row[3]) for row in validation_failures] == [
-        (1, None, "not json"),
-        (2, 42, "still not json"),
-        (3, 43, "also not json"),
-    ]
-    assert [task.do_sample for task in submitted] == [False, True, True, True]
-    for task in submitted[1:]:
-        assert (task.temperature, task.top_p, task.top_k) == (0.1, 0.8, 20)
-
-
-def test_summary_is_completed_from_worker_callback_before_batch_returns() -> None:
-    sections = {
-        "setting_and_environments": "An indoor room",
-        "main_characters_and_objects": "A person",
-        "chronological_events": "The person walks",
-        "relations": "The person is inside the room",
-        "visual_atmosphere": "A calm indoor atmosphere",
-        "visible_affect": "Neutral visible affect",
-        "semantic_topics": "Indoor activity",
-    }
-    structured = json.dumps(sections)
-    completed = []
+    failures = []
+    submissions = []
 
     def generate(tasks, callback=None):
         assert callback is not None
+        submissions.append([task.task_id for task in tasks])
         callback("c2", structured)
         assert completed == ["c2"]
-        callback("c1", structured)
-        return {task.task_id: structured for task in tasks}
+        callback("c1", "not labeled text")
+        return {}
 
     def complete(task_id, text):
         parse_summary_sections(text)
         completed.append(task_id)
 
-    retry_count = summary_executor.generate_summaries_with_retry(
-        generate,
-        [
-            QwenGenerationTask("c1", (), "prompt", 512),
-            QwenGenerationTask("c2", (), "prompt", 512),
-        ],
-        complete,
-        {
-            "seeds": [42, 43, 44],
-            "temperature": 0.1,
-            "top_p": 0.8,
-            "top_k": 20,
-        },
-        batch_size=2,
-    )
-
-    assert retry_count == 0
-    assert completed == ["c2", "c1"]
-
-
-def test_summary_retry_is_content_local_for_one_gpu() -> None:
-    sections = {
-        "setting_and_environments": "An indoor room",
-        "main_characters_and_objects": "A person",
-        "chronological_events": "The person walks",
-        "relations": "The person is inside the room",
-        "visual_atmosphere": "A calm indoor atmosphere",
-        "visible_affect": "Neutral visible affect",
-        "semantic_topics": "Indoor activity",
-    }
-    structured = json.dumps(sections)
-    submissions = []
-    completed = []
-
-    def generate(tasks, callback=None):
-        assert callback is not None
-        submissions.append([(task.task_id, task.seed) for task in tasks])
-        for task in tasks:
-            text = "not json" if task.task_id == "c1" and task.seed is None else structured
-            callback(task.task_id, text)
-        return {}
-
-    retry_count = summary_executor.generate_summaries_with_retry(
-        generate,
-        [
-            QwenGenerationTask("c1", (), "prompt", 512),
-            QwenGenerationTask("c2", (), "prompt", 512),
-        ],
-        lambda task_id, text: completed.append(
-            (task_id, parse_summary_sections(text))
-        ),
-        {
-            "seeds": [42, 43, 44],
-            "temperature": 0.1,
-            "top_p": 0.8,
-            "top_k": 20,
-        },
-        batch_size=1,
-    )
-
-    assert retry_count == 1
-    assert submissions == [
-        [("c1", None)],
-        [("c1", 42)],
-        [("c2", None)],
-    ]
-    assert [task_id for task_id, _sections in completed] == ["c1", "c2"]
-
-
-def test_content_local_retry_continues_after_one_content_is_exhausted() -> None:
-    sections = {
-        "setting_and_environments": "An indoor room",
-        "main_characters_and_objects": "A person",
-        "chronological_events": "The person walks",
-        "relations": "The person is inside the room",
-        "visual_atmosphere": "A calm indoor atmosphere",
-        "visible_affect": "Neutral visible affect",
-        "semantic_topics": "Indoor activity",
-    }
-    structured = json.dumps(sections)
-    submissions = []
-    completed = []
-
-    def generate(tasks, callback=None):
-        assert callback is not None
-        task = tasks[0]
-        submissions.append((task.task_id, task.seed))
-        callback(task.task_id, "not json" if task.task_id == "c1" else structured)
-        return {}
-
     with pytest.raises(
         extraction_steps.ExtractionStepError,
         match=r"task_ids=\['c1'\]",
     ):
-        summary_executor.generate_summaries_with_retry(
+        summary_executor.generate_summaries_once(
             generate,
             [
                 QwenGenerationTask("c1", (), "prompt", 512),
                 QwenGenerationTask("c2", (), "prompt", 512),
             ],
-            lambda task_id, text: completed.append(
-                (task_id, parse_summary_sections(text))
+            complete,
+            lambda task_id, attempt, seed, raw_response, error: failures.append(
+                (task_id, attempt, seed, raw_response, str(error))
             ),
-            {
-                "seeds": [42, 43, 44],
-                "temperature": 0.1,
-                "top_p": 0.8,
-                "top_k": 20,
-            },
-            batch_size=1,
         )
 
-    assert submissions == [
-        ("c1", None),
-        ("c1", 42),
-        ("c1", 43),
-        ("c1", 44),
-        ("c2", None),
-    ]
-    assert [task_id for task_id, _sections in completed] == ["c2"]
+    assert submissions == [["c1", "c2"]]
+    assert completed == ["c2"]
+    assert len(failures) == 1
+    assert failures[0][:4] == ("c1", 1, None, "not labeled text")
 
 
 def test_reused_summary_rejects_noncanonical_text(
@@ -750,7 +623,7 @@ def test_gemini_scene_stage_aggregates_out_of_order_errors(
     assert failure["failure_kind"] == "generation"
 
 
-def test_graph_summary_logs_worker_retry_and_saves_from_callback(
+def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
     context: RunContext,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -788,47 +661,48 @@ def test_graph_summary_logs_worker_retry_and_saves_from_callback(
     }
     output_path = context.graph_summary_dir("qwen") / "c1.json"
     failure_path = context.graph_summary_failure_dir("qwen") / "c1.jsonl"
-    calls = 0
-
     @contextmanager
-    def observable_generator(**kwargs):
-        on_status = kwargs["on_status"]
-        on_status("worker_ready", {"worker_index": 0, "gpu_id": "0"})
-
+    def invalid_generator(**_kwargs):
         def generate(tasks, callback):
-            nonlocal calls
-            calls += 1
-            on_status(
-                "task_started",
-                {"worker_index": 0, "gpu_id": "0", "task_id": tasks[0].task_id},
-            )
-            text = "not json" if calls == 1 else json.dumps(sections)
-            callback(tasks[0].task_id, text)
-            if calls == 1:
-                failures = read_jsonl(failure_path)
-                assert failures[0]["schema_version"] == "summary-generation-failure/v1"
-                assert failures[0]["attempt"] == 1
-                assert failures[0]["seed"] is None
-                assert failures[0]["raw_response"] == "not json"
-            else:
-                assert output_path.is_file()
-                assert not failure_path.exists()
+            assert tasks[0].do_sample is False
+            callback(tasks[0].task_id, "not labeled text")
             return {}
 
         yield generate
 
-    monkeypatch.setattr(extraction_steps, "qwen_generator", observable_generator)
+    monkeypatch.setattr(extraction_steps, "qwen_generator", invalid_generator)
+    with pytest.raises(
+        extraction_steps.ExtractionStepError,
+        match=r"structured summary failed: task_ids=\['c1'\]",
+    ):
+        extraction_steps.summarize_graph(context, source="qwen", gpus=1)
+
+    failures = read_jsonl(failure_path)
+    assert len(failures) == 1
+    assert failures[0]["schema_version"] == "summary-generation-failure/v1"
+    assert failures[0]["attempt"] == 1
+    assert failures[0]["seed"] is None
+    assert failures[0]["raw_response"] == "not labeled text"
+    stderr = capsys.readouterr().err
+    assert "[Qwen_summary_graph_qwen_fail]" in stderr
+    assert "generation started" not in stderr
+
+    @contextmanager
+    def valid_generator(**_kwargs):
+        def generate(tasks, callback):
+            callback(tasks[0].task_id, _summary_lines(sections))
+            assert output_path.is_file()
+            assert not failure_path.exists()
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", valid_generator)
     result = extraction_steps.summarize_graph(context, source="qwen", gpus=1)
 
     assert result["content_count"] == 1
-    assert result["retry_count"] == 1
     assert json.loads(output_path.read_text(encoding="utf-8"))["sections"] == sections
     assert not failure_path.exists()
-    stderr = capsys.readouterr().err
-    assert "initializing 1 CUDA worker(s) for 1 pending content(s)" in stderr
-    assert "worker 0 ready on GPU 0" in stderr
-    assert "generation started on GPU 0" in stderr
-    assert "attempt 1/4 (greedy) rejected" in stderr
 
 
 def test_description_summary_failure_is_nested_and_success_retry_removes_it(
@@ -870,13 +744,13 @@ def test_description_summary_failure_is_nested_and_success_retry_removes_it(
     monkeypatch.setattr(extraction_steps, "qwen_generator", invalid_generator)
     with pytest.raises(
         extraction_steps.ExtractionStepError,
-        match="structured summary failed after 3 retries",
+        match="structured summary failed",
     ):
         extraction_steps.summarize_description(context)
 
     failures = read_jsonl(failure_path)
-    assert [row["attempt"] for row in failures] == [1, 2, 3, 4]
-    assert [row["seed"] for row in failures] == [None, 42, 43, 44]
+    assert [row["attempt"] for row in failures] == [1]
+    assert [row["seed"] for row in failures] == [None]
     assert all(row["failure_kind"] == "schema_validation" for row in failures)
     assert all(row["raw_response"] == "not json" for row in failures)
 
@@ -893,7 +767,7 @@ def test_description_summary_failure_is_nested_and_success_retry_removes_it(
     @contextmanager
     def valid_generator(**_kwargs):
         def generate(tasks, callback):
-            callback(tasks[0].task_id, json.dumps(sections))
+            callback(tasks[0].task_id, _summary_lines(sections))
             return {}
 
         yield generate

@@ -10,7 +10,6 @@ from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.monitoring import (
     graph_skip_message,
     scene_messages,
-    summary_message,
     video_names,
 )
 
@@ -37,24 +36,12 @@ def test_graph_scene_messages_are_sorted_and_use_normalized_json() -> None:
     }
 
 
-def test_description_and_summary_message_formats() -> None:
+def test_description_scene_message_format() -> None:
     assert scene_messages(
         "2.mp4",
         [{"scene_idx": 3, "description": " visible action "}],
         arm="description",
     ) == ["[Desc] 2.mp4 | scene #003\nvisible action"]
-    assert summary_message(
-        "2.mp4",
-        arm="graph",
-        scene_count=4,
-        text=" graph summary ",
-    ) == "[Summary_graph] 2.mp4 | 4 scenes\ngraph summary"
-    assert summary_message(
-        "2.mp4",
-        arm="description",
-        scene_count=4,
-        text="description summary",
-    ) == "[Summary_desc] 2.mp4 | 4 scenes\ndescription summary"
 
 
 def test_graph_skip_message_flattens_error_lines() -> None:
@@ -76,13 +63,6 @@ def test_graph_monitoring_can_identify_source() -> None:
         arm="graph",
         source="qwen",
     )[0].startswith("[Graph_qwen] 1.mp4 | scene #000\n")
-    assert summary_message(
-        "1.mp4",
-        arm="graph",
-        scene_count=1,
-        text="summary",
-        source="gemini",
-    ) == "[Summary_graph_gemini] 1.mp4 | 1 scenes\nsummary"
 
 
 def test_serial_generator_calls_completion_callback_per_task(

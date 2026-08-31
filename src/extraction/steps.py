@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -18,7 +17,6 @@ from extraction.errors import ExtractionStepError
 from extraction.monitoring import (
     graph_skip_message,
     scene_messages,
-    summary_message,
 )
 from extraction.preparation import prepare_input_data
 from extraction.semantic_graph import (
@@ -33,7 +31,7 @@ from extraction.summary_validation import (
     serialize_summary_sections,
 )
 from extraction.summary_executor import (
-    generate_summaries_with_retry,
+    generate_summaries_once,
     qwen_generator,
     reuse_summary_document,
 )
@@ -85,6 +83,19 @@ def _summary_failure_record(
         "failure_kind": failure_kind,
         "error": error,
         "raw_response": raw_response,
+    }
+
+
+def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
+    extraction = context.config["extraction"]
+    if bool(extraction["greedy_decoding"]):
+        return {}
+    sampling = extraction["summary_sampling"]
+    return {
+        "do_sample": True,
+        "temperature": float(sampling["temperature"]),
+        "top_p": float(sampling["top_p"]),
+        "top_k": int(sampling["top_k"]),
     }
 
 
@@ -360,7 +371,7 @@ def summarize_graph(
     stage = graph_stage_name("summarize-graph", source)
     context.initialize()
     settings = context.config["extraction"]["graph"]
-    retry_settings = context.config["extraction"]["summary_retry"]
+    summary_generation = _summary_generation_settings(context)
     prompt_path = context.config_path("extraction", "graph", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
     model_path = context.path("models", "qwen")
@@ -420,6 +431,7 @@ def summarize_graph(
                 image_paths=(),
                 prompt=prompt,
                 max_new_tokens=int(settings["summary_max_new_tokens"]),
+                **summary_generation,
             )
         )
         pending.append((records, output_path, task_id))
@@ -454,80 +466,22 @@ def summarize_graph(
                 summary_failure_dir / f"{content_id}.jsonl"
             ).unlink(missing_ok=True)
             documents_by_content[content_id] = document
-            _write_progress(
-                progress,
-                summary_message(
-                    names.get(content_id, f"{content_id}.mp4"),
-                    arm="graph",
-                    scene_count=len(records),
-                    text=summary,
-                    source=source,
-                ),
-            )
             _complete_content_progress(progress)
 
-        retry_count = 0
         if tasks:
-            total_attempts = 1 + len(retry_settings["seeds"])
-            last_wait_log = 0.0
-
-            def report_qwen_status(
-                event: str,
-                payload: dict[str, Any],
-            ) -> None:
-                nonlocal last_wait_log
-                if event == "worker_ready":
-                    _write_progress(
-                        progress,
-                        f"[Qwen_summary_graph_{source}] worker "
-                        f"{payload.get('worker_index')} ready on GPU "
-                        f"{payload.get('gpu_id')}",
-                    )
-                elif event == "task_started":
-                    task_id = str(payload.get("task_id"))
-                    generation_mode = (
-                        f"retry seed={payload.get('seed')}"
-                        if payload.get("do_sample")
-                        else "greedy"
-                    )
-                    _write_progress(
-                        progress,
-                        f"[Qwen_summary_graph_{source}] "
-                        f"{names.get(task_id, f'{task_id}.mp4')} | generation started "
-                        f"on GPU {payload.get('gpu_id')} | {generation_mode}",
-                    )
-                elif event == "waiting":
-                    now = time.monotonic()
-                    if now - last_wait_log >= 30:
-                        last_wait_log = now
-                        _write_progress(
-                            progress,
-                            f"[Qwen_summary_graph_{source}] waiting for "
-                            f"{payload.get('pending_count')} generation(s); "
-                            "workers are alive",
-                        )
-
             def report_validation_failure(
                 task_id: str,
-                attempt: int,
+                _attempt: int,
                 seed: int | None,
                 raw_response: str,
                 error: Exception,
             ) -> None:
-                seed_note = "greedy" if seed is None else f"seed={seed}"
                 message = " ".join(str(error).splitlines())
-                _write_progress(
-                    progress,
-                    f"[Qwen_summary_graph_{source}_retry] "
-                    f"{names.get(task_id, f'{task_id}.mp4')} | "
-                    f"attempt {attempt}/{total_attempts} ({seed_note}) rejected | "
-                    f"{message}",
-                )
                 failures = summary_failures_by_content[task_id]
                 failures.append(
                     _summary_failure_record(
                         task_id,
-                        attempt=attempt,
+                        attempt=1,
                         seed=seed,
                         failure_kind="schema_validation",
                         error=str(error),
@@ -538,30 +492,23 @@ def summarize_graph(
                     summary_failure_dir / f"{task_id}.jsonl",
                     failures,
                 )
+                _write_progress(
+                    progress,
+                    f"[Qwen_summary_graph_{source}_fail] "
+                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}",
+                )
 
-            _write_progress(
-                progress,
-                f"[Qwen_summary_graph_{source}] initializing "
-                f"{gpus or 1} CUDA worker(s) for {len(tasks)} pending content(s)",
-            )
-            with qwen_generator(
-                model_path=model_path,
-                gpus=gpus,
-                on_status=report_qwen_status,
-            ) as generate:
-                retry_count = generate_summaries_with_retry(
+            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                generate_summaries_once(
                     generate,
                     tasks,
                     complete_graph_summary,
-                    retry_settings,
                     report_validation_failure,
-                    batch_size=gpus or 1,
                 )
     return _result(
         stage,
         content_count=len(documents_by_content),
         failure_count=empty_scene_files,
-        retry_count=retry_count,
     )
 
 
@@ -730,7 +677,7 @@ def summarize_description(
 ) -> dict[str, Any]:
     context.initialize()
     settings = context.config["extraction"]["description"]
-    retry_settings = context.config["extraction"]["summary_retry"]
+    summary_generation = _summary_generation_settings(context)
     prompt_path = context.config_path("extraction", "description", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
     model_path = context.path("models", "qwen")
@@ -795,6 +742,7 @@ def summarize_description(
                 image_paths=(),
                 prompt=prompt,
                 max_new_tokens=int(settings["summary_max_new_tokens"]),
+                **summary_generation,
             )
         )
         pending.append((records, output_path, task_id))
@@ -829,18 +777,8 @@ def summarize_description(
                 context.description_summary_failure_dir / f"{content_id}.jsonl"
             ).unlink(missing_ok=True)
             documents_by_content[content_id] = document
-            _write_progress(
-                progress,
-                summary_message(
-                    names.get(content_id, f"{content_id}.mp4"),
-                    arm="description",
-                    scene_count=len(records),
-                    text=summary,
-                ),
-            )
             _complete_content_progress(progress)
 
-        retry_count = 0
         if tasks:
             def record_description_summary_failure(
                 task_id: str,
@@ -864,21 +802,24 @@ def summarize_description(
                     context.description_summary_failure_dir / f"{task_id}.jsonl",
                     failures,
                 )
+                message = " ".join(str(error).splitlines())
+                _write_progress(
+                    progress,
+                    f"[Qwen_summary_description_fail] "
+                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}",
+                )
 
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                retry_count = generate_summaries_with_retry(
+                generate_summaries_once(
                     generate,
                     tasks,
                     complete_description_summary,
-                    retry_settings,
                     record_description_summary_failure,
-                    batch_size=gpus or 1,
                 )
     return _result(
         "summarize-description",
         content_count=len(documents_by_content),
         failure_count=empty_scene_files,
-        retry_count=retry_count,
     )
 
 

@@ -76,11 +76,7 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
     _worker_main(2, "7", "model", Queue([task, None]), result_queue)
 
     assert initialized == [("model", True, "7")]
-    assert [row.get("event") for row in result_queue.values[:2]] == [
-        "worker_ready",
-        "task_started",
-    ]
-    assert result_queue.values[2]["text"] == "['a.png']:prompt:32"
+    assert result_queue.values[0]["text"] == "['a.png']:prompt:32"
 
 
 def test_pool_callback_uses_worker_completion_order() -> None:
@@ -119,56 +115,6 @@ def test_pool_callback_uses_worker_completion_order() -> None:
 
     assert completed == [("b", "second"), ("a", "first")]
     assert results == {}
-
-
-def test_pool_reports_worker_task_and_waiting_status() -> None:
-    class TaskQueue:
-        def put(self, _value) -> None:
-            return None
-
-    class ResultQueue:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def get(self, timeout):
-            self.calls += 1
-            if self.calls == 1:
-                return {"event": "worker_ready", "worker_index": 0, "gpu_id": "0"}
-            if self.calls == 2:
-                return {
-                    "event": "task_started",
-                    "worker_index": 0,
-                    "gpu_id": "0",
-                    "task_id": "a",
-                }
-            if self.calls == 3:
-                import queue
-
-                raise queue.Empty
-            return {"ok": True, "task_id": "a", "text": "done"}
-
-    class Process:
-        def is_alive(self) -> bool:
-            return True
-
-    statuses = []
-    pool = object.__new__(QwenWorkerPool)
-    pool.gpu_count = 1
-    pool._closed = False
-    pool._task_queues = [TaskQueue()]
-    pool._result_queue = ResultQueue()
-    pool._processes = [Process()]
-    pool._on_status = lambda event, payload: statuses.append((event, payload))
-
-    result = pool.generate([QwenGenerationTask("a", (), "prompt", 1)])
-
-    assert result == {"a": "done"}
-    assert [event for event, _payload in statuses] == [
-        "worker_ready",
-        "task_started",
-        "waiting",
-    ]
-    assert statuses[-1][1]["pending_count"] == 1
 
 
 def test_pool_interrupt_terminates_then_kills_stubborn_workers() -> None:

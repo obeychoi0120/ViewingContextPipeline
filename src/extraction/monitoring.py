@@ -44,26 +44,6 @@ def scene_messages(
     return messages
 
 
-def summary_message(
-    video_name: str,
-    *,
-    arm: str,
-    scene_count: int,
-    text: str,
-    source: str | None = None,
-) -> str:
-    if arm not in {"graph", "description"}:
-        raise ValueError(f"unsupported summary monitor arm: {arm}")
-    label = (
-        f"Summary_graph_{source}"
-        if arm == "graph" and source
-        else "Summary_graph"
-        if arm == "graph"
-        else "Summary_desc"
-    )
-    return f"[{label}] {video_name} | {scene_count} scenes\n{text.strip()}"
-
-
 def graph_skip_message(
     video_name: str,
     record: dict[str, Any],
