@@ -192,16 +192,26 @@ def _validate_config(value: dict[str, Any]) -> None:
     if set(extraction) != {
         "greedy_decoding",
         "visual_evidence",
+        "summary_repetition_penalty",
         "summary_sampling",
         "graph",
         "description",
     }:
         raise ConfigError(
             "extraction must contain greedy_decoding, visual_evidence, "
-            "summary_sampling, graph, and description"
+            "summary_repetition_penalty, summary_sampling, graph, and description"
         )
     if not isinstance(extraction.get("greedy_decoding"), bool):
         raise ConfigError("extraction.greedy_decoding must be true or false")
+    repetition_penalty = extraction.get("summary_repetition_penalty")
+    if (
+        not isinstance(repetition_penalty, (int, float))
+        or isinstance(repetition_penalty, bool)
+        or not 1 <= float(repetition_penalty) <= 2
+    ):
+        raise ConfigError(
+            "extraction.summary_repetition_penalty must be in [1, 2]"
+        )
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution"}:
         raise ConfigError("extraction.visual_evidence must contain image_resolution")

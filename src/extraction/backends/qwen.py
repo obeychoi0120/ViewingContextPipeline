@@ -4,6 +4,31 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Iterator, Sequence
 
+
+class GeneratedTokenRepetitionPenalty:
+    """Apply a repetition penalty only to tokens generated after the prompt."""
+
+    def __init__(self, penalty: float, prompt_length: int) -> None:
+        if penalty < 1.0:
+            raise ValueError("repetition penalty must be at least 1.0")
+        self.penalty = penalty
+        self.prompt_length = prompt_length
+
+    def __call__(self, input_ids: Any, scores: Any) -> Any:
+        import torch
+
+        generated_ids = input_ids[:, self.prompt_length :]
+        if generated_ids.numel() == 0:
+            return scores
+        repeated_scores = torch.gather(scores, 1, generated_ids)
+        repeated_scores = torch.where(
+            repeated_scores < 0,
+            repeated_scores * self.penalty,
+            repeated_scores / self.penalty,
+        )
+        return scores.scatter(1, generated_ids, repeated_scores)
+
+
 @dataclass
 class QwenBackend:
     model: Any
@@ -47,6 +72,7 @@ class QwenBackend:
         temperature: float | None = None,
         top_p: float | None = None,
         top_k: int | None = None,
+        repetition_penalty: float = 1.0,
     ) -> str:
         content: list[dict[str, Any]] = []
         for image in images:
@@ -64,6 +90,20 @@ class QwenBackend:
             "max_new_tokens": max_new_tokens,
             "do_sample": do_sample,
         }
+        if repetition_penalty < 1.0:
+            raise ValueError("repetition penalty must be at least 1.0")
+        if repetition_penalty > 1.0:
+            input_ids = inputs.input_ids
+            shape = getattr(input_ids, "shape", None)
+            prompt_length = (
+                int(shape[-1]) if shape is not None else len(input_ids[0])
+            )
+            generation["logits_processor"] = [
+                GeneratedTokenRepetitionPenalty(
+                    repetition_penalty,
+                    prompt_length,
+                )
+            ]
         if do_sample:
             if temperature is None or top_p is None or top_k is None:
                 raise ValueError(

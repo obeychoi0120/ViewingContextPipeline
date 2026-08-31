@@ -11,16 +11,21 @@ Rules:
 - visual_atmosphere: the overall visually evident atmosphere grounded in described lighting, color, weather, setting, composition, and visible action tone. Do not infer genre, story, intent, private mental state, or audio mood.
 - visible_affect: visible expression, posture, interaction, or action tone described for people or animals. Do not infer private or actual mental state.
 - semantic_topics: important grounded topics supported by explicit people, objects, actions, or settings in the descriptions.
-- Each value should be concise and factual.
+- Output exactly seven physical lines.
+- Put each value on the same physical line as its label. Never insert a newline after a label.
+- State each distinct person, object, action, relation, or atmosphere only once.
+- Merge repeated observations into one concise sentence.
+- Use at most 25 English words per field.
+- Stop immediately after the semantic_topics line.
 - Do not add facts absent from the descriptions. Do not output JSON, Markdown, bullets, commentary, or fields other than the seven fields above.
 
-Return exactly these seven single-line labels in this order. Put each value after the first colon:
-setting_and_environments:
-main_characters_and_objects:
-chronological_events:
-relations:
-visual_atmosphere:
-visible_affect:
-semantic_topics:
+Return exactly this shape in this order. Replace each angle-bracketed instruction with a single-line value or leave the value empty:
+setting_and_environments: <one concise single-line value or empty>
+main_characters_and_objects: <one concise single-line value or empty>
+chronological_events: <one concise single-line value or empty>
+relations: <one concise single-line value or empty>
+visual_atmosphere: <one concise single-line value or empty>
+visible_affect: <one concise single-line value or empty>
+semantic_topics: <one concise single-line value or empty>
 
 {scenes}

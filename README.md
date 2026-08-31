@@ -130,7 +130,7 @@ Qwen scene 단계는 GPU worker 시작을 알린 뒤 scene이 하나 끝날 때�
 
 summary 단계는 실행 시점에 누락된 content를 한 batch로 한 번씩 생성합니다. 성공한 content는 7-line 응답 검증 직후 v3 JSON artifact로 저장하고, 실패한 content만 `summaries/failures/`에 남깁니다. worker 준비·generation 시작·대기 상태는 콘솔에 출력하지 않으며, 최종 validation failure만 `[Qwen_summary_*_fail]` 로그로 오류와 raw output을 함께 출력합니다. 자동 retry는 없습니다. 같은 명령을 다시 실행하면 완료 artifact는 재사용하고 실패·누락 content만 다시 생성합니다.
 
-Qwen summary decoding은 `config/pipeline.yaml`의 `extraction.greedy_decoding`으로 선택합니다. `true`는 `do_sample=false`, `false`는 seed를 별도로 고정하지 않은 sampling이며 `extraction.summary_sampling`의 `temperature`, `top_p`, `top_k`를 사용합니다. 현재 sampling 설정은 `0.2`, `0.8`, `20`입니다. 동일 실행의 단순 중단·실패 resume에는 같은 `run_id`를 쓸 수 있지만, prompt·decoding 설정·model 등 실험 조건을 바꾸는 경우에는 새 `run_id`가 필요합니다.
+Qwen summary decoding은 `config/pipeline.yaml`의 `extraction.greedy_decoding`으로 선택합니다. `true`는 `do_sample=false`, `false`는 seed를 별도로 고정하지 않은 sampling이며 `extraction.summary_sampling`의 `temperature`, `top_p`, `top_k`를 사용합니다. 현재 sampling 설정은 `0.2`, `0.8`, `20`입니다. `summary_repetition_penalty=1.05`는 prompt의 label과 evidence를 억제하지 않도록 생성 token에만 적용하며, Graph·Description summary 출력 상한은 320 tokens입니다. 동일 실행의 단순 중단·실패 resume에는 같은 `run_id`를 쓸 수 있지만, prompt·decoding 설정·model 등 실험 조건을 바꾸는 경우에는 새 `run_id`가 필요합니다.
 
 ## Artifact map
 
