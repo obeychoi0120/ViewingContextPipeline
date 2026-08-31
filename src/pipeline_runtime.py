@@ -112,7 +112,7 @@ class RunContext:
         return self.run_root / "extraction" / "graph" / source / "scenes"
 
     def graph_failure_dir(self, source: str) -> Path:
-        return self.run_root / "extraction" / "graph" / source / "failures"
+        return self.graph_scene_dir(source) / "failures"
 
     @property
     def description_scene_dir(self) -> Path:
@@ -120,14 +120,21 @@ class RunContext:
 
     @property
     def description_failure_dir(self) -> Path:
-        return self.run_root / "extraction" / "description" / "failures"
+        return self.description_scene_dir / "failures"
 
     def graph_summary_dir(self, source: str) -> Path:
         return self.run_root / "extraction" / "graph" / source / "summaries"
 
+    def graph_summary_failure_dir(self, source: str) -> Path:
+        return self.graph_summary_dir(source) / "failures"
+
     @property
     def description_summary_dir(self) -> Path:
         return self.run_root / "extraction" / "description" / "summaries"
+
+    @property
+    def description_summary_failure_dir(self) -> Path:
+        return self.description_summary_dir / "failures"
 
     @property
     def representations_dir(self) -> Path:

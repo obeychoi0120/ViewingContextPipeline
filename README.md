@@ -124,11 +124,11 @@ test pass는 구현 계약, runtime pass는 artifact 완전성, comparison decis
 | v2, 추가 필드, 비정규 text 등 legacy artifact              | migration하지 않음. 새 run_id가 기본이며 같은 실험의 단순 재생성만 --force 사용              |
 | diagnosis만 현재 파일 기준으로 재검사                      | run-diagnosis 재실행. 기존 diagnosis를 신뢰하지 않고 덮어씀                                  |
 
-failure JSONL은 append-only history가 아니라 **현재 unresolved failure state**입니다. 성공한 force retry 또는 완전한 cache reuse 뒤에는 stale·empty failure 파일을 삭제합니다. failure 파일 부재만으로 완전성을 판단하지 말고 diagnosis를 확인해야 합니다.
+scene failure JSONL은 `scenes/failures/`, summary failure JSONL은 `summaries/failures/`에 둡니다. failure artifact는 append-only history가 아니라 **현재 unresolved failure state**입니다. 성공한 force retry 또는 완전한 cache reuse 뒤에는 stale·empty failure 파일을 삭제합니다. failure 파일 부재만으로 완전성을 판단하지 말고 diagnosis를 확인해야 합니다. summary failure row는 `summary-generation-failure/v1`이며 content, attempt, seed, failure kind, error, raw response를 기록합니다.
 
 Qwen scene 단계는 GPU worker 시작을 알린 뒤 scene이 하나 끝날 때마다 결과를 출력하고, 해당 content에서 지금까지 완료된 scene subset을 원자적으로 JSONL에 checkpoint합니다. content progress bar는 그 content의 모든 scene이 끝나야 1 증가합니다. GPU가 사용 중이어도 새 scene 로그와 파일 수정 시각이 모두 멈춰 있다면 현재 generation이 아직 반환되지 않은 상태이며, worker가 살아 있는 동안 별도의 generation timeout은 적용하지 않습니다. Ctrl+C 전까지 저장된 partial checkpoint는 남지만 같은 명령을 재실행하면 incomplete content 전체를 다시 생성하고, 완료 content만 cache에서 재사용합니다.
 
-`summarize-graph`는 Qwen worker 초기화·준비, content generation 시작, 결과 대기 heartbeat, schema validation rejection과 retry를 진행 로그로 구분합니다. summary JSON은 정확한 7-field v3 validation을 통과한 content만 callback 즉시 저장합니다. 거부된 raw output은 정상 summary처럼 저장하지 않으며, 로그의 `attempt N/4 ... rejected` 뒤에 다음 retry seed가 적용됩니다.
+`summarize-graph`는 Qwen worker 초기화·준비, content generation 시작, 결과 대기 heartbeat, schema validation rejection과 retry를 진행 로그로 구분합니다. 단일 GPU에서는 한 content의 greedy와 필요한 fixed-seed retry를 끝낸 뒤 다음 content로 이동합니다. 다중 GPU에서는 GPU 수만큼의 작은 batch 안에서 같은 순서를 적용합니다. summary JSON은 정확한 7-field v3 validation을 통과한 content만 callback 즉시 저장합니다. 거부된 raw output은 정상 summary처럼 저장하지 않으며, 로그의 `attempt N/4 ... rejected` 뒤에 다음 retry seed가 적용됩니다.
 
 ## Artifact map
 
@@ -142,8 +142,16 @@ artifacts/{run_id}/
 │  └─ source_assets/{content_id}/assets/timestamp_fixed_30s.json
 ├─ data/fixed_30s/resized_keyframes/{content_id}/*.png
 ├─ extraction/
-│  ├─ graph/{qwen,gemini}/{scenes,failures,summaries}/
-│  └─ description/{scenes,failures,summaries}/
+│  ├─ graph/{qwen,gemini}/
+│  │  ├─ scenes/{content_id}.jsonl
+│  │  ├─ scenes/failures/{content_id}.jsonl
+│  │  ├─ summaries/{content_id}.json
+│  │  └─ summaries/failures/{content_id}.jsonl
+│  └─ description/
+│     ├─ scenes/{content_id}.jsonl
+│     ├─ scenes/failures/{content_id}.jsonl
+│     ├─ summaries/{content_id}.json
+│     └─ summaries/failures/{content_id}.jsonl
 └─ validation/
    ├─ representations/
    ├─ recommendations/
@@ -208,7 +216,7 @@ Graph와 Description은 동일한 7개 문자열 필드와 순서를 사용합�
 
 개별 필드는 근거가 없으면 빈 문자열일 수 있지만 7개 전체가 비어 있으면 실패합니다. 추가·누락 필드와 비문자열 값은 거부합니다. BGE에는 raw JSON이나 Markdown이 아니라 canonical section line으로 직렬화한 text만 입력합니다.
 
-summary 생성은 greedy 최초 1회 후 계약 검증에 실패한 content만 seed 42, 43, 44의 sampled retry를 수행합니다. 총 최대 4회이며 모두 실패하면 malformed summary를 저장하지 않고 summary 단계를 실패 처리합니다.
+summary 생성은 content-local greedy 최초 1회 후 계약 검증에 실패한 content만 seed 42, 43, 44의 sampled retry를 수행합니다. 총 최대 4회이며 모두 실패하면 malformed summary를 저장하지 않고 summary 단계를 실패 처리합니다. 다중 GPU에서는 GPU 수만큼의 content group을 한 단위로 처리합니다.
 
 주요 schema version은 viewing-context-config/v1, scene-description/v1, graph-video-summary/v3, description-video-summary/v3, sasrec-training-run/v1, diagnosis/v2입니다.
 

@@ -308,7 +308,9 @@ def test_scene_failures_are_counted_and_coverage_thresholds_fail(tmp_path) -> No
             [],
         )
         write_jsonl(
-            run_root / "extraction/graph/gemini/failures" / f"{content_id}.jsonl",
+            run_root
+            / "extraction/graph/gemini/scenes/failures"
+            / f"{content_id}.jsonl",
             [{"scene_idx": 0, "failure_kind": "generation"}],
         )
 

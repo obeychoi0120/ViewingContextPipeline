@@ -54,16 +54,38 @@ from pipeline_runtime import (
     RunContext,
     read_jsonl,
     write_json,
+    write_jsonl,
 )
 
 
 GRAPH_SOURCES = ("qwen", "gemini")
+SUMMARY_FAILURE_SCHEMA_VERSION = "summary-generation-failure/v1"
 
 
 def graph_stage_name(stage: str, source: str) -> str:
     if source not in GRAPH_SOURCES:
         raise ValueError(f"unsupported graph source: {source}")
     return f"{stage}-{source}"
+
+
+def _summary_failure_record(
+    content_id: str,
+    *,
+    attempt: int | None,
+    seed: int | None,
+    failure_kind: str,
+    error: str,
+    raw_response: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": SUMMARY_FAILURE_SCHEMA_VERSION,
+        "content_id": content_id,
+        "attempt": attempt,
+        "seed": seed,
+        "failure_kind": failure_kind,
+        "error": error,
+        "raw_response": raw_response,
+    }
 
 
 def extract_graph_scenes(
@@ -346,6 +368,7 @@ def summarize_graph(
     names = _video_name_map(context)
     scene_dir = context.graph_scene_dir(source)
     summary_dir = context.graph_summary_dir(source)
+    summary_failure_dir = context.graph_summary_failure_dir(source)
     if not scene_dir.is_dir():
         raise ExtractionStepError(f"missing graph scene directory: {scene_dir}")
     scene_paths = [scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
@@ -355,14 +378,29 @@ def summarize_graph(
     documents_by_content: dict[str, dict[str, Any]] = {}
     pending: list[tuple[list[dict[str, Any]], Path, str]] = []
     tasks: list[QwenGenerationTask] = []
+    summary_failures_by_content: dict[str, list[dict[str, Any]]] = {}
     empty_scene_files = 0
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
+        content_id = scene_path.stem
+        summary_failure_path = summary_failure_dir / f"{content_id}.jsonl"
         if not records:
             empty_scene_files += 1
+            write_jsonl(
+                summary_failure_path,
+                [
+                    _summary_failure_record(
+                        content_id,
+                        attempt=None,
+                        seed=None,
+                        failure_kind="empty_scene_records",
+                        error="graph summary requires at least one successful scene",
+                        raw_response="",
+                    )
+                ],
+            )
             continue
         records = _minimal_graph_records(records, scene_path)
-        content_id = scene_path.stem
         output_path = summary_dir / f"{content_id}.json"
         if output_path.is_file() and not force:
             documents_by_content[content_id] = reuse_summary_document(
@@ -372,6 +410,7 @@ def summarize_graph(
                 arm=f"graph_{source}",
                 scene_count=len(records),
             )
+            summary_failure_path.unlink(missing_ok=True)
             continue
         prompt = graph_summary_prompt(template, records)
         task_id = content_id
@@ -384,6 +423,7 @@ def summarize_graph(
             )
         )
         pending.append((records, output_path, task_id))
+        summary_failures_by_content[task_id] = []
 
     pending_by_task = {
         task_id: (records, output_path)
@@ -410,6 +450,9 @@ def summarize_graph(
                 "scene_count": len(records),
             }
             write_json(output_path, document)
+            (
+                summary_failure_dir / f"{content_id}.jsonl"
+            ).unlink(missing_ok=True)
             documents_by_content[content_id] = document
             _write_progress(
                 progress,
@@ -442,11 +485,16 @@ def summarize_graph(
                     )
                 elif event == "task_started":
                     task_id = str(payload.get("task_id"))
+                    generation_mode = (
+                        f"retry seed={payload.get('seed')}"
+                        if payload.get("do_sample")
+                        else "greedy"
+                    )
                     _write_progress(
                         progress,
                         f"[Qwen_summary_graph_{source}] "
                         f"{names.get(task_id, f'{task_id}.mp4')} | generation started "
-                        f"on GPU {payload.get('gpu_id')}",
+                        f"on GPU {payload.get('gpu_id')} | {generation_mode}",
                     )
                 elif event == "waiting":
                     now = time.monotonic()
@@ -463,6 +511,7 @@ def summarize_graph(
                 task_id: str,
                 attempt: int,
                 seed: int | None,
+                raw_response: str,
                 error: Exception,
             ) -> None:
                 seed_note = "greedy" if seed is None else f"seed={seed}"
@@ -473,6 +522,21 @@ def summarize_graph(
                     f"{names.get(task_id, f'{task_id}.mp4')} | "
                     f"attempt {attempt}/{total_attempts} ({seed_note}) rejected | "
                     f"{message}",
+                )
+                failures = summary_failures_by_content[task_id]
+                failures.append(
+                    _summary_failure_record(
+                        task_id,
+                        attempt=attempt,
+                        seed=seed,
+                        failure_kind="schema_validation",
+                        error=str(error),
+                        raw_response=raw_response,
+                    )
+                )
+                write_jsonl(
+                    summary_failure_dir / f"{task_id}.jsonl",
+                    failures,
                 )
 
             _write_progress(
@@ -491,6 +555,7 @@ def summarize_graph(
                     complete_graph_summary,
                     retry_settings,
                     report_validation_failure,
+                    batch_size=gpus or 1,
                 )
     return _result(
         stage,
@@ -683,11 +748,29 @@ def summarize_description(
     documents_by_content: dict[str, dict[str, Any]] = {}
     pending: list[tuple[list[dict[str, Any]], Path, str]] = []
     tasks: list[QwenGenerationTask] = []
+    summary_failures_by_content: dict[str, list[dict[str, Any]]] = {}
     empty_scene_files = 0
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
+        content_id = scene_path.stem
+        summary_failure_path = (
+            context.description_summary_failure_dir / f"{content_id}.jsonl"
+        )
         if not records:
             empty_scene_files += 1
+            write_jsonl(
+                summary_failure_path,
+                [
+                    _summary_failure_record(
+                        content_id,
+                        attempt=None,
+                        seed=None,
+                        failure_kind="empty_scene_records",
+                        error="description summary requires at least one successful scene",
+                        raw_response="",
+                    )
+                ],
+            )
             continue
         records = _minimal_description_records(records, scene_path)
         if any(row.get("schema_version") != SCENE_SCHEMA_VERSION for row in records):
@@ -702,6 +785,7 @@ def summarize_description(
                 arm="description",
                 scene_count=len(records),
             )
+            summary_failure_path.unlink(missing_ok=True)
             continue
         prompt = description_summary_prompt(template, records)
         task_id = str(records[0]["content_id"])
@@ -714,6 +798,7 @@ def summarize_description(
             )
         )
         pending.append((records, output_path, task_id))
+        summary_failures_by_content[task_id] = []
 
     pending_by_task = {
         task_id: (records, output_path)
@@ -740,6 +825,9 @@ def summarize_description(
                 "scene_count": len(records),
             }
             write_json(output_path, document)
+            (
+                context.description_summary_failure_dir / f"{content_id}.jsonl"
+            ).unlink(missing_ok=True)
             documents_by_content[content_id] = document
             _write_progress(
                 progress,
@@ -754,12 +842,37 @@ def summarize_description(
 
         retry_count = 0
         if tasks:
+            def record_description_summary_failure(
+                task_id: str,
+                attempt: int,
+                seed: int | None,
+                raw_response: str,
+                error: Exception,
+            ) -> None:
+                failures = summary_failures_by_content[task_id]
+                failures.append(
+                    _summary_failure_record(
+                        task_id,
+                        attempt=attempt,
+                        seed=seed,
+                        failure_kind="schema_validation",
+                        error=str(error),
+                        raw_response=raw_response,
+                    )
+                )
+                write_jsonl(
+                    context.description_summary_failure_dir / f"{task_id}.jsonl",
+                    failures,
+                )
+
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 retry_count = generate_summaries_with_retry(
                     generate,
                     tasks,
                     complete_description_summary,
                     retry_settings,
+                    record_description_summary_failure,
+                    batch_size=gpus or 1,
                 )
     return _result(
         "summarize-description",

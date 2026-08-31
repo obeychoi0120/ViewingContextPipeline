@@ -170,18 +170,18 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
             "top_p": 0.8,
             "top_k": 20,
         },
-        lambda task_id, attempt, seed, error: validation_failures.append(
-            (task_id, attempt, seed, str(error))
+        lambda task_id, attempt, seed, raw_response, error: validation_failures.append(
+            (task_id, attempt, seed, raw_response, str(error))
         ),
     )
 
     assert retry_count == 3
     assert completed == [("c1", sections)]
     assert [task.seed for task in submitted] == [None, 42, 43, 44]
-    assert [(row[1], row[2]) for row in validation_failures] == [
-        (1, None),
-        (2, 42),
-        (3, 43),
+    assert [(row[1], row[2], row[3]) for row in validation_failures] == [
+        (1, None, "not json"),
+        (2, 42, "still not json"),
+        (3, 43, "also not json"),
     ]
     assert [task.do_sample for task in submitted] == [False, True, True, True]
     for task in submitted[1:]:
@@ -225,10 +225,113 @@ def test_summary_is_completed_from_worker_callback_before_batch_returns() -> Non
             "top_p": 0.8,
             "top_k": 20,
         },
+        batch_size=2,
     )
 
     assert retry_count == 0
     assert completed == ["c2", "c1"]
+
+
+def test_summary_retry_is_content_local_for_one_gpu() -> None:
+    sections = {
+        "setting_and_environments": "An indoor room",
+        "main_characters_and_objects": "A person",
+        "chronological_events": "The person walks",
+        "relations": "The person is inside the room",
+        "visual_atmosphere": "A calm indoor atmosphere",
+        "visible_affect": "Neutral visible affect",
+        "semantic_topics": "Indoor activity",
+    }
+    structured = json.dumps(sections)
+    submissions = []
+    completed = []
+
+    def generate(tasks, callback=None):
+        assert callback is not None
+        submissions.append([(task.task_id, task.seed) for task in tasks])
+        for task in tasks:
+            text = "not json" if task.task_id == "c1" and task.seed is None else structured
+            callback(task.task_id, text)
+        return {}
+
+    retry_count = summary_executor.generate_summaries_with_retry(
+        generate,
+        [
+            QwenGenerationTask("c1", (), "prompt", 512),
+            QwenGenerationTask("c2", (), "prompt", 512),
+        ],
+        lambda task_id, text: completed.append(
+            (task_id, parse_summary_sections(text))
+        ),
+        {
+            "seeds": [42, 43, 44],
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "top_k": 20,
+        },
+        batch_size=1,
+    )
+
+    assert retry_count == 1
+    assert submissions == [
+        [("c1", None)],
+        [("c1", 42)],
+        [("c2", None)],
+    ]
+    assert [task_id for task_id, _sections in completed] == ["c1", "c2"]
+
+
+def test_content_local_retry_continues_after_one_content_is_exhausted() -> None:
+    sections = {
+        "setting_and_environments": "An indoor room",
+        "main_characters_and_objects": "A person",
+        "chronological_events": "The person walks",
+        "relations": "The person is inside the room",
+        "visual_atmosphere": "A calm indoor atmosphere",
+        "visible_affect": "Neutral visible affect",
+        "semantic_topics": "Indoor activity",
+    }
+    structured = json.dumps(sections)
+    submissions = []
+    completed = []
+
+    def generate(tasks, callback=None):
+        assert callback is not None
+        task = tasks[0]
+        submissions.append((task.task_id, task.seed))
+        callback(task.task_id, "not json" if task.task_id == "c1" else structured)
+        return {}
+
+    with pytest.raises(
+        extraction_steps.ExtractionStepError,
+        match=r"task_ids=\['c1'\]",
+    ):
+        summary_executor.generate_summaries_with_retry(
+            generate,
+            [
+                QwenGenerationTask("c1", (), "prompt", 512),
+                QwenGenerationTask("c2", (), "prompt", 512),
+            ],
+            lambda task_id, text: completed.append(
+                (task_id, parse_summary_sections(text))
+            ),
+            {
+                "seeds": [42, 43, 44],
+                "temperature": 0.1,
+                "top_p": 0.8,
+                "top_k": 20,
+            },
+            batch_size=1,
+        )
+
+    assert submissions == [
+        ("c1", None),
+        ("c1", 42),
+        ("c1", 43),
+        ("c1", 44),
+        ("c2", None),
+    ]
+    assert [task_id for task_id, _sections in completed] == ["c2"]
 
 
 def test_reused_summary_rejects_noncanonical_text(
@@ -313,6 +416,23 @@ def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> Non
     assert not hasattr(context, "visual_manifest")
     assert not hasattr(context, "representations_manifest")
     assert not hasattr(context, "recommendations_manifest")
+
+
+def test_failure_directories_are_nested_under_their_artifact_stage(
+    context: RunContext,
+) -> None:
+    assert context.graph_failure_dir("qwen") == (
+        context.graph_scene_dir("qwen") / "failures"
+    )
+    assert context.graph_summary_failure_dir("gemini") == (
+        context.graph_summary_dir("gemini") / "failures"
+    )
+    assert context.description_failure_dir == (
+        context.description_scene_dir / "failures"
+    )
+    assert context.description_summary_failure_dir == (
+        context.description_summary_dir / "failures"
+    )
 
 
 def test_graph_scene_failure_is_recorded_and_stage_continues(
@@ -667,6 +787,7 @@ def test_graph_summary_logs_worker_retry_and_saves_from_callback(
         "semantic_topics": "",
     }
     output_path = context.graph_summary_dir("qwen") / "c1.json"
+    failure_path = context.graph_summary_failure_dir("qwen") / "c1.jsonl"
     calls = 0
 
     @contextmanager
@@ -683,8 +804,15 @@ def test_graph_summary_logs_worker_retry_and_saves_from_callback(
             )
             text = "not json" if calls == 1 else json.dumps(sections)
             callback(tasks[0].task_id, text)
-            if calls == 2:
+            if calls == 1:
+                failures = read_jsonl(failure_path)
+                assert failures[0]["schema_version"] == "summary-generation-failure/v1"
+                assert failures[0]["attempt"] == 1
+                assert failures[0]["seed"] is None
+                assert failures[0]["raw_response"] == "not json"
+            else:
                 assert output_path.is_file()
+                assert not failure_path.exists()
             return {}
 
         yield generate
@@ -695,11 +823,87 @@ def test_graph_summary_logs_worker_retry_and_saves_from_callback(
     assert result["content_count"] == 1
     assert result["retry_count"] == 1
     assert json.loads(output_path.read_text(encoding="utf-8"))["sections"] == sections
+    assert not failure_path.exists()
     stderr = capsys.readouterr().err
     assert "initializing 1 CUDA worker(s) for 1 pending content(s)" in stderr
     assert "worker 0 ready on GPU 0" in stderr
     assert "generation started on GPU 0" in stderr
     assert "attempt 1/4 (greedy) rejected" in stderr
+
+
+def test_description_summary_failure_is_nested_and_success_retry_removes_it(
+    context: RunContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context.initialize()
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    monkeypatch.setattr(
+        extraction_steps,
+        "_visual_rows",
+        lambda _context: [{"content_id": "c1"}],
+    )
+    write_jsonl(
+        context.description_scene_dir / "c1.jsonl",
+        [
+            {
+                "schema_version": "scene-description/v1",
+                "content_id": "c1",
+                "scene_idx": 0,
+                "keyframes": [5, 15, 25],
+                "description": "A person walks indoors.",
+            }
+        ],
+    )
+    failure_path = context.description_summary_failure_dir / "c1.jsonl"
+
+    @contextmanager
+    def invalid_generator(**_kwargs):
+        def generate(tasks, callback):
+            callback(tasks[0].task_id, "not json")
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", invalid_generator)
+    with pytest.raises(
+        extraction_steps.ExtractionStepError,
+        match="structured summary failed after 3 retries",
+    ):
+        extraction_steps.summarize_description(context)
+
+    failures = read_jsonl(failure_path)
+    assert [row["attempt"] for row in failures] == [1, 2, 3, 4]
+    assert [row["seed"] for row in failures] == [None, 42, 43, 44]
+    assert all(row["failure_kind"] == "schema_validation" for row in failures)
+    assert all(row["raw_response"] == "not json" for row in failures)
+
+    sections = {
+        "setting_and_environments": "An indoor setting.",
+        "main_characters_and_objects": "A person.",
+        "chronological_events": "The person walks.",
+        "relations": "",
+        "visual_atmosphere": "",
+        "visible_affect": "",
+        "semantic_topics": "Walking indoors.",
+    }
+
+    @contextmanager
+    def valid_generator(**_kwargs):
+        def generate(tasks, callback):
+            callback(tasks[0].task_id, json.dumps(sections))
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", valid_generator)
+    result = extraction_steps.summarize_description(context)
+
+    assert result["content_count"] == 1
+    assert not failure_path.exists()
+    assert (context.description_summary_dir / "c1.json").is_file()
 
 
 def test_graph_summary_rejects_legacy_scene_shape(

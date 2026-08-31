@@ -26,12 +26,18 @@ DECISION_CONFIG_KEYS = {
     "multiple_comparison_correction",
 }
 SCENE_ARMS = {
-    "graph_qwen": ("extraction/graph/qwen/scenes", "extraction/graph/qwen/failures"),
+    "graph_qwen": (
+        "extraction/graph/qwen/scenes",
+        "extraction/graph/qwen/scenes/failures",
+    ),
     "graph_gemini": (
         "extraction/graph/gemini/scenes",
-        "extraction/graph/gemini/failures",
+        "extraction/graph/gemini/scenes/failures",
     ),
-    "desc": ("extraction/description/scenes", "extraction/description/failures"),
+    "desc": (
+        "extraction/description/scenes",
+        "extraction/description/scenes/failures",
+    ),
 }
 
 
