@@ -12,7 +12,7 @@ from extraction.summary_validation import SummaryContractError, parse_summary_se
 
 
 SCENE_SCHEMA_VERSION = "scene-description/v1"
-SUMMARY_SCHEMA_VERSION = "description-video-summary/v2"
+SUMMARY_SCHEMA_VERSION = "description-video-summary/v3"
 
 
 class DescriptionError(RuntimeError):

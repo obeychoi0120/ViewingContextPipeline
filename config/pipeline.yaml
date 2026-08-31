@@ -31,13 +31,13 @@ extraction:
     top_p: 0.8
     top_k: 20
   graph:
-    summary_prompt: config/prompts/graph_summary_v2.md
+    summary_prompt: config/prompts/graph_summary_v3.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
     gemini_concurrency: 8
   description:
     scene_prompt: config/prompts/description_scene_v1.md
-    summary_prompt: config/prompts/description_summary_v2.md
+    summary_prompt: config/prompts/description_summary_v3.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
 validation:

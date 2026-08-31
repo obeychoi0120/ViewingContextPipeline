@@ -24,7 +24,7 @@ GRAPH_FIELDS = (
     "semantic_topics",
     "affect",
 )
-SUMMARY_SCHEMA_VERSION = "graph-video-summary/v2"
+SUMMARY_SCHEMA_VERSION = "graph-video-summary/v3"
 
 
 class SemanticGraphError(RuntimeError):
