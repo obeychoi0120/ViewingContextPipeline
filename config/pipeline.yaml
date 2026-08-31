@@ -25,9 +25,9 @@ models:
 extraction:
   visual_evidence:
     image_resolution: [640, 352]
-  summary_retry:
-    seeds: [42, 43, 44]
-    temperature: 0.1
+  greedy_decoding: true
+  summary_sampling:
+    temperature: 0.2
     top_p: 0.8
     top_k: 20
   graph:

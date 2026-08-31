@@ -124,11 +124,13 @@ test pass는 구현 계약, runtime pass는 artifact 완전성, comparison decis
 | v2, 추가 필드, 비정규 text 등 legacy artifact              | migration하지 않음. 새 run_id가 기본이며 같은 실험의 단순 재생성만 --force 사용              |
 | diagnosis만 현재 파일 기준으로 재검사                      | run-diagnosis 재실행. 기존 diagnosis를 신뢰하지 않고 덮어씀                                  |
 
-scene failure JSONL은 `scenes/failures/`, summary failure JSONL은 `summaries/failures/`에 둡니다. failure artifact는 append-only history가 아니라 **현재 unresolved failure state**입니다. 성공한 force retry 또는 완전한 cache reuse 뒤에는 stale·empty failure 파일을 삭제합니다. failure 파일 부재만으로 완전성을 판단하지 말고 diagnosis를 확인해야 합니다. summary failure row는 `summary-generation-failure/v1`이며 content, attempt, seed, failure kind, error, raw response를 기록합니다.
+scene failure JSONL은 `scenes/failures/`, summary failure JSONL은 `summaries/failures/`에 둡니다. failure artifact는 append-only history가 아니라 **현재 unresolved failure state**입니다. 성공한 재실행 또는 완전한 cache reuse 뒤에는 stale·empty failure 파일을 삭제합니다. failure 파일 부재만으로 완전성을 판단하지 말고 diagnosis를 확인해야 합니다. summary failure row는 `summary-generation-failure/v1`이며 content, attempt, seed, failure kind, error, raw response를 기록합니다.
 
 Qwen scene 단계는 GPU worker 시작을 알린 뒤 scene이 하나 끝날 때마다 결과를 출력하고, 해당 content에서 지금까지 완료된 scene subset을 원자적으로 JSONL에 checkpoint합니다. content progress bar는 그 content의 모든 scene이 끝나야 1 증가합니다. GPU가 사용 중이어도 새 scene 로그와 파일 수정 시각이 모두 멈춰 있다면 현재 generation이 아직 반환되지 않은 상태이며, worker가 살아 있는 동안 별도의 generation timeout은 적용하지 않습니다. Ctrl+C 전까지 저장된 partial checkpoint는 남지만 같은 명령을 재실행하면 incomplete content 전체를 다시 생성하고, 완료 content만 cache에서 재사용합니다.
 
-`summarize-graph`는 Qwen worker 초기화·준비, content generation 시작, 결과 대기 heartbeat, schema validation rejection과 retry를 진행 로그로 구분합니다. 단일 GPU에서는 한 content의 greedy와 필요한 fixed-seed retry를 끝낸 뒤 다음 content로 이동합니다. 다중 GPU에서는 GPU 수만큼의 작은 batch 안에서 같은 순서를 적용합니다. summary JSON은 정확한 7-field v3 validation을 통과한 content만 callback 즉시 저장합니다. 거부된 raw output은 정상 summary처럼 저장하지 않으며, 로그의 `attempt N/4 ... rejected` 뒤에 다음 retry seed가 적용됩니다.
+summary 단계는 실행 시점에 누락된 content를 한 batch로 한 번씩 생성합니다. 성공한 content는 7-line 응답 검증 직후 v3 JSON artifact로 저장하고, 실패한 content만 `summaries/failures/`에 남깁니다. worker 준비·generation 시작·대기 상태는 콘솔에 출력하지 않으며, 최종 validation failure만 `[Qwen_summary_*_fail]` 로그로 출력합니다. 자동 retry는 없습니다. 같은 명령을 다시 실행하면 완료 artifact는 재사용하고 실패·누락 content만 다시 생성합니다.
+
+Qwen summary decoding은 `config/pipeline.yaml`의 `extraction.greedy_decoding`으로 선택합니다. `true`는 `do_sample=false`, `false`는 seed를 별도로 고정하지 않은 sampling이며 `extraction.summary_sampling`의 `temperature`, `top_p`, `top_k`를 사용합니다. 현재 sampling 설정은 `0.2`, `0.8`, `20`입니다. 동일 실행의 단순 중단·실패 resume에는 같은 `run_id`를 쓸 수 있지만, prompt·decoding 설정·model 등 실험 조건을 바꾸는 경우에는 새 `run_id`가 필요합니다.
 
 ## Artifact map
 
@@ -200,23 +202,21 @@ Graph prompt와 공통 원칙은 visible-only grounding이지만 세부 규칙�
 
 ### Video summary v3
 
-Graph와 Description은 동일한 7개 문자열 필드와 순서를 사용합니다.
+Graph와 Description summary 모델은 JSON 대신 다음 7개 labeled text line을 정확한 순서로 출력합니다. 각 줄은 첫 번째 `:`에서만 label과 값으로 나누므로 값 안의 추가 `:`는 허용됩니다.
 
-```json
-{
-  "setting_and_environments": "...",
-  "main_characters_and_objects": "...",
-  "chronological_events": "...",
-  "relations": "...",
-  "visual_atmosphere": "...",
-  "visible_affect": "...",
-  "semantic_topics": "..."
-}
+```text
+setting_and_environments: ...
+main_characters_and_objects: ...
+chronological_events: ...
+relations: ...
+visual_atmosphere: ...
+visible_affect: ...
+semantic_topics: ...
 ```
 
-개별 필드는 근거가 없으면 빈 문자열일 수 있지만 7개 전체가 비어 있으면 실패합니다. 추가·누락 필드와 비문자열 값은 거부합니다. BGE에는 raw JSON이나 Markdown이 아니라 canonical section line으로 직렬화한 text만 입력합니다.
+파서는 label의 추가·누락·중복·순서 변경과 별도 prose를 거부합니다. 개별 값은 빈 문자열일 수 있지만 7개 전체가 비어 있으면 실패합니다. 검증된 응답은 기존 v3 artifact의 `sections` dictionary로 변환되므로 저장 schema와 BGE 입력의 canonical section text는 바뀌지 않습니다.
 
-summary 생성은 content-local greedy 최초 1회 후 계약 검증에 실패한 content만 seed 42, 43, 44의 sampled retry를 수행합니다. 총 최대 4회이며 모두 실패하면 malformed summary를 저장하지 않고 summary 단계를 실패 처리합니다. 다중 GPU에서는 GPU 수만큼의 content group을 한 단위로 처리합니다.
+한 명령 실행에서는 content마다 한 번만 생성하며 자동 retry나 retry 전용 prompt는 없습니다. 실패 응답은 정상 summary로 저장하지 않습니다. 다음 실행에서 decoding mode를 조정해 실패 content를 수동 resume할 수 있으며, 기존에 완료된 content는 `--force`를 쓰지 않는 한 재사용됩니다. sampled mode에서 pipeline 자체는 seed를 고정하지 않습니다.
 
 주요 schema version은 viewing-context-config/v1, scene-description/v1, graph-video-summary/v3, description-video-summary/v3, sasrec-training-run/v1, diagnosis/v2입니다.
 

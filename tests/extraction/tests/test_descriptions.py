@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -34,6 +33,7 @@ def test_description_summary_preserves_scene_order_and_requires_seven_fields() -
     prompt = description_summary_prompt("{scenes}", records)
     assert prompt.index("Scene 0") < prompt.index("Scene 1")
     sections = {name: f"visible {name}" for name in SUMMARY_SECTIONS}
-    assert validate_summary(f"```json\n{json.dumps(sections)}\n```") == sections
-    with pytest.raises(DescriptionError, match="must be one JSON object"):
+    labeled_text = "\n".join(f"{name}: {value}" for name, value in sections.items())
+    assert validate_summary(labeled_text) == sections
+    with pytest.raises(DescriptionError, match="exactly seven"):
         validate_summary("short")

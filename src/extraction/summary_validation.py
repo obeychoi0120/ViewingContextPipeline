@@ -26,24 +26,29 @@ class SummaryContractError(ValueError):
 
 
 def parse_summary_sections(text: str) -> dict[str, str]:
-    """Parse the model-authored seven-field JSON without semantic reclassification."""
-    from extraction.semantic_graph.json_repair import parse_or_repair_graph
-
+    """Parse exactly seven ``field: value`` lines in canonical order."""
     raw = str(text or "").strip()
     if not raw:
         raise SummaryContractError("structured video summary must not be empty")
-    value = parse_or_repair_graph(raw).graph
-    if value is None:
-        raise SummaryContractError("structured video summary must be one JSON object")
-    if set(value) != set(SUMMARY_SECTIONS):
-        missing = sorted(set(SUMMARY_SECTIONS) - set(value))
-        extra = sorted(set(value) - set(SUMMARY_SECTIONS))
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) != len(SUMMARY_SECTIONS):
         raise SummaryContractError(
-            f"structured video summary fields mismatch: missing={missing} extra={extra}"
+            "structured video summary must contain exactly seven non-empty labeled lines"
         )
-    if any(not isinstance(value[name], str) for name in SUMMARY_SECTIONS):
-        raise SummaryContractError("structured video summary fields must all be strings")
-    sections = {name: value[name].strip() for name in SUMMARY_SECTIONS}
+    sections: dict[str, str] = {}
+    for expected, line in zip(SUMMARY_SECTIONS, lines):
+        label, separator, value = line.partition(":")
+        if not separator:
+            raise SummaryContractError(
+                f"structured video summary line is missing ':' for {expected}"
+            )
+        normalized_label = label.strip()
+        if normalized_label != expected:
+            raise SummaryContractError(
+                "structured video summary labels must use canonical order: "
+                f"expected={expected!r} actual={normalized_label!r}"
+            )
+        sections[expected] = value.strip()
     if not any(sections.values()):
         raise SummaryContractError("structured video summary must contain visible evidence")
     return sections

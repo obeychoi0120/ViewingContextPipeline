@@ -92,16 +92,12 @@ def result(
     *,
     content_count: int,
     failure_count: int = 0,
-    retry_count: int | None = None,
 ) -> dict[str, Any]:
-    document = {
+    return {
         "stage": stage,
         "content_count": content_count,
         "failure_count": failure_count,
     }
-    if retry_count is not None:
-        document["retry_count"] = retry_count
-    return document
 
 
 def require_file(path: Path, label: str) -> Path:

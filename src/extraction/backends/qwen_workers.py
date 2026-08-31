@@ -9,9 +9,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 
-QwenStatusCallback = Callable[[str, dict[str, Any]], None]
-
-
 @dataclass(frozen=True)
 class QwenGenerationTask:
     task_id: str
@@ -34,13 +31,7 @@ def assign_worker_indices(task_count: int, gpu_count: int) -> list[int]:
 class QwenWorkerPool:
     """One persistent Qwen process per requested CUDA device."""
 
-    def __init__(
-        self,
-        gpu_count: int,
-        model_path: str,
-        *,
-        on_status: QwenStatusCallback | None = None,
-    ) -> None:
+    def __init__(self, gpu_count: int, model_path: str) -> None:
         gpu_ids = _visible_gpu_ids(gpu_count)
         self.gpu_count = gpu_count
         self._context = mp.get_context("spawn")
@@ -48,7 +39,6 @@ class QwenWorkerPool:
         self._task_queues: list[Any] = []
         self._processes: list[Any] = []
         self._closed = False
-        self._on_status = on_status
         for worker_index, gpu_id in enumerate(gpu_ids):
             task_queue = self._context.Queue()
             process = self._context.Process(
@@ -100,17 +90,6 @@ class QwenWorkerPool:
                         raise RuntimeError(
                             f"Qwen GPU worker(s) exited before finishing tasks: {sorted(dead)}"
                         )
-                    self._emit_status(
-                        "waiting",
-                        {
-                            "pending_count": len(pending),
-                            "task_id": next(iter(pending), None),
-                        },
-                    )
-                    continue
-                event = result.get("event")
-                if event is not None:
-                    self._emit_status(str(event), result)
                     continue
                 task_id = str(result.get("task_id"))
                 if not result.get("ok"):
@@ -131,11 +110,6 @@ class QwenWorkerPool:
         except BaseException:
             self.abort()
             raise
-
-    def _emit_status(self, event: str, payload: dict[str, Any]) -> None:
-        callback = getattr(self, "_on_status", None)
-        if callback is not None:
-            callback(event, payload)
 
     def close(self) -> None:
         if getattr(self, "_closed", False):
@@ -254,28 +228,10 @@ def _worker_main(
         )
         return
 
-    result_queue.put(
-        {
-            "event": "worker_ready",
-            "worker_index": worker_index,
-            "gpu_id": gpu_id,
-        }
-    )
-
     while True:
         task = task_queue.get()
         if task is None:
             return
-        result_queue.put(
-            {
-                "event": "task_started",
-                "worker_index": worker_index,
-                "gpu_id": gpu_id,
-                "task_id": task.task_id,
-                "do_sample": task.do_sample,
-                "seed": task.seed,
-            }
-        )
         try:
             from extraction.evidence import load_images
 

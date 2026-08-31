@@ -65,9 +65,9 @@ class QwenBackend:
             "do_sample": do_sample,
         }
         if do_sample:
-            if seed is None or temperature is None or top_p is None or top_k is None:
+            if temperature is None or top_p is None or top_k is None:
                 raise ValueError(
-                    "sampled Qwen generation requires seed, temperature, top_p, and top_k"
+                    "sampled Qwen generation requires temperature, top_p, and top_k"
                 )
             generation.update(
                 {
@@ -77,7 +77,9 @@ class QwenBackend:
                 }
             )
         seed_context = (
-            _seeded_rng(seed, self.model.device) if do_sample else nullcontext()
+            _seeded_rng(seed, self.model.device)
+            if do_sample and seed is not None
+            else nullcontext()
         )
         with seed_context:
             generated = self.model.generate(**inputs, **generation)
