@@ -128,7 +128,7 @@ scene failure JSONL은 `scenes/failures/`, summary failure JSONL은 `summaries/f
 
 Qwen scene 단계는 GPU worker 시작을 알린 뒤 scene이 하나 끝날 때마다 결과를 출력하고, 해당 content에서 지금까지 완료된 scene subset을 원자적으로 JSONL에 checkpoint합니다. content progress bar는 그 content의 모든 scene이 끝나야 1 증가합니다. GPU가 사용 중이어도 새 scene 로그와 파일 수정 시각이 모두 멈춰 있다면 현재 generation이 아직 반환되지 않은 상태이며, worker가 살아 있는 동안 별도의 generation timeout은 적용하지 않습니다. Ctrl+C 전까지 저장된 partial checkpoint는 남지만 같은 명령을 재실행하면 incomplete content 전체를 다시 생성하고, 완료 content만 cache에서 재사용합니다.
 
-summary 단계는 실행 시점에 누락된 content를 한 batch로 한 번씩 생성합니다. 성공한 content는 7-line 응답 검증 직후 v3 JSON artifact로 저장하고, 실패한 content만 `summaries/failures/`에 남깁니다. worker 준비·generation 시작·대기 상태는 콘솔에 출력하지 않으며, 최종 validation failure만 `[Qwen_summary_*_fail]` 로그로 출력합니다. 자동 retry는 없습니다. 같은 명령을 다시 실행하면 완료 artifact는 재사용하고 실패·누락 content만 다시 생성합니다.
+summary 단계는 실행 시점에 누락된 content를 한 batch로 한 번씩 생성합니다. 성공한 content는 7-line 응답 검증 직후 v3 JSON artifact로 저장하고, 실패한 content만 `summaries/failures/`에 남깁니다. worker 준비·generation 시작·대기 상태는 콘솔에 출력하지 않으며, 최종 validation failure만 `[Qwen_summary_*_fail]` 로그로 오류와 raw output을 함께 출력합니다. 자동 retry는 없습니다. 같은 명령을 다시 실행하면 완료 artifact는 재사용하고 실패·누락 content만 다시 생성합니다.
 
 Qwen summary decoding은 `config/pipeline.yaml`의 `extraction.greedy_decoding`으로 선택합니다. `true`는 `do_sample=false`, `false`는 seed를 별도로 고정하지 않은 sampling이며 `extraction.summary_sampling`의 `temperature`, `top_p`, `top_k`를 사용합니다. 현재 sampling 설정은 `0.2`, `0.8`, `20`입니다. 동일 실행의 단순 중단·실패 resume에는 같은 `run_id`를 쓸 수 있지만, prompt·decoding 설정·model 등 실험 조건을 바꾸는 경우에는 새 `run_id`가 필요합니다.
 
