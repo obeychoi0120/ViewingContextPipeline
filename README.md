@@ -113,6 +113,8 @@ python -m validation run-diagnosis --run-id 1k_pilot_260827
 
 Qwen을 사용하는 Step은 `--gpus N`을 지원합니다. 멀티-GPU 실행의 Qwen worker는 부모 process가 수명주기를 관리합니다. Linux local에서 `Ctrl+C`가 들어오면 대기 중인 작업을 버리고 모든 GPU worker에 즉시 종료를 요청하며, 짧은 유예 뒤에도 남은 worker는 강제 종료해 CUDA memory를 해제합니다. CLI는 이 경우 exit code `130`을 반환합니다. Gemini scene extraction은 `--gpus` 대신 `extraction.graph.gemini_concurrency`만 사용합니다. `embed-representations`는 유효한 branch embedding을 재사용하고, 인코딩이 필요한 branch들은 한 번 로드한 BGE runtime을 공유합니다.
 
+Graph scene, Description scene, Graph Summary, Description Summary의 콘솔 출력은 한 content의 모든 메시지가 끝날 때마다 빈 줄 한 줄을 추가해 다음 content와 구분합니다.
+
 ## Runtime 판정과 저장 정책
 
 - config, prompt, model, summary schema 또는 protocol이 달라지는 새 실험은 새 `run_id`를 사용합니다.

@@ -109,3 +109,23 @@ def test_serial_generator_calls_completion_callback_per_task(
 
     assert completed == [("a", "result:first"), ("b", "result:second")]
     assert results == {"a": "result:first", "b": "result:second"}
+
+
+def test_complete_content_progress_updates_then_writes_blank_separator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = []
+
+    class Progress:
+        def update(self, amount):
+            events.append(("update", amount))
+
+    monkeypatch.setattr(
+        steps_module,
+        "_write_progress",
+        lambda _progress, message: events.append(("write", message)),
+    )
+
+    steps_module._complete_content_progress(Progress())
+
+    assert events == [("update", 1), ("write", "")]

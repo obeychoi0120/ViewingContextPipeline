@@ -216,6 +216,11 @@ def _write_progress(progress: tqdm, message: str) -> None:
     tqdm.write(message, file=progress.fp)
 
 
+def _complete_content_progress(progress: tqdm) -> None:
+    progress.update(1)
+    _write_progress(progress, "")
+
+
 def _write_failure_jsonl(path: Path, failures: list[dict[str, Any]]) -> None:
     if failures:
         write_jsonl(path, failures)
@@ -532,7 +537,7 @@ def extract_graph_scenes(
                     progress,
                     graph_skip_message(video_name, failure, source=model),
                 )
-            progress.update(1)
+            _complete_content_progress(progress)
 
         if pending and model == "qwen":
             assert model_path is not None
@@ -689,7 +694,7 @@ def summarize_graph(
                     source=source,
                 ),
             )
-            progress.update(1)
+            _complete_content_progress(progress)
 
         retry_count = 0
         if tasks:
@@ -805,7 +810,7 @@ def extract_description_scenes(
                             f"[SKIPPED] {video_name} | description scene "
                             f"#{int(failure['scene_idx']):03d} | {failure['error']}",
                         )
-                    progress.update(1)
+                    _complete_content_progress(progress)
     failures = [
         record
         for visual in visual_rows
@@ -911,7 +916,7 @@ def summarize_description(
                     text=summary,
                 ),
             )
-            progress.update(1)
+            _complete_content_progress(progress)
 
         retry_count = 0
         if tasks:
