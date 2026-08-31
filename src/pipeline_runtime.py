@@ -254,12 +254,13 @@ def _validate_config(value: dict[str, Any]) -> None:
     ):
         raise ConfigError("extraction.summary_sampling.top_k must be a positive integer")
     generation_keys = {
+        "scene_prompt",
         "summary_prompt",
         "scene_max_new_tokens",
         "summary_max_new_tokens",
     }
     graph_keys = generation_keys | {"gemini_concurrency"}
-    description_keys = generation_keys | {"scene_prompt"}
+    description_keys = generation_keys
     for arm in ("graph", "description"):
         settings = _require_mapping(extraction, arm)
         expected = graph_keys if arm == "graph" else description_keys
