@@ -685,6 +685,7 @@ def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
     assert failures[0]["raw_response"] == "not labeled text"
     stderr = capsys.readouterr().err
     assert "[Qwen_summary_graph_qwen_fail]" in stderr
+    assert "Raw output:\nnot labeled text" in stderr
     assert "generation started" not in stderr
 
     @contextmanager
@@ -708,6 +709,7 @@ def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
 def test_description_summary_failure_is_nested_and_success_retry_removes_it(
     context: RunContext,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     context.initialize()
     write_jsonl(
@@ -753,6 +755,9 @@ def test_description_summary_failure_is_nested_and_success_retry_removes_it(
     assert [row["seed"] for row in failures] == [None]
     assert all(row["failure_kind"] == "schema_validation" for row in failures)
     assert all(row["raw_response"] == "not json" for row in failures)
+    stderr = capsys.readouterr().err
+    assert "[Qwen_summary_description_fail]" in stderr
+    assert "Raw output:\nnot json" in stderr
 
     sections = {
         "setting_and_environments": "An indoor setting.",

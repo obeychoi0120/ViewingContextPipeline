@@ -495,7 +495,8 @@ def summarize_graph(
                 _write_progress(
                     progress,
                     f"[Qwen_summary_graph_{source}_fail] "
-                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}",
+                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
+                    f"Raw output:\n{raw_response or '<empty>'}",
                 )
 
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
@@ -806,7 +807,8 @@ def summarize_description(
                 _write_progress(
                     progress,
                     f"[Qwen_summary_description_fail] "
-                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}",
+                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
+                    f"Raw output:\n{raw_response or '<empty>'}",
                 )
 
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
