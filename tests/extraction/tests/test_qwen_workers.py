@@ -54,6 +54,7 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
                 "temperature": None,
                 "top_p": None,
                 "top_k": None,
+                "repetition_penalty": 1.0,
             }
             return f"{images}:{prompt}:{max_new_tokens}"
 

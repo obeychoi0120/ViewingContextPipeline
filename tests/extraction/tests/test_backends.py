@@ -55,6 +55,29 @@ def test_qwen_backend_uses_native_images_and_deterministic_generation() -> None:
     assert model.kwargs["max_new_tokens"] == 32
     assert model.kwargs["do_sample"] is False
     assert "temperature" not in model.kwargs
+    assert "logits_processor" not in model.kwargs
+
+
+def test_qwen_backend_penalizes_only_generated_tokens() -> None:
+    model = FakeModel()
+    backend = QwenBackend(
+        model=model,
+        processor=FakeProcessor(),
+        model_id="qwen",
+    )
+
+    assert backend.generate(
+        [],
+        "summary prompt",
+        64,
+        repetition_penalty=1.05,
+    ) == "generated text"
+
+    processors = model.kwargs["logits_processor"]
+    assert len(processors) == 1
+    assert isinstance(processors[0], qwen_module.GeneratedTokenRepetitionPenalty)
+    assert processors[0].penalty == 1.05
+    assert processors[0].prompt_length == 2
 
 
 def test_qwen_backend_uses_optional_seed_for_sampling(monkeypatch) -> None:

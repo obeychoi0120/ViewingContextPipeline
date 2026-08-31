@@ -26,6 +26,7 @@ extraction:
   visual_evidence:
     image_resolution: [640, 352]
   greedy_decoding: true
+  summary_repetition_penalty: 1.05
   summary_sampling:
     temperature: 0.2
     top_p: 0.8
@@ -33,13 +34,13 @@ extraction:
   graph:
     summary_prompt: config/prompts/graph_summary_v3.md
     scene_max_new_tokens: 512
-    summary_max_new_tokens: 512
+    summary_max_new_tokens: 320
     gemini_concurrency: 8
   description:
     scene_prompt: config/prompts/description_scene_v1.md
     summary_prompt: config/prompts/description_summary_v3.md
     scene_max_new_tokens: 512
-    summary_max_new_tokens: 512
+    summary_max_new_tokens: 320
 validation:
   cohort:
     user_count: 59

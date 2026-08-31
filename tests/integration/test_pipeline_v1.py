@@ -73,11 +73,17 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
     assert context.config["extraction"]["greedy_decoding"] is True
+    assert context.config["extraction"]["summary_repetition_penalty"] == 1.05
     assert context.config["extraction"]["summary_sampling"] == {
         "temperature": 0.2,
         "top_p": 0.8,
         "top_k": 20,
     }
+    assert context.config["extraction"]["graph"]["summary_max_new_tokens"] == 320
+    assert (
+        context.config["extraction"]["description"]["summary_max_new_tokens"]
+        == 320
+    )
     assert set(context.config["validation"]["encoder"]) == {
         "embedding_dim",
         "max_length",
@@ -94,14 +100,37 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
 def test_greedy_decoding_switches_summary_generation_mode(
     context: RunContext,
 ) -> None:
-    assert extraction_steps._summary_generation_settings(context) == {}
+    assert extraction_steps._summary_generation_settings(context) == {
+        "repetition_penalty": 1.05,
+    }
     context.config["extraction"]["greedy_decoding"] = False
     assert extraction_steps._summary_generation_settings(context) == {
+        "repetition_penalty": 1.05,
         "do_sample": True,
         "temperature": 0.2,
         "top_p": 0.8,
         "top_k": 20,
     }
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "config/prompts/graph_summary_v3.md",
+        "config/prompts/description_summary_v3.md",
+    ],
+)
+def test_summary_prompts_require_bounded_single_line_values(
+    relative_path: str,
+) -> None:
+    prompt = (ROOT / relative_path).read_text(encoding="utf-8")
+
+    assert "Output exactly seven physical lines." in prompt
+    assert "Never insert a newline after a label." in prompt
+    assert "Use at most 25 English words per field." in prompt
+    assert "Stop immediately after the semantic_topics line." in prompt
+    for name in SUMMARY_SECTIONS:
+        assert f"{name}: <one concise single-line value or empty>" in prompt
 
 
 def test_config_rejects_non_boolean_greedy_decoding(context: RunContext) -> None:
@@ -111,6 +140,19 @@ def test_config_rejects_non_boolean_greedy_decoding(context: RunContext) -> None
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     with pytest.raises(ConfigError, match="greedy_decoding"):
         RunContext.load("invalid-greedy", root=context.root)
+
+
+@pytest.mark.parametrize("value", [0.9, 2.1, True, "1.05"])
+def test_config_rejects_invalid_summary_repetition_penalty(
+    context: RunContext,
+    value: object,
+) -> None:
+    path = context.root / "config/pipeline.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["extraction"]["summary_repetition_penalty"] = value
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError, match="summary_repetition_penalty"):
+        RunContext.load("invalid-summary-repetition", root=context.root)
 
 
 @pytest.mark.parametrize(
@@ -665,6 +707,8 @@ def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
     def invalid_generator(**_kwargs):
         def generate(tasks, callback):
             assert tasks[0].do_sample is False
+            assert tasks[0].repetition_penalty == 1.05
+            assert tasks[0].max_new_tokens == 320
             callback(tasks[0].task_id, "not labeled text")
             return {}
 

@@ -135,6 +135,7 @@ def qwen_generator(
                 temperature=task.temperature,
                 top_p=task.top_p,
                 top_k=task.top_k,
+                repetition_penalty=task.repetition_penalty,
             )
             if on_task_complete is not None:
                 on_task_complete(task.task_id, text)

@@ -20,6 +20,7 @@ class QwenGenerationTask:
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
+    repetition_penalty: float = 1.0
 
 
 def assign_worker_indices(task_count: int, gpu_count: int) -> list[int]:
@@ -244,6 +245,7 @@ def _worker_main(
                 temperature=task.temperature,
                 top_p=task.top_p,
                 top_k=task.top_k,
+                repetition_penalty=task.repetition_penalty,
             )
             result_queue.put(
                 {

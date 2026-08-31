@@ -88,15 +88,21 @@ def _summary_failure_record(
 
 def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     extraction = context.config["extraction"]
+    settings: dict[str, Any] = {
+        "repetition_penalty": float(
+            extraction["summary_repetition_penalty"]
+        ),
+    }
     if bool(extraction["greedy_decoding"]):
-        return {}
+        return settings
     sampling = extraction["summary_sampling"]
-    return {
+    settings.update({
         "do_sample": True,
         "temperature": float(sampling["temperature"]),
         "top_p": float(sampling["top_p"]),
         "top_k": int(sampling["top_k"]),
-    }
+    })
+    return settings
 
 
 def extract_graph_scenes(
