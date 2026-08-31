@@ -115,3 +115,65 @@ def test_pool_callback_uses_worker_completion_order() -> None:
 
     assert completed == [("b", "second"), ("a", "first")]
     assert results == {"b": "second", "a": "first"}
+
+
+def test_pool_interrupt_terminates_then_kills_stubborn_workers() -> None:
+    class TaskQueue:
+        def __init__(self) -> None:
+            self.cancelled = False
+            self.closed = False
+
+        def put(self, value) -> None:
+            return None
+
+        def cancel_join_thread(self) -> None:
+            self.cancelled = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    class InterruptingResultQueue(TaskQueue):
+        def get(self, timeout):
+            raise KeyboardInterrupt
+
+    class StubbornProcess:
+        def __init__(self) -> None:
+            self.alive = True
+            self.terminate_calls = 0
+            self.kill_calls = 0
+            self.join_timeouts = []
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def terminate(self) -> None:
+            self.terminate_calls += 1
+
+        def kill(self) -> None:
+            self.kill_calls += 1
+            self.alive = False
+
+        def join(self, timeout) -> None:
+            self.join_timeouts.append(timeout)
+
+    task_queue = TaskQueue()
+    result_queue = InterruptingResultQueue()
+    process = StubbornProcess()
+    pool = object.__new__(QwenWorkerPool)
+    pool.gpu_count = 1
+    pool._closed = False
+    pool._task_queues = [task_queue]
+    pool._result_queue = result_queue
+    pool._processes = [process]
+
+    with pytest.raises(KeyboardInterrupt):
+        pool.generate([QwenGenerationTask("a", (), "a", 1)])
+
+    assert pool._closed is True
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.join_timeouts == [0.2, 0.2]
+    assert task_queue.cancelled is True
+    assert task_queue.closed is True
+    assert result_queue.cancelled is True
+    assert result_queue.closed is True
