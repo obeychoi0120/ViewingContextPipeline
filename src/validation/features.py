@@ -61,8 +61,3 @@ class BGETextEncoder:
         if matrix.shape != expected_shape or not np.isfinite(matrix).all():
             raise FeatureError(f"invalid BGE embedding matrix: {matrix.shape}")
         return matrix
-
-
-def encode_bge_texts(settings: EncoderConfig, texts: list[str]) -> np.ndarray:
-    """One-shot compatibility wrapper; reuse ``BGETextEncoder`` for multiple calls."""
-    return BGETextEncoder(settings).encode(texts)

@@ -1,13 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from extraction.backends import VLMBackend
-from extraction.evidence import (
-    build_scene_evidence,
-    load_images,
-)
 from extraction.summary_validation import SummaryContractError, parse_summary_sections
 
 
@@ -17,44 +11,6 @@ SUMMARY_SCHEMA_VERSION = "description-video-summary/v3"
 
 class DescriptionError(RuntimeError):
     pass
-
-
-def extract_scene_descriptions(
-    *,
-    content_id: str,
-    scenes: list[dict[str, Any]],
-    frames_dir: str | Path,
-    timestamp_json_path: str | Path,
-    backend: VLMBackend,
-    prompt: str,
-    max_new_tokens: int,
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for scene in build_scene_evidence(scenes, frames_dir, timestamp_json_path):
-        scene_idx = scene["scene_idx"]
-        keyframes = scene["keyframes"]
-        image_paths = scene["image_paths"]
-        if not keyframes or len(image_paths) != len(keyframes):
-            raise DescriptionError(
-                f"scene {scene_idx} has {len(image_paths)} of {len(keyframes)} keyframes"
-            )
-        description = backend.generate(
-            load_images(image_paths), prompt, max_new_tokens
-        ).strip()
-        if not description:
-            raise DescriptionError(f"scene {scene_idx} produced an empty description")
-        records.append(
-            {
-                "schema_version": SCENE_SCHEMA_VERSION,
-                "content_id": content_id,
-                "scene_idx": scene_idx,
-                "keyframes": keyframes,
-                "description": description,
-            }
-        )
-    if not records:
-        raise DescriptionError("video has no scenes")
-    return records
 
 
 def description_summary_prompt(template: str, records: list[dict[str, Any]]) -> str:

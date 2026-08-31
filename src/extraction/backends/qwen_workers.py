@@ -101,10 +101,11 @@ class QwenWorkerPool:
                     )
                 if task_id in pending:
                     text = str(result["text"])
-                    results[task_id] = text
                     del pending[task_id]
                     if on_task_complete is not None:
                         on_task_complete(task_id, text)
+                    else:
+                        results[task_id] = text
             return results
         except BaseException:
             self.abort()

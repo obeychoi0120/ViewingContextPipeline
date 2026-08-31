@@ -112,7 +112,7 @@ class FakeModels:
         return SimpleNamespace(text="gemini text")
 
 
-def test_gemini_backend_interleaves_references(monkeypatch) -> None:
+def test_gemini_backend_uses_images_prompt_and_operational_controls(monkeypatch) -> None:
     types = SimpleNamespace(
         Part=FakePart,
         GenerateContentConfig=FakeConfig,
@@ -128,19 +128,10 @@ def test_gemini_backend_interleaves_references(monkeypatch) -> None:
         thinking_level="low",
         media_resolution="MEDIA_RESOLUTION_MEDIUM",
     )
-    references = [
-        {
-            "kind": "shot_reference",
-            "timestamp_seconds": 5,
-            "asr_text": "speech",
-            "ocr_text": "caption",
-        }
-    ]
-
-    assert backend.generate([Image.new("RGB", (8, 8))], "prompt", 64, references) == "gemini text"
+    assert backend.generate([Image.new("RGB", (8, 8))], "prompt", 64) == "gemini text"
     contents = models.call["contents"]
-    assert [part["kind"] for part in contents] == ["image", "text", "text"]
-    assert '"asr_text":"speech"' in contents[1]["text"]
+    assert [part["kind"] for part in contents] == ["image", "text"]
+    assert contents[1]["text"] == "prompt"
     assert models.call["config"] == {
         "temperature": 0.25,
         "max_output_tokens": 64,

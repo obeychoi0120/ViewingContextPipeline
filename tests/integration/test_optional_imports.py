@@ -11,7 +11,7 @@ def test_public_clis_import_without_optional_backend_modules() -> None:
 import importlib.abc
 import sys
 
-blocked = ("google.genai", "faster_whisper", "moviepy", "paddleocr")
+blocked = ("google.genai", "torch", "transformers")
 
 class Blocker(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):

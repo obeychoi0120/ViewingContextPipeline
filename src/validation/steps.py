@@ -9,13 +9,10 @@ import numpy as np
 
 from validation.cohort import prepare_cohort
 from validation.config import ValidationConfig
-from validation.diagnosis import diagnose_recommendations
-from validation.features import BGETextEncoder
-from validation.recommendation import (
+from validation.recommendation_contracts import (
     RECOMMENDATION_ARMS,
     TRAINING_RUNS_FILENAME,
     TRAINING_RUN_SCHEMA_VERSION,
-    train_recommendation_arms,
 )
 from pipeline_runtime import RunContext, read_json, read_jsonl, write_json
 
@@ -142,6 +139,8 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
 
 
 def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    from validation.features import BGETextEncoder
+
     context.initialize()
     config = validation_config(context)
     catalog_path = _require_file(context.cohort_dir / "catalog.jsonl", "cohort catalog")
@@ -198,6 +197,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         if matrix.shape != expected_shape or not np.isfinite(matrix).all():
             raise ValidationStepError(f"invalid embedding matrix for {branch}: {matrix.shape}")
         matrices[branch] = matrix
+        del documents_by_branch[branch]
 
     for branch, matrix in matrices.items():
         _write_embedding(_embedding_path(context, branch), matrix)
@@ -250,6 +250,8 @@ def _training_runs_complete(
 
 
 def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    from validation.recommendation import train_recommendation_arms
+
     context.initialize()
     config = validation_config(context)
     for branch in ("graph_qwen", "graph_gemini", "desc"):
@@ -273,6 +275,8 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
 
 
 def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    from validation.diagnosis import diagnose_recommendations
+
     context.initialize()
     config = validation_config(context)
     decision_config = {

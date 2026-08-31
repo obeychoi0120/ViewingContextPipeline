@@ -1,58 +1,60 @@
 from __future__ import annotations
 
-import json
-from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from tqdm import tqdm
 
-from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool, QwenBackend
-from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
-from extraction.data_preparation.microlens import prepare_catalog
+from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool
+from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.descriptions import (
-    DescriptionError,
     SCENE_SCHEMA_VERSION,
     SUMMARY_SCHEMA_VERSION,
     description_summary_prompt,
     validate_summary as validate_description_summary,
 )
-from extraction.evidence import (
-    build_scene_evidence,
-    load_images,
-)
+from extraction.errors import ExtractionStepError
 from extraction.monitoring import (
     graph_skip_message,
     scene_messages,
     summary_message,
-    video_names,
 )
+from extraction.preparation import prepare_input_data
 from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
-    SemanticGraphError,
     graph_semantic_warnings,
     graph_summary_prompt,
     parse_or_repair_graph,
     validate_summary as validate_graph_summary,
 )
 from extraction.summary_validation import (
-    SummaryContractError,
-    parse_summary_sections,
     serialize_summary_sections,
+)
+from extraction.summary_executor import (
+    generate_summaries_with_retry,
+    qwen_generator,
+    reuse_summary_document,
+)
+from extraction.step_support import (
+    complete_content_progress as _complete_content_progress,
+    minimal_description_records as _minimal_description_records,
+    minimal_graph_failures as _minimal_graph_failures,
+    minimal_graph_records as _minimal_graph_records,
+    require_file as _require_file,
+    result as _result,
+    scene_generation_rows as _scene_generation_rows,
+    video_name_map as _video_name_map,
+    visual_rows as _visual_rows,
+    write_failure_jsonl as _write_failure_jsonl,
+    write_progress as _write_progress,
 )
 from pipeline_runtime import (
     RunContext,
-    read_json,
     read_jsonl,
     write_json,
     write_jsonl,
 )
-
-
-class ExtractionStepError(RuntimeError):
-    pass
 
 
 GRAPH_SOURCES = ("qwen", "gemini")
@@ -62,365 +64,6 @@ def graph_stage_name(stage: str, source: str) -> str:
     if source not in GRAPH_SOURCES:
         raise ValueError(f"unsupported graph source: {source}")
     return f"{stage}-{source}"
-
-
-def _reuse_summary_document(
-    output_path: Path,
-    *,
-    schema_version: str,
-    content_id: str,
-    arm: str,
-    scene_count: int,
-) -> dict[str, Any]:
-    existing = read_json(output_path)
-    try:
-        sections = parse_summary_sections(
-            json.dumps(existing.get("sections"), ensure_ascii=False)
-        )
-        text = serialize_summary_sections(sections)
-    except (AttributeError, SummaryContractError, TypeError) as exc:
-        raise ExtractionStepError(
-            f"incompatible structured summary output: {output_path}; "
-            "use --force or a new run_id"
-        ) from exc
-    expected = {
-        "schema_version": schema_version,
-        "content_id": content_id,
-        "arm": arm,
-        "status": "complete",
-        "sections": sections,
-        "text": text,
-        "scene_count": scene_count,
-    }
-    if any(
-        existing.get(key) != value
-        for key, value in expected.items()
-        if key != "text"
-    ):
-        raise ExtractionStepError(
-            f"incompatible structured summary output: {output_path}; "
-            "use --force or a new run_id"
-        )
-    if existing != expected:
-        write_json(output_path, expected)
-    return expected
-
-
-def _generate_summaries_with_retry(
-    generate: GenerationFunction,
-    tasks: list[QwenGenerationTask],
-    complete: GenerationCallback,
-    retry_settings: dict[str, Any],
-) -> int:
-    last_errors: dict[str, Exception] = {}
-
-    def run_attempt(attempt_tasks: list[QwenGenerationTask]) -> list[QwenGenerationTask]:
-        tasks_by_id = {task.task_id: task for task in attempt_tasks}
-        handled: set[str] = set()
-        failed: list[QwenGenerationTask] = []
-
-        def handle_result(task_id: str, text: str) -> None:
-            if task_id in handled:
-                return
-            task = tasks_by_id[task_id]
-            handled.add(task_id)
-            try:
-                complete(task_id, text)
-                last_errors.pop(task_id, None)
-            except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
-                failed.append(task)
-                last_errors[task_id] = exc
-
-        results = generate(attempt_tasks, handle_result)
-        # Keep compatibility with simple/local generators that return a result
-        # mapping without invoking the optional completion callback.
-        for task in attempt_tasks:
-            if task.task_id not in handled:
-                handle_result(task.task_id, results[task.task_id])
-        return failed
-
-    pending = run_attempt(tasks)
-
-    retry_count = 0
-    for seed in retry_settings["seeds"]:
-        if not pending:
-            break
-        retry_tasks = [
-            replace(
-                task,
-                do_sample=True,
-                seed=int(seed),
-                temperature=float(retry_settings["temperature"]),
-                top_p=float(retry_settings["top_p"]),
-                top_k=int(retry_settings["top_k"]),
-            )
-            for task in pending
-        ]
-        retry_count += len(retry_tasks)
-        pending = run_attempt(retry_tasks)
-
-    if pending:
-        task_ids = [task.task_id for task in pending]
-        cause = last_errors[task_ids[0]]
-        raise ExtractionStepError(
-            f"structured summary failed after {len(retry_settings['seeds'])} retries: "
-            f"task_ids={task_ids}"
-        ) from cause
-    return retry_count
-
-
-GenerationCallback = Callable[[str, str], None]
-GenerationFunction = Callable[
-    [list[QwenGenerationTask], GenerationCallback | None],
-    dict[str, str],
-]
-
-
-@contextmanager
-def _qwen_generator(
-    *,
-    model_path: Path,
-    gpus: int | None,
-) -> Iterator[GenerationFunction]:
-    if gpus is not None:
-        with QwenWorkerPool(gpus, str(model_path)) as worker_pool:
-            yield worker_pool.generate
-        return
-    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
-
-    def generate(
-        tasks: list[QwenGenerationTask],
-        on_task_complete: GenerationCallback | None = None,
-    ) -> dict[str, str]:
-        results: dict[str, str] = {}
-        for task in tasks:
-            text = backend.generate(
-                load_images(list(task.image_paths)),
-                task.prompt,
-                task.max_new_tokens,
-                do_sample=task.do_sample,
-                seed=task.seed,
-                temperature=task.temperature,
-                top_p=task.top_p,
-                top_k=task.top_k,
-            )
-            results[task.task_id] = text
-            if on_task_complete is not None:
-                on_task_complete(task.task_id, text)
-        return results
-
-    yield generate
-
-
-def _write_progress(progress: tqdm, message: str) -> None:
-    tqdm.write(message, file=progress.fp)
-
-
-def _complete_content_progress(progress: tqdm) -> None:
-    progress.update(1)
-    _write_progress(progress, "")
-
-
-def _write_failure_jsonl(path: Path, failures: list[dict[str, Any]]) -> None:
-    if failures:
-        write_jsonl(path, failures)
-    else:
-        path.unlink(missing_ok=True)
-
-
-def _video_name_map(context: RunContext) -> dict[str, str]:
-    return video_names(read_jsonl(context.cohort_dir / "catalog.jsonl"))
-
-
-def _scene_generation_rows(
-    visual: dict[str, Any],
-    *,
-    prompt: str,
-    max_new_tokens: int,
-) -> list[dict[str, Any]]:
-    scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
-    rows: list[dict[str, Any]] = []
-    for scene in build_scene_evidence(
-        scenes, visual["frames_dir"], visual["timestamp_json"]
-    ):
-        fallback_idx = scene["fallback_idx"]
-        scene_idx = scene["scene_idx"]
-        keyframes = scene["keyframes"]
-        image_paths = scene["image_paths"]
-        if not keyframes or len(image_paths) != len(keyframes):
-            raise ExtractionStepError(
-                f"{visual['content_id']} scene {scene_idx} has "
-                f"{len(image_paths)} of {len(keyframes)} keyframes"
-            )
-        task_id = f"{visual['content_id']}:{fallback_idx}"
-        rows.append({
-            "task": QwenGenerationTask(
-                task_id=task_id,
-                image_paths=tuple(image_paths),
-                prompt=prompt,
-                max_new_tokens=max_new_tokens,
-            ),
-            "scene_idx": scene_idx,
-            "scene_start_seconds": scene["scene_start_seconds"],
-            "scene_end_seconds": scene["scene_end_seconds"],
-            "keyframes": keyframes,
-            "image_paths": image_paths,
-        })
-    if not rows:
-        raise ExtractionStepError(f"{visual['content_id']} has no scenes")
-    return rows
-
-
-def _result(
-    stage: str,
-    *,
-    content_count: int,
-    failure_count: int = 0,
-    retry_count: int | None = None,
-) -> dict[str, Any]:
-    result = {
-        "stage": stage,
-        "content_count": content_count,
-        "failure_count": failure_count,
-    }
-    if retry_count is not None:
-        result["retry_count"] = retry_count
-    return result
-
-
-def _require_file(path: Path, label: str) -> Path:
-    if not path.is_file():
-        raise ExtractionStepError(f"missing {label}: {path}")
-    return path
-
-
-def _minimal_graph_records(
-    records: list[dict[str, Any]],
-    path: Path,
-) -> list[dict[str, Any]]:
-    try:
-        minimal = [
-            {
-                "scene_idx": row["scene_idx"],
-                "keyframes": row["keyframes"],
-                "graph": row["graph"],
-                "parse_mode": row.get("parse_mode", "unknown"),
-                "semantic_warnings": row.get(
-                    "semantic_warnings", graph_semantic_warnings(row["graph"])
-                ),
-            }
-            for row in records
-        ]
-    except KeyError as exc:
-        raise ExtractionStepError(
-            f"invalid graph scene file, missing {exc.args[0]}: {path}"
-        ) from exc
-    if minimal != records:
-        write_jsonl(path, minimal)
-    return minimal
-
-
-def _minimal_description_records(
-    records: list[dict[str, Any]],
-    path: Path,
-) -> list[dict[str, Any]]:
-    required = (
-        "schema_version",
-        "content_id",
-        "scene_idx",
-        "keyframes",
-        "description",
-    )
-    try:
-        minimal = [{key: row[key] for key in required} for row in records]
-    except KeyError as exc:
-        raise ExtractionStepError(
-            f"invalid description scene file, missing {exc.args[0]}: {path}"
-        ) from exc
-    if minimal != records:
-        write_jsonl(path, minimal)
-    return minimal
-
-
-def _minimal_graph_failures(
-    failures: list[dict[str, Any]],
-    path: Path,
-) -> list[dict[str, Any]]:
-    minimal = [
-        {
-            key: row[key]
-            for key in ("scene_idx", "keyframes", "failure_kind", "error", "raw_response")
-            if key in row
-        }
-        for row in failures
-    ]
-    if minimal != failures:
-        _write_failure_jsonl(path, minimal)
-    return minimal
-
-
-def _visual_rows(context: RunContext) -> list[dict[str, Any]]:
-    catalog_path = _require_file(
-        context.cohort_dir / "catalog.jsonl",
-        "cohort catalog",
-    )
-    rows: list[dict[str, Any]] = []
-    for item in read_jsonl(catalog_path):
-        content_id = str(item["content_id"])
-        frames_dir = context.evidence_dir / "resized_keyframes" / content_id
-        timestamp = (
-            context.cohort_dir
-            / "source_assets"
-            / content_id
-            / "assets"
-            / "timestamp_fixed_30s.json"
-        )
-        frames = (
-            sorted(
-                path
-                for path in frames_dir.iterdir()
-                if path.is_file()
-                and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
-            )
-            if frames_dir.is_dir()
-            else []
-        )
-        if not frames or not timestamp.is_file():
-            raise ExtractionStepError(f"missing visual evidence for {content_id}")
-        rows.append({
-            "content_id": content_id,
-            "item_id": str(item["item_id"]),
-            "frames_dir": str(frames_dir),
-            "timestamp_json": str(timestamp),
-        })
-    if not rows:
-        raise ExtractionStepError(f"empty cohort catalog: {catalog_path}")
-    return rows
-
-
-def prepare_input_data(context: RunContext, *, force: bool = False) -> dict[str, Any]:
-    context.initialize()
-    if not force:
-        try:
-            rows = _visual_rows(context)
-        except ExtractionStepError:
-            pass
-        else:
-            return _result("prepare-input-data", content_count=len(rows))
-    catalog_path = _require_file(context.cohort_dir / "catalog.jsonl", "cohort catalog")
-    catalog = read_jsonl(catalog_path)
-    settings = context.config["extraction"]["visual_evidence"]
-    result = prepare_catalog(
-        catalog,
-        assets_root=context.cohort_dir / "source_assets",
-        output_root=context.run_root,
-        image_size=tuple(settings["image_resolution"]),
-        force=force,
-    )
-    if result["failed"] or result["succeeded"] != len(catalog):
-        raise ExtractionStepError(f"visual evidence preparation is incomplete: {result}")
-    rows = _visual_rows(context)
-    return _result("prepare-input-data", content_count=len(rows))
 
 
 def extract_graph_scenes(
@@ -541,7 +184,7 @@ def extract_graph_scenes(
 
         if pending and model == "qwen":
             assert model_path is not None
-            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 for visual, scene_rows in pending:
                     responses = generate([row["task"] for row in scene_rows], None)
                     complete_content(
@@ -638,7 +281,7 @@ def summarize_graph(
         content_id = scene_path.stem
         output_path = summary_dir / f"{content_id}.json"
         if output_path.is_file() and not force:
-            documents_by_content[content_id] = _reuse_summary_document(
+            documents_by_content[content_id] = reuse_summary_document(
                 output_path,
                 schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
                 content_id=content_id,
@@ -698,8 +341,8 @@ def summarize_graph(
 
         retry_count = 0
         if tasks:
-            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                retry_count = _generate_summaries_with_retry(
+            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                retry_count = generate_summaries_with_retry(
                     generate,
                     tasks,
                     complete_graph_summary,
@@ -762,7 +405,7 @@ def extract_description_scenes(
         unit="content",
     ) as progress:
         if pending:
-            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
+            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 for visual, scene_rows in pending:
                     generated = generate([row["task"] for row in scene_rows], None)
                     records: list[dict[str, Any]] = []
@@ -861,7 +504,7 @@ def summarize_description(
         output_path = context.description_summary_dir / f"{records[0]['content_id']}.json"
         if output_path.is_file() and not force:
             content_id = str(records[0]["content_id"])
-            documents_by_content[content_id] = _reuse_summary_document(
+            documents_by_content[content_id] = reuse_summary_document(
                 output_path,
                 schema_version=SUMMARY_SCHEMA_VERSION,
                 content_id=content_id,
@@ -920,8 +563,8 @@ def summarize_description(
 
         retry_count = 0
         if tasks:
-            with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                retry_count = _generate_summaries_with_retry(
+            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
+                retry_count = generate_summaries_with_retry(
                     generate,
                     tasks,
                     complete_description_summary,

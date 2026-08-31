@@ -20,7 +20,7 @@ def test_gemini_pool_completes_out_of_order_and_captures_errors(tmp_path) -> Non
     class Backend:
         model_id = "fake-gemini"
 
-        def generate(self, images, prompt, max_new_tokens, references=()):
+        def generate(self, images, prompt, max_new_tokens):
             assert len(images) == 1
             assert max_new_tokens == 32
             if prompt == "slow":
@@ -83,7 +83,7 @@ def test_gemini_pool_propagates_ctrl_c_without_waiting_for_http_call() -> None:
     release = threading.Event()
 
     class BlockingBackend:
-        def generate(self, images, prompt, max_new_tokens, references=()):
+        def generate(self, images, prompt, max_new_tokens):
             started.set()
             release.wait(timeout=5)
             return "late result"

@@ -11,19 +11,12 @@ from .config import ValidationConfig
 from .io import atomic_write_jsonl, read_jsonl
 from .metrics import metrics_from_rank
 from .model import SASRec, catalog_score_batches, in_batch_loss, require_torch, save_checkpoint, seed_everything, torch
+from .recommendation_contracts import (
+    RECOMMENDATION_ARMS,
+    TRAINING_RUN_SCHEMA_VERSION,
+    TRAINING_RUNS_FILENAME,
+)
 from .scoring import mask_history, rank_of_target, top_k_rows
-
-
-TRAINING_RUNS_FILENAME = "training_runs.jsonl"
-TRAINING_RUN_SCHEMA_VERSION = "sasrec-training-run/v1"
-
-
-RECOMMENDATION_ARMS: dict[str, str | None] = {
-    "SASRec_ID": None,
-    "SASRec_GRAPH_QWEN": "graph_qwen",
-    "SASRec_GRAPH_GEMINI": "graph_gemini",
-    "SASRec_DESC": "desc",
-}
 
 
 def _internal(items: list[str], item_index: dict[str, int]) -> list[int]:

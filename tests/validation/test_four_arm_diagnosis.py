@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import pytest
 
-import validation.diagnosis as diagnosis_module
+import validation.diagnosis_statistics as diagnosis_statistics
 from validation.config import ValidationConfig
 from validation.diagnosis import diagnose_recommendations
 from validation.metrics import metrics_from_rank
@@ -547,12 +547,12 @@ def test_all_statistical_failures_do_not_fail_runtime_artifact_contract(
         raise ValueError("control mean must be non-zero for relative bootstrap")
 
     monkeypatch.setattr(
-        diagnosis_module,
+        diagnosis_statistics,
         "paired_relative_bootstrap_ci",
         reject_zero_control_mean,
     )
     monkeypatch.setattr(
-        diagnosis_module,
+        diagnosis_statistics,
         "paired_bootstrap_ci",
         reject_zero_control_mean,
     )
@@ -578,7 +578,7 @@ def test_relative_failures_preserve_id_family_results(tmp_path, monkeypatch) -> 
         raise ValueError("relative control is not evaluable")
 
     monkeypatch.setattr(
-        diagnosis_module,
+        diagnosis_statistics,
         "paired_relative_bootstrap_ci",
         reject_relative_comparison,
     )
@@ -598,7 +598,7 @@ def test_relative_failures_preserve_id_family_results(tmp_path, monkeypatch) -> 
 
 def test_sparse_control_suppresses_non_inferiority_claims(tmp_path, monkeypatch) -> None:
     config, runtime, _, _ = _valid_run(tmp_path)
-    original = diagnosis_module.paired_relative_bootstrap_ci
+    original = diagnosis_statistics.paired_relative_bootstrap_ci
 
     def mark_conditional(*args, **kwargs):
         result = original(*args, **kwargs)
@@ -607,7 +607,7 @@ def test_sparse_control_suppresses_non_inferiority_claims(tmp_path, monkeypatch)
         return result
 
     monkeypatch.setattr(
-        diagnosis_module,
+        diagnosis_statistics,
         "paired_relative_bootstrap_ci",
         mark_conditional,
     )

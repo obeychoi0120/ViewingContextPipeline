@@ -33,6 +33,7 @@ def build_scene_evidence(
     timestamp_json_path: str | Path,
 ) -> list[dict[str, Any]]:
     timeline = load_scene_timestamps(timestamp_json_path)
+    frame_index = _frame_image_index(frames_dir)
     rows: list[dict[str, Any]] = []
     for fallback_idx, scene in enumerate(scenes):
         keyframes = normalize_keyframe_timestamps(
@@ -53,7 +54,11 @@ def build_scene_evidence(
             ),
             "keyframes": keyframes,
             "image_paths": select_scene_image_paths(
-                frames_dir, scene, timeline, fallback_idx
+                frames_dir,
+                scene,
+                timeline,
+                fallback_idx,
+                frame_index=frame_index,
             ),
         })
     return rows
@@ -64,14 +69,16 @@ def select_scene_image_paths(
     scene: dict[str, Any],
     timestamps: list[dict[str, Any]],
     fallback_idx: int,
+    *,
+    frame_index: dict[str, Path] | None = None,
 ) -> list[str]:
-    frame_paths = list_frame_images(frames_dir)
+    indexed = frame_index if frame_index is not None else _frame_image_index(frames_dir)
     selected: list[Path] = []
     seen: set[Path] = set()
     for timestamp in normalize_keyframe_timestamps(
         get_keyframe_timestamps(scene, timestamps, fallback_idx)
     ):
-        match = image_path_for_timestamp(frame_paths, timestamp)
+        match = indexed.get(f"{timestamp:04d}")
         if match is not None and match not in seen:
             selected.append(match)
             seen.add(match)
@@ -87,6 +94,10 @@ def list_frame_images(frames_dir: str | Path) -> list[Path]:
         for child in path.iterdir()
         if child.is_file() and child.suffix.lower() in IMAGE_EXTENSIONS
     )
+
+
+def _frame_image_index(frames_dir: str | Path) -> dict[str, Path]:
+    return {path.stem: path for path in list_frame_images(frames_dir)}
 
 
 def get_keyframe_timestamps(

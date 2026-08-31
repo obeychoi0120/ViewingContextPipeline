@@ -4,12 +4,6 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Iterator, Sequence
 
-from extraction.multimodal import (
-    shot_reference_text,
-    validate_image_reference_alignment,
-)
-
-
 @dataclass
 class QwenBackend:
     model: Any
@@ -47,7 +41,6 @@ class QwenBackend:
         images: Sequence[Any],
         prompt: str,
         max_new_tokens: int,
-        references: Sequence[dict[str, Any]] = (),
         *,
         do_sample: bool = False,
         seed: int | None = None,
@@ -55,15 +48,9 @@ class QwenBackend:
         top_p: float | None = None,
         top_k: int | None = None,
     ) -> str:
-        if references:
-            validate_image_reference_alignment(len(images), list(references))
         content: list[dict[str, Any]] = []
-        for index, image in enumerate(images):
+        for image in images:
             content.append({"type": "image", "image": image})
-            if references:
-                content.append(
-                    {"type": "text", "text": shot_reference_text(references[index])}
-                )
         content.append({"type": "text", "text": prompt})
         messages = [{"role": "user", "content": content}]
         inputs = self.processor.apply_chat_template(

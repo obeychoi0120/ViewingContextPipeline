@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .video_processor import extract_resized_keyframes
+from extraction.image_validation import verified_image_size
 
 
 SCENE_SECONDS = 30
@@ -116,8 +117,6 @@ def resized_keyframes_match_timestamps(
     image_size: tuple[int, int],
 ) -> bool:
     try:
-        from PIL import Image
-
         expected = {
             f"{timestamp:04d}.png"
             for timestamp in selected_keyframe_timestamps(timestamp_file)
@@ -131,9 +130,8 @@ def resized_keyframes_match_timestamps(
         if actual != expected:
             return False
         for name in expected:
-            with Image.open(output / name) as image:
-                if image.size != image_size:
-                    return False
+            if verified_image_size(output / name) != image_size:
+                return False
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return False
     return True
