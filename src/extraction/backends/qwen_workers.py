@@ -14,6 +14,11 @@ class QwenGenerationTask:
     image_paths: tuple[str, ...]
     prompt: str
     max_new_tokens: int
+    do_sample: bool = False
+    seed: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
 
 
 def assign_worker_indices(task_count: int, gpu_count: int) -> list[int]:
@@ -170,6 +175,11 @@ def _worker_main(
                 load_images(list(task.image_paths)),
                 task.prompt,
                 task.max_new_tokens,
+                do_sample=task.do_sample,
+                seed=task.seed,
+                temperature=task.temperature,
+                top_p=task.top_p,
+                top_k=task.top_k,
             )
             result_queue.put(
                 {

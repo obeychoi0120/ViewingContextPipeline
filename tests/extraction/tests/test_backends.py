@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from PIL import Image
 
 from extraction.backends import GeminiBackend, QwenBackend
 import extraction.backends.gemini as gemini_module
+import extraction.backends.qwen as qwen_module
 
 
 class FakeInputs(dict):
@@ -52,6 +54,38 @@ def test_qwen_backend_uses_native_images_and_deterministic_generation() -> None:
     ]
     assert model.kwargs["max_new_tokens"] == 32
     assert model.kwargs["do_sample"] is False
+    assert "temperature" not in model.kwargs
+
+
+def test_qwen_backend_uses_seeded_sampling_for_retry(monkeypatch) -> None:
+    seeds = []
+
+    @contextmanager
+    def fake_seeded_rng(seed, device):
+        seeds.append((seed, device))
+        yield
+
+    monkeypatch.setattr(qwen_module, "_seeded_rng", fake_seeded_rng)
+    model = FakeModel()
+    processor = FakeProcessor()
+    backend = QwenBackend(model=model, processor=processor, model_id="qwen")
+
+    assert backend.generate(
+        [],
+        "retry prompt",
+        64,
+        do_sample=True,
+        seed=43,
+        temperature=0.1,
+        top_p=0.8,
+        top_k=20,
+    ) == "generated text"
+
+    assert seeds == [(43, "cuda:0")]
+    assert model.kwargs["do_sample"] is True
+    assert model.kwargs["temperature"] == 0.1
+    assert model.kwargs["top_p"] == 0.8
+    assert model.kwargs["top_k"] == 20
 
 
 class FakePart:

@@ -25,6 +25,11 @@ models:
 extraction:
   visual_evidence:
     image_resolution: [640, 352]
+  summary_retry:
+    seeds: [42, 43, 44]
+    temperature: 0.1
+    top_p: 0.8
+    top_k: 20
   graph:
     summary_prompt: config/prompts/graph_summary_v2.md
     scene_max_new_tokens: 512

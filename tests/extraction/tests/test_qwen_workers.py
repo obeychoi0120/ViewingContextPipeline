@@ -47,7 +47,14 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
             initialized.append((model_path, use_fc_patch, os.environ["CUDA_VISIBLE_DEVICES"]))
             return cls()
 
-        def generate(self, images, prompt, max_new_tokens):
+        def generate(self, images, prompt, max_new_tokens, **generation):
+            assert generation == {
+                "do_sample": False,
+                "seed": None,
+                "temperature": None,
+                "top_p": None,
+                "top_k": None,
+            }
             return f"{images}:{prompt}:{max_new_tokens}"
 
     class Queue:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -11,6 +12,7 @@ from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool, QwenB
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.descriptions import (
+    DescriptionError,
     SCENE_SCHEMA_VERSION,
     SUMMARY_SCHEMA_VERSION,
     description_summary_prompt,
@@ -29,6 +31,7 @@ from extraction.monitoring import (
 from extraction.semantic_graph import (
     SCENE_EXTRACTION_PROMPT,
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
+    SemanticGraphError,
     graph_semantic_warnings,
     graph_summary_prompt,
     parse_or_repair_graph,
@@ -38,7 +41,6 @@ from extraction.summary_validation import (
     SummaryContractError,
     parse_summary_sections,
     serialize_summary_sections,
-    summary_soft_warnings,
 )
 from pipeline_runtime import (
     RunContext,
@@ -89,7 +91,6 @@ def _reuse_summary_document(
         "sections": sections,
         "text": text,
         "scene_count": scene_count,
-        "validation_warnings": summary_soft_warnings(" ".join(sections.values())),
     }
     if any(existing.get(key) != value for key, value in expected.items()):
         raise ExtractionStepError(
@@ -99,6 +100,59 @@ def _reuse_summary_document(
     if existing != expected:
         write_json(output_path, expected)
     return expected
+
+
+def _generate_summaries_with_retry(
+    generate: GenerationFunction,
+    tasks: list[QwenGenerationTask],
+    complete: GenerationCallback,
+    retry_settings: dict[str, Any],
+) -> int:
+    results = generate(tasks)
+    pending: list[QwenGenerationTask] = []
+    last_errors: dict[str, Exception] = {}
+    for task in tasks:
+        try:
+            complete(task.task_id, results[task.task_id])
+        except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
+            pending.append(task)
+            last_errors[task.task_id] = exc
+
+    retry_count = 0
+    for seed in retry_settings["seeds"]:
+        if not pending:
+            break
+        retry_tasks = [
+            replace(
+                task,
+                do_sample=True,
+                seed=int(seed),
+                temperature=float(retry_settings["temperature"]),
+                top_p=float(retry_settings["top_p"]),
+                top_k=int(retry_settings["top_k"]),
+            )
+            for task in pending
+        ]
+        retry_count += len(retry_tasks)
+        retry_results = generate(retry_tasks)
+        next_pending: list[QwenGenerationTask] = []
+        for task in retry_tasks:
+            try:
+                complete(task.task_id, retry_results[task.task_id])
+                last_errors.pop(task.task_id, None)
+            except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
+                next_pending.append(task)
+                last_errors[task.task_id] = exc
+        pending = next_pending
+
+    if pending:
+        task_ids = [task.task_id for task in pending]
+        cause = last_errors[task_ids[0]]
+        raise ExtractionStepError(
+            f"structured summary failed after {len(retry_settings['seeds'])} retries: "
+            f"task_ids={task_ids}"
+        ) from cause
+    return retry_count
 
 
 GenerationCallback = Callable[[str, str], None]
@@ -130,6 +184,11 @@ def _qwen_generator(
                 load_images(list(task.image_paths)),
                 task.prompt,
                 task.max_new_tokens,
+                do_sample=task.do_sample,
+                seed=task.seed,
+                temperature=task.temperature,
+                top_p=task.top_p,
+                top_k=task.top_k,
             )
             results[task.task_id] = text
             if on_task_complete is not None:
@@ -198,12 +257,16 @@ def _result(
     *,
     content_count: int,
     failure_count: int = 0,
+    retry_count: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "stage": stage,
         "content_count": content_count,
         "failure_count": failure_count,
     }
+    if retry_count is not None:
+        result["retry_count"] = retry_count
+    return result
 
 
 def _require_file(path: Path, label: str) -> Path:
@@ -529,6 +592,7 @@ def summarize_graph(
     stage = graph_stage_name("summarize-graph", source)
     context.initialize()
     settings = context.config["extraction"]["graph"]
+    retry_settings = context.config["extraction"]["summary_retry"]
     prompt_path = context.config_path("extraction", "graph", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
     model_path = context.path("models", "qwen")
@@ -598,7 +662,6 @@ def summarize_graph(
                 "sections": sections,
                 "text": summary,
                 "scene_count": len(records),
-                "validation_warnings": summary_soft_warnings(" ".join(sections.values())),
             }
             write_json(output_path, document)
             documents_by_content[content_id] = document
@@ -614,13 +677,20 @@ def summarize_graph(
             )
             progress.update(1)
 
+        retry_count = 0
         if tasks:
             with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                generate(tasks, complete_graph_summary)
+                retry_count = _generate_summaries_with_retry(
+                    generate,
+                    tasks,
+                    complete_graph_summary,
+                    retry_settings,
+                )
     return _result(
         stage,
         content_count=len(documents_by_content),
         failure_count=empty_scene_files,
+        retry_count=retry_count,
     )
 
 
@@ -742,6 +812,7 @@ def summarize_description(
 ) -> dict[str, Any]:
     context.initialize()
     settings = context.config["extraction"]["description"]
+    retry_settings = context.config["extraction"]["summary_retry"]
     prompt_path = context.config_path("extraction", "description", "summary_prompt")
     template = prompt_path.read_text(encoding="utf-8")
     model_path = context.path("models", "qwen")
@@ -814,7 +885,6 @@ def summarize_description(
                 "sections": sections,
                 "text": summary,
                 "scene_count": len(records),
-                "validation_warnings": summary_soft_warnings(" ".join(sections.values())),
             }
             write_json(output_path, document)
             documents_by_content[content_id] = document
@@ -829,13 +899,20 @@ def summarize_description(
             )
             progress.update(1)
 
+        retry_count = 0
         if tasks:
             with _qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                generate(tasks, complete_description_summary)
+                retry_count = _generate_summaries_with_retry(
+                    generate,
+                    tasks,
+                    complete_description_summary,
+                    retry_settings,
+                )
     return _result(
         "summarize-description",
         content_count=len(documents_by_content),
         failure_count=empty_scene_files,
+        retry_count=retry_count,
     )
 
 

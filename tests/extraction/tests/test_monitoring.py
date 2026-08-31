@@ -93,7 +93,7 @@ def test_serial_generator_calls_completion_callback_per_task(
         def from_pretrained(cls, model_path, *, use_fc_patch):
             return cls()
 
-        def generate(self, images, prompt, max_new_tokens):
+        def generate(self, images, prompt, max_new_tokens, **_generation):
             return f"result:{prompt}"
 
     monkeypatch.setattr(steps_module, "QwenBackend", Backend)

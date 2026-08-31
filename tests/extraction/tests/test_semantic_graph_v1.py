@@ -19,7 +19,6 @@ from extraction.semantic_graph import (
 from extraction.summary_validation import (
     SUMMARY_SECTIONS,
     serialize_summary_sections,
-    summary_soft_warnings,
 )
 
 
@@ -101,7 +100,7 @@ def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
     assert '"object_id": "e4"' in prompt
 
 
-def test_summary_requires_five_fields_and_uses_256_word_soft_guidance() -> None:
+def test_summary_requires_five_fields_and_repairs_json_syntax_once() -> None:
     sections = {name: f"visible {name}" for name in SUMMARY_SECTIONS}
     parsed = validate_summary(json.dumps(sections))
 
@@ -109,10 +108,8 @@ def test_summary_requires_five_fields_and_uses_256_word_soft_guidance() -> None:
     assert serialize_summary_sections(parsed).startswith(
         "Setting and environments: visible setting_and_environments."
     )
-    assert summary_soft_warnings("word " * 256) == []
-    assert summary_soft_warnings("word " * 257) == [
-        "summary_word_guidance_exceeded: observed=257 guidance_max=256"
-    ]
+    repaired = validate_summary(json.dumps(sections)[:-1] + ",}")
+    assert repaired == sections
     with pytest.raises(SemanticGraphError, match="must be one JSON object"):
         validate_summary("free-form summary")
     with pytest.raises(SemanticGraphError, match="fields mismatch"):
