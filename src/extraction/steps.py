@@ -472,7 +472,7 @@ def summarize_graph(
                 summary_failure_dir / f"{content_id}.jsonl"
             ).unlink(missing_ok=True)
             documents_by_content[content_id] = document
-            _complete_content_progress(progress)
+            progress.update(1)
 
         if tasks:
             def report_validation_failure(
@@ -784,7 +784,7 @@ def summarize_description(
                 context.description_summary_failure_dir / f"{content_id}.jsonl"
             ).unlink(missing_ok=True)
             documents_by_content[content_id] = document
-            _complete_content_progress(progress)
+            progress.update(1)
 
         if tasks:
             def record_description_summary_failure(
