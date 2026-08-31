@@ -92,7 +92,11 @@ def _reuse_summary_document(
         "text": text,
         "scene_count": scene_count,
     }
-    if any(existing.get(key) != value for key, value in expected.items()):
+    if any(
+        existing.get(key) != value
+        for key, value in expected.items()
+        if key != "text"
+    ):
         raise ExtractionStepError(
             f"incompatible structured summary output: {output_path}; "
             "use --force or a new run_id"

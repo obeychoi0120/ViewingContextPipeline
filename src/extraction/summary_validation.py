@@ -46,7 +46,7 @@ def parse_summary_sections(text: str) -> dict[str, str]:
 
 
 def serialize_summary_sections(sections: dict[str, str]) -> str:
-    """Render validated sections as one stable natural-language paragraph for BGE."""
+    """Render validated sections as stable newline-delimited text for BGE."""
     if tuple(sections) != SUMMARY_SECTIONS:
         raise SummaryContractError("summary sections must use the canonical field order")
     parts = [
@@ -56,7 +56,7 @@ def serialize_summary_sections(sections: dict[str, str]) -> str:
     ]
     if not parts:
         raise SummaryContractError("structured video summary must contain visible evidence")
-    return " ".join(parts)
+    return "\n".join(parts)
 
 
 def _with_terminal_punctuation(value: str) -> str:

@@ -67,7 +67,7 @@ Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으
 }
 ```
 
-필드명과 분류는 Qwen 출력 계약에 포함됩니다. 후처리는 자유 문장을 필드로 재분류하지 않습니다. 먼저 native JSON object를 읽고 실패하면 `json_repair.py`의 deterministic syntax-only repair를 한 번 적용한 뒤, exact field set·문자열 타입·비어 있지 않은 전체 evidence를 검증합니다. 근거가 없는 개별 필드는 빈 문자열로 출력합니다. 유효한 필드는 위 순서대로 `Setting and environments: ...` 형태의 단일 자연어 문단으로 결정적으로 직렬화하며, summary artifact에는 원래 `sections`와 BGE 입력용 `text`를 함께 저장합니다. BGE에는 raw JSON이나 Markdown이 아니라 `text`만 입력합니다.
+필드명과 분류는 Qwen 출력 계약에 포함됩니다. 후처리는 자유 문장을 필드로 재분류하지 않습니다. 먼저 native JSON object를 읽고 실패하면 `json_repair.py`의 deterministic syntax-only repair를 한 번 적용한 뒤, exact field set·문자열 타입·비어 있지 않은 전체 evidence를 검증합니다. 근거가 없는 개별 필드는 빈 문자열로 출력합니다. 유효한 필드는 위 순서대로 `Setting and environments: ...` 형태로 결정적으로 직렬화하고 각 section 끝에 줄바꿈을 넣습니다. summary artifact에는 원래 `sections`와 BGE 입력용 `text`를 함께 저장합니다. BGE에는 raw JSON이나 Markdown이 아니라 줄 단위 section으로 구성된 `text`만 입력합니다.
 
 Graph와 Description은 같은 필드·repair·검증·직렬화기를 사용하므로 출력 형식 차이가 representation arm 비교의 교란변수가 되지 않도록 합니다. 최종 summary JSON에는 `validation_warnings`를 저장하지 않습니다. 이 구조화 summary 계약을 변경하는 실험은 새 `run_id`를 사용해야 합니다.
 
