@@ -108,15 +108,34 @@ def _generate_summaries_with_retry(
     complete: GenerationCallback,
     retry_settings: dict[str, Any],
 ) -> int:
-    results = generate(tasks)
-    pending: list[QwenGenerationTask] = []
     last_errors: dict[str, Exception] = {}
-    for task in tasks:
-        try:
-            complete(task.task_id, results[task.task_id])
-        except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
-            pending.append(task)
-            last_errors[task.task_id] = exc
+
+    def run_attempt(attempt_tasks: list[QwenGenerationTask]) -> list[QwenGenerationTask]:
+        tasks_by_id = {task.task_id: task for task in attempt_tasks}
+        handled: set[str] = set()
+        failed: list[QwenGenerationTask] = []
+
+        def handle_result(task_id: str, text: str) -> None:
+            if task_id in handled:
+                return
+            task = tasks_by_id[task_id]
+            handled.add(task_id)
+            try:
+                complete(task_id, text)
+                last_errors.pop(task_id, None)
+            except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
+                failed.append(task)
+                last_errors[task_id] = exc
+
+        results = generate(attempt_tasks, handle_result)
+        # Keep compatibility with simple/local generators that return a result
+        # mapping without invoking the optional completion callback.
+        for task in attempt_tasks:
+            if task.task_id not in handled:
+                handle_result(task.task_id, results[task.task_id])
+        return failed
+
+    pending = run_attempt(tasks)
 
     retry_count = 0
     for seed in retry_settings["seeds"]:
@@ -134,16 +153,7 @@ def _generate_summaries_with_retry(
             for task in pending
         ]
         retry_count += len(retry_tasks)
-        retry_results = generate(retry_tasks)
-        next_pending: list[QwenGenerationTask] = []
-        for task in retry_tasks:
-            try:
-                complete(task.task_id, retry_results[task.task_id])
-                last_errors.pop(task.task_id, None)
-            except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
-                next_pending.append(task)
-                last_errors[task.task_id] = exc
-        pending = next_pending
+        pending = run_attempt(retry_tasks)
 
     if pending:
         task_ids = [task.task_id for task in pending]

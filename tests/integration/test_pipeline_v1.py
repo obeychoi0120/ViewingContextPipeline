@@ -141,10 +141,13 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
     responses = ["not json", "still not json", "also not json", json.dumps(sections)]
     submitted: list[QwenGenerationTask] = []
 
-    def generate(tasks, _callback=None):
+    def generate(tasks, callback=None):
         task = tasks[0]
         submitted.append(task)
-        return {task.task_id: responses[len(submitted) - 1]}
+        text = responses[len(submitted) - 1]
+        if callback is not None:
+            callback(task.task_id, text)
+        return {task.task_id: text}
 
     completed = []
 
@@ -169,6 +172,47 @@ def test_summary_retry_uses_three_seeded_sampling_attempts() -> None:
     assert [task.do_sample for task in submitted] == [False, True, True, True]
     for task in submitted[1:]:
         assert (task.temperature, task.top_p, task.top_k) == (0.1, 0.8, 20)
+
+
+def test_summary_is_completed_from_worker_callback_before_batch_returns() -> None:
+    sections = {
+        "setting_and_environments": "An indoor room",
+        "main_characters_and_objects": "A person",
+        "chronological_events": "The person walks",
+        "relations": "The person is inside the room",
+        "affect_or_topic": "Neutral",
+    }
+    structured = json.dumps(sections)
+    completed = []
+
+    def generate(tasks, callback=None):
+        assert callback is not None
+        callback("c2", structured)
+        assert completed == ["c2"]
+        callback("c1", structured)
+        return {task.task_id: structured for task in tasks}
+
+    def complete(task_id, text):
+        extraction_steps.parse_summary_sections(text)
+        completed.append(task_id)
+
+    retry_count = extraction_steps._generate_summaries_with_retry(
+        generate,
+        [
+            QwenGenerationTask("c1", (), "prompt", 512),
+            QwenGenerationTask("c2", (), "prompt", 512),
+        ],
+        complete,
+        {
+            "seeds": [42, 43, 44],
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "top_k": 20,
+        },
+    )
+
+    assert retry_count == 0
+    assert completed == ["c2", "c1"]
 
 
 def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> None:
