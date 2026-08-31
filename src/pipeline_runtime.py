@@ -275,6 +275,7 @@ def _validate_config(value: dict[str, Any]) -> None:
         "temperature",
         "max_output_tokens",
         "thinking_level",
+        "media_resolution",
     }
     if set(gemini) != gemini_keys:
         raise ConfigError(f"models.gemini must contain exactly {sorted(gemini_keys)}")
@@ -298,4 +299,15 @@ def _validate_config(value: dict[str, Any]) -> None:
     if gemini.get("thinking_level") not in {"low", "medium", "high"}:
         raise ConfigError(
             "models.gemini.thinking_level must be low, medium, or high"
+        )
+    media_resolutions = {
+        "MEDIA_RESOLUTION_UNSPECIFIED",
+        "MEDIA_RESOLUTION_LOW",
+        "MEDIA_RESOLUTION_MEDIUM",
+        "MEDIA_RESOLUTION_HIGH",
+    }
+    if gemini.get("media_resolution") not in media_resolutions:
+        raise ConfigError(
+            "models.gemini.media_resolution must be one of "
+            f"{sorted(media_resolutions)}"
         )

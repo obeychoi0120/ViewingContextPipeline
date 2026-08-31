@@ -53,6 +53,24 @@ Qwen Graph, Gemini Graph, Description은 같은 fixed-30s 장면과 시간순 ke
 
 Graph JSON은 native object를 우선 사용하고 실패 시 deterministic repair를 한 번 적용합니다. 복구할 수 없는 Graph scene, Gemini API 최종 실패, 빈 Description scene만 해당 scene의 failure artifact로 남기고 나머지는 계속 처리합니다. 실제 success/failure scene 수와 arm별 coverage는 `run-diagnosis`가 다시 집계합니다.
 
+### 영상 Summary 계약
+
+Qwen3-VL-2B는 Graph와 Description의 영상 단위 summary를 자유 문단으로 직접 생성하지 않습니다. 두 branch 모두 다음과 같은 동일한 5개 필드의 JSON object를 생성합니다.
+
+```json
+{
+  "setting_and_environments": "...",
+  "main_characters_and_objects": "...",
+  "chronological_events": "...",
+  "relations": "...",
+  "affect_or_topic": "..."
+}
+```
+
+필드명과 분류는 Qwen 출력 계약에 포함됩니다. 후처리는 자유 문장을 필드로 재분류하지 않고, exact field set·문자열 타입·비어 있지 않은 전체 evidence만 검증합니다. 근거가 없는 개별 필드는 빈 문자열로 출력합니다. 유효한 필드는 위 순서대로 `Setting and environments: ...` 형태의 단일 자연어 문단으로 결정적으로 직렬화하며, summary artifact에는 원래 `sections`와 BGE 입력용 `text`를 함께 저장합니다. BGE에는 raw JSON이나 Markdown이 아니라 `text`만 입력합니다.
+
+Graph와 Description은 같은 필드·직렬화기를 사용하므로 출력 형식 차이가 representation arm 비교의 교란변수가 되지 않도록 합니다. 다섯 필드 전체는 최대 256 English words를 지침으로 사용하며, 초과 출력은 `validation_warnings`에 기록합니다. 이 구조화 summary 계약을 변경하는 실험은 새 `run_id`를 사용해야 합니다.
+
 4-arm 평가는 `validation.evaluation`의 family-wise alpha와 Bonferroni 정책을 사용합니다. confirmatory family는 세 Viewing Context arm과 `SASRec_ID`의 superiority 비교 3개, 두 Graph arm과 `SASRec_DESC`의 non-inferiority 비교 2개입니다. Qwen–Gemini 직접 비교는 exploratory입니다.
 
 `min_scene_coverage`와 `max_arm_coverage_gap`은 runtime 통과 기준입니다. `[직접 결정 필요]` 현재 `0.95`와 `0.05`는 provisional PoC gate이므로 실제 pilot 결과를 해석하기 전에 확정해야 합니다.
@@ -95,7 +113,7 @@ Qwen을 사용하는 Step은 `--gpus N`을 지원합니다. Gemini scene extract
 
 ## Runtime 판정과 저장 정책
 
-- config, prompt, model 또는 protocol이 달라지는 새 실험은 새 `run_id`를 사용합니다.
+- config, prompt, model, summary schema 또는 protocol이 달라지는 새 실험은 새 `run_id`를 사용합니다.
 - manifest와 fingerprint는 생성하지 않으며 고정 경로의 실제 파일을 직접 읽습니다.
 - content별 title/tag metadata와 빈 failure JSONL은 생성하지 않습니다.
 - Description scene에는 `schema_version`, `content_id`, `scene_idx`, `keyframes`, `description`만 저장합니다.
@@ -103,7 +121,7 @@ Qwen을 사용하는 Step은 `--gpus N`을 지원합니다. Gemini scene extract
 - `diagnosis.json`은 `report_ready`를 사용하지 않습니다. `run-diagnosis`가 매번 실제 artifact를 집계해 `runtime_decision.status`, `checks`, `errors`를 기록하고 기준 미달이면 파일을 기록한 뒤 실패합니다.
 - runtime artifact 통과와 통계적 superiority/non-inferiority 결론은 별개입니다.
 
-주요 계약은 `viewing-context-config/v1`, `scene-description/v1`, `description-video-summary/v1`, `diagnosis/v2`입니다.
+주요 계약은 `viewing-context-config/v1`, `scene-description/v1`, `graph-video-summary/v2`, `description-video-summary/v2`, `diagnosis/v2`입니다.
 
 ## 검증
 

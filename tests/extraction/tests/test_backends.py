@@ -83,6 +83,7 @@ def test_gemini_backend_interleaves_references(monkeypatch) -> None:
         Part=FakePart,
         GenerateContentConfig=FakeConfig,
         ThinkingConfig=lambda **kwargs: kwargs,
+        MediaResolution=lambda value: value,
     )
     monkeypatch.setattr(gemini_module, "_google_genai", lambda: (None, types))
     models = FakeModels()
@@ -91,6 +92,7 @@ def test_gemini_backend_interleaves_references(monkeypatch) -> None:
         model_id="gemini",
         temperature=0.25,
         thinking_level="low",
+        media_resolution="MEDIA_RESOLUTION_MEDIUM",
     )
     references = [
         {
@@ -109,4 +111,5 @@ def test_gemini_backend_interleaves_references(monkeypatch) -> None:
         "temperature": 0.25,
         "max_output_tokens": 64,
         "thinking_config": {"thinking_level": "low"},
+        "media_resolution": "MEDIA_RESOLUTION_MEDIUM",
     }

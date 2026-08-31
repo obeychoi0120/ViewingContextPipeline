@@ -19,6 +19,7 @@ class GeminiBackend:
     model_id: str
     temperature: float = 0.0
     thinking_level: str | None = None
+    media_resolution: str | None = None
 
     @classmethod
     def vertex(
@@ -29,6 +30,7 @@ class GeminiBackend:
         location: str = "global",
         temperature: float = 0.0,
         thinking_level: str | None = None,
+        media_resolution: str | None = None,
     ) -> GeminiBackend:
         genai, types = _google_genai()
         retry = types.HttpRetryOptions(
@@ -50,6 +52,7 @@ class GeminiBackend:
             model_id=model_id,
             temperature=temperature,
             thinking_level=thinking_level,
+            media_resolution=media_resolution,
         )
 
     def generate(
@@ -77,6 +80,10 @@ class GeminiBackend:
         if self.thinking_level:
             config_kwargs["thinking_config"] = types.ThinkingConfig(
                 thinking_level=self.thinking_level
+            )
+        if self.media_resolution:
+            config_kwargs["media_resolution"] = types.MediaResolution(
+                self.media_resolution
             )
         response = self.client.models.generate_content(
             model=self.model_id,

@@ -13,6 +13,7 @@ from extraction.semantic_graph.taxonomy import (
     EVENT_REFERENCE_SLOTS,
     SETTING_CONTEXTS,
 )
+from extraction.summary_validation import SummaryContractError, parse_summary_sections
 
 
 GRAPH_FIELDS = (
@@ -23,6 +24,7 @@ GRAPH_FIELDS = (
     "semantic_topics",
     "affect",
 )
+SUMMARY_SCHEMA_VERSION = "graph-video-summary/v2"
 
 
 class SemanticGraphError(RuntimeError):
@@ -210,8 +212,8 @@ def graph_summary_prompt(template: str, records: list[dict[str, Any]]) -> str:
     return template.format(scenes="\n\n".join(scenes))
 
 
-def validate_summary(text: str) -> str:
-    summary = str(text or "").strip()
-    if not summary:
-        raise SemanticGraphError("video summary must not be empty")
-    return summary
+def validate_summary(text: str) -> dict[str, str]:
+    try:
+        return parse_summary_sections(text)
+    except SummaryContractError as exc:
+        raise SemanticGraphError(str(exc)) from exc

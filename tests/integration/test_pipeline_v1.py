@@ -44,6 +44,7 @@ def context(tmp_path: Path) -> RunContext:
             "temperature": 0.0,
             "max_output_tokens": 1024,
             "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_MEDIUM",
         },
     }
     config["extraction"]["graph"]["summary_prompt"] = str(
@@ -83,6 +84,7 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
         ("temperature", -0.1, "temperature"),
         ("max_output_tokens", 0, "max_output_tokens"),
         ("thinking_level", "minimal", "thinking_level"),
+        ("media_resolution", "medium", "media_resolution"),
     ],
 )
 def test_config_rejects_invalid_gemini_generation_settings(
@@ -228,7 +230,16 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
     @contextmanager
     def fake_generator(**_kwargs):
         def generate(tasks, callback=None):
-            results = {task.task_id: "video summary" for task in tasks}
+            structured = json.dumps(
+                {
+                    "setting_and_environments": "An indoor setting",
+                    "main_characters_and_objects": "A person and an object",
+                    "chronological_events": "The person approaches the object",
+                    "relations": "The person stands beside the object",
+                    "affect_or_topic": "A neutral visible affect",
+                }
+            )
+            results = {task.task_id: structured for task in tasks}
             if callback is not None:
                 for task_id, text in results.items():
                     callback(task_id, text)
@@ -252,9 +263,25 @@ def test_graph_summary_trusts_directory_and_compacts_legacy_scene(
         (context.graph_summary_dir("qwen") / "c1.json").read_text(encoding="utf-8")
     )
     assert summary == {
+        "schema_version": "graph-video-summary/v2",
         "content_id": "c1",
+        "arm": "graph_qwen",
+        "status": "complete",
+        "sections": {
+            "setting_and_environments": "An indoor setting",
+            "main_characters_and_objects": "A person and an object",
+            "chronological_events": "The person approaches the object",
+            "relations": "The person stands beside the object",
+            "affect_or_topic": "A neutral visible affect",
+        },
         "scene_count": 1,
-        "text": "video summary",
+        "text": (
+            "Setting and environments: An indoor setting. "
+            "Main characters and objects: A person and an object. "
+            "Chronological events: The person approaches the object. "
+            "Relations: The person stands beside the object. "
+            "Affect or topic: A neutral visible affect."
+        ),
         "validation_warnings": [],
     }
 
@@ -269,7 +296,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
         write_json(
             context.graph_summary_dir(source) / f"{content_id}.json",
             {
-                "schema_version": "graph-video-summary/v1",
+                "schema_version": "graph-video-summary/v2",
                 "content_id": content_id,
                 "status": "complete",
                 "text": f"{source} graph",
@@ -278,7 +305,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
     write_json(
         context.description_summary_dir / f"{content_id}.json",
         {
-            "schema_version": "description-video-summary/v1",
+            "schema_version": "description-video-summary/v2",
             "content_id": content_id,
             "status": "complete",
             "text": "description",

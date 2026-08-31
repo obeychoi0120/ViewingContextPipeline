@@ -20,18 +20,19 @@ models:
     model_id: gemini-3.7-flash
     temperature: 0.0
     max_output_tokens: 1024
-    thinking_level: medium
+    thinking_level: low
+    media_resolution: MEDIA_RESOLUTION_MEDIUM
 extraction:
   visual_evidence:
     image_resolution: [640, 352]
   graph:
-    summary_prompt: config/prompts/graph_summary_v1.md
+    summary_prompt: config/prompts/graph_summary_v2.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
-    gemini_concurrency: 4
+    gemini_concurrency: 8
   description:
     scene_prompt: config/prompts/description_scene_v1.md
-    summary_prompt: config/prompts/description_summary_v1.md
+    summary_prompt: config/prompts/description_summary_v2.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
 validation:

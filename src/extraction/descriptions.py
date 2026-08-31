@@ -8,10 +8,11 @@ from extraction.evidence import (
     build_scene_evidence,
     load_images,
 )
+from extraction.summary_validation import SummaryContractError, parse_summary_sections
 
 
 SCENE_SCHEMA_VERSION = "scene-description/v1"
-SUMMARY_SCHEMA_VERSION = "description-video-summary/v1"
+SUMMARY_SCHEMA_VERSION = "description-video-summary/v2"
 
 
 class DescriptionError(RuntimeError):
@@ -70,8 +71,8 @@ def description_summary_prompt(template: str, records: list[dict[str, Any]]) -> 
     return template.format(scenes="\n".join(lines))
 
 
-def validate_summary(text: str) -> str:
-    summary = str(text or "").strip()
-    if not summary:
-        raise DescriptionError("video summary must not be empty")
-    return summary
+def validate_summary(text: str) -> dict[str, str]:
+    try:
+        return parse_summary_sections(text)
+    except SummaryContractError as exc:
+        raise DescriptionError(str(exc)) from exc
