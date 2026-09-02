@@ -116,7 +116,7 @@ python -m pip install -e ".[dev]"
 python -m pip install -e ".[qwen,gemini,train,dev]"
 ```
 
-`prepare-cohort`는 MP4 기준 eligible catalog를 먼저 정한 뒤 title coverage를 검사합니다. 잘못된 item ID, duplicate, blank title, missing title은 오류이며 fallback title이나 조용한 catalog 축소는 없습니다.
+`prepare-cohort`는 MP4 기준 eligible catalog를 먼저 정한 뒤 title coverage를 검사합니다. 전체 CSV의 잘못된 item ID와 duplicate는 오류입니다. Blank/missing title은 eligible catalog 안의 item에 대해서만 `data/cohort/failures.jsonl`에 `missing_metadata_title`로 기록하고 실행을 중단합니다. Catalog 밖의 blank title은 실행을 막지 않으며, fallback title이나 조용한 catalog 축소는 없습니다.
 
 ## 11단계 실행
 

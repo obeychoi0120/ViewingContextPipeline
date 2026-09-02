@@ -148,8 +148,11 @@ def test_title_csv_accepts_bom_and_splits_only_the_first_comma(tmp_path) -> None
     ("text", "message"),
     [
         ("1,First\n01,Duplicate\n", "duplicate metadata title"),
-        ("1,   \n", "empty metadata title"),
+        ("1,   \n01,Duplicate\n", "duplicate metadata title"),
+        ("1,First\n01,   \n", "duplicate metadata title"),
+        ("1,\n01,\n", "duplicate metadata title"),
         ("not-an-id,Title\n", "invalid metadata title row"),
+        ("not-an-id,   \n", "invalid metadata title row"),
         ("1 Title\n", "missing comma"),
     ],
 )
@@ -161,7 +164,43 @@ def test_title_csv_rejects_invalid_rows(tmp_path, text: str, message: str) -> No
         load_metadata_titles(path)
 
 
-def test_missing_title_fails_without_shrinking_catalog(tmp_path) -> None:
+def test_title_csv_omits_blank_titles_for_catalog_coverage_check(tmp_path) -> None:
+    path = tmp_path / "titles.csv"
+    path.write_text("\ufeff1,A title, with commas\n2,\n1849, \t\n", encoding="utf-8")
+
+    assert load_metadata_titles(path) == {"1": "A title, with commas"}
+
+
+@pytest.mark.parametrize("outside_item", ["1849", "6"])
+def test_blank_title_outside_eligible_catalog_preserves_cohort(tmp_path, outside_item) -> None:
+    data = config_data(tmp_path, users=1)
+    videos = data["dataset"]["videos_dir"]
+    videos.mkdir()
+    for item in range(1, 6):
+        (videos / f"{item}.mp4").write_bytes(b"video")
+    # Item 6 is referenced but has no video; item 1849 is not referenced at all.
+    sequence = "1 2 3 4 5 6" if outside_item == "6" else "1 2 3 4 5"
+    data["dataset"]["pairs_tsv"].write_text(f"u01\t{sequence}\n", encoding="utf-8")
+    titles_path = data["dataset"]["titles_csv"]
+    _write_titles(titles_path, range(1, 6))
+    config = ValidationConfig.model_validate(data)
+    baseline_result = prepare_cohort(config, probe=lambda _: 2.0)
+    cohort_dir = config.output_dir / "data/cohort"
+    baseline_files = {path.name: path.read_bytes() for path in cohort_dir.iterdir()}
+
+    titles_path.write_text(
+        titles_path.read_text(encoding="utf-8") + f"{outside_item}, \t\n", encoding="utf-8"
+    )
+    result = prepare_cohort(config, probe=lambda _: 2.0)
+
+    assert result == baseline_result
+    assert {path.name: path.read_bytes() for path in cohort_dir.iterdir()} == baseline_files
+    catalog = [json.loads(line) for line in (cohort_dir / "catalog.jsonl").read_text().splitlines()]
+    assert [row["item_id"] for row in catalog] == [str(item) for item in range(1, 6)]
+
+
+@pytest.mark.parametrize("last_title_row", ["", "5,\n", "5, \t\n"])
+def test_missing_title_fails_without_shrinking_catalog(tmp_path, last_title_row) -> None:
     data = config_data(tmp_path, users=1)
     videos = data["dataset"]["videos_dir"]
     videos.mkdir()
@@ -172,6 +211,10 @@ def test_missing_title_fails_without_shrinking_catalog(tmp_path) -> None:
         encoding="utf-8",
     )
     _write_titles(data["dataset"]["titles_csv"], range(1, 5))
+    titles_path = data["dataset"]["titles_csv"]
+    titles_path.write_text(
+        titles_path.read_text(encoding="utf-8") + last_title_row, encoding="utf-8"
+    )
     config = ValidationConfig.model_validate(data)
 
     with pytest.raises(CohortError, match="without metadata titles"):
@@ -187,3 +230,13 @@ def test_missing_title_fails_without_shrinking_catalog(tmp_path) -> None:
         "missing_item_count": 1,
     }
     assert not (cohort_dir / "metadata_titles.jsonl").exists()
+    failures = [
+        json.loads(line)
+        for line in (cohort_dir / "failures.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert failures == [{"item_id": "5", "reason": "missing_metadata_title"}]
+    inventory = [
+        json.loads(line)
+        for line in (cohort_dir / "item_inventory.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(inventory) == 5 and all(row["eligible"] for row in inventory)
