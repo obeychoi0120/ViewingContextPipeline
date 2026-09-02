@@ -31,6 +31,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "torch: requires an installed PyTorch runtime and executes training checks",
+]
 
 [tool.ruff]
 line-length = 100

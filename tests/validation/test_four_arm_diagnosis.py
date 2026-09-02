@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import numpy as np
 import pytest
 
 import validation.diagnosis_statistics as diagnosis_statistics
 from validation.config import ValidationConfig
 from validation.diagnosis import diagnose_recommendations
 from validation.metrics import metrics_from_rank
-from validation.recommendation import RECOMMENDATION_ARMS
+from validation.recommendation_contracts import (
+    ARCHITECTURE_VERSION,
+    RECOMMENDATION_ARMS,
+    TRAINING_RUN_SCHEMA_VERSION,
+)
 from pipeline_runtime import read_jsonl, write_json, write_jsonl
 
 from conftest import config_data
@@ -21,7 +26,7 @@ DECISION_CONFIG = {
     "multiple_comparison_correction": "bonferroni",
 }
 ARM_RANKS = {
-    "SASRec_ID": 4,
+    "SASRec_METADATA": 4,
     "SASRec_GRAPH_QWEN": 2,
     "SASRec_GRAPH_GEMINI": 1,
     "SASRec_DESC": 3,
@@ -116,11 +121,40 @@ def _valid_run(tmp_path):
     write_json(
         cohort_dir / "eligibility_summary.json",
         {
-            "schema_version": "microlens-cohort-eligibility/v1",
+            "schema_version": "microlens-cohort-eligibility/v2",
             "eligible_items": len(item_ids),
             "eligible_users": len(sequences),
+            "metadata_title_coverage": {
+                "schema_version": "metadata-title/v1",
+                "catalog_item_count": len(item_ids),
+                "covered_item_count": len(item_ids),
+                "missing_item_count": 0,
+            },
         },
     )
+    write_jsonl(
+        cohort_dir / "metadata_titles.jsonl",
+        [
+            {
+                "item_id": item_id,
+                "content_id": content_id,
+                "title": f"Title {item_id}",
+            }
+            for item_id, content_id in item_content.items()
+        ],
+    )
+    representations_dir = run_root / "validation" / "representations"
+    write_json(
+        representations_dir / "item_index.json",
+        {item_id: index for index, item_id in enumerate(item_ids)},
+    )
+    for branch in RECOMMENDATION_ARMS.values():
+        path = representations_dir / f"{branch}_embeddings.npz"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            path,
+            values=np.ones((len(item_ids), config.encoder.embedding_dim), dtype=np.float32),
+        )
     _write_success_scene_files(run_root, content_ids)
 
     rows = []
@@ -138,9 +172,7 @@ def _valid_run(tmp_path):
                         "arm": arm,
                         "branch": branch,
                         "candidate_count": len(item_ids),
-                        "target_frequency_bucket": target_buckets[
-                            sequence["user_id"]
-                        ],
+                        "target_frequency_bucket": target_buckets[sequence["user_id"]],
                         "rank": rank,
                         "target_item_id": target,
                         "target_content_id": item_content[target],
@@ -155,29 +187,35 @@ def _valid_run(tmp_path):
     for seed in config.model.seeds:
         for arm in RECOMMENDATION_ARMS:
             checkpoint = (
-                recommendations_dir
-                / "checkpoints"
-                / f"seed_{seed}"
-                / arm.lower()
-                / "sasrec.pt"
+                recommendations_dir / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
             )
             checkpoint.parent.mkdir(parents=True, exist_ok=True)
             checkpoint.write_bytes(b"checkpoint")
-            value = metrics_from_rank(ARM_RANKS[arm], config.evaluation.cutoffs)[
-                "NDCG@10"
-            ]
+            value = metrics_from_rank(ARM_RANKS[arm], config.evaluation.cutoffs)["NDCG@10"]
             training_runs.append(
                 {
-                    "schema_version": "sasrec-training-run/v1",
+                    "schema_version": TRAINING_RUN_SCHEMA_VERSION,
+                    "architecture_version": ARCHITECTURE_VERSION,
                     "run_id": "test",
                     "seed": seed,
                     "arm": arm,
+                    "branch": RECOMMENDATION_ARMS[arm],
+                    "candidate_count": len(item_ids),
                     "checkpoint": str(checkpoint),
-                    "epochs": [{"epoch": 1, "loss": 1.0, "NDCG@10": value}],
-                    "best_validation": {
-                        "metric": "NDCG@10",
-                        "value": value,
-                        "epoch": 1,
+                    "selection": {
+                        "epochs_completed": 1,
+                        "early_stopped": True,
+                        "epochs": [{"epoch": 1, "loss": 1.0, "NDCG@10": value}],
+                        "best_validation": {
+                            "metric": "NDCG@10",
+                            "value": value,
+                            "epoch": 1,
+                        },
+                    },
+                    "refit": {
+                        "data": "train+valid_target",
+                        "epochs_completed": 1,
+                        "epochs": [{"epoch": 1, "loss": 1.0}],
                     },
                 }
             )
@@ -196,7 +234,7 @@ def _valid_run(tmp_path):
 
 def test_four_arm_runtime_decision_and_multiple_comparison_policy(tmp_path) -> None:
     assert RECOMMENDATION_ARMS == {
-        "SASRec_ID": None,
+        "SASRec_METADATA": "metadata",
         "SASRec_GRAPH_QWEN": "graph_qwen",
         "SASRec_GRAPH_GEMINI": "graph_gemini",
         "SASRec_DESC": "desc",
@@ -206,7 +244,7 @@ def test_four_arm_runtime_decision_and_multiple_comparison_policy(tmp_path) -> N
     result = diagnose_recommendations(config, runtime, DECISION_CONFIG)
 
     assert "report_ready" not in result
-    assert result["schema_version"] == "diagnosis/v2"
+    assert result["schema_version"] == "diagnosis/v3"
     assert result["runtime_decision"] == {
         "status": "pass",
         "checks": {key: True for key in result["runtime_decision"]["checks"]},
@@ -223,36 +261,33 @@ def test_four_arm_runtime_decision_and_multiple_comparison_policy(tmp_path) -> N
     assert grid["expected_cell_count"] == grid["observed_row_count"] == 24
     assert grid["duplicate_cell_count"] == grid["missing_cell_count"] == 0
     policy = result["multiple_comparison_policy"]
-    assert policy["families"]["id_baseline_superiority"][
+    assert policy["families"]["metadata_baseline_superiority"][
         "per_comparison_alpha"
     ] == pytest.approx(0.05 / 3)
     assert policy["families"]["graph_vs_description_non_inferiority"][
         "per_comparison_alpha"
     ] == pytest.approx(0.05 / 2)
-    assert policy["families"]["graph_vs_description_non_inferiority"][
-        "interval_type"
-    ] == "one_sided_lower"
+    assert (
+        policy["families"]["graph_vs_description_non_inferiority"]["interval_type"]
+        == "one_sided_lower"
+    )
     assert policy["families"]["qwen_vs_gemini"]["role"] == "exploratory"
     assert set(result["comparisons"]) == {
-        "SASRec_GRAPH_QWEN-SASRec_ID",
-        "SASRec_GRAPH_GEMINI-SASRec_ID",
-        "SASRec_DESC-SASRec_ID",
+        "SASRec_GRAPH_QWEN-SASRec_METADATA",
+        "SASRec_GRAPH_GEMINI-SASRec_METADATA",
+        "SASRec_DESC-SASRec_METADATA",
         "SASRec_GRAPH_QWEN-SASRec_DESC",
         "SASRec_GRAPH_GEMINI-SASRec_DESC",
         "SASRec_GRAPH_GEMINI-SASRec_GRAPH_QWEN",
     }
-    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_ID"]["decision"] == "superior"
-    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"][
-        "decision"
-    ] == "non_inferior"
-    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"][
-        "non_inferior"
-    ] is True
-    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"][
-        "interval_type"
-    ] == "one_sided_lower"
+    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_METADATA"]["decision"] == "superior"
+    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"]["decision"] == "non_inferior"
+    assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"]["non_inferior"] is True
+    assert (
+        result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"]["interval_type"] == "one_sided_lower"
+    )
     assert result["comparisons"]["SASRec_GRAPH_QWEN-SASRec_DESC"]["ci_high"] is None
-    coverage_diagnostic = result["diagnostics"]["SASRec_ID"]["top20_coverage"]
+    coverage_diagnostic = result["diagnostics"]["SASRec_METADATA"]["top20_coverage"]
     assert coverage_diagnostic["by_seed"] == {"42": 1.0, "43": 1.0, "44": 1.0}
     assert coverage_diagnostic["mean"] == 1.0
     assert coverage_diagnostic["range"] == {"min": 1.0, "max": 1.0}
@@ -308,9 +343,7 @@ def test_scene_failures_are_counted_and_coverage_thresholds_fail(tmp_path) -> No
             [],
         )
         write_jsonl(
-            run_root
-            / "extraction/graph/gemini/scenes/failures"
-            / f"{content_id}.jsonl",
+            run_root / "extraction/graph/gemini/scenes/failures" / f"{content_id}.jsonl",
             [{"scene_idx": 0, "failure_kind": "generation"}],
         )
 
@@ -359,10 +392,32 @@ def test_diagnosis_reloads_metrics_on_every_call(tmp_path) -> None:
     assert second["artifact_integrity"]["recommendation_grid"]["missing_cell_count"] == 1
 
 
+def test_metadata_titles_and_embeddings_are_revalidated_from_files(tmp_path) -> None:
+    config, runtime, _, _ = _valid_run(tmp_path)
+    run_root = tmp_path / "run"
+    title_path = run_root / "data/cohort/metadata_titles.jsonl"
+    titles = read_jsonl(title_path)
+    titles[0], titles[1] = titles[1], titles[0]
+    write_jsonl(title_path, titles)
+    metadata_path = run_root / "validation/representations/metadata_embeddings.npz"
+    values = np.load(metadata_path)["values"]
+    values[0, 0] = np.nan
+    np.savez_compressed(metadata_path, values=values)
+
+    result = diagnose_recommendations(config, runtime, DECISION_CONFIG)
+
+    assert result["runtime_decision"]["status"] == "fail"
+    assert result["runtime_decision"]["checks"]["metadata_titles_valid"] is False
+    assert result["runtime_decision"]["checks"]["representations_valid"] is False
+    codes = {error["code"] for error in result["runtime_decision"]["errors"]}
+    assert {"invalid_metadata_titles", "invalid_representations"} <= codes
+    representations = result["artifact_integrity"]["representations"]
+    assert representations["expected_shape"] == [5, 1024]
+    assert representations["branches"]["metadata"]["finite"] is False
+
+
 @pytest.mark.parametrize("missing_file", [False, True])
-def test_missing_or_partial_training_history_fails_runtime(
-    tmp_path, missing_file
-) -> None:
+def test_missing_or_partial_training_history_fails_runtime(tmp_path, missing_file) -> None:
     config, runtime, _, _ = _valid_run(tmp_path)
     path = tmp_path / "run/validation/recommendations/training_runs.jsonl"
     if missing_file:
@@ -383,8 +438,7 @@ def test_missing_or_partial_training_history_fails_runtime(
 def test_empty_checkpoint_fails_minimum_checkpoint_contract(tmp_path) -> None:
     config, runtime, _, _ = _valid_run(tmp_path)
     checkpoint = (
-        tmp_path
-        / "run/validation/recommendations/checkpoints/seed_42/sasrec_id/sasrec.pt"
+        tmp_path / "run/validation/recommendations/checkpoints/seed_42/sasrec_metadata/sasrec.pt"
     )
     checkpoint.write_bytes(b"")
 
@@ -399,7 +453,7 @@ def test_training_history_validates_best_value_and_canonical_checkpoint(tmp_path
     config, runtime, _, _ = _valid_run(tmp_path)
     path = tmp_path / "run/validation/recommendations/training_runs.jsonl"
     rows = read_jsonl(path)
-    rows[0]["best_validation"]["value"] = -1.0
+    rows[0]["selection"]["best_validation"]["value"] = -1.0
     rows[1]["checkpoint"] = str(tmp_path / "unrelated.pt")
     write_jsonl(path, rows)
 
@@ -409,6 +463,20 @@ def test_training_history_validates_best_value_and_canonical_checkpoint(tmp_path
     issues = result["artifact_integrity"]["training_runs"]["row_issue_counts"]
     assert issues["invalid_best_validation"] == 1
     assert issues["checkpoint_path_mismatch"] == 1
+
+
+def test_training_history_rejects_refit_epoch_mismatch(tmp_path) -> None:
+    config, runtime, _, _ = _valid_run(tmp_path)
+    path = tmp_path / "run/validation/recommendations/training_runs.jsonl"
+    rows = read_jsonl(path)
+    rows[0]["refit"]["epochs_completed"] = 2
+    write_jsonl(path, rows)
+
+    result = diagnose_recommendations(config, runtime, DECISION_CONFIG)
+
+    assert result["runtime_decision"]["status"] == "fail"
+    issues = result["artifact_integrity"]["training_runs"]["row_issue_counts"]
+    assert issues["invalid_refit_history"] == 1
 
 
 def test_invalid_success_scene_schemas_fail_runtime_and_success_coverage(
@@ -445,12 +513,11 @@ def test_invalid_success_scene_schemas_fail_runtime_and_success_coverage(
     assert result["runtime_decision"]["status"] == "fail"
     assert result["runtime_decision"]["checks"]["scene_outcomes_complete"] is False
     assert result["scene_coverage"]["arms"]["graph_qwen"]["success_scene_count"] == 4
-    assert result["scene_coverage"]["arms"]["graph_qwen"]["issue_counts"][
-        "invalid_graph"
-    ] == 1
-    assert result["scene_coverage"]["arms"]["desc"]["issue_counts"][
-        "description_content_id_mismatch"
-    ] == 1
+    assert result["scene_coverage"]["arms"]["graph_qwen"]["issue_counts"]["invalid_graph"] == 1
+    assert (
+        result["scene_coverage"]["arms"]["desc"]["issue_counts"]["description_content_id_mismatch"]
+        == 1
+    )
 
 
 def test_malformed_runtime_returns_structured_fail_document(tmp_path) -> None:
@@ -509,8 +576,7 @@ def test_unhashable_sequence_and_metric_targets_return_structured_fail(
     assert result["runtime_decision"]["checks"]["sequences_valid"] is False
     assert result["runtime_decision"]["checks"]["recommendation_rows_valid"] is False
     assert any(
-        error["code"] == "invalid_sequences"
-        for error in result["runtime_decision"]["errors"]
+        error["code"] == "invalid_sequences" for error in result["runtime_decision"]["errors"]
     )
 
 
@@ -535,9 +601,7 @@ def test_train_length_and_recomputed_frequency_bucket_are_enforced(tmp_path) -> 
     )
     assert sequence_error["details"]["issue_counts"]["train_too_short"] == 1
     recommendation = result["artifact_integrity"]["recommendation_grid"]
-    assert recommendation["row_issue_counts"][
-        "target_frequency_bucket_mismatch"
-    ] >= 1
+    assert recommendation["row_issue_counts"]["target_frequency_bucket_mismatch"] >= 1
 
 
 def test_all_statistical_failures_do_not_fail_runtime_artifact_contract(
@@ -567,13 +631,13 @@ def test_all_statistical_failures_do_not_fail_runtime_artifact_contract(
     assert result["statistical_analysis"]["status"] == "not_computed"
     assert result["statistical_analysis"]["computed_comparison_count"] == 0
     assert len(result["statistical_analysis"]["errors"]) == 6
-    assert {
-        error["code"] for error in result["statistical_analysis"]["errors"]
-    } == {"comparison_computation_failed"}
+    assert {error["code"] for error in result["statistical_analysis"]["errors"]} == {
+        "comparison_computation_failed"
+    }
     assert result["comparisons"] == {}
 
 
-def test_relative_failures_preserve_id_family_results(tmp_path, monkeypatch) -> None:
+def test_relative_failures_preserve_metadata_family_results(tmp_path, monkeypatch) -> None:
     config, runtime, _, _ = _valid_run(tmp_path)
 
     def reject_relative_comparison(*args, **kwargs):
@@ -592,9 +656,9 @@ def test_relative_failures_preserve_id_family_results(tmp_path, monkeypatch) -> 
     assert result["statistical_analysis"]["computed_comparison_count"] == 3
     assert len(result["statistical_analysis"]["errors"]) == 3
     assert set(result["comparisons"]) == {
-        "SASRec_GRAPH_QWEN-SASRec_ID",
-        "SASRec_GRAPH_GEMINI-SASRec_ID",
-        "SASRec_DESC-SASRec_ID",
+        "SASRec_GRAPH_QWEN-SASRec_METADATA",
+        "SASRec_GRAPH_GEMINI-SASRec_METADATA",
+        "SASRec_DESC-SASRec_METADATA",
     }
 
 
@@ -624,7 +688,4 @@ def test_sparse_control_suppresses_non_inferiority_claims(tmp_path, monkeypatch)
         "SASRec_GRAPH_GEMINI-SASRec_DESC",
     ):
         assert result["comparisons"][comparison]["non_inferior"] is None
-        assert (
-            result["comparisons"][comparison]["decision"]
-            == "not_evaluable_sparse_control"
-        )
+        assert result["comparisons"][comparison]["decision"] == "not_evaluable_sparse_control"

@@ -30,6 +30,7 @@ def context(tmp_path: Path) -> RunContext:
     videos = data / "videos"
     videos.mkdir(parents=True)
     (data / "pairs.tsv").write_text("fixture\n", encoding="utf-8")
+    (data / "titles.csv").write_text("1,Fixture title\n", encoding="utf-8")
     models = tmp_path / "models"
     for name in ("qwen", "bge"):
         (models / name).mkdir(parents=True)
@@ -40,6 +41,7 @@ def context(tmp_path: Path) -> RunContext:
     config["data"] = {
         "videos_dir": str(videos),
         "pairs_tsv": str(data / "pairs.tsv"),
+        "titles_csv": str(data / "titles.csv"),
     }
     config["models"] = {
         "qwen": str(models / "qwen"),
@@ -56,9 +58,7 @@ def context(tmp_path: Path) -> RunContext:
     }
     for arm in ("graph", "description"):
         for key in ("scene_prompt", "summary_prompt"):
-            config["extraction"][arm][key] = str(
-                ROOT / config["extraction"][arm][key]
-            )
+            config["extraction"][arm][key] = str(ROOT / config["extraction"][arm][key])
     (config_dir / "pipeline.yaml").write_text(
         yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
     )
@@ -66,22 +66,25 @@ def context(tmp_path: Path) -> RunContext:
 
 
 def test_config_contract_remains_fixed(context: RunContext) -> None:
-    assert context.config["schema_version"] == "viewing-context-config/v1"
-    assert set(context.config["data"]) == {"videos_dir", "pairs_tsv"}
+    assert context.config["schema_version"] == "viewing-context-config/v2"
+    assert set(context.config["data"]) == {"videos_dir", "pairs_tsv", "titles_csv"}
+    assert context.config["protocol"]["arms"] == [
+        "metadata",
+        "graph_qwen",
+        "graph_gemini",
+        "description",
+    ]
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
     assert context.config["extraction"]["greedy_decoding"] is True
-    assert context.config["extraction"]["summary_repetition_penalty"] == 1.0
+    assert context.config["extraction"]["summary_repetition_penalty"] == 1.05
     assert context.config["extraction"]["summary_sampling"] == {
         "temperature": 0.2,
         "top_p": 0.8,
         "top_k": 20,
     }
     assert context.config["extraction"]["graph"]["summary_max_new_tokens"] == 512
-    assert (
-        context.config["extraction"]["description"]["summary_max_new_tokens"]
-        == 512
-    )
+    assert context.config["extraction"]["description"]["summary_max_new_tokens"] == 512
     assert set(context.config["validation"]["encoder"]) == {
         "embedding_dim",
         "max_length",
@@ -95,15 +98,47 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
         RunContext.load("other", root=context.root)
 
 
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (lambda value: value.update(schema_version="viewing-context-config/v1"), "schema_version"),
+        (
+            lambda value: value["protocol"].update(
+                arms=["id", "graph_qwen", "graph_gemini", "description"]
+            ),
+            "protocol.arms",
+        ),
+        (lambda value: value["protocol"].update(legacy=True), "protocol must contain exactly"),
+        (lambda value: value["data"].pop("titles_csv"), "data must contain exactly"),
+        (
+            lambda value: value["validation"]["model"].update(embedding_dim=8),
+            "invalid validation config",
+        ),
+    ],
+)
+def test_pipeline_config_rejects_legacy_and_non_exact_v2_contract(
+    context: RunContext,
+    change,
+    message: str,
+) -> None:
+    path = context.root / "config/pipeline.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    change(value)
+    path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=message):
+        RunContext.load("legacy", root=context.root)
+
+
 def test_greedy_decoding_switches_summary_generation_mode(
     context: RunContext,
 ) -> None:
     assert extraction_steps._summary_generation_settings(context) == {
-        "repetition_penalty": 1.0,
+        "repetition_penalty": 1.05,
     }
     context.config["extraction"]["greedy_decoding"] = False
     assert extraction_steps._summary_generation_settings(context) == {
-        "repetition_penalty": 1.0,
+        "repetition_penalty": 1.05,
         "do_sample": True,
         "temperature": 0.2,
         "top_p": 0.8,
@@ -125,10 +160,9 @@ def test_summary_prompts_require_bounded_single_line_values(
 
     assert "Output exactly seven physical lines in the required order." in prompt
     assert "Every non-empty value must be one natural, complete English sentence." in prompt
-    assert "long comma-separated inventories" in prompt
     assert "not an exhaustive inventory" in prompt
     assert "Never create combinations by pairing every person" in prompt
-    assert "Use at most 25 English words per field." in prompt
+    assert "Use at most 20 English words per field." in prompt
     assert "Stop immediately after the semantic_topics line." in prompt
     for name in SUMMARY_SECTIONS:
         assert f"{name}: <one complete sentence or empty>" in prompt
@@ -337,18 +371,12 @@ def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> Non
 def test_failure_directories_are_nested_under_their_artifact_stage(
     context: RunContext,
 ) -> None:
-    assert context.graph_failure_dir("qwen") == (
-        context.graph_scene_dir("qwen") / "failures"
-    )
+    assert context.graph_failure_dir("qwen") == (context.graph_scene_dir("qwen") / "failures")
     assert context.graph_summary_failure_dir("gemini") == (
         context.graph_summary_dir("gemini") / "failures"
     )
-    assert context.description_failure_dir == (
-        context.description_scene_dir / "failures"
-    )
-    assert context.description_summary_failure_dir == (
-        context.description_summary_dir / "failures"
-    )
+    assert context.description_failure_dir == (context.description_scene_dir / "failures")
+    assert context.description_summary_failure_dir == (context.description_summary_dir / "failures")
 
 
 def test_graph_scene_failure_is_recorded_and_stage_continues(
@@ -704,11 +732,12 @@ def test_graph_summary_failure_is_saved_once_and_manual_resume_removes_it(
     }
     output_path = context.graph_summary_dir("qwen") / "c1.json"
     failure_path = context.graph_summary_failure_dir("qwen") / "c1.jsonl"
+
     @contextmanager
     def invalid_generator(**_kwargs):
         def generate(tasks, callback):
             assert tasks[0].do_sample is False
-            assert tasks[0].repetition_penalty == 1.0
+            assert tasks[0].repetition_penalty == 1.05
             assert tasks[0].max_new_tokens == 512
             callback(tasks[0].task_id, "not labeled text")
             return {}
@@ -873,6 +902,10 @@ def test_embedding_uses_fixed_files_and_no_manifest(
     context.initialize()
     content_id = "c1"
     write_jsonl(context.cohort_dir / "catalog.jsonl", [{"content_id": content_id, "item_id": "1"}])
+    write_jsonl(
+        context.cohort_dir / "metadata_titles.jsonl",
+        [{"content_id": content_id, "item_id": "1", "title": "Fixture title"}],
+    )
     for source in ("qwen", "gemini"):
         write_json(
             context.graph_summary_dir(source) / f"{content_id}.json",
@@ -909,23 +942,22 @@ def test_embedding_uses_fixed_files_and_no_manifest(
     validation_steps.embed_representations(context)
 
     assert (context.representations_dir / "item_index.json").is_file()
-    for branch in ("graph_qwen", "graph_gemini", "desc"):
+    for branch in ("metadata", "graph_qwen", "graph_gemini", "desc"):
         assert (context.representations_dir / f"{branch}_embeddings.npz").is_file()
     assert len(loads) == 1
-    assert len(encoded_texts) == 3
+    assert len(encoded_texts) == 4
+    assert encoded_texts[0] == ["Fixture title"]
 
     (context.representations_dir / "desc_embeddings.npz").unlink()
     validation_steps.embed_representations(context)
 
     assert len(loads) == 2
-    assert len(encoded_texts) == 4
+    assert len(encoded_texts) == 5
     assert encoded_texts[-1] == ["description"]
 
     stable = {
-        branch: np.load(
-            context.representations_dir / f"{branch}_embeddings.npz"
-        )["values"].copy()
-        for branch in ("graph_qwen", "graph_gemini", "desc")
+        branch: np.load(context.representations_dir / f"{branch}_embeddings.npz")["values"].copy()
+        for branch in ("metadata", "graph_qwen", "graph_gemini", "desc")
     }
 
     class FailingEncoder:
@@ -942,9 +974,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
     with pytest.raises(RuntimeError, match="second-branch failure"):
         validation_steps.embed_representations(context, force=True)
     for branch, expected in stable.items():
-        actual = np.load(
-            context.representations_dir / f"{branch}_embeddings.npz"
-        )["values"]
+        actual = np.load(context.representations_dir / f"{branch}_embeddings.npz")["values"]
         assert np.array_equal(actual, expected)
     assert not (context.representations_dir / "manifest.json").exists()
 
@@ -952,8 +982,14 @@ def test_embedding_uses_fixed_files_and_no_manifest(
 def test_missing_summary_error_names_the_actual_path(context: RunContext) -> None:
     context.initialize()
     write_jsonl(context.cohort_dir / "catalog.jsonl", [{"content_id": "c1", "item_id": "1"}])
+    write_jsonl(
+        context.cohort_dir / "metadata_titles.jsonl",
+        [{"content_id": "c1", "item_id": "1", "title": "Fixture title"}],
+    )
     expected = context.graph_summary_dir("qwen")
-    with pytest.raises(validation_steps.ValidationStepError, match="missing graph_qwen summary directory") as raised:
+    with pytest.raises(
+        validation_steps.ValidationStepError, match="missing graph_qwen summary directory"
+    ) as raised:
         validation_steps.embed_representations(context)
     assert str(expected) in str(raised.value)
 
@@ -965,7 +1001,7 @@ def test_diagnosis_recomputes_runtime_data_and_overwrites_stale_pass(
     write_json(
         context.diagnosis_path,
         {
-            "schema_version": "diagnosis/v2",
+            "schema_version": "diagnosis/v3",
             "runtime_decision": {"status": "pass", "checks": {}, "errors": []},
         },
     )
@@ -974,6 +1010,6 @@ def test_diagnosis_recomputes_runtime_data_and_overwrites_stale_pass(
         validation_steps.run_diagnosis(context)
 
     diagnosis = json.loads(context.diagnosis_path.read_text(encoding="utf-8"))
-    assert diagnosis["schema_version"] == "diagnosis/v2"
+    assert diagnosis["schema_version"] == "diagnosis/v3"
     assert diagnosis["runtime_decision"]["status"] == "fail"
     assert "report_ready" not in diagnosis

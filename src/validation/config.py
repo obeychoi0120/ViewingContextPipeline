@@ -12,6 +12,7 @@ class StrictModel(BaseModel):
 class DatasetConfig(StrictModel):
     pairs_tsv: Path
     videos_dir: Path
+    titles_csv: Path
 
 
 class CohortConfig(StrictModel):
@@ -23,7 +24,11 @@ class CohortConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_cohort(self) -> "CohortConfig":
-        if not self.history_strata or self.history_strata != sorted(set(self.history_strata)) or self.history_strata[0] != 5:
+        if (
+            not self.history_strata
+            or self.history_strata != sorted(set(self.history_strata))
+            or self.history_strata[0] != 5
+        ):
             raise ValueError("history_strata must be sorted, unique, and start at 5")
         return self
 
@@ -37,14 +42,15 @@ class EncoderConfig(StrictModel):
 
 class ModelConfig(StrictModel):
     max_sequence_length: Literal[10]
-    embedding_dim: int = Field(gt=0)
+    embedding_dim: Literal[512]
     num_blocks: Literal[2]
     num_heads: Literal[2]
     dropout: float = Field(ge=0, lt=1)
-    batch_size: int = Field(gt=0)
+    batch_size: Literal[256]
     max_epochs: int = Field(gt=0)
     patience: int = Field(gt=0)
     learning_rate: float = Field(gt=0)
+    popularity_power: Literal[1.0]
     seeds: list[int]
 
     @model_validator(mode="after")
@@ -74,7 +80,7 @@ class EvaluationConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v1"]
+    schema_version: Literal["validation-config/v2"]
     run_id: str
     dataset: DatasetConfig
     cohort: CohortConfig

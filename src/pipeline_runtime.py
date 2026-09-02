@@ -11,7 +11,7 @@ from artifact_io import atomic_write_json, atomic_write_jsonl
 
 
 CONFIG_PATH = Path("config/pipeline.yaml")
-CONFIG_SCHEMA = "viewing-context-config/v1"
+CONFIG_SCHEMA = "viewing-context-config/v2"
 
 
 class ConfigError(RuntimeError):
@@ -81,7 +81,12 @@ class RunContext:
     def load(cls, run_id: str, *, root: Path | None = None) -> "RunContext":
         repo_root = (root or Path(__file__).resolve().parents[1]).resolve()
         selected = str(run_id or "").strip()
-        if not selected or selected in {".", ".."} or Path(selected).name != selected or "\\" in selected:
+        if (
+            not selected
+            or selected in {".", ".."}
+            or Path(selected).name != selected
+            or "\\" in selected
+        ):
             raise ConfigError("run_id must be a single non-empty directory name")
         config = _load_yaml(repo_root / CONFIG_PATH)
         _validate_config(config)
@@ -183,8 +188,10 @@ def _validate_config(value: dict[str, Any]) -> None:
         "graph_extractors": ["qwen", "gemini"],
         "graph_summarizer": "qwen",
         "description_model": "qwen",
-        "arms": ["graph_qwen", "graph_gemini", "description"],
+        "arms": ["metadata", "graph_qwen", "graph_gemini", "description"],
     }
+    if set(protocol) != set(expected):
+        raise ConfigError(f"protocol must contain exactly {sorted(expected)}")
     for key, expected_value in expected.items():
         if protocol.get(key) != expected_value:
             raise ConfigError(f"protocol.{key} must be {expected_value!r}")
@@ -209,9 +216,7 @@ def _validate_config(value: dict[str, Any]) -> None:
         or isinstance(repetition_penalty, bool)
         or not 1 <= float(repetition_penalty) <= 2
     ):
-        raise ConfigError(
-            "extraction.summary_repetition_penalty must be in [1, 2]"
-        )
+        raise ConfigError("extraction.summary_repetition_penalty must be in [1, 2]")
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution"}:
         raise ConfigError("extraction.visual_evidence must contain image_resolution")
@@ -229,9 +234,7 @@ def _validate_config(value: dict[str, Any]) -> None:
         )
     summary_sampling = _require_mapping(extraction, "summary_sampling")
     if set(summary_sampling) != {"temperature", "top_p", "top_k"}:
-        raise ConfigError(
-            "extraction.summary_sampling must contain temperature, top_p, and top_k"
-        )
+        raise ConfigError("extraction.summary_sampling must contain temperature, top_p, and top_k")
     sampling_temperature = summary_sampling.get("temperature")
     if (
         not isinstance(sampling_temperature, (int, float))
@@ -265,16 +268,10 @@ def _validate_config(value: dict[str, Any]) -> None:
         settings = _require_mapping(extraction, arm)
         expected = graph_keys if arm == "graph" else description_keys
         if set(settings) != expected:
-            raise ConfigError(
-                f"extraction.{arm} must contain exactly {sorted(expected)}"
-            )
+            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected)}")
         for key in ("scene_max_new_tokens", "summary_max_new_tokens"):
             setting = settings.get(key)
-            if (
-                not isinstance(setting, int)
-                or isinstance(setting, bool)
-                or setting <= 0
-            ):
+            if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
                 raise ConfigError(f"extraction.{arm}.{key} must be a positive integer")
         for key in ("summary_prompt", "scene_prompt"):
             if key in settings and (
@@ -287,8 +284,8 @@ def _validate_config(value: dict[str, Any]) -> None:
     _require_mapping(value, "validation")
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
-    if set(data) != {"videos_dir", "pairs_tsv"}:
-        raise ConfigError("data must contain exactly videos_dir and pairs_tsv")
+    if set(data) != {"videos_dir", "pairs_tsv", "titles_csv"}:
+        raise ConfigError("data must contain exactly videos_dir, pairs_tsv, and titles_csv")
     if set(models) != {"qwen", "bge", "gemini"}:
         raise ConfigError("models must contain exactly qwen, bge, and gemini")
     gemini = _require_mapping(models, "gemini")
@@ -321,9 +318,7 @@ def _validate_config(value: dict[str, Any]) -> None:
     ):
         raise ConfigError("models.gemini.max_output_tokens must be a positive integer")
     if gemini.get("thinking_level") not in {"low", "medium", "high"}:
-        raise ConfigError(
-            "models.gemini.thinking_level must be low, medium, or high"
-        )
+        raise ConfigError("models.gemini.thinking_level must be low, medium, or high")
     media_resolutions = {
         "MEDIA_RESOLUTION_UNSPECIFIED",
         "MEDIA_RESOLUTION_LOW",
@@ -332,6 +327,31 @@ def _validate_config(value: dict[str, Any]) -> None:
     }
     if gemini.get("media_resolution") not in media_resolutions:
         raise ConfigError(
-            "models.gemini.media_resolution must be one of "
-            f"{sorted(media_resolutions)}"
+            f"models.gemini.media_resolution must be one of {sorted(media_resolutions)}"
         )
+    validation = _require_mapping(value, "validation")
+    expected_validation_keys = {"cohort", "encoder", "model", "evaluation"}
+    if set(validation) != expected_validation_keys:
+        raise ConfigError(f"validation must contain exactly {sorted(expected_validation_keys)}")
+    try:
+        from pydantic import ValidationError
+
+        from validation.config import ValidationConfig
+
+        ValidationConfig.model_validate(
+            {
+                "schema_version": "validation-config/v2",
+                "run_id": "config-validation",
+                "dataset": data,
+                "cohort": validation.get("cohort"),
+                "encoder": {
+                    **_require_mapping(validation, "encoder"),
+                    "model_path": models.get("bge"),
+                },
+                "model": validation.get("model"),
+                "evaluation": validation.get("evaluation"),
+                "output_dir": value.get("artifacts_root"),
+            }
+        )
+    except ValidationError as exc:
+        raise ConfigError(f"invalid validation config: {exc}") from exc

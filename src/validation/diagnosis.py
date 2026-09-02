@@ -7,11 +7,14 @@ from itertools import product
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .config import ValidationConfig
 from .diagnosis_statistics import multiple_comparison_policy, statistics
 from .io import read_jsonl
 from .metrics import metrics_from_rank
 from .recommendation_contracts import (
+    ARCHITECTURE_VERSION,
     RECOMMENDATION_ARMS,
     TRAINING_RUN_SCHEMA_VERSION,
     TRAINING_RUNS_FILENAME,
@@ -270,11 +273,7 @@ def _sequence_contract(
             else:
                 referenced.append(target)
         missing_items = sorted(
-            {
-                item
-                for item in referenced
-                if isinstance(item, str) and item not in item_content
-            }
+            {item for item in referenced if isinstance(item, str) and item not in item_content}
         )
         if missing_items:
             issues["sequence_item_outside_catalog"] += 1
@@ -318,13 +317,20 @@ def _eligibility_contract(
         return {}, False
     eligible_items = value.get("eligible_items")
     eligible_users = value.get("eligible_users")
+    title_coverage = value.get("metadata_title_coverage")
     valid = (
-        isinstance(eligible_items, int)
+        value.get("schema_version") == "microlens-cohort-eligibility/v2"
+        and isinstance(eligible_items, int)
         and not isinstance(eligible_items, bool)
         and isinstance(eligible_users, int)
         and not isinstance(eligible_users, bool)
         and eligible_items == catalog_size
         and eligible_users >= user_count
+        and isinstance(title_coverage, dict)
+        and title_coverage.get("schema_version") == "metadata-title/v1"
+        and title_coverage.get("catalog_item_count") == catalog_size
+        and title_coverage.get("covered_item_count") == catalog_size
+        and title_coverage.get("missing_item_count") == 0
     )
     if not valid:
         _error(
@@ -337,6 +343,120 @@ def _eligibility_contract(
             sequence_users=user_count,
         )
     return value, valid
+
+
+def _metadata_title_contract(
+    rows: list[Any],
+    loaded: bool,
+    catalog_rows: list[Any],
+    errors: list[dict[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    issues: Counter[str] = Counter()
+    examples: list[dict[str, Any]] = []
+    for index, (row, catalog_row) in enumerate(zip(rows, catalog_rows, strict=False)):
+        if not isinstance(row, dict) or set(row) != {"item_id", "content_id", "title"}:
+            _row_issue(issues, examples, "invalid_metadata_title_fields", index)
+            continue
+        if not isinstance(catalog_row, dict):
+            _row_issue(issues, examples, "invalid_catalog_reference", index)
+            continue
+        if row.get("item_id") != catalog_row.get("item_id"):
+            _row_issue(issues, examples, "metadata_item_order_mismatch", index)
+        if row.get("content_id") != catalog_row.get("content_id"):
+            _row_issue(issues, examples, "metadata_content_order_mismatch", index)
+        title = row.get("title")
+        if not isinstance(title, str) or not title.strip():
+            _row_issue(issues, examples, "invalid_metadata_title", index)
+    if len(rows) != len(catalog_rows):
+        issues["metadata_title_count_mismatch"] += 1
+        examples.append(
+            {
+                "reason": "metadata_title_count_mismatch",
+                "expected": len(catalog_rows),
+                "observed": len(rows),
+            }
+        )
+    valid = loaded and bool(rows) and not issues and len(rows) == len(catalog_rows)
+    if issues or (loaded and not rows):
+        if loaded and not rows:
+            issues["empty_metadata_titles"] += 1
+        _error(
+            errors,
+            "invalid_metadata_titles",
+            "metadata titles must exactly cover the catalog in catalog order",
+            issue_counts=dict(sorted(issues.items())),
+            examples=_bounded_examples(examples),
+        )
+    return {
+        "schema_version": "metadata-title/v1",
+        "expected_count": len(catalog_rows),
+        "observed_count": len(rows),
+        "issue_counts": dict(sorted(issues.items())),
+    }, valid
+
+
+def _representation_contract(
+    run_root: Path,
+    *,
+    item_ids: list[str],
+    embedding_dim: int,
+    errors: list[dict[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    directory = run_root / "validation" / "representations"
+    expected_index = {item_id: index for index, item_id in enumerate(item_ids)}
+    item_index, index_loaded = _read_json(
+        directory / "item_index.json", "representation item index", errors
+    )
+    issues: Counter[str] = Counter()
+    examples: list[dict[str, Any]] = []
+    if index_loaded and item_index != expected_index:
+        issues["item_index_mismatch"] += 1
+        examples.append({"reason": "item_index_mismatch"})
+
+    branches: dict[str, Any] = {}
+    for branch in RECOMMENDATION_ARMS.values():
+        path = directory / f"{branch}_embeddings.npz"
+        branch_document: dict[str, Any] = {"path": str(path)}
+        try:
+            with np.load(path, allow_pickle=False) as archive:
+                if set(archive.files) != {"values"}:
+                    raise ValueError("NPZ must contain exactly the values array")
+                values = archive["values"]
+            branch_document["shape"] = list(values.shape)
+            branch_document["finite"] = bool(np.isfinite(values).all())
+            if values.shape != (len(item_ids), embedding_dim):
+                issues[f"{branch}_shape_mismatch"] += 1
+                examples.append(
+                    {
+                        "reason": f"{branch}_shape_mismatch",
+                        "expected": [len(item_ids), embedding_dim],
+                        "observed": list(values.shape),
+                    }
+                )
+            if not branch_document["finite"]:
+                issues[f"{branch}_non_finite"] += 1
+                examples.append({"reason": f"{branch}_non_finite"})
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            issues[f"{branch}_unreadable"] += 1
+            branch_document["error"] = str(exc)
+            examples.append({"reason": f"{branch}_unreadable", "error": str(exc)})
+        branches[branch] = branch_document
+
+    valid = index_loaded and item_index == expected_index and not issues
+    if issues:
+        _error(
+            errors,
+            "invalid_representations",
+            "all four embedding artifacts must match the catalog order and shape",
+            issue_counts=dict(sorted(issues.items())),
+            examples=_bounded_examples(examples),
+        )
+    return {
+        "item_index_path": str(directory / "item_index.json"),
+        "expected_shape": [len(item_ids), embedding_dim],
+        "branches": branches,
+        "issue_counts": dict(sorted(issues.items())),
+    }, valid
 
 
 def _row_issue(
@@ -377,9 +497,7 @@ def _recommendation_contract(
         if isinstance(item, str)
     )
     nonzero_frequency = sorted(train_frequency.values())
-    median_frequency = (
-        nonzero_frequency[len(nonzero_frequency) // 2] if nonzero_frequency else 0
-    )
+    median_frequency = nonzero_frequency[len(nonzero_frequency) // 2] if nonzero_frequency else 0
     expected_buckets = {
         user_id: (
             "cold"
@@ -472,9 +590,7 @@ def _recommendation_contract(
 
         rank = row.get("rank")
         rank_valid = (
-            isinstance(rank, int)
-            and not isinstance(rank, bool)
-            and 1 <= rank <= catalog_size
+            isinstance(rank, int) and not isinstance(rank, bool) and 1 <= rank <= catalog_size
         )
         if not rank_valid:
             _row_issue(
@@ -637,11 +753,7 @@ def _checkpoint_contract(
     errors: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], bool]:
     paths = [
-        recommendations_dir
-        / "checkpoints"
-        / f"seed_{seed}"
-        / arm.lower()
-        / "sasrec.pt"
+        recommendations_dir / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
         for seed in seeds
         for arm in RECOMMENDATION_ARMS
     ]
@@ -687,13 +799,7 @@ def _canonical_checkpoint_path(
     seed: int,
     arm: str,
 ) -> Path:
-    return (
-        recommendations_dir
-        / "checkpoints"
-        / f"seed_{seed}"
-        / arm.lower()
-        / "sasrec.pt"
-    )
+    return recommendations_dir / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
 
 
 def _paths_match(value: Any, expected: Path) -> bool:
@@ -737,11 +843,34 @@ def _best_validation_is_consistent(value: Any, epochs: Any) -> bool:
     declared = float(best_value)
     return (
         best_epoch in epoch_values
-        and math.isclose(
-            epoch_values[best_epoch], declared, rel_tol=1e-9, abs_tol=1e-12
-        )
+        and math.isclose(epoch_values[best_epoch], declared, rel_tol=1e-9, abs_tol=1e-12)
         and math.isclose(max(epoch_values.values()), declared, rel_tol=1e-9, abs_tol=1e-12)
     )
+
+
+def _refit_history_is_consistent(value: Any, best_epoch: Any) -> bool:
+    if not isinstance(value, dict) or value.get("data") != "train+valid_target":
+        return False
+    epochs = value.get("epochs")
+    completed = value.get("epochs_completed")
+    if (
+        not isinstance(best_epoch, int)
+        or isinstance(best_epoch, bool)
+        or not isinstance(completed, int)
+        or isinstance(completed, bool)
+        or completed != best_epoch
+        or not isinstance(epochs, list)
+        or len(epochs) != best_epoch
+    ):
+        return False
+    for expected_epoch, row in enumerate(epochs, start=1):
+        if (
+            not isinstance(row, dict)
+            or row.get("epoch") != expected_epoch
+            or not _finite_number(row.get("loss"))
+        ):
+            return False
+    return True
 
 
 def _training_run_contract(
@@ -749,6 +878,7 @@ def _training_run_contract(
     *,
     run_id: Any,
     seeds: list[int],
+    catalog_size: int,
     errors: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], bool]:
     path = recommendations_dir / TRAINING_RUNS_FILENAME
@@ -767,11 +897,7 @@ def _training_run_contract(
             continue
         seed = row.get("seed")
         arm = row.get("arm")
-        if (
-            not isinstance(seed, int)
-            or isinstance(seed, bool)
-            or not isinstance(arm, str)
-        ):
+        if not isinstance(seed, int) or isinstance(seed, bool) or not isinstance(arm, str):
             malformed += 1
             issues["invalid_cell_key"] += 1
             examples.append({"row_index": index, "reason": "invalid_cell_key"})
@@ -781,15 +907,39 @@ def _training_run_contract(
         if row.get("schema_version") != TRAINING_RUN_SCHEMA_VERSION:
             issues["schema_version_mismatch"] += 1
             examples.append({"row_index": index, "cell": list(key)})
+        if row.get("architecture_version") != ARCHITECTURE_VERSION:
+            issues["architecture_version_mismatch"] += 1
+            examples.append({"row_index": index, "cell": list(key)})
         if row.get("run_id") != run_id:
             issues["run_id_mismatch"] += 1
             examples.append({"row_index": index, "cell": list(key)})
-        epochs = row.get("epochs")
-        if not isinstance(epochs, list) or not epochs:
+        if row.get("branch") != RECOMMENDATION_ARMS.get(arm):
+            issues["branch_mismatch"] += 1
+            examples.append({"row_index": index, "cell": list(key)})
+        if row.get("candidate_count") != catalog_size:
+            issues["candidate_count_mismatch"] += 1
+            examples.append({"row_index": index, "cell": list(key)})
+        selection = row.get("selection")
+        if not isinstance(selection, dict):
             issues["missing_epoch_history"] += 1
             examples.append({"row_index": index, "cell": list(key)})
-        if not _best_validation_is_consistent(row.get("best_validation"), epochs):
+            selection = {}
+        epochs = selection.get("epochs")
+        if (
+            not isinstance(epochs, list)
+            or not epochs
+            or selection.get("epochs_completed") != len(epochs)
+            or not isinstance(selection.get("early_stopped"), bool)
+        ):
+            issues["missing_epoch_history"] += 1
+            examples.append({"row_index": index, "cell": list(key)})
+        best_validation = selection.get("best_validation")
+        if not _best_validation_is_consistent(best_validation, epochs):
             issues["invalid_best_validation"] += 1
+            examples.append({"row_index": index, "cell": list(key)})
+        best_epoch = best_validation.get("epoch") if isinstance(best_validation, dict) else None
+        if not _refit_history_is_consistent(row.get("refit"), best_epoch):
+            issues["invalid_refit_history"] += 1
             examples.append({"row_index": index, "cell": list(key)})
         canonical = _canonical_checkpoint_path(recommendations_dir, seed, arm)
         if not _paths_match(row.get("checkpoint"), canonical):
@@ -1027,11 +1177,7 @@ def _scene_arm_contract(
                     )
                     continue
                 scene_idx = row.get("scene_idx")
-                if (
-                    not isinstance(scene_idx, int)
-                    or isinstance(scene_idx, bool)
-                    or scene_idx < 0
-                ):
+                if not isinstance(scene_idx, int) or isinstance(scene_idx, bool) or scene_idx < 0:
                     issues[f"invalid_{outcome}_scene_idx"] += 1
                     examples.append(
                         {"content_id": content_id, "outcome": outcome, "row_index": row_index}
@@ -1221,6 +1367,21 @@ def diagnose_recommendations(
         user_count=len(sequences),
         errors=errors,
     )
+    metadata_title_rows, metadata_titles_loaded = _read_jsonl(
+        cohort_dir / "metadata_titles.jsonl", "metadata titles", errors
+    )
+    metadata_title_summary, metadata_titles_valid = _metadata_title_contract(
+        metadata_title_rows,
+        metadata_titles_loaded,
+        catalog_rows,
+        errors,
+    )
+    representation_summary, representations_valid = _representation_contract(
+        run_root,
+        item_ids=list(item_content),
+        embedding_dim=config.encoder.embedding_dim,
+        errors=errors,
+    )
     configured_user_count_matches = len(sequences) == config.cohort.user_count
     if not configured_user_count_matches:
         _error(
@@ -1252,12 +1413,11 @@ def diagnose_recommendations(
         recommendations_dir,
         run_id=runtime_object.get("run_id"),
         seeds=list(config.model.seeds),
+        catalog_size=len(item_content),
         errors=errors,
     )
 
-    expected_scenes, scene_denominator_valid = _expected_scenes(
-        run_root, content_ids, errors
-    )
+    expected_scenes, scene_denominator_valid = _expected_scenes(run_root, content_ids, errors)
     scene_documents: dict[str, Any] = {}
     successful_scenes: dict[str, set[tuple[str, int]]] = {}
     scene_arm_valid: dict[str, bool] = {}
@@ -1269,17 +1429,12 @@ def diagnose_recommendations(
         successful_scenes[arm] = success
         scene_arm_valid[arm] = valid
 
-    coverages = [
-        float(document["success_coverage"]) for document in scene_documents.values()
-    ]
+    coverages = [float(document["success_coverage"]) for document in scene_documents.values()]
     observed_gap = max(coverages) - min(coverages) if coverages else 1.0
     minimum_scene_coverage_met = (
         decision_config_valid
         and scene_denominator_valid
-        and all(
-            value >= float(settings["min_scene_coverage"])
-            for value in coverages
-        )
+        and all(value >= float(settings["min_scene_coverage"]) for value in coverages)
     )
     coverage_gap_within_limit = (
         decision_config_valid
@@ -1302,13 +1457,9 @@ def diagnose_recommendations(
             maximum=settings.get("max_arm_coverage_gap"),
             observed=observed_gap,
         )
-    common_success = (
-        set.intersection(*successful_scenes.values()) if successful_scenes else set()
-    )
+    common_success = set.intersection(*successful_scenes.values()) if successful_scenes else set()
     scene_outcomes_complete = (
-        runtime_paths_valid
-        and scene_denominator_valid
-        and all(scene_arm_valid.values())
+        runtime_paths_valid and scene_denominator_valid and all(scene_arm_valid.values())
     )
     scene_coverage = {
         "denominator_source": "fixed_30s timestamp artifacts",
@@ -1330,11 +1481,7 @@ def diagnose_recommendations(
     analysis_errors: list[dict[str, Any]] = []
     analysis_warnings: list[dict[str, Any]] = []
     statistics_inputs_valid = (
-        decision_config_valid
-        and catalog_valid
-        and sequences_valid
-        and grid_complete
-        and rows_valid
+        decision_config_valid and catalog_valid and sequences_valid and grid_complete and rows_valid
     )
     if statistics_inputs_valid:
         try:
@@ -1376,6 +1523,8 @@ def diagnose_recommendations(
         "catalog_valid": catalog_valid,
         "sequences_valid": sequences_valid,
         "eligibility_matches_artifacts": eligibility_valid,
+        "metadata_titles_valid": metadata_titles_valid,
+        "representations_valid": representations_valid,
         "configured_user_count_matches": configured_user_count_matches,
         "recommendation_grid_complete": grid_complete,
         "recommendation_rows_valid": rows_valid,
@@ -1387,7 +1536,7 @@ def diagnose_recommendations(
     }
     status = "pass" if all(checks.values()) else "fail"
     return {
-        "schema_version": "diagnosis/v2",
+        "schema_version": "diagnosis/v3",
         "run_id": runtime_object.get("run_id"),
         "modality": runtime_object.get("modality"),
         "runtime_decision": {
@@ -1401,6 +1550,8 @@ def diagnose_recommendations(
             "configured_user_count": config.cohort.user_count,
             "eligible_catalog_size": eligibility.get("eligible_items"),
             "eligible_user_count": eligibility.get("eligible_users"),
+            "metadata_titles": metadata_title_summary,
+            "representations": representation_summary,
             "seed_count": len(config.model.seeds),
             "arm_count": len(RECOMMENDATION_ARMS),
             "recommendation_grid": grid,
