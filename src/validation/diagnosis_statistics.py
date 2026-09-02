@@ -33,23 +33,23 @@ def multiple_comparison_policy(
     primary_metric: str,
 ) -> dict[str, Any]:
     alpha = settings.get("familywise_alpha")
-    id_alpha = bonferroni_alpha(alpha, 3) if valid else None
+    metadata_alpha = bonferroni_alpha(alpha, 3) if valid else None
     ni_alpha = bonferroni_alpha(alpha, 2) if valid else None
     return {
         "primary_metric": primary_metric,
         "familywise_alpha": alpha,
         "correction": settings.get("multiple_comparison_correction"),
         "families": {
-            "id_baseline_superiority": {
+            "metadata_baseline_superiority": {
                 "role": "confirmatory",
                 "interval_type": "two_sided",
                 "comparison_count": 3,
                 "comparisons": [
-                    "SASRec_GRAPH_QWEN-SASRec_ID",
-                    "SASRec_GRAPH_GEMINI-SASRec_ID",
-                    "SASRec_DESC-SASRec_ID",
+                    "SASRec_GRAPH_QWEN-SASRec_METADATA",
+                    "SASRec_GRAPH_GEMINI-SASRec_METADATA",
+                    "SASRec_DESC-SASRec_METADATA",
                 ],
-                "per_comparison_alpha": id_alpha,
+                "per_comparison_alpha": metadata_alpha,
                 "decision_rule": "ci_low > 0",
             },
             "graph_vs_description_non_inferiority": {
@@ -61,9 +61,7 @@ def multiple_comparison_policy(
                     "SASRec_GRAPH_GEMINI-SASRec_DESC",
                 ],
                 "per_comparison_alpha": ni_alpha,
-                "decision_rule": (
-                    "one-sided lower relative bound > -non_inferiority_margin"
-                ),
+                "decision_rule": ("one-sided lower relative bound > -non_inferiority_margin"),
             },
             "qwen_vs_gemini": {
                 "role": "exploratory",
@@ -86,10 +84,7 @@ def _mean_by_user(
     metric: str,
 ) -> np.ndarray:
     return np.asarray(
-        [
-            np.mean([by_key[(seed, user, arm)][metric] for seed in seeds])
-            for user in users
-        ],
+        [np.mean([by_key[(seed, user, arm)][metric] for seed in seeds]) for user in users],
         dtype=np.float64,
     )
 
@@ -122,18 +117,12 @@ def statistics(
 ]:
     arms = list(RECOMMENDATION_ARMS)
     metric_names = [
-        f"{name}@{cutoff}"
-        for cutoff in config.evaluation.cutoffs
-        for name in ("HR", "NDCG")
+        f"{name}@{cutoff}" for cutoff in config.evaluation.cutoffs for name in ("HR", "NDCG")
     ]
-    canonical_rows = [
-        by_key[(seed, user, arm)] for seed, user, arm in product(seeds, users, arms)
-    ]
+    canonical_rows = [by_key[(seed, user, arm)] for seed, user, arm in product(seeds, users, arms)]
     summary = {
         arm: {
-            metric: float(
-                np.mean([row[metric] for row in canonical_rows if row["arm"] == arm])
-            )
+            metric: float(np.mean([row[metric] for row in canonical_rows if row["arm"] == arm]))
             for metric in metric_names
         }
         for arm in arms
@@ -176,30 +165,30 @@ def statistics(
     comparisons: dict[str, Any] = {}
     comparison_errors: list[dict[str, Any]] = []
     comparison_warnings: list[dict[str, Any]] = []
-    baseline = _mean_by_user(by_key, users, seeds, "SASRec_ID", primary_metric)
-    id_alpha = float(family["id_baseline_superiority"]["per_comparison_alpha"])
+    baseline = _mean_by_user(by_key, users, seeds, "SASRec_METADATA", primary_metric)
+    metadata_alpha = float(family["metadata_baseline_superiority"]["per_comparison_alpha"])
     for arm in ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI", "SASRec_DESC"):
-        key = f"{arm}-SASRec_ID"
+        key = f"{arm}-SASRec_METADATA"
         try:
             treatment = _mean_by_user(by_key, users, seeds, arm, primary_metric)
             result = paired_bootstrap_ci(
                 treatment - baseline,
                 samples=config.evaluation.bootstrap_samples,
-                alpha=id_alpha,
+                alpha=metadata_alpha,
             )
         except (KeyError, TypeError, ValueError) as exc:
             _error(
                 comparison_errors,
                 "comparison_computation_failed",
                 "failed to compute one declared comparison",
-                family="id_baseline_superiority",
+                family="metadata_baseline_superiority",
                 comparison=key,
                 error=str(exc),
             )
             continue
         result.update(
             {
-                "family": "id_baseline_superiority",
+                "family": "metadata_baseline_superiority",
                 "decision": (
                     "superior"
                     if result["ci_low"] > 0
@@ -211,9 +200,7 @@ def statistics(
         )
         comparisons[key] = result
 
-    ni_alpha = float(
-        family["graph_vs_description_non_inferiority"]["per_comparison_alpha"]
-    )
+    ni_alpha = float(family["graph_vs_description_non_inferiority"]["per_comparison_alpha"])
     desc_values = _mean_by_user(by_key, users, seeds, "SASRec_DESC", primary_metric)
     for graph in ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI"):
         key = f"{graph}-SASRec_DESC"
@@ -251,11 +238,7 @@ def statistics(
             )
         else:
             non_inferior = result["ci_low"] > -margin
-            decision = (
-                "non_inferior"
-                if non_inferior
-                else "non_inferiority_not_demonstrated"
-            )
+            decision = "non_inferior" if non_inferior else "non_inferiority_not_demonstrated"
         result.update(
             {
                 "family": "graph_vs_description_non_inferiority",

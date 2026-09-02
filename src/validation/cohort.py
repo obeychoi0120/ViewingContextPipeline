@@ -15,6 +15,9 @@ class CohortError(RuntimeError):
     pass
 
 
+METADATA_TITLE_SCHEMA_VERSION = "metadata-title/v1"
+
+
 def normalize_item_id(value: object) -> str:
     text = str(value).strip()
     if not text.isdigit() or int(text) <= 0:
@@ -40,10 +43,42 @@ def load_pairs(path: Path) -> list[tuple[str, list[str]]]:
     return users
 
 
+def load_metadata_titles(path: Path) -> dict[str, str]:
+    titles: dict[str, str] = {}
+    try:
+        handle = path.open("r", encoding="utf-8-sig")
+    except OSError as exc:
+        raise CohortError(f"failed to read metadata titles {path}: {exc}") from exc
+    with handle:
+        for line_number, line in enumerate(handle, start=1):
+            raw = line.rstrip("\r\n")
+            if not raw.strip():
+                continue
+            if "," not in raw:
+                raise CohortError(f"invalid metadata title row {line_number}: missing comma")
+            raw_item_id, raw_title = raw.split(",", 1)
+            try:
+                item_id = normalize_item_id(raw_item_id)
+            except CohortError as exc:
+                raise CohortError(f"invalid metadata title row {line_number}: {exc}") from exc
+            title = raw_title.strip()
+            if not title:
+                raise CohortError(f"empty metadata title at row {line_number}")
+            if item_id in titles:
+                raise CohortError(
+                    f"duplicate metadata title for item {item_id} at row {line_number}"
+                )
+            titles[item_id] = title
+    return titles
+
+
 def probe_duration(path: Path) -> float:
     completed = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
-        check=True, capture_output=True, text=True, encoding="utf-8",
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     duration = float(json.loads(completed.stdout)["format"]["duration"])
     if duration <= 0:
@@ -51,7 +86,9 @@ def probe_duration(path: Path) -> float:
     return duration
 
 
-def build_item_inventory(referenced_items: set[str], videos_dir: Path, probe: Callable[[Path], float] = probe_duration) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_item_inventory(
+    referenced_items: set[str], videos_dir: Path, probe: Callable[[Path], float] = probe_duration
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     videos = {normalize_item_id(path.stem): path for path in sorted(videos_dir.glob("*.mp4"))}
     rows: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -68,13 +105,18 @@ def build_item_inventory(referenced_items: set[str], videos_dir: Path, probe: Ca
             except Exception as exc:
                 reasons.append("invalid_video")
                 failures.append({"item_id": item_id, "reason": "invalid_video", "error": str(exc)})
-        rows.append({
-            "item_id": item_id, "content_id": f"microlens_100k_{int(item_id):05d}",
-            "source_video_path": str(path.resolve()) if path else None,
-            "duration_seconds": duration, "source_file_size": path.stat().st_size if path else None,
-            "source_mtime_ns": path.stat().st_mtime_ns if path else None,
-            "eligible": not reasons, "exclusion_reasons": reasons,
-        })
+        rows.append(
+            {
+                "item_id": item_id,
+                "content_id": f"microlens_100k_{int(item_id):05d}",
+                "source_video_path": str(path.resolve()) if path else None,
+                "duration_seconds": duration,
+                "source_file_size": path.stat().st_size if path else None,
+                "source_mtime_ns": path.stat().st_mtime_ns if path else None,
+                "eligible": not reasons,
+                "exclusion_reasons": reasons,
+            }
+        )
     return rows, failures
 
 
@@ -109,26 +151,48 @@ def _stable_key(seed: int, value: str) -> str:
     return hashlib.sha256(f"{seed}:{value}".encode()).hexdigest()
 
 
-def select_users(pairs: list[tuple[str, list[str]]], eligible_items: set[str], *, count: int, seed: int, boundaries: list[int], min_length: int, max_length: int) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def select_users(
+    pairs: list[tuple[str, list[str]]],
+    eligible_items: set[str],
+    *,
+    count: int,
+    seed: int,
+    boundaries: list[int],
+    min_length: int,
+    max_length: int,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for user_id, original in pairs:
         filtered = [item for item in original if item in eligible_items]
         if len(filtered) < min_length:
             continue
         stratum = history_stratum(len(original), boundaries)
-        grouped[stratum].append({"user_id": user_id, "original_length": len(original), "filtered_length": len(filtered), "sequence": filtered[-max_length:], "stratum": stratum})
+        grouped[stratum].append(
+            {
+                "user_id": user_id,
+                "original_length": len(original),
+                "filtered_length": len(filtered),
+                "sequence": filtered[-max_length:],
+                "stratum": stratum,
+            }
+        )
     sizes = {key: len(rows) for key, rows in grouped.items()}
     quotas = largest_remainder_quotas(sizes, count)
     selected: list[dict[str, Any]] = []
     for stratum in sorted(grouped):
         rows = sorted(grouped[stratum], key=lambda row: _stable_key(seed, row["user_id"]))
-        selected.extend(rows[:quotas[stratum]])
+        selected.extend(rows[: quotas[stratum]])
     return sorted(selected, key=lambda row: row["user_id"]), quotas
 
 
 def split_record(row: dict[str, Any]) -> dict[str, Any]:
     sequence = row["sequence"]
-    return {**row, "train": sequence[:-2], "valid_target": sequence[-2], "test_target": sequence[-1]}
+    return {
+        **row,
+        "train": sequence[:-2],
+        "valid_target": sequence[-2],
+        "test_target": sequence[-1],
+    }
 
 
 def prepare_cohort(
@@ -142,18 +206,19 @@ def prepare_cohort(
     referenced_items = {item for _, sequence in pairs for item in sequence}
     inventory, failures = build_item_inventory(referenced_items, config.dataset.videos_dir, probe)
     eligible = {row["item_id"] for row in inventory if row["eligible"]}
+    titles = load_metadata_titles(config.dataset.titles_csv)
+    missing_title_items = sorted(eligible - set(titles), key=int)
+    failures.extend(
+        {"item_id": item_id, "reason": "missing_metadata_title"} for item_id in missing_title_items
+    )
     eligible_user_count = sum(
         1
         for _, sequence in pairs
         if sum(item in eligible for item in sequence) >= config.cohort.min_sequence_length
     )
-    exclusion_counts = Counter(
-        reason
-        for row in inventory
-        for reason in row["exclusion_reasons"]
-    )
+    exclusion_counts = Counter(reason for row in inventory for reason in row["exclusion_reasons"])
     eligibility = {
-        "schema_version": "microlens-cohort-eligibility/v1",
+        "schema_version": "microlens-cohort-eligibility/v2",
         "requested_users": config.cohort.user_count,
         "pairs_users": len(pairs),
         "referenced_items": len(referenced_items),
@@ -163,6 +228,13 @@ def prepare_cohort(
         "item_exclusions": dict(sorted(exclusion_counts.items())),
         "pairs_tsv": str(config.dataset.pairs_tsv),
         "videos_dir": str(config.dataset.videos_dir),
+        "titles_csv": str(config.dataset.titles_csv),
+        "metadata_title_coverage": {
+            "schema_version": METADATA_TITLE_SCHEMA_VERSION,
+            "catalog_item_count": len(eligible),
+            "covered_item_count": len(eligible) - len(missing_title_items),
+            "missing_item_count": len(missing_title_items),
+        },
     }
     atomic_write_jsonl(output / "item_inventory.jsonl", inventory)
     failure_path = output / "failures.jsonl"
@@ -183,19 +255,49 @@ def prepare_cohort(
             f"requested {config.cohort.user_count} users but only {eligible_user_count} are eligible; "
             f"check pairs_tsv/videos_dir and {output / 'eligibility_summary.json'}"
         )
-    selected, quotas = select_users(pairs, eligible, count=config.cohort.user_count, seed=config.cohort.seed, boundaries=config.cohort.history_strata, min_length=config.cohort.min_sequence_length, max_length=config.cohort.max_sequence_length)
+    if missing_title_items:
+        (output / "metadata_titles.jsonl").unlink(missing_ok=True)
+        raise CohortError(
+            f"eligible catalog has {len(missing_title_items)} items without metadata titles; "
+            f"check {config.dataset.titles_csv} and {output / 'eligibility_summary.json'}"
+        )
+    selected, quotas = select_users(
+        pairs,
+        eligible,
+        count=config.cohort.user_count,
+        seed=config.cohort.seed,
+        boundaries=config.cohort.history_strata,
+        min_length=config.cohort.min_sequence_length,
+        max_length=config.cohort.max_sequence_length,
+    )
     sequences = [split_record(row) for row in selected]
     # Ranking is defined over the complete eligible item catalog. Restricting this
     # to items observed in the selected users silently turns the fixed item-1K
     # protocol into a much smaller cohort-union evaluation.
     catalog_ids = sorted(eligible, key=int)
     by_item = {row["item_id"]: row for row in inventory}
-    catalog = [{key: by_item[item][key] for key in ("item_id", "content_id", "source_video_path", "duration_seconds")} for item in catalog_ids]
+    catalog = [
+        {
+            key: by_item[item][key]
+            for key in ("item_id", "content_id", "source_video_path", "duration_seconds")
+        }
+        for item in catalog_ids
+    ]
+    metadata_titles = [
+        {
+            "item_id": row["item_id"],
+            "content_id": row["content_id"],
+            "title": titles[row["item_id"]],
+        }
+        for row in catalog
+    ]
     atomic_write_jsonl(output / "sequences.jsonl", sequences)
     atomic_write_jsonl(output / "catalog.jsonl", catalog)
+    atomic_write_jsonl(output / "metadata_titles.jsonl", metadata_titles)
     return {
         "run_id": config.run_id,
         "user_count": len(sequences),
         "catalog_size": len(catalog),
+        "metadata_title_count": len(metadata_titles),
         "stratum_quotas": quotas,
     }

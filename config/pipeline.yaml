@@ -1,4 +1,4 @@
-schema_version: viewing-context-config/v1
+schema_version: viewing-context-config/v2
 protocol:
   dataset: microlens_100k
   modality: visual_only
@@ -6,11 +6,12 @@ protocol:
   graph_extractors: [qwen, gemini]
   graph_summarizer: qwen
   description_model: qwen
-  arms: [graph_qwen, graph_gemini, description]
+  arms: [metadata, graph_qwen, graph_gemini, description]
 artifacts_root: artifacts
 data:
   videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k_videos
   pairs_tsv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs_1k.tsv
+  titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
@@ -32,7 +33,7 @@ extraction:
     top_p: 0.8
     top_k: 20
   graph:
-    scene_prompt: config/prompts/graph_scene_v1.md
+    scene_prompt: config/prompts/graph_scene_v2.md
     summary_prompt: config/prompts/graph_summary_v3.md
     scene_max_new_tokens: 512
     summary_max_new_tokens: 512
@@ -55,14 +56,15 @@ validation:
     batch_size: 32
   model:
     max_sequence_length: 10
-    embedding_dim: 128
+    embedding_dim: 512
     num_blocks: 2
     num_heads: 2
     dropout: 0.1
-    batch_size: 128
+    batch_size: 256
     max_epochs: 50
     patience: 5
     learning_rate: 0.0001
+    popularity_power: 1.0
     seeds: [42, 43, 44]
   evaluation:
     cutoffs: [4, 8, 10, 20]

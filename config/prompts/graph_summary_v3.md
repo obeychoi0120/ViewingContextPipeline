@@ -10,7 +10,8 @@ Output rules:
 - Start each non-empty value with a capital letter and end it with a period.
 - Do not output keyword lists, tag lists, sentence fragments, or long comma-separated inventories.
 - Prefer subject-verb sentences and conjunctions over comma-separated enumeration.
-- Use at most 25 English words per field.
+- Use at most 20 English words per field.
+- Use no more than two commas per field.
 - Select only the most important distinct evidence needed to characterize the whole video.
 - Merge repeated or equivalent observations into one statement.
 - Mention a recurring action or relation once instead of reproducing every occurrence.
@@ -27,7 +28,7 @@ Field guidance:
 - setting_and_environments: Describe the primary visible settings and meaningful setting transitions as one sentence.
 - main_characters_and_objects: Summarize the principal visible subject types and salient objects as one sentence; do not enumerate every occurrence.
 - chronological_events: Connect the major visible actions in temporal order as one sentence, using words such as first, then, and finally only when supported.
-- relations: Summarize only the most important distinct visible spatial, interaction, holding, wearing, or other explicit relations as one sentence.
+- relations: Summarize only relations explicitly represented by event actor, target, instrument, or location slots as one sentence.
 - visual_atmosphere: Describe the overall graph-grounded visual atmosphere as one sentence without inventing lighting, color, weather, or composition.
 - visible_affect: Describe explicitly visible expressions, postures, interactions, or action tone as one sentence without inferring private mental states.
 - semantic_topics: Summarize the principal graph-grounded topics as one sentence.

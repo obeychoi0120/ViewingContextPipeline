@@ -1,5 +1,7 @@
 Using only the chronological scene descriptions below, produce a selective video-level summary of the visible content.
 
+This is a synthesis task, not an exhaustive inventory of every entity, action, or relation.
+
 Chronological scene descriptions:
 
 {scenes}
@@ -16,13 +18,13 @@ Before writing, silently compress the evidence:
 - Do not preserve every scene, shot, person, object, action, or transition.
 - If the scenes are disconnected, summarize their recurring visual patterns instead of forcing them into one continuous timeline.
 - Omit quoted text, OCR-like content, names, brands, model names, demographic labels, and other unsupported identity information even if they appear in the source descriptions.
-- Never create new person-object, action-object, or subject-relation-object combinations.
+- Never create combinations by pairing every person with every object, action, or relation.
 
 Hard output rules:
 
 - Output exactly seven physical lines in the required order.
 - Put each value on the same physical line as its label.
-- Every non-empty value must be one natural, grammatical English sentence.
+- Every non-empty value must be one natural, complete English sentence.
 - Start each non-empty value with a capital letter and end it with a period.
 - Use at most 20 English words per field.
 - Use no more than two commas per field.

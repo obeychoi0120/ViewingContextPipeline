@@ -20,4 +20,3 @@ def atomic_write_jsonl(path: str | Path, rows: Iterable[dict[str, Any]]) -> None
 def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
     with Path(path).open("r", encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
-

@@ -10,6 +10,7 @@ import numpy as np
 from validation.cohort import prepare_cohort
 from validation.config import ValidationConfig
 from validation.recommendation_contracts import (
+    ARCHITECTURE_VERSION,
     RECOMMENDATION_ARMS,
     TRAINING_RUNS_FILENAME,
     TRAINING_RUN_SCHEMA_VERSION,
@@ -23,22 +24,25 @@ class ValidationStepError(RuntimeError):
 
 def validation_config(context: RunContext) -> ValidationConfig:
     settings = context.config["validation"]
-    return ValidationConfig.model_validate({
-        "schema_version": "validation-config/v1",
-        "run_id": context.run_id,
-        "dataset": {
-            "pairs_tsv": context.path("data", "pairs_tsv"),
-            "videos_dir": context.path("data", "videos_dir"),
-        },
-        "cohort": settings["cohort"],
-        "encoder": {
-            **settings["encoder"],
-            "model_path": context.path("models", "bge"),
-        },
-        "model": settings["model"],
-        "evaluation": settings["evaluation"],
-        "output_dir": context.run_root,
-    })
+    return ValidationConfig.model_validate(
+        {
+            "schema_version": "validation-config/v2",
+            "run_id": context.run_id,
+            "dataset": {
+                "pairs_tsv": context.path("data", "pairs_tsv"),
+                "videos_dir": context.path("data", "videos_dir"),
+                "titles_csv": context.path("data", "titles_csv"),
+            },
+            "cohort": settings["cohort"],
+            "encoder": {
+                **settings["encoder"],
+                "model_path": context.path("models", "bge"),
+            },
+            "model": settings["model"],
+            "evaluation": settings["evaluation"],
+            "output_dir": context.run_root,
+        }
+    )
 
 
 def _runtime(context: RunContext) -> dict[str, Any]:
@@ -72,14 +76,42 @@ def prepare_cohort_step(context: RunContext, *, force: bool = False) -> dict[str
     context.initialize()
     catalog_path = context.cohort_dir / "catalog.jsonl"
     sequences_path = context.cohort_dir / "sequences.jsonl"
-    if catalog_path.is_file() and sequences_path.is_file() and not force:
-        return _result("prepare-cohort", content_count=len(read_jsonl(catalog_path)))
+    metadata_titles_path = context.cohort_dir / "metadata_titles.jsonl"
+    if (
+        catalog_path.is_file()
+        and sequences_path.is_file()
+        and metadata_titles_path.is_file()
+        and not force
+    ):
+        catalog = read_jsonl(catalog_path)
+        if _metadata_titles_match_catalog(metadata_titles_path, catalog):
+            return _result("prepare-cohort", content_count=len(catalog))
     result = prepare_cohort(validation_config(context), output_dir=context.cohort_dir)
     return _result("prepare-cohort", content_count=int(result["catalog_size"]))
 
 
 def _embedding_path(context: RunContext, branch: str) -> Path:
     return context.representations_dir / f"{branch}_embeddings.npz"
+
+
+def _metadata_titles_match_catalog(
+    path: Path,
+    catalog: list[dict[str, Any]],
+) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        rows = read_jsonl(path)
+    except (OSError, ValueError):
+        return False
+    return len(rows) == len(catalog) and all(
+        set(title_row) == {"item_id", "content_id", "title"}
+        and str(title_row["item_id"]) == str(catalog_row["item_id"])
+        and str(title_row["content_id"]) == str(catalog_row["content_id"])
+        and isinstance(title_row["title"], str)
+        and bool(title_row["title"].strip())
+        for title_row, catalog_row in zip(rows, catalog, strict=True)
+    )
 
 
 def _representations_match_catalog(
@@ -147,6 +179,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     catalog = read_jsonl(catalog_path)
     content_ids = [str(row["content_id"]) for row in catalog]
     sources = {
+        "metadata": None,
         "graph_qwen": context.graph_summary_dir("qwen"),
         "graph_gemini": context.graph_summary_dir("gemini"),
         "desc": context.description_summary_dir,
@@ -169,7 +202,22 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     context.representations_dir.mkdir(parents=True, exist_ok=True)
     documents_by_branch: dict[str, list[dict[str, Any]]] = {}
     for branch in pending:
+        if branch == "metadata":
+            metadata_titles_path = context.cohort_dir / "metadata_titles.jsonl"
+            if not _metadata_titles_match_catalog(metadata_titles_path, catalog):
+                raise ValidationStepError(
+                    "metadata titles do not match the cohort catalog; rerun prepare-cohort"
+                )
+            documents_by_branch[branch] = [
+                {
+                    "content_id": row["content_id"],
+                    "text": row["title"],
+                }
+                for row in read_jsonl(metadata_titles_path)
+            ]
+            continue
         directory = sources[branch]
+        assert directory is not None
         if not directory.is_dir():
             raise ValidationStepError(f"missing {branch} summary directory: {directory}")
         documents = [
@@ -212,11 +260,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
 def _checkpoint_paths(context: RunContext) -> list[Path]:
     seeds = validation_config(context).model.seeds
     return [
-        context.recommendations_dir
-        / "checkpoints"
-        / f"seed_{seed}"
-        / arm.lower()
-        / "sasrec.pt"
+        context.recommendations_dir / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
         for seed in seeds
         for arm in RECOMMENDATION_ARMS
     ]
@@ -241,9 +285,16 @@ def _training_runs_complete(
         and actual == expected
         and all(
             row.get("schema_version") == TRAINING_RUN_SCHEMA_VERSION
+            and row.get("architecture_version") == ARCHITECTURE_VERSION
             and row.get("run_id") == run_id
-            and isinstance(row.get("epochs"), list)
-            and bool(row["epochs"])
+            and isinstance(row.get("selection"), dict)
+            and isinstance(row["selection"].get("epochs"), list)
+            and bool(row["selection"]["epochs"])
+            and isinstance(row.get("refit"), dict)
+            and isinstance(row["refit"].get("epochs"), list)
+            and bool(row["refit"]["epochs"])
+            and row["refit"].get("epochs_completed")
+            == row["selection"].get("best_validation", {}).get("epoch")
             for row in rows
         )
     )
@@ -254,7 +305,7 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
 
     context.initialize()
     config = validation_config(context)
-    for branch in ("graph_qwen", "graph_gemini", "desc"):
+    for branch in ("metadata", "graph_qwen", "graph_gemini", "desc"):
         _require_file(_embedding_path(context, branch), f"{branch} embeddings")
     _require_file(context.representations_dir / "item_index.json", "item index")
     metrics_path = context.recommendations_dir / "per_user_metrics.jsonl"
@@ -283,9 +334,7 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         "min_scene_coverage": config.evaluation.min_scene_coverage,
         "max_arm_coverage_gap": config.evaluation.max_arm_coverage_gap,
         "familywise_alpha": config.evaluation.familywise_alpha,
-        "multiple_comparison_correction": (
-            config.evaluation.multiple_comparison_correction
-        ),
+        "multiple_comparison_correction": (config.evaluation.multiple_comparison_correction),
     }
     document = diagnose_recommendations(config, _runtime(context), decision_config)
     write_json(context.diagnosis_path, document)
@@ -293,9 +342,7 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
     if decision.get("status") != "pass":
         errors = decision.get("errors", [])
         error_codes = [
-            str(error.get("code", "unknown"))
-            for error in errors
-            if isinstance(error, dict)
+            str(error.get("code", "unknown")) for error in errors if isinstance(error, dict)
         ]
         raise ValidationStepError(
             "runtime diagnosis failed: " + ", ".join(error_codes or ["unknown"])

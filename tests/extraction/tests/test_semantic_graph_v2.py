@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -23,15 +24,26 @@ def graph_with_dangling_reference() -> dict:
     return {
         "setting_context": "indoor",
         "entities": [
-            {"local_id": "e1", "name": "person", "role": "primary"}
+            {
+                "local_id": "e1",
+                "name": "person",
+                "salience": "primary",
+                "function": None,
+                "count": "one",
+            }
         ],
-        "events": [],
-        "static_relations": [
-            {"subject_id": "e1", "relation": "WEARING", "object_id": "e4"}
+        "events": [
+            {
+                "local_id": "ev1",
+                "actor_id": "e1",
+                "action": "hold",
+                "target_id": "e4",
+                "instrument_id": None,
+                "location_id": None,
+            }
         ],
         "semantic_topics": [],
         "affect": {
-            "subject_ids": ["e1"],
             "valence": "neutral",
             "arousal": "medium",
         },
@@ -40,28 +52,58 @@ def graph_with_dangling_reference() -> dict:
 
 def test_semantic_schema_and_reference_errors_are_not_rejected() -> None:
     dangling = graph_with_dangling_reference()
-    assert graph_semantic_warnings(dangling) == [
-        "unresolved_reference:static_relations[0].object_id='e4'"
-    ]
+    assert graph_semantic_warnings(dangling) == ["unresolved_reference:events[0].target_id='e4'"]
+
+
+def test_raw_graph_is_not_compacted_when_semantic_warnings_are_emitted() -> None:
+    graph = graph_with_dangling_reference()
+    graph["entities"].extend(
+        {
+            "local_id": f"e{index}",
+            "name": f"visible entity {index}",
+            "salience": "background",
+            "function": None,
+            "count": "one",
+        }
+        for index in range(2, 8)
+    )
+    graph["events"][0]["role"] = "legacy"
+    original = deepcopy(graph)
+
+    first = graph_semantic_warnings(graph)
+    second = graph_semantic_warnings(graph)
+    reordered = graph_semantic_warnings(
+        {key: graph[key] for key in reversed(graph)}
+    )
+
+    assert graph == original
+    assert first == second == reordered
+    assert "entity_count_out_of_range:7" in first
+    assert "unexpected_fields:events[0]:role" in first
+    assert "removed_field:graph.events[0].role" in first
+    assert "unresolved_reference:events[0].target_id='e4'" not in first
 
     arbitrary = {"triples": [], "extra": "preserved"}
     assert graph_semantic_warnings(arbitrary) == [
-        "missing_top_level_fields:setting_context,entities,events,static_relations,semantic_topics,affect",
-        "unexpected_top_level_fields:extra,triples",
+        "missing_fields:top_level:setting_context,entities,events,semantic_topics,affect",
+        "unexpected_fields:top_level:extra,triples",
+        "entity_count_out_of_range:0",
     ]
 
 
 def test_graph_scene_prompt_is_file_backed_and_contains_the_contract() -> None:
-    prompt = (ROOT / "config/prompts/graph_scene_v1.md").read_text(
-        encoding="utf-8"
-    )
+    prompt = (ROOT / "config/prompts/graph_scene_v2.md").read_text(encoding="utf-8")
 
     assert "one to three chronological keyframes" in prompt
-    assert "If entities is empty" in prompt
-    assert "Prefer 0 to 6 meaningful visible entities" in prompt
-    assert (
-        "Extract only facts directly visible in at least one keyframe." in prompt
-    )
+    assert "Output one to six semantically meaningful visible entities" in prompt
+    assert '"salience"' in prompt
+    assert '"function"' in prompt
+    assert '"count"' in prompt
+    assert "Output at most four directly visible events" in prompt
+    assert "Output at most three topics" in prompt
+    assert "static_relations" in prompt
+    assert "subject_ids" in prompt
+    assert "Extract only information directly grounded in visible pixels." in prompt
     for value in (
         "indoor",
         "outdoor_urban",
@@ -70,6 +112,12 @@ def test_graph_scene_prompt_is_file_backed_and_contains_the_contract() -> None:
         "unknown",
     ):
         assert value in prompt
+    assert "ground truth" not in prompt.lower()
+    assert "student" not in prompt.lower()
+    assert "retry" not in prompt.lower()
+    assert not (ROOT / "config/prompts/graph_scene_v1.md").exists()
+    assert not (ROOT / "docs/next_graph_ontology/prompt.py").exists()
+    assert not (ROOT / "docs/next_graph_ontology/taxonomy.py").exists()
 
 
 def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
@@ -86,7 +134,7 @@ def test_graph_summary_preserves_raw_graph_and_sorts_scenes() -> None:
     prompt = graph_summary_prompt("Graphs:\n{scenes}", records)
 
     assert prompt.index("Scene 0") < prompt.index("Scene 1")
-    assert '"object_id": "e4"' in prompt
+    assert '"target_id": "e4"' in prompt
 
 
 def test_summary_requires_seven_labeled_lines_in_canonical_order() -> None:
