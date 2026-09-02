@@ -44,7 +44,9 @@ def load_pairs(path: Path) -> list[tuple[str, list[str]]]:
 
 
 def load_metadata_titles(path: Path) -> dict[str, str]:
+    """Load usable titles; prepare_cohort checks missing titles against eligible items."""
     titles: dict[str, str] = {}
+    seen: set[str] = set()
     try:
         handle = path.open("r", encoding="utf-8-sig")
     except OSError as exc:
@@ -61,13 +63,16 @@ def load_metadata_titles(path: Path) -> dict[str, str]:
                 item_id = normalize_item_id(raw_item_id)
             except CohortError as exc:
                 raise CohortError(f"invalid metadata title row {line_number}: {exc}") from exc
-            title = raw_title.strip()
-            if not title:
-                raise CohortError(f"empty metadata title at row {line_number}")
-            if item_id in titles:
+            if item_id in seen:
                 raise CohortError(
                     f"duplicate metadata title for item {item_id} at row {line_number}"
                 )
+            seen.add(item_id)
+            title = raw_title.strip()
+            if not title:
+                # A full title CSV may contain blank titles outside this run's catalog.
+                # Eligible blank titles become missing_metadata_title failures below.
+                continue
             titles[item_id] = title
     return titles
 
