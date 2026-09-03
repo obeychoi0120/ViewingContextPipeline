@@ -27,6 +27,8 @@ extraction:
   visual_evidence:
     image_resolution: [640, 352]
   greedy_decoding: true
+  graph_repetition_penalty: 1.05
+  description_repetition_penalty: 1.00
   summary_repetition_penalty: 1.05
   summary_sampling:
     temperature: 0.2

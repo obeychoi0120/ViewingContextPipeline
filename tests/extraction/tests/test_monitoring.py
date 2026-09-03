@@ -75,13 +75,14 @@ def test_serial_generator_calls_completion_callback_per_task(
             return cls()
 
         def generate(self, images, prompt, max_new_tokens, **_generation):
+            assert _generation["repetition_penalty"] == {"first": 1.05, "second": 1.2}[prompt]
             return f"result:{prompt}"
 
     monkeypatch.setattr(summary_executor, "QwenBackend", Backend)
     monkeypatch.setattr(summary_executor, "load_images", lambda paths: paths)
     tasks = [
-        QwenGenerationTask("a", (), "first", 10),
-        QwenGenerationTask("b", (), "second", 10),
+        QwenGenerationTask("a", (), "first", 10, repetition_penalty=1.05),
+        QwenGenerationTask("b", (), "second", 10, repetition_penalty=1.2),
     ]
     completed = []
 

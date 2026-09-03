@@ -137,6 +137,11 @@ def extract_graph_scenes(
             visual,
             prompt=prompt,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
+            repetition_penalty=(
+                float(context.config["extraction"]["graph_repetition_penalty"])
+                if model == "qwen"
+                else 1.0
+            ),
         )
         expected_scene_indices = {int(row["scene_idx"]) for row in scene_rows}
         if path.is_file() and not force:
@@ -542,6 +547,9 @@ def extract_description_scenes(
             visual,
             prompt=prompt,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
+            repetition_penalty=float(
+                context.config["extraction"]["description_repetition_penalty"]
+            ),
         )
         expected_scene_indices = {int(row["scene_idx"]) for row in scene_rows}
         if path.is_file() and not force:

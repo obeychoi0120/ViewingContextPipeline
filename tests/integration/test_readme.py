@@ -37,6 +37,9 @@ def test_readme_documents_current_dag_cli_and_schema_contracts() -> None:
     assert config["extraction"]["summary_repetition_penalty"] == 1.05
     assert "summary_repetition_penalty=1.05" in text
     assert "summary_repetition_penalty=1.00" not in text
+    for stage, default in (("graph", 1.05), ("description", 1.0)):
+        assert config["extraction"][f"{stage}_repetition_penalty"] == default
+        assert f"extraction.{stage}_repetition_penalty={default}" in text
     for arm in RECOMMENDATION_ARMS:
         assert arm in text
     for schema in (
