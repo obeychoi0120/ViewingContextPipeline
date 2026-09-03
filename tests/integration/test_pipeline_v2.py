@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
+from PIL import Image
 
 import extraction.steps as extraction_steps
 import extraction.summary_executor as summary_executor
@@ -77,6 +78,8 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     assert "do_sample" not in context.config["extraction"]["graph"]
     assert "do_sample" not in context.config["extraction"]["description"]
     assert context.config["extraction"]["greedy_decoding"] is True
+    assert context.config["extraction"]["graph_repetition_penalty"] == 1.05
+    assert context.config["extraction"]["description_repetition_penalty"] == 1.0
     assert context.config["extraction"]["summary_repetition_penalty"] == 1.05
     assert context.config["extraction"]["summary_sampling"] == {
         "temperature": 0.2,
@@ -177,17 +180,129 @@ def test_config_rejects_non_boolean_greedy_decoding(context: RunContext) -> None
         RunContext.load("invalid-greedy", root=context.root)
 
 
-@pytest.mark.parametrize("value", [0.9, 2.1, True, "1.05"])
-def test_config_rejects_invalid_summary_repetition_penalty(
+@pytest.mark.parametrize("stage", ["graph", "description", "summary"])
+@pytest.mark.parametrize("value", [0.9, 2.1, True, "1.05", None, float("nan"), float("inf")])
+def test_config_rejects_invalid_repetition_penalty(
     context: RunContext,
+    stage: str,
     value: object,
 ) -> None:
     path = context.root / "config/pipeline.yaml"
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    config["extraction"]["summary_repetition_penalty"] = value
+    config["extraction"][f"{stage}_repetition_penalty"] = value
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    with pytest.raises(ConfigError, match="summary_repetition_penalty"):
-        RunContext.load("invalid-summary-repetition", root=context.root)
+    with pytest.raises(ConfigError, match=f"{stage}_repetition_penalty"):
+        RunContext.load("invalid-repetition", root=context.root)
+
+
+@pytest.mark.parametrize("stage", ["graph", "description", "summary"])
+@pytest.mark.parametrize("value", [1, 1.15, 2])
+def test_config_accepts_independent_repetition_penalty(context, stage, value) -> None:
+    path = context.root / "config/pipeline.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config["extraction"][f"{stage}_repetition_penalty"] = value
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    loaded = RunContext.load("valid-repetition", root=context.root)
+    assert loaded.config["extraction"] == config["extraction"]
+
+
+@pytest.mark.parametrize("stage", ["graph", "description", "summary"])
+def test_config_requires_each_repetition_penalty(context, stage) -> None:
+    path = context.root / "config/pipeline.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    del config["extraction"][f"{stage}_repetition_penalty"]
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError, match=f"{stage}_repetition_penalty"):
+        RunContext.load("missing-repetition", root=context.root)
+
+
+@pytest.mark.parametrize(
+    ("stage", "source", "expected_penalty"),
+    [
+        ("graph", "qwen", 1.11),
+        ("graph", "gemini", 1.0),
+        ("description", None, 1.22),
+        ("summary", "qwen", 1.33),
+        ("summary", "gemini", 1.33),
+        ("summary", None, 1.33),
+    ],
+)
+@pytest.mark.parametrize("greedy", [True, False])
+def test_repetition_penalty_reaches_only_its_generation_stage(
+    context, monkeypatch, stage, source, expected_penalty, greedy
+) -> None:
+    context.config["extraction"].update(
+        graph_repetition_penalty=1.11,
+        description_repetition_penalty=1.22,
+        summary_repetition_penalty=1.33,
+        greedy_decoding=greedy,
+    )
+    write_jsonl(
+        context.cohort_dir / "catalog.jsonl",
+        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
+    )
+    frames = context.evidence_dir / "resized_keyframes/c1"
+    frames.mkdir(parents=True)
+    Image.new("RGB", (8, 8)).save(frames / "0005.png")
+    write_json(
+        context.cohort_dir / "source_assets/c1/assets/timestamp_fixed_30s.json",
+        [{"scene_start": 0, "scene_end": 10, "keyframe_timestamps": [5]}],
+    )
+    graph_record = {
+        "scene_idx": 0,
+        "keyframes": [5],
+        "graph": {"setting_context": "indoor"},
+        "parse_mode": "native",
+        "semantic_warnings": [],
+    }
+    description_record = {
+        "schema_version": "scene-description/v1",
+        "content_id": "c1",
+        "scene_idx": 0,
+        "keyframes": [5],
+        "description": "A person walks.",
+    }
+    if stage == "summary":
+        scene_dir = context.graph_scene_dir(source) if source else context.description_scene_dir
+        write_jsonl(scene_dir / "c1.jsonl", [graph_record if source else description_record])
+        response = _summary_lines({name: "A person walks." for name in SUMMARY_SECTIONS})
+    else:
+        response = json.dumps(graph_record["graph"]) if stage == "graph" else "A person walks."
+    captured = []
+
+    def generate(tasks, callback):
+        captured.extend(tasks)
+        for task in tasks:
+            callback(task.task_id, response)
+        return {}
+
+    @contextmanager
+    def fake_generator(**_kwargs):
+        yield generate
+
+    class FakeGeminiPool:
+        def __init__(self, *_args, **kwargs):
+            assert not any("penalty" in key for key in kwargs)
+
+        def generate(self, tasks, callback):
+            captured.extend(tasks)
+            for task in tasks:
+                callback(extraction_steps.GeminiGenerationOutcome(task.task_id, response))
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", fake_generator)
+    monkeypatch.setattr(extraction_steps, "GeminiWorkerPool", FakeGeminiPool)
+    if stage == "graph":
+        result = extraction_steps.extract_graph_scenes(context, model=source)
+    elif stage == "description":
+        result = extraction_steps.extract_description_scenes(context)
+    elif source:
+        result = extraction_steps.summarize_graph(context, source=source)
+    else:
+        result = extraction_steps.summarize_description(context)
+    assert result["failure_count"] == 0
+    assert len(captured) == 1
+    assert captured[0].repetition_penalty == expected_penalty
+    assert captured[0].do_sample is (stage == "summary" and not greedy)
 
 
 @pytest.mark.parametrize(

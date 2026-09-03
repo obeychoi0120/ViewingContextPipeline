@@ -36,8 +36,10 @@ def test_gpu_count_selects_first_visible_devices(
     assert _visible_gpu_ids(2) == ["4", "7"]
 
 
+@pytest.mark.parametrize("penalty", [1.0, 1.05, 1.25])
 def test_worker_selects_cuda_device_and_reuses_one_model(
     monkeypatch: pytest.MonkeyPatch,
+    penalty: float,
 ) -> None:
     initialized = []
 
@@ -54,7 +56,7 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
                 "temperature": None,
                 "top_p": None,
                 "top_k": None,
-                "repetition_penalty": 1.0,
+                "repetition_penalty": penalty,
             }
             return f"{images}:{prompt}:{max_new_tokens}"
 
@@ -68,7 +70,7 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
         def put(self, value):
             self.values.append(value)
 
-    task = QwenGenerationTask("task", ("a.png",), "prompt", 32)
+    task = QwenGenerationTask("task", ("a.png",), "prompt", 32, repetition_penalty=penalty)
     result_queue = Queue()
     monkeypatch.setattr(qwen_module, "QwenBackend", Backend)
     monkeypatch.setattr(evidence_module, "load_images", lambda paths: paths)
