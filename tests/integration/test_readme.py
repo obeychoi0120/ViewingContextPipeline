@@ -58,7 +58,8 @@ def test_readme_documents_current_dag_cli_and_schema_contracts() -> None:
         flags=re.MULTILINE,
     )
     auxiliary = [
-        command for command in stage_commands
+        command
+        for command in stage_commands
         if "--plan-only" in command or "--reuse-run-id" in command
     ]
     assert len(auxiliary) == 2
@@ -79,6 +80,10 @@ def test_readme_explains_user_first_readiness_scope_and_reruns() -> None:
         assert config["protocol"][key] in text
     assert config["validation"]["cohort"]["user_count"] == 1000
     assert "MicroLens-100k_pairs.tsv" in config["data"]["pairs_tsv"]
+    assert config["data"]["titles_csv"].endswith("MicroLens-100k_title_en_completed.csv")
+    assert "python -m validation.complete_titles" in text
+    assert "MicroLens-50k_titles.csv" in text
+    assert "metadata-title-completion/v1" in text
     assert "user_count=1000" in text and "user_count=59" not in text
     for artifact in ("cohort_plan.json", "selected_users.jsonl", "required_items.jsonl"):
         assert artifact in text

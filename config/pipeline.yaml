@@ -13,7 +13,7 @@ artifacts_root: artifacts
 data:
   videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k_videos
   pairs_tsv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs.tsv
-  titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
+  titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en_completed.csv
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
