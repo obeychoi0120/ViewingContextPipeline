@@ -7,6 +7,7 @@ import pytest
 
 import validation.diagnosis_statistics as diagnosis_statistics
 from validation.config import ValidationConfig
+from validation.cohort import prepare_cohort
 from validation.diagnosis import diagnose_recommendations
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import (
@@ -70,8 +71,8 @@ def _write_success_scene_files(run_root, content_ids: list[str]) -> None:
                     "scene_idx": 0,
                     "keyframes": [5, 15, 25],
                     "graph": {},
-                    "parse_mode": "repaired" if content_id == "c1" else "native",
-                    "semantic_warnings": ["dangling reference"] if content_id == "c1" else [],
+                    "parse_mode": "repaired" if content_id == "microlens_100k_00001" else "native",
+                    "semantic_warnings": ["dangling reference"] if content_id == "microlens_100k_00001" else [],
                 }
             ],
         )
@@ -93,56 +94,19 @@ def _valid_run(tmp_path):
     config = ValidationConfig.model_validate(config_data(tmp_path, users=2))
     run_root = tmp_path / "run"
     cohort_dir = run_root / "data" / "cohort"
-    item_ids = [f"i{index}" for index in range(1, 6)]
-    content_ids = [f"c{index}" for index in range(1, 6)]
+    config.dataset.videos_dir.mkdir()
+    for index in range(1, 6):
+        (config.dataset.videos_dir / f"{index}.mp4").write_bytes(b"video")
+    config.dataset.pairs_tsv.write_text("u1\t1 2 4 3 5\nu2\t1 2 3 5 4\n", encoding="utf-8")
+    config.dataset.titles_csv.write_text(
+        "".join(f"{index},Title {index}\n" for index in range(1, 6)), encoding="utf-8"
+    )
+    prepare_cohort(config, output_dir=cohort_dir, probe=lambda _: 30.0)
+    catalog = read_jsonl(cohort_dir / "catalog.jsonl")
+    sequences = read_jsonl(cohort_dir / "sequences.jsonl")
+    item_ids = [row["item_id"] for row in catalog]
+    content_ids = [row["content_id"] for row in catalog]
     item_content = dict(zip(item_ids, content_ids))
-    write_jsonl(
-        cohort_dir / "catalog.jsonl",
-        [
-            {"content_id": content_id, "item_id": item_id}
-            for item_id, content_id in item_content.items()
-        ],
-    )
-    sequences = [
-        {
-            "user_id": "u1",
-            "train": ["i1", "i2", "i4"],
-            "valid_target": "i3",
-            "test_target": "i5",
-        },
-        {
-            "user_id": "u2",
-            "train": ["i1", "i2", "i3"],
-            "valid_target": "i5",
-            "test_target": "i4",
-        },
-    ]
-    write_jsonl(cohort_dir / "sequences.jsonl", sequences)
-    write_json(
-        cohort_dir / "eligibility_summary.json",
-        {
-            "schema_version": "microlens-cohort-eligibility/v2",
-            "eligible_items": len(item_ids),
-            "eligible_users": len(sequences),
-            "metadata_title_coverage": {
-                "schema_version": "metadata-title/v1",
-                "catalog_item_count": len(item_ids),
-                "covered_item_count": len(item_ids),
-                "missing_item_count": 0,
-            },
-        },
-    )
-    write_jsonl(
-        cohort_dir / "metadata_titles.jsonl",
-        [
-            {
-                "item_id": item_id,
-                "content_id": content_id,
-                "title": f"Title {item_id}",
-            }
-            for item_id, content_id in item_content.items()
-        ],
-    )
     representations_dir = run_root / "validation" / "representations"
     write_json(
         representations_dir / "item_index.json",
@@ -244,7 +208,7 @@ def test_four_arm_runtime_decision_and_multiple_comparison_policy(tmp_path) -> N
     result = diagnose_recommendations(config, runtime, DECISION_CONFIG)
 
     assert "report_ready" not in result
-    assert result["schema_version"] == "diagnosis/v3"
+    assert result["schema_version"] == "diagnosis/v4"
     assert result["runtime_decision"] == {
         "status": "pass",
         "checks": {key: True for key in result["runtime_decision"]["checks"]},
@@ -485,7 +449,7 @@ def test_invalid_success_scene_schemas_fail_runtime_and_success_coverage(
     config, runtime, _, _ = _valid_run(tmp_path)
     run_root = tmp_path / "run"
     write_jsonl(
-        run_root / "extraction/graph/qwen/scenes/c1.jsonl",
+        run_root / "extraction/graph/qwen/scenes/microlens_100k_00001.jsonl",
         [
             {
                 "scene_idx": 0,
@@ -496,7 +460,7 @@ def test_invalid_success_scene_schemas_fail_runtime_and_success_coverage(
         ],
     )
     write_jsonl(
-        run_root / "extraction/description/scenes/c2.jsonl",
+        run_root / "extraction/description/scenes/microlens_100k_00002.jsonl",
         [
             {
                 "schema_version": "scene-description/v1",
@@ -562,12 +526,12 @@ def test_unhashable_sequence_and_metric_targets_return_structured_fail(
     config, runtime, _, _ = _valid_run(tmp_path)
     sequence_path = tmp_path / "run/data/cohort/sequences.jsonl"
     sequences = read_jsonl(sequence_path)
-    sequences[0]["train"] = [{"item_id": "i1"}]
-    sequences[0]["valid_target"] = ["i3"]
+    sequences[0]["train"] = [{"item_id": "1"}]
+    sequences[0]["valid_target"] = ["3"]
     write_jsonl(sequence_path, sequences)
     metrics_path = tmp_path / "run/validation/recommendations/per_user_metrics.jsonl"
     metrics = read_jsonl(metrics_path)
-    metrics[0]["target_item_id"] = ["i5"]
+    metrics[0]["target_item_id"] = ["5"]
     write_jsonl(metrics_path, metrics)
 
     result = diagnose_recommendations(config, runtime, DECISION_CONFIG)
@@ -584,7 +548,7 @@ def test_train_length_and_recomputed_frequency_bucket_are_enforced(tmp_path) -> 
     config, runtime, _, _ = _valid_run(tmp_path)
     sequence_path = tmp_path / "run/data/cohort/sequences.jsonl"
     sequences = read_jsonl(sequence_path)
-    sequences[0]["train"] = ["i1", "i2"]
+    sequences[0]["train"] = ["1", "2"]
     write_jsonl(sequence_path, sequences)
     metrics_path = tmp_path / "run/validation/recommendations/per_user_metrics.jsonl"
     metrics = read_jsonl(metrics_path)

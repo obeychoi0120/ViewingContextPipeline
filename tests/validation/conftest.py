@@ -3,7 +3,7 @@ from pathlib import Path
 
 def config_data(root: Path, *, users: int = 2) -> dict:
     return {
-        "schema_version": "validation-config/v2",
+        "schema_version": "validation-config/v3",
         "run_id": "test",
         "dataset": {
             "pairs_tsv": root / "pairs.tsv",

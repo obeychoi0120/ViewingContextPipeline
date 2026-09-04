@@ -8,6 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from validation.config import ValidationConfig  # noqa: E402
+from validation.cohort import prepare_cohort  # noqa: E402
 from validation.model import SASRec, in_batch_loss, pad_sequences  # noqa: E402
 from validation.recommendation import (  # noqa: E402
     popularity_probabilities,
@@ -18,7 +19,7 @@ from validation.recommendation_contracts import (  # noqa: E402
     RECOMMENDATION_ARMS,
     TRAINING_RUN_SCHEMA_VERSION,
 )
-from pipeline_runtime import read_jsonl, write_json, write_jsonl  # noqa: E402
+from pipeline_runtime import read_jsonl, write_json  # noqa: E402
 
 from conftest import config_data  # noqa: E402
 
@@ -200,7 +201,7 @@ def test_popularity_corrected_duplicate_mask_matches_numpy_reference() -> None:
         probabilities,
     )
 
-    assert float(loss) == pytest.approx(expected, rel=1e-6, abs=1e-6)
+    assert float(loss.detach()) == pytest.approx(expected, rel=1e-6, abs=1e-6)
 
 
 def test_popularity_distribution_and_non_finite_guards() -> None:
@@ -233,25 +234,24 @@ def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(tmp_path) -> None
     cohort = run_root / "data" / "cohort"
     representations = run_root / "validation" / "representations"
     recommendations = run_root / "validation" / "recommendations"
-    catalog = [{"item_id": str(index), "content_id": f"c{index}"} for index in range(1, 9)]
-    sequences = [
-        {
-            "user_id": "u1",
-            "train": ["1", "2", "3", "4"],
-            "valid_target": "5",
-            "test_target": "6",
-            "stratum": "5-9",
-        },
-        {
-            "user_id": "u2",
-            "train": ["2", "3", "4", "5"],
-            "valid_target": "6",
-            "test_target": "7",
-            "stratum": "5-9",
-        },
-    ]
-    write_jsonl(cohort / "catalog.jsonl", catalog)
-    write_jsonl(cohort / "sequences.jsonl", sequences)
+    data = config_data(tmp_path)
+    data["run_id"] = "train-smoke"
+    data["output_dir"] = run_root
+    data["model"].update(max_epochs=1, patience=1, seeds=[42, 43, 44])
+    config = ValidationConfig.model_validate(data)
+    config.dataset.videos_dir.mkdir()
+    for item in range(1, 9):
+        (config.dataset.videos_dir / f"{item}.mp4").write_bytes(b"video")
+    config.dataset.pairs_tsv.write_text(
+        "u1\t1 2 3 4 5 6\nu2\t2 3 4 5 6 7\n", encoding="utf-8"
+    )
+    config.dataset.titles_csv.write_text(
+        "".join(f"{item},Title {item}\n" for item in range(1, 9)), encoding="utf-8"
+    )
+    prepare_cohort(config, plan_only=True)
+    prepare_cohort(config, probe=lambda _: 30.0)
+    catalog = read_jsonl(cohort / "catalog.jsonl")
+    assert [row["item_id"] for row in catalog] == [str(item) for item in range(1, 8)]
     write_json(
         representations / "item_index.json",
         {row["item_id"]: index for index, row in enumerate(catalog)},
@@ -264,9 +264,6 @@ def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(tmp_path) -> None
             values=rng.normal(size=(len(catalog), 1024)).astype(np.float32),
         )
 
-    data = config_data(tmp_path)
-    data["model"].update(max_epochs=1, patience=1, seeds=[42, 43, 44])
-    config = ValidationConfig.model_validate(data)
     result = train_recommendation_arms(
         config,
         {

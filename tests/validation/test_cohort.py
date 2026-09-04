@@ -5,30 +5,22 @@ import pytest
 from conftest import config_data
 from validation.cohort import (
     CohortError,
-    largest_remainder_quotas,
     load_metadata_titles,
     prepare_cohort,
-    select_users,
-    split_record,
 )
+from validation.cohort_selection import select_users, split_record
 from validation.config import ValidationConfig
-
-
-def test_largest_remainder_is_exact() -> None:
-    quotas = largest_remainder_quotas({"5-9": 51, "10-19": 31, "20-49": 18}, 33)
-    assert quotas == {"5-9": 17, "10-19": 10, "20-49": 6}
 
 
 def test_user_selection_is_deterministic_and_split_has_no_target_leakage() -> None:
     pairs = [(f"u{i:03d}", [str(value) for value in range(1, 6 + i % 20)]) for i in range(80)]
-    eligible = {str(value) for value in range(1, 30)}
-    first, quotas = select_users(
-        pairs, eligible, count=32, seed=42, boundaries=[5, 10, 20, 50], min_length=5, max_length=13
+    first = select_users(
+        pairs, count=32, seed=42, boundaries=[5, 10, 20, 50], min_length=5, max_length=13
     )
-    second, _ = select_users(
-        pairs, eligible, count=32, seed=42, boundaries=[5, 10, 20, 50], min_length=5, max_length=13
+    second = select_users(
+        pairs, count=32, seed=42, boundaries=[5, 10, 20, 50], min_length=5, max_length=13
     )
-    assert first == second and len(first) == sum(quotas.values()) == 32
+    assert first == second and len(first) == 32
     for row in first:
         split = split_record(row)
         assert split["train"] == split["sequence"][:-2]
@@ -75,13 +67,19 @@ def test_prepare_cohort_requires_complete_metadata_titles(tmp_path) -> None:
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    assert len(metadata_titles) == manifest["catalog_size"] == 19
+    sequences = [
+        json.loads(line)
+        for line in (config.output_dir / "data/cohort/sequences.jsonl").read_text().splitlines()
+    ]
+    assert len(metadata_titles) == manifest["catalog_size"] == len(
+        {item for row in sequences for item in row["sequence"]}
+    )
     assert set(metadata_titles[0]) == {"item_id", "content_id", "title"}
     assert not (config.output_dir / "data/cohort/failures.jsonl").exists()
     assert not (config.output_dir / "data/cohort/vce_smoke_selection.jsonl").exists()
 
 
-def test_prepare_cohort_uses_full_eligible_catalog_not_selected_user_union(tmp_path) -> None:
+def test_prepare_cohort_uses_selected_user_union_not_all_available_items(tmp_path) -> None:
     data = config_data(tmp_path, users=1)
     videos = data["dataset"]["videos_dir"]
     videos.mkdir()
@@ -106,7 +104,7 @@ def test_prepare_cohort_uses_full_eligible_catalog_not_selected_user_union(tmp_p
         for line in (cohort_dir / "catalog.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert len({item for row in sequences for item in row["sequence"]}) == 5
-    assert [row["item_id"] for row in catalog] == [str(item) for item in range(1, 11)]
+    assert [row["item_id"] for row in catalog] == sorted(sequences[0]["sequence"], key=int)
 
 
 def test_prepare_cohort_preserves_eligibility_diagnostics_on_failure(tmp_path) -> None:
@@ -128,7 +126,9 @@ def test_prepare_cohort_preserves_eligibility_diagnostics_on_failure(tmp_path) -
     cohort_dir = config.output_dir / "data/cohort"
     summary = json.loads((cohort_dir / "eligibility_summary.json").read_text(encoding="utf-8"))
     assert summary["requested_users"] == 2
-    assert summary["eligible_users"] == 0
+    assert summary["candidate_user_count"] == summary["selected_user_count"] == 2
+    assert summary["available_item_count"] == 1
+    assert summary["status"] == "blocked"
     assert summary["item_exclusions"] == {"missing_video": 4}
     assert (cohort_dir / "item_inventory.jsonl").exists()
     assert (cohort_dir / "failures.jsonl").exists()
@@ -172,15 +172,14 @@ def test_title_csv_omits_blank_titles_for_catalog_coverage_check(tmp_path) -> No
 
 
 @pytest.mark.parametrize("outside_item", ["1849", "6"])
-def test_blank_title_outside_eligible_catalog_preserves_cohort(tmp_path, outside_item) -> None:
+def test_blank_title_outside_required_catalog_preserves_cohort(tmp_path, outside_item) -> None:
     data = config_data(tmp_path, users=1)
     videos = data["dataset"]["videos_dir"]
     videos.mkdir()
     for item in range(1, 6):
         (videos / f"{item}.mp4").write_bytes(b"video")
-    # Item 6 is referenced but has no video; item 1849 is not referenced at all.
-    sequence = "1 2 3 4 5 6" if outside_item == "6" else "1 2 3 4 5"
-    data["dataset"]["pairs_tsv"].write_text(f"u01\t{sequence}\n", encoding="utf-8")
+    # Item 6 belongs to a too-short user's history; item 1849 is not referenced.
+    data["dataset"]["pairs_tsv"].write_text("u01\t1 2 3 4 5\nshort\t6\n", encoding="utf-8")
     titles_path = data["dataset"]["titles_csv"]
     _write_titles(titles_path, range(1, 6))
     config = ValidationConfig.model_validate(data)
@@ -222,7 +221,7 @@ def test_missing_title_fails_without_shrinking_catalog(tmp_path, last_title_row)
 
     cohort_dir = config.output_dir / "data/cohort"
     eligibility = json.loads((cohort_dir / "eligibility_summary.json").read_text(encoding="utf-8"))
-    assert eligibility["eligible_items"] == 5
+    assert eligibility["available_item_count"] == eligibility["required_item_count"] == 5
     assert eligibility["metadata_title_coverage"] == {
         "schema_version": "metadata-title/v1",
         "catalog_item_count": 5,

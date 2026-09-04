@@ -10,12 +10,12 @@ from validation.config import ValidationConfig
 from conftest import config_data
 
 
-def test_validation_config_v2_accepts_only_the_declared_contract(tmp_path) -> None:
+def test_validation_config_v3_accepts_only_the_declared_contract(tmp_path) -> None:
     value = config_data(tmp_path)
 
     config = ValidationConfig.model_validate(value)
 
-    assert config.schema_version == "validation-config/v2"
+    assert config.schema_version == "validation-config/v3"
     assert config.dataset.titles_csv == tmp_path / "titles.csv"
     assert config.model.embedding_dim == 512
     assert config.model.batch_size == 256
@@ -26,6 +26,7 @@ def test_validation_config_v2_accepts_only_the_declared_contract(tmp_path) -> No
     "mutation",
     [
         lambda value: value.update(schema_version="validation-config/v1"),
+        lambda value: value.update(schema_version="validation-config/v2"),
         lambda value: value["dataset"].pop("titles_csv"),
         lambda value: value["dataset"].update(legacy_titles="titles.csv"),
         lambda value: value["model"].update(embedding_dim=8),

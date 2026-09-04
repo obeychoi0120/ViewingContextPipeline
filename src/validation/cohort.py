@@ -1,28 +1,25 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import math
 import subprocess
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
+from .cohort_selection import (
+    CATALOG_SCOPE,
+    COHORT_SAMPLING,
+    ELIGIBILITY_SCHEMA_VERSION,
+    METADATA_TITLE_SCHEMA_VERSION,
+    CohortError,
+    build_cohort_plan,
+    content_id_for_item,
+    normalize_item_id,
+    validate_plan,
+)
 from .config import ValidationConfig
-from .io import atomic_write_json, atomic_write_jsonl
-
-
-class CohortError(RuntimeError):
-    pass
-
-
-METADATA_TITLE_SCHEMA_VERSION = "metadata-title/v1"
-
-
-def normalize_item_id(value: object) -> str:
-    text = str(value).strip()
-    if not text.isdigit() or int(text) <= 0:
-        raise CohortError(f"invalid item id: {value!r}")
-    return str(int(text))
+from .io import atomic_write_json, atomic_write_jsonl, read_jsonl
 
 
 def load_pairs(path: Path) -> list[tuple[str, list[str]]]:
@@ -44,7 +41,7 @@ def load_pairs(path: Path) -> list[tuple[str, list[str]]]:
 
 
 def load_metadata_titles(path: Path) -> dict[str, str]:
-    """Load usable titles; prepare_cohort checks missing titles against eligible items."""
+    """Blank titles outside the required catalog do not block preparation."""
     titles: dict[str, str] = {}
     seen: set[str] = set()
     try:
@@ -69,12 +66,18 @@ def load_metadata_titles(path: Path) -> dict[str, str]:
                 )
             seen.add(item_id)
             title = raw_title.strip()
-            if not title:
-                # A full title CSV may contain blank titles outside this run's catalog.
-                # Eligible blank titles become missing_metadata_title failures below.
-                continue
-            titles[item_id] = title
+            if title:
+                titles[item_id] = title
     return titles
+
+
+def _positive_finite(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value > 0
+    )
 
 
 def probe_duration(path: Path) -> float:
@@ -86,38 +89,57 @@ def probe_duration(path: Path) -> float:
         encoding="utf-8",
     )
     duration = float(json.loads(completed.stdout)["format"]["duration"])
-    if duration <= 0:
-        raise ValueError("duration must be positive")
+    if not _positive_finite(duration):
+        raise ValueError("duration must be positive and finite")
     return duration
 
 
 def build_item_inventory(
-    referenced_items: set[str], videos_dir: Path, probe: Callable[[Path], float] = probe_duration
+    referenced_items: set[str],
+    videos_dir: Path,
+    probe: Callable[[Path], float] = probe_duration,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    videos = {normalize_item_id(path.stem): path for path in sorted(videos_dir.glob("*.mp4"))}
+    videos: dict[str, list[Path]] = {}
+    for path in sorted(videos_dir.glob("*.mp4")):
+        try:
+            item_id = normalize_item_id(path.stem)
+        except CohortError:
+            continue
+        if item_id in referenced_items:
+            videos.setdefault(item_id, []).append(path)
     rows: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     for item_id in sorted(referenced_items, key=int):
-        path = videos.get(item_id)
+        matches = videos.get(item_id, [])
+        path = matches[0] if matches else None
         reasons: list[str] = []
-        duration: float | None = None
+        duration = size = mtime = None
         if path is None:
             reasons.append("missing_video")
             failures.append({"item_id": item_id, "reason": "missing_video"})
         else:
             try:
+                if len(matches) != 1:
+                    raise ValueError(f"multiple video files normalize to item {item_id}")
+                stat = path.stat()
+                size, mtime = stat.st_size, stat.st_mtime_ns
+                if not path.is_file() or size <= 0:
+                    raise ValueError("video must be a non-empty file")
                 duration = probe(path)
+                if not _positive_finite(duration):
+                    raise ValueError("duration must be positive and finite")
             except Exception as exc:
+                duration = None
                 reasons.append("invalid_video")
                 failures.append({"item_id": item_id, "reason": "invalid_video", "error": str(exc)})
         rows.append(
             {
                 "item_id": item_id,
-                "content_id": f"microlens_100k_{int(item_id):05d}",
+                "content_id": content_id_for_item(item_id),
                 "source_video_path": str(path.resolve()) if path else None,
                 "duration_seconds": duration,
-                "source_file_size": path.stat().st_size if path else None,
-                "source_mtime_ns": path.stat().st_mtime_ns if path else None,
+                "source_file_size": size,
+                "source_mtime_ns": mtime,
                 "eligible": not reasons,
                 "exclusion_reasons": reasons,
             }
@@ -125,78 +147,187 @@ def build_item_inventory(
     return rows, failures
 
 
-def history_stratum(length: int, boundaries: list[int]) -> str:
-    for start, end in zip(boundaries, boundaries[1:]):
-        if start <= length < end:
-            return f"{start}-{end - 1}"
-    return f"{boundaries[-1]}+"
+def _read(path: Path, *, jsonl: bool = False) -> Any:
+    try:
+        value = read_jsonl(path) if jsonl else json.loads(path.read_text(encoding="utf-8"))
+        if jsonl:
+            if not all(isinstance(row, dict) for row in value):
+                raise ValueError("JSONL rows must be objects")
+        elif not isinstance(value, dict):
+            raise ValueError("JSON root must be an object")
+        return value
+    except (OSError, TypeError, ValueError) as exc:
+        raise CohortError(f"missing or invalid cohort artifact {path}: {exc}") from exc
 
 
-def largest_remainder_quotas(sizes: dict[str, int], total: int) -> dict[str, int]:
-    available = sum(sizes.values())
-    if total > available:
-        raise CohortError(f"requested {total} users but only {available} are eligible")
-    exact = {key: total * size / available for key, size in sizes.items()}
-    quotas = {key: min(sizes[key], int(value)) for key, value in exact.items()}
-    remaining = total - sum(quotas.values())
-    order = sorted(sizes, key=lambda key: (-(exact[key] - int(exact[key])), key))
-    while remaining:
-        progressed = False
-        for key in order:
-            if quotas[key] < sizes[key] and remaining:
-                quotas[key] += 1
-                remaining -= 1
-                progressed = True
-        if not progressed:
-            raise CohortError("unable to allocate user quotas")
-    return quotas
-
-
-def _stable_key(seed: int, value: str) -> str:
-    return hashlib.sha256(f"{seed}:{value}".encode()).hexdigest()
-
-
-def select_users(
-    pairs: list[tuple[str, list[str]]],
-    eligible_items: set[str],
-    *,
-    count: int,
-    seed: int,
-    boundaries: list[int],
-    min_length: int,
-    max_length: int,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for user_id, original in pairs:
-        filtered = [item for item in original if item in eligible_items]
-        if len(filtered) < min_length:
-            continue
-        stratum = history_stratum(len(original), boundaries)
-        grouped[stratum].append(
-            {
-                "user_id": user_id,
-                "original_length": len(original),
-                "filtered_length": len(filtered),
-                "sequence": filtered[-max_length:],
-                "stratum": stratum,
-            }
-        )
-    sizes = {key: len(rows) for key, rows in grouped.items()}
-    quotas = largest_remainder_quotas(sizes, count)
-    selected: list[dict[str, Any]] = []
-    for stratum in sorted(grouped):
-        rows = sorted(grouped[stratum], key=lambda row: _stable_key(seed, row["user_id"]))
-        selected.extend(rows[: quotas[stratum]])
-    return sorted(selected, key=lambda row: row["user_id"]), quotas
-
-
-def split_record(row: dict[str, Any]) -> dict[str, Any]:
-    sequence = row["sequence"]
+def _media_statistics(inventory: list[dict[str, Any]]) -> dict[str, Any]:
+    available = [row for row in inventory if row["eligible"]]
+    complete = len(available) == len(inventory)
+    duration = math.fsum(row["duration_seconds"] for row in available)
     return {
-        **row,
-        "train": sequence[:-2],
-        "valid_target": sequence[-2],
-        "test_target": sequence[-1],
+        "available_duration_seconds": duration,
+        "total_duration_seconds": duration if complete else None,
+        "scene_count": (
+            sum((math.ceil(row["duration_seconds"]) + 29) // 30 for row in available)
+            if complete
+            else None
+        ),
+        "keyframe_count": (
+            sum((math.ceil(row["duration_seconds"]) + 9) // 10 for row in available)
+            if complete
+            else None
+        ),
+    }
+
+
+def _eligibility(plan: dict[str, Any], status: str) -> dict[str, Any]:
+    return {
+        "schema_version": ELIGIBILITY_SCHEMA_VERSION,
+        "run_id": plan["run_id"],
+        "status": status,
+        "cohort_sampling": COHORT_SAMPLING,
+        "catalog_scope": CATALOG_SCOPE,
+        "inputs": plan["inputs"],
+        "requested_users": plan["selected_user_count"],
+        "pairs_user_count": plan["pairs_user_count"],
+        "candidate_user_count": plan["candidate_user_count"],
+        "selected_user_count": plan["selected_user_count"],
+        "required_item_count": plan["required_item_count"],
+        "available_item_count": None,
+        "item_exclusions": {},
+        "metadata_title_coverage": {
+            "schema_version": METADATA_TITLE_SCHEMA_VERSION,
+            "catalog_item_count": plan["required_item_count"],
+            "covered_item_count": None,
+            "missing_item_count": None,
+        },
+        "statistics": plan["statistics"],
+        "media": {
+            "available_duration_seconds": None,
+            "total_duration_seconds": None,
+            "scene_count": None,
+            "keyframe_count": None,
+        },
+    }
+
+
+def _freeze_plan(
+    output: Path,
+    plan: dict[str, Any],
+    selected: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+) -> None:
+    plan_path = output / "cohort_plan.json"
+    eligibility_path = output / "eligibility_summary.json"
+    if eligibility_path.exists():
+        eligibility = _read(eligibility_path)
+        if eligibility.get("schema_version") != ELIGIBILITY_SCHEMA_VERSION or eligibility.get(
+            "status"
+        ) not in {"planned", "blocked", "ready"}:
+            raise CohortError("legacy/invalid cohort artifacts cannot be reused; use a new run_id")
+    if not plan_path.exists() and any(
+        (output / name).exists()
+        for name in ("catalog.jsonl", "sequences.jsonl", "metadata_titles.jsonl")
+    ):
+        raise CohortError("cohort artifacts have no user-first plan; use a new run_id")
+    documents = (
+        (output / "selected_users.jsonl", selected, True),
+        (output / "required_items.jsonl", items, True),
+        (plan_path, plan, False),
+    )
+    # Check every existing file before any writes. The plan is committed last;
+    # identical interrupted partial writes can therefore be resumed safely.
+    for path, value, jsonl in documents:
+        if path.exists() and _read(path, jsonl=jsonl) != value:
+            raise CohortError(f"cohort selection/input changed at {path.name}; use a new run_id")
+    for path, value, jsonl in documents:
+        if not path.exists():
+            (atomic_write_jsonl if jsonl else atomic_write_json)(path, value)
+    if not eligibility_path.exists():
+        atomic_write_json(eligibility_path, _eligibility(plan, "planned"))
+
+
+def load_ready_cohort(
+    output: Path,
+    *,
+    run_id: str,
+    settings: dict[str, Any],
+    inputs: dict[str, str],
+) -> dict[str, Any]:
+    """Shared artifact gate. No original videos, ffprobe, Torch or VLM imports."""
+    eligibility = _read(output / "eligibility_summary.json")
+    if eligibility.get("schema_version") != ELIGIBILITY_SCHEMA_VERSION:
+        raise CohortError("legacy or invalid cohort eligibility; use a new run_id")
+    if eligibility.get("status") != "ready":
+        raise CohortError(
+            f"cohort is not ready (status={eligibility.get('status')!r}); "
+            "complete prepare-cohort after supplying the required assets"
+        )
+    plan = _read(output / "cohort_plan.json")
+    selected = _read(output / "selected_users.jsonl", jsonl=True)
+    items = _read(output / "required_items.jsonl", jsonl=True)
+    validate_plan(plan, selected, items, run_id=run_id, settings=settings, inputs=inputs)
+    sequences = _read(output / "sequences.jsonl", jsonl=True)
+    if sequences != sorted(selected, key=lambda row: row["user_id"]):
+        raise CohortError("cohort sequences differ from the frozen selected users")
+    catalog = _read(output / "catalog.jsonl", jsonl=True)
+    inventory = _read(output / "item_inventory.jsonl", jsonl=True)
+    titles = _read(output / "metadata_titles.jsonl", jsonl=True)
+    for label, rows in (
+        ("catalog", catalog),
+        ("inventory", inventory),
+        ("metadata titles", titles),
+    ):
+        mapping = [
+            {"item_id": row.get("item_id"), "content_id": row.get("content_id")} for row in rows
+        ]
+        if mapping != items:
+            raise CohortError(f"{label} does not match the required selected sequence union")
+    for item, row, title in zip(catalog, inventory, titles, strict=True):
+        if (
+            set(item) != {"item_id", "content_id", "source_video_path", "duration_seconds"}
+            or any(item[key] != row.get(key) for key in item)
+            or row.get("eligible") is not True
+            or row.get("exclusion_reasons") != []
+            or not _positive_finite(row.get("duration_seconds"))
+            or not isinstance(row.get("source_video_path"), str)
+            or not row["source_video_path"].strip()
+            or type(row.get("source_file_size")) is not int
+            or row["source_file_size"] <= 0
+            or type(row.get("source_mtime_ns")) is not int
+        ):
+            raise CohortError("invalid ready cohort video inventory/catalog")
+        if (
+            set(title) != {"item_id", "content_id", "title"}
+            or not isinstance(title["title"], str)
+            or not title["title"].strip()
+        ):
+            raise CohortError("invalid ready cohort metadata title")
+    expected = _eligibility(plan, "ready")
+    expected.update(
+        available_item_count=len(items),
+        metadata_title_coverage={
+            "schema_version": METADATA_TITLE_SCHEMA_VERSION,
+            "catalog_item_count": len(items),
+            "covered_item_count": len(items),
+            "missing_item_count": 0,
+        },
+        media=_media_statistics(inventory),
+    )
+    if eligibility != expected:
+        raise CohortError("cohort eligibility does not match the actual plan/catalog/sequences")
+    failure_path = output / "failures.jsonl"
+    if failure_path.exists() and _read(failure_path, jsonl=True):
+        raise CohortError("ready cohort still has unresolved asset failures")
+    return {
+        "plan": plan,
+        "selected_users": selected,
+        "required_items": items,
+        "catalog": catalog,
+        "sequences": sequences,
+        "inventory": inventory,
+        "metadata_titles": titles,
+        "eligibility": eligibility,
     }
 
 
@@ -204,105 +335,104 @@ def prepare_cohort(
     config: ValidationConfig,
     *,
     output_dir: Path | None = None,
-    probe: Callable[[Path], float] = probe_duration,
+    plan_only: bool = False,
+    force: bool = False,
+    probe: Callable[[Path], float] | None = None,
 ) -> dict[str, Any]:
     output = output_dir or config.output_dir / "data" / "cohort"
-    pairs = load_pairs(config.dataset.pairs_tsv)
-    referenced_items = {item for _, sequence in pairs for item in sequence}
-    inventory, failures = build_item_inventory(referenced_items, config.dataset.videos_dir, probe)
-    eligible = {row["item_id"] for row in inventory if row["eligible"]}
-    titles = load_metadata_titles(config.dataset.titles_csv)
-    missing_title_items = sorted(eligible - set(titles), key=int)
-    failures.extend(
-        {"item_id": item_id, "reason": "missing_metadata_title"} for item_id in missing_title_items
+    settings = config.cohort.model_dump(mode="json")
+    inputs = {key: str(path.resolve()) for key, path in config.dataset.model_dump().items()}
+    plan, selected, items = build_cohort_plan(
+        load_pairs(config.dataset.pairs_tsv),
+        run_id=config.run_id,
+        settings=settings,
+        inputs=inputs,
     )
-    eligible_user_count = sum(
-        1
-        for _, sequence in pairs
-        if sum(item in eligible for item in sequence) >= config.cohort.min_sequence_length
-    )
-    exclusion_counts = Counter(reason for row in inventory for reason in row["exclusion_reasons"])
-    eligibility = {
-        "schema_version": "microlens-cohort-eligibility/v2",
-        "requested_users": config.cohort.user_count,
-        "pairs_users": len(pairs),
-        "referenced_items": len(referenced_items),
-        "eligible_items": len(eligible),
-        "eligible_users": eligible_user_count,
-        "min_sequence_length": config.cohort.min_sequence_length,
-        "item_exclusions": dict(sorted(exclusion_counts.items())),
-        "pairs_tsv": str(config.dataset.pairs_tsv),
-        "videos_dir": str(config.dataset.videos_dir),
-        "titles_csv": str(config.dataset.titles_csv),
-        "metadata_title_coverage": {
-            "schema_version": METADATA_TITLE_SCHEMA_VERSION,
-            "catalog_item_count": len(eligible),
-            "covered_item_count": len(eligible) - len(missing_title_items),
-            "missing_item_count": len(missing_title_items),
-        },
-    }
-    atomic_write_jsonl(output / "item_inventory.jsonl", inventory)
-    failure_path = output / "failures.jsonl"
-    if failures:
-        atomic_write_jsonl(failure_path, failures)
+    _freeze_plan(output, plan, selected, items)
+    eligibility_path = output / "eligibility_summary.json"
+    eligibility = _read(eligibility_path)
+    if plan_only:
+        if eligibility.get("status") == "ready":
+            load_ready_cohort(output, run_id=config.run_id, settings=settings, inputs=inputs)
+        print(
+            f"[COHORT PLAN] status={eligibility['status']} "
+            f"candidate_users={plan['candidate_user_count']} selected_users={len(selected)} "
+            f"required_videos={len(items)}",
+            flush=True,
+        )
+        for size, statistics in plan["scale_statistics"].items():
+            print(
+                f"[COHORT SCALE] users={size} {json.dumps(statistics, sort_keys=True)}", flush=True
+            )
     else:
-        failure_path.unlink(missing_ok=True)
-    atomic_write_json(output / "eligibility_summary.json", eligibility)
-    print(
-        "[COHORT] "
-        f"pairs_users={len(pairs)} referenced_items={len(referenced_items)} "
-        f"eligible_items={len(eligible)} eligible_users={eligible_user_count} "
-        f"requested_users={config.cohort.user_count}",
-        flush=True,
-    )
-    if eligible_user_count < config.cohort.user_count:
-        raise CohortError(
-            f"requested {config.cohort.user_count} users but only {eligible_user_count} are eligible; "
-            f"check pairs_tsv/videos_dir and {output / 'eligibility_summary.json'}"
+        # Preparation revalidates the assets even on resume. --force never redraws
+        # users or permits a changed plan, and does not invalidate downstream files.
+        eligibility = _eligibility(plan, "blocked")
+        atomic_write_json(eligibility_path, eligibility)
+        inventory, failures = build_item_inventory(
+            {row["item_id"] for row in items}, config.dataset.videos_dir, probe or probe_duration
         )
-    if missing_title_items:
-        (output / "metadata_titles.jsonl").unlink(missing_ok=True)
-        raise CohortError(
-            f"eligible catalog has {len(missing_title_items)} items without metadata titles; "
-            f"check {config.dataset.titles_csv} and {output / 'eligibility_summary.json'}"
+        titles: dict[str, str] = {}
+        try:
+            titles = load_metadata_titles(config.dataset.titles_csv)
+        except (CohortError, UnicodeError) as exc:
+            failures.append({"reason": "invalid_metadata_titles", "error": str(exc)})
+        missing = [row["item_id"] for row in items if row["item_id"] not in titles]
+        failures.extend({"item_id": item, "reason": "missing_metadata_title"} for item in missing)
+        eligibility.update(
+            available_item_count=sum(row["eligible"] for row in inventory),
+            item_exclusions=dict(
+                sorted(
+                    Counter(
+                        reason for row in inventory for reason in row["exclusion_reasons"]
+                    ).items()
+                )
+            ),
+            metadata_title_coverage={
+                "schema_version": METADATA_TITLE_SCHEMA_VERSION,
+                "catalog_item_count": len(items),
+                "covered_item_count": len(items) - len(missing),
+                "missing_item_count": len(missing),
+            },
+            media=_media_statistics(inventory),
         )
-    selected, quotas = select_users(
-        pairs,
-        eligible,
-        count=config.cohort.user_count,
-        seed=config.cohort.seed,
-        boundaries=config.cohort.history_strata,
-        min_length=config.cohort.min_sequence_length,
-        max_length=config.cohort.max_sequence_length,
-    )
-    sequences = [split_record(row) for row in selected]
-    # Ranking is defined over the complete eligible item catalog. Restricting this
-    # to items observed in the selected users silently turns the fixed item-1K
-    # protocol into a much smaller cohort-union evaluation.
-    catalog_ids = sorted(eligible, key=int)
-    by_item = {row["item_id"]: row for row in inventory}
-    catalog = [
-        {
-            key: by_item[item][key]
-            for key in ("item_id", "content_id", "source_video_path", "duration_seconds")
-        }
-        for item in catalog_ids
-    ]
-    metadata_titles = [
-        {
-            "item_id": row["item_id"],
-            "content_id": row["content_id"],
-            "title": titles[row["item_id"]],
-        }
-        for row in catalog
-    ]
-    atomic_write_jsonl(output / "sequences.jsonl", sequences)
-    atomic_write_jsonl(output / "catalog.jsonl", catalog)
-    atomic_write_jsonl(output / "metadata_titles.jsonl", metadata_titles)
+        atomic_write_jsonl(output / "item_inventory.jsonl", inventory)
+        failure_path = output / "failures.jsonl"
+        if failures:
+            atomic_write_jsonl(failure_path, failures)
+        else:
+            failure_path.unlink(missing_ok=True)
+        atomic_write_json(eligibility_path, eligibility)
+        if failures:
+            raise CohortError(
+                f"required catalog has {len(missing)} items without metadata titles and "
+                f"{len(items) - eligibility['available_item_count']} unavailable videos; "
+                f"selection is unchanged; check {eligibility_path}"
+            )
+        catalog = [
+            {
+                key: row[key]
+                for key in ("item_id", "content_id", "source_video_path", "duration_seconds")
+            }
+            for row in inventory
+        ]
+        metadata_titles = [{**item, "title": titles[item["item_id"]]} for item in items]
+        atomic_write_jsonl(output / "catalog.jsonl", catalog)
+        atomic_write_jsonl(
+            output / "sequences.jsonl", sorted(selected, key=lambda row: row["user_id"])
+        )
+        atomic_write_jsonl(output / "metadata_titles.jsonl", metadata_titles)
+        eligibility["status"] = "ready"
+        atomic_write_json(eligibility_path, eligibility)
+        print(
+            f"[COHORT] status=ready selected_users={len(selected)} catalog_size={len(items)} "
+            f"scenes={eligibility['media']['scene_count']}",
+            flush=True,
+        )
     return {
         "run_id": config.run_id,
-        "user_count": len(sequences),
-        "catalog_size": len(catalog),
-        "metadata_title_count": len(metadata_titles),
-        "stratum_quotas": quotas,
+        "status": eligibility["status"],
+        "user_count": len(selected),
+        "catalog_size": len(items),
+        "catalog_scope": CATALOG_SCOPE,
     }
