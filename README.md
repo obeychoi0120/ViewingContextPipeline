@@ -112,7 +112,8 @@ Qwen Graph, Gemini Graph, Description은 서로 독립적인 extraction DAG입�
 - Linux/CUDA, Qwen checkpoint, 충분한 GPU memory (`Qwen` scene/summary pilot)
 - Vertex ADC, project 권한, location, quota, 비용 승인 (`Gemini` branch)
 - 원본 전체 `MicroLens-100k_pairs.tsv`: `user_id<TAB>space-separated item ids`
-- `MicroLens-100k_title_en.csv`: 각 줄을 첫 comma에서만 나눈 `positive item_id,title`; UTF-8 BOM 허용
+- 공식 `MicroLens-100k_title_en.csv`와 결측 title 보완용 공식 `MicroLens-50k_titles.csv`
+- `data.titles_csv`가 가리키는 파생 `MicroLens-100k_title_en_completed.csv`: 각 줄을 첫 comma에서만 나눈 `positive item_id,title`; UTF-8 BOM 허용
 - 양의 정수를 stem으로 갖는 local `{item_id}.mp4`
 - `config/pipeline.yaml`의 data/model 경로가 실행 host에서 유효
 
@@ -138,6 +139,23 @@ python -m validation prepare-cohort --run-id "$RUN_ID" --plan-only
 ```
 
 `cohort_plan.json`, `selected_users.jsonl`, `required_items.jsonl`로 선정 결과를 고정하고 `eligibility_summary.json`에 `planned` 상태를 기록합니다. 설정 규모와 1K·10K·100K prefix별 필요한 영상 수, history 길이·절단 비율, train/refit interaction 수, 학습 단계별 미관찰 target 비율을 확인하십시오. 후보가 부족한 참고 규모는 `insufficient_candidates`이며, 설정한 목표 인원 자체가 부족하면 명령이 실패합니다. Duration을 모르는 단계의 scene/keyframe 수는 `null`이며 0이나 확정 비용으로 해석하지 않습니다.
+
+공식 100K title 파일에는 빈 title이 일부 존재합니다. 선정 catalog에 빈 title이 포함되면 원본 파일을 수정하지 말고, 아래 준비 도구로 **현재 `required_items.jsonl`에 필요한 빈 값만** 공식 50K title에서 보완합니다. Primary의 비어 있지 않은 title은 항상 우선하며, supplement로도 해결되지 않은 required item이 있으면 출력 파일을 만들지 않고 실패합니다. 파생 CSV 옆의 `metadata-title-completion/v1` report에는 입력·출력 SHA-256과 보완 item ID가 기록됩니다. 이 명령은 11단계 밖의 데이터 준비 도구입니다.
+
+```bash
+ANNOTATIONS=/home_nvme/shared/data/microlens_100k/Annotations
+wget -c \
+  https://recsys.westlake.edu.cn/MicroLens-50k-Dataset/MicroLens-50k_titles.csv \
+  -P "$ANNOTATIONS"
+
+python -m validation.complete_titles \
+  --primary "$ANNOTATIONS/MicroLens-100k_title_en.csv" \
+  --supplement "$ANNOTATIONS/MicroLens-50k_titles.csv" \
+  --required-items "artifacts/$RUN_ID/data/cohort/required_items.jsonl" \
+  --output "$ANNOTATIONS/MicroLens-100k_title_en_completed.csv"
+```
+
+원본과 supplement는 [공식 MicroLens portal](https://recsys.westlake.edu.cn/)에서 받습니다. 50K supplement의 더 긴 문장·hashtag 스타일은 보완된 item에만 남으므로, Metadata arm 결과 해석 시 provenance report의 보완 규모를 함께 확인합니다. `data.titles_csv` 경로가 바뀐 기존 plan은 재사용하지 않고 새 `run_id`에서 `--plan-only`부터 시작합니다.
 
 일반 `prepare-cohort`는 같은 선정 명세를 확인하고 필요한 MP4의 duration과 title coverage를 검증합니다. 전체 title CSV의 잘못된 item ID와 duplicate는 오류입니다. 필요한 title의 blank/missing은 `data/cohort/failures.jsonl`에 `missing_metadata_title`로 기록합니다. 필요한 영상 누락·손상도 기록하고 `blocked` 상태, exit code 1로 중단합니다. Catalog 밖의 blank title은 무시하지만, 필요한 item의 interaction 삭제·사용자 대체·fallback title은 하지 않습니다.
 
@@ -323,6 +341,7 @@ viewing-context-config/v3
 validation-config/v3
 microlens-user-cohort-plan/v1
 microlens-cohort-eligibility/v3
+metadata-title-completion/v1
 metadata-title/v1
 scene-description/v1
 graph-video-summary/v3
