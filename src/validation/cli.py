@@ -12,10 +12,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--plan-only", action="store_true",
+        help="Freeze users and list required items without media/title validation (prepare-cohort only).",
+    )
     args = parser.parse_args(argv)
     try:
+        if args.plan_only and args.step != "prepare-cohort":
+            raise ValueError("--plan-only is only supported by prepare-cohort")
         context = RunContext.load(args.run_id)
-        STEP_HANDLERS[args.step](context, force=args.force)
+        kwargs = {"force": args.force}
+        if args.step == "prepare-cohort":
+            kwargs["plan_only"] = args.plan_only
+        STEP_HANDLERS[args.step](context, **kwargs)
+    except KeyboardInterrupt:
+        print(f"[INTERRUPTED] {args.step}", file=sys.stderr)
+        return 130
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[FAILED] {args.step}: {exc}", file=sys.stderr)
         return 1

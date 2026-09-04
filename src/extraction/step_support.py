@@ -172,9 +172,9 @@ def minimal_graph_failures(
 
 
 def visual_rows(context: RunContext) -> list[dict[str, Any]]:
-    catalog_path = require_file(context.cohort_dir / "catalog.jsonl", "cohort catalog")
+    cohort = context.require_ready_cohort()
     rows: list[dict[str, Any]] = []
-    for item in read_jsonl(catalog_path):
+    for item in cohort["catalog"]:
         content_id = str(item["content_id"])
         frames_dir = context.evidence_dir / "resized_keyframes" / content_id
         timestamp = (
@@ -205,5 +205,5 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
             }
         )
     if not rows:
-        raise ExtractionStepError(f"empty cohort catalog: {catalog_path}")
+        raise ExtractionStepError(f"empty cohort catalog: {context.cohort_dir}")
     return rows

@@ -13,6 +13,7 @@ import extraction.steps as extraction_steps
 import extraction.summary_executor as summary_executor
 import validation.features as validation_features
 import validation.steps as validation_steps
+from validation.cohort import prepare_cohort
 from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.summary_validation import SUMMARY_SECTIONS, parse_summary_sections
 from pipeline_runtime import ConfigError, RunContext, read_jsonl, write_json, write_jsonl
@@ -23,6 +24,17 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _summary_lines(sections: dict[str, str]) -> str:
     return "\n".join(f"{name}: {sections[name]}" for name in SUMMARY_SECTIONS)
+
+
+def _ready_cohort(context: RunContext) -> str:
+    context.config["validation"]["cohort"]["user_count"] = 1
+    context.path("data", "pairs_tsv").write_text("fixture\t1 1 1 1 1\n", encoding="utf-8")
+    (context.path("data", "videos_dir") / "1.mp4").write_bytes(b"video")
+    prepare_cohort(
+        validation_steps.validation_config(context), output_dir=context.cohort_dir,
+        probe=lambda _: 10.0,
+    )
+    return "microlens_100k_00001"
 
 
 @pytest.fixture()
@@ -67,7 +79,9 @@ def context(tmp_path: Path) -> RunContext:
 
 
 def test_config_contract_remains_fixed(context: RunContext) -> None:
-    assert context.config["schema_version"] == "viewing-context-config/v2"
+    assert context.config["schema_version"] == "viewing-context-config/v3"
+    assert context.config["protocol"]["cohort_sampling"] == "user_first_nested_stratified"
+    assert context.config["protocol"]["catalog_scope"] == "selected_user_sequence_union"
     assert set(context.config["data"]) == {"videos_dir", "pairs_tsv", "titles_csv"}
     assert context.config["protocol"]["arms"] == [
         "metadata",
@@ -105,6 +119,7 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
     ("change", "message"),
     [
         (lambda value: value.update(schema_version="viewing-context-config/v1"), "schema_version"),
+        (lambda value: value.update(schema_version="viewing-context-config/v2"), "schema_version"),
         (
             lambda value: value["protocol"].update(
                 arms=["id", "graph_qwen", "graph_gemini", "description"]
@@ -119,7 +134,7 @@ def test_config_contract_remains_fixed(context: RunContext) -> None:
         ),
     ],
 )
-def test_pipeline_config_rejects_legacy_and_non_exact_v2_contract(
+def test_pipeline_config_rejects_legacy_and_non_exact_v3_contract(
     context: RunContext,
     change,
     message: str,
@@ -237,15 +252,12 @@ def test_repetition_penalty_reaches_only_its_generation_stage(
         summary_repetition_penalty=1.33,
         greedy_decoding=greedy,
     )
-    write_jsonl(
-        context.cohort_dir / "catalog.jsonl",
-        [{"content_id": "c1", "item_id": "1", "source_video_path": "1.mp4"}],
-    )
-    frames = context.evidence_dir / "resized_keyframes/c1"
+    content_id = _ready_cohort(context)
+    frames = context.evidence_dir / "resized_keyframes" / content_id
     frames.mkdir(parents=True)
     Image.new("RGB", (8, 8)).save(frames / "0005.png")
     write_json(
-        context.cohort_dir / "source_assets/c1/assets/timestamp_fixed_30s.json",
+        context.cohort_dir / "source_assets" / content_id / "assets/timestamp_fixed_30s.json",
         [{"scene_start": 0, "scene_end": 10, "keyframe_timestamps": [5]}],
     )
     graph_record = {
@@ -257,14 +269,14 @@ def test_repetition_penalty_reaches_only_its_generation_stage(
     }
     description_record = {
         "schema_version": "scene-description/v1",
-        "content_id": "c1",
+        "content_id": content_id,
         "scene_idx": 0,
         "keyframes": [5],
         "description": "A person walks.",
     }
     if stage == "summary":
         scene_dir = context.graph_scene_dir(source) if source else context.description_scene_dir
-        write_jsonl(scene_dir / "c1.jsonl", [graph_record if source else description_record])
+        write_jsonl(scene_dir / f"{content_id}.jsonl", [graph_record if source else description_record])
         response = _summary_lines({name: "A person walks." for name in SUMMARY_SECTIONS})
     else:
         response = json.dumps(graph_record["graph"]) if stage == "graph" else "A person walks."
@@ -1015,12 +1027,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
     context: RunContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     context.initialize()
-    content_id = "c1"
-    write_jsonl(context.cohort_dir / "catalog.jsonl", [{"content_id": content_id, "item_id": "1"}])
-    write_jsonl(
-        context.cohort_dir / "metadata_titles.jsonl",
-        [{"content_id": content_id, "item_id": "1", "title": "Fixture title"}],
-    )
+    content_id = _ready_cohort(context)
     for source in ("qwen", "gemini"):
         write_json(
             context.graph_summary_dir(source) / f"{content_id}.json",
@@ -1096,11 +1103,7 @@ def test_embedding_uses_fixed_files_and_no_manifest(
 
 def test_missing_summary_error_names_the_actual_path(context: RunContext) -> None:
     context.initialize()
-    write_jsonl(context.cohort_dir / "catalog.jsonl", [{"content_id": "c1", "item_id": "1"}])
-    write_jsonl(
-        context.cohort_dir / "metadata_titles.jsonl",
-        [{"content_id": "c1", "item_id": "1", "title": "Fixture title"}],
-    )
+    _ready_cohort(context)
     expected = context.graph_summary_dir("qwen")
     with pytest.raises(
         validation_steps.ValidationStepError, match="missing graph_qwen summary directory"
@@ -1125,6 +1128,6 @@ def test_diagnosis_recomputes_runtime_data_and_overwrites_stale_pass(
         validation_steps.run_diagnosis(context)
 
     diagnosis = json.loads(context.diagnosis_path.read_text(encoding="utf-8"))
-    assert diagnosis["schema_version"] == "diagnosis/v3"
+    assert diagnosis["schema_version"] == "diagnosis/v4"
     assert diagnosis["runtime_decision"]["status"] == "fail"
     assert "report_ready" not in diagnosis

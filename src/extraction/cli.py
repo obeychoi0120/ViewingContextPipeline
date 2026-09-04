@@ -12,6 +12,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--reuse-run-id",
+        help="Validate and copy matching PNG/timestamps from a donor run (prepare-input-data only).",
+    )
     parser.add_argument("--model", choices=GRAPH_SOURCES)
     parser.add_argument("--source", choices=GRAPH_SOURCES)
     parser.add_argument(
@@ -21,6 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.reuse_run_id is not None:
+            if args.step != "prepare-input-data":
+                raise ValueError("--reuse-run-id is only supported by prepare-input-data")
+            if args.force:
+                raise ValueError("--reuse-run-id cannot be combined with --force")
         if args.step == "extract-graph-scenes":
             if args.model is None:
                 raise ValueError("extract-graph-scenes requires --model qwen|gemini")
@@ -44,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--gpus is not supported for this step")
         context = RunContext.load(args.run_id)
         kwargs = {"force": args.force}
+        if args.reuse_run_id is not None:
+            kwargs["reuse_run_id"] = args.reuse_run_id
         if args.step == "extract-graph-scenes":
             kwargs["model"] = args.model
         elif args.step == "summarize-graph":

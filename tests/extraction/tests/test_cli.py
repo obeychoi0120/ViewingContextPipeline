@@ -122,3 +122,37 @@ def test_keyboard_interrupt_returns_shell_interrupt_code(
 
     monkeypatch.setitem(cli_module.STEP_HANDLERS, "prepare-input-data", interrupt)
     assert cli_module.main(["prepare-input-data", "--run-id", "demo"]) == 130
+
+
+def test_reuse_run_is_forwarded_to_input_preparation(monkeypatch):
+    received = {}
+    monkeypatch.setattr(cli_module.RunContext, "load", lambda _: SimpleNamespace())
+
+    def prepare(_context, **kwargs):
+        received.update(kwargs)
+
+    monkeypatch.setitem(cli_module.STEP_HANDLERS, "prepare-input-data", prepare)
+    assert cli_module.main([
+        "prepare-input-data", "--run-id", "new", "--reuse-run-id", "old",
+    ]) == 0
+    assert received == {"force": False, "reuse_run_id": "old"}
+
+
+@pytest.mark.parametrize("args", [
+    ["extract-graph-scenes", "--model", "qwen"],
+    ["extract-graph-scenes", "--model", "gemini"],
+    ["summarize-graph", "--source", "qwen"],
+    ["summarize-graph", "--source", "gemini"],
+    ["extract-description-scenes"],
+    ["summarize-description"],
+    ["prepare-input-data", "--force"],
+])
+def test_reuse_run_is_rejected_outside_its_stage_or_with_force(args, capsys):
+    assert cli_module.main([*args, "--run-id", "new", "--reuse-run-id", "old"]) == 1
+    assert "--reuse-run-id" in capsys.readouterr().err
+
+
+def test_plan_only_is_not_an_extraction_flag():
+    with pytest.raises(SystemExit) as raised:
+        cli_module.main(["prepare-input-data", "--run-id", "new", "--plan-only"])
+    assert raised.value.code == 2

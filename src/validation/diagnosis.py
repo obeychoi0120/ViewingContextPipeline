@@ -10,6 +10,13 @@ from typing import Any
 import numpy as np
 
 from .config import ValidationConfig
+from .cohort import load_ready_cohort
+from .cohort_selection import (
+    CATALOG_SCOPE,
+    COHORT_SAMPLING,
+    ELIGIBILITY_SCHEMA_VERSION,
+    CohortError,
+)
 from .diagnosis_statistics import multiple_comparison_policy, statistics
 from .io import read_jsonl
 from .metrics import metrics_from_rank
@@ -181,6 +188,7 @@ def _catalog_contract(
 ) -> tuple[dict[str, str], list[str], bool]:
     item_content: dict[str, str] = {}
     content_ids: list[str] = []
+    seen_content_ids: set[str] = set()
     issues: Counter[str] = Counter()
     examples: list[dict[str, Any]] = []
     for index, row in enumerate(rows):
@@ -202,12 +210,13 @@ def _catalog_contract(
             issues["duplicate_item_id"] += 1
             examples.append({"row_index": index, "item_id": item_id})
             continue
-        if content_id in content_ids:
+        if content_id in seen_content_ids:
             issues["duplicate_content_id"] += 1
             examples.append({"row_index": index, "content_id": content_id})
             continue
         item_content[item_id] = content_id
         content_ids.append(content_id)
+        seen_content_ids.add(content_id)
     valid = loaded and bool(rows) and not issues and len(item_content) == len(rows)
     if loaded and not rows:
         issues["empty_catalog"] += 1
@@ -315,17 +324,19 @@ def _eligibility_contract(
                 "eligibility summary must be an object",
             )
         return {}, False
-    eligible_items = value.get("eligible_items")
-    eligible_users = value.get("eligible_users")
+    available_items = value.get("available_item_count")
+    candidate_users = value.get("candidate_user_count")
     title_coverage = value.get("metadata_title_coverage")
     valid = (
-        value.get("schema_version") == "microlens-cohort-eligibility/v2"
-        and isinstance(eligible_items, int)
-        and not isinstance(eligible_items, bool)
-        and isinstance(eligible_users, int)
-        and not isinstance(eligible_users, bool)
-        and eligible_items == catalog_size
-        and eligible_users >= user_count
+        value.get("schema_version") == ELIGIBILITY_SCHEMA_VERSION
+        and value.get("status") == "ready"
+        and value.get("cohort_sampling") == COHORT_SAMPLING
+        and value.get("catalog_scope") == CATALOG_SCOPE
+        and type(available_items) is int
+        and type(candidate_users) is int
+        and available_items == value.get("required_item_count") == catalog_size
+        and value.get("requested_users") == value.get("selected_user_count") == user_count
+        and candidate_users >= user_count
         and isinstance(title_coverage, dict)
         and title_coverage.get("schema_version") == "metadata-title/v1"
         and title_coverage.get("catalog_item_count") == catalog_size
@@ -336,13 +347,49 @@ def _eligibility_contract(
         _error(
             errors,
             "eligibility_mismatch",
-            "catalog/sequences are inconsistent with the eligible item/user counts",
-            eligible_items=eligible_items,
+            "catalog/sequences are inconsistent with the ready user-first cohort",
+            status=value.get("status"),
+            available_items=available_items,
             catalog_size=catalog_size,
-            eligible_users=eligible_users,
+            candidate_users=candidate_users,
             sequence_users=user_count,
         )
     return value, valid
+
+
+def _cohort_plan_contract(
+    config: ValidationConfig,
+    cohort_dir: Path,
+    errors: list[dict[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    try:
+        cohort = load_ready_cohort(
+            cohort_dir,
+            run_id=config.run_id,
+            settings=config.cohort.model_dump(mode="json"),
+            inputs={key: str(path.resolve()) for key, path in config.dataset.model_dump().items()},
+        )
+    except (CohortError, KeyError, TypeError, ValueError) as exc:
+        _error(
+            errors,
+            "cohort_plan_mismatch",
+            "cohort must be ready and match its frozen selection, sequence union, and inventory",
+            error=str(exc),
+        )
+        return {}, False
+    eligibility = cohort["eligibility"]
+    return {
+        "status": eligibility["status"],
+        "cohort_sampling": COHORT_SAMPLING,
+        "catalog_scope": CATALOG_SCOPE,
+        "pairs_user_count": eligibility["pairs_user_count"],
+        "candidate_user_count": eligibility["candidate_user_count"],
+        "selected_user_count": len(cohort["selected_users"]),
+        "required_item_count": len(cohort["required_items"]),
+        "available_item_count": eligibility["available_item_count"],
+        "statistics": cohort["plan"]["statistics"],
+        "media": eligibility["media"],
+    }, True
 
 
 def _metadata_title_contract(
@@ -1367,6 +1414,7 @@ def diagnose_recommendations(
         user_count=len(sequences),
         errors=errors,
     )
+    cohort_summary, cohort_plan_valid = _cohort_plan_contract(config, cohort_dir, errors)
     metadata_title_rows, metadata_titles_loaded = _read_jsonl(
         cohort_dir / "metadata_titles.jsonl", "metadata titles", errors
     )
@@ -1482,6 +1530,7 @@ def diagnose_recommendations(
     analysis_warnings: list[dict[str, Any]] = []
     statistics_inputs_valid = (
         decision_config_valid and catalog_valid and sequences_valid and grid_complete and rows_valid
+        and cohort_plan_valid and eligibility_valid
     )
     if statistics_inputs_valid:
         try:
@@ -1523,6 +1572,7 @@ def diagnose_recommendations(
         "catalog_valid": catalog_valid,
         "sequences_valid": sequences_valid,
         "eligibility_matches_artifacts": eligibility_valid,
+        "cohort_plan_matches_artifacts": cohort_plan_valid,
         "metadata_titles_valid": metadata_titles_valid,
         "representations_valid": representations_valid,
         "configured_user_count_matches": configured_user_count_matches,
@@ -1536,7 +1586,7 @@ def diagnose_recommendations(
     }
     status = "pass" if all(checks.values()) else "fail"
     return {
-        "schema_version": "diagnosis/v3",
+        "schema_version": "diagnosis/v4",
         "run_id": runtime_object.get("run_id"),
         "modality": runtime_object.get("modality"),
         "runtime_decision": {
@@ -1548,8 +1598,9 @@ def diagnose_recommendations(
             "catalog_size": len(item_content),
             "sequence_user_count": len(sequences),
             "configured_user_count": config.cohort.user_count,
-            "eligible_catalog_size": eligibility.get("eligible_items"),
-            "eligible_user_count": eligibility.get("eligible_users"),
+            "catalog_scope": CATALOG_SCOPE,
+            "required_catalog_size": eligibility.get("required_item_count"),
+            "candidate_user_count": eligibility.get("candidate_user_count"),
             "metadata_titles": metadata_title_summary,
             "representations": representation_summary,
             "seed_count": len(config.model.seeds),
@@ -1558,6 +1609,7 @@ def diagnose_recommendations(
             "training_runs": training_run_summary,
             "checkpoints": checkpoint_summary,
         },
+        "cohort": cohort_summary,
         "scene_coverage": scene_coverage,
         "multiple_comparison_policy": policy,
         "statistical_analysis": {

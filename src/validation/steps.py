@@ -26,7 +26,7 @@ def validation_config(context: RunContext) -> ValidationConfig:
     settings = context.config["validation"]
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v2",
+            "schema_version": "validation-config/v3",
             "run_id": context.run_id,
             "dataset": {
                 "pairs_tsv": context.path("data", "pairs_tsv"),
@@ -72,22 +72,20 @@ def _require_file(path: Path, label: str) -> Path:
     return path
 
 
-def prepare_cohort_step(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def prepare_cohort_step(
+    context: RunContext, *, force: bool = False, plan_only: bool = False
+) -> dict[str, Any]:
     context.initialize()
-    catalog_path = context.cohort_dir / "catalog.jsonl"
-    sequences_path = context.cohort_dir / "sequences.jsonl"
-    metadata_titles_path = context.cohort_dir / "metadata_titles.jsonl"
-    if (
-        catalog_path.is_file()
-        and sequences_path.is_file()
-        and metadata_titles_path.is_file()
-        and not force
-    ):
-        catalog = read_jsonl(catalog_path)
-        if _metadata_titles_match_catalog(metadata_titles_path, catalog):
-            return _result("prepare-cohort", content_count=len(catalog))
-    result = prepare_cohort(validation_config(context), output_dir=context.cohort_dir)
-    return _result("prepare-cohort", content_count=int(result["catalog_size"]))
+    prepared = prepare_cohort(
+        validation_config(context), output_dir=context.cohort_dir,
+        plan_only=plan_only, force=force,
+    )
+    return {
+        **_result("prepare-cohort", content_count=int(prepared["catalog_size"])),
+        "status": prepared["status"],
+        "user_count": prepared["user_count"],
+        "catalog_scope": prepared["catalog_scope"],
+    }
 
 
 def _embedding_path(context: RunContext, branch: str) -> Path:
@@ -171,12 +169,12 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
 
 
 def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    context.initialize()
+    cohort = context.require_ready_cohort()
     from validation.features import BGETextEncoder
 
-    context.initialize()
     config = validation_config(context)
-    catalog_path = _require_file(context.cohort_dir / "catalog.jsonl", "cohort catalog")
-    catalog = read_jsonl(catalog_path)
+    catalog = cohort["catalog"]
     content_ids = [str(row["content_id"]) for row in catalog]
     sources = {
         "metadata": None,
@@ -301,9 +299,10 @@ def _training_runs_complete(
 
 
 def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    context.initialize()
+    context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
 
-    context.initialize()
     config = validation_config(context)
     for branch in ("metadata", "graph_qwen", "graph_gemini", "desc"):
         _require_file(_embedding_path(context, branch), f"{branch} embeddings")

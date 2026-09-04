@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -50,21 +49,20 @@ def prepare_visual_item(
     width, height = image_size
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
-    complete = (
-        timestamp_path.is_file()
-        and resized_keyframes_match_timestamps(timestamp_path, frames_dir, image_size)
+    complete = visual_evidence_matches(
+        timestamp_path, frames_dir, image_size, duration_seconds
     )
     if force or not complete:
-        shutil.rmtree(frames_dir, ignore_errors=True)
         duration = _ceil_duration_seconds(duration_seconds)
         scenes = build_fixed_30s_windows(duration)
-        _write_json(timestamp_path, scenes)
         extract_resized_keyframes(
             source,
-            selected_keyframe_timestamps(timestamp_path),
+            [timestamp for scene in scenes for timestamp in scene["keyframe_timestamps"]],
             frames_dir,
             image_size,
         )
+        # Commit the timestamp only after the complete frame directory is installed.
+        _write_json(timestamp_path, scenes)
     return {"content_id": content_id}
 
 
@@ -137,9 +135,25 @@ def resized_keyframes_match_timestamps(
     return True
 
 
+def visual_evidence_matches(
+    timestamp_file: Path,
+    output_dir: Path,
+    image_size: tuple[int, int],
+    duration_seconds: object,
+) -> bool:
+    try:
+        expected = build_fixed_30s_windows(_ceil_duration_seconds(duration_seconds))
+        observed = json.loads(timestamp_file.read_text(encoding="utf-8"))
+        return observed == expected and resized_keyframes_match_timestamps(
+            timestamp_file, output_dir, image_size
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+
+
 def _safe_content_id(value: object) -> str:
     text = str(value or "").strip()
-    if not text or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in text):
+    if not text or text in {".", ".."} or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in text):
         raise ValueError(f"content_id is not filesystem-safe: {value!r}")
     return text
 

@@ -30,6 +30,8 @@ class CohortConfig(StrictModel):
             or self.history_strata[0] != 5
         ):
             raise ValueError("history_strata must be sorted, unique, and start at 5")
+        if self.max_sequence_length < self.min_sequence_length:
+            raise ValueError("max_sequence_length must be at least min_sequence_length")
         return self
 
 
@@ -80,7 +82,7 @@ class EvaluationConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v2"]
+    schema_version: Literal["validation-config/v3"]
     run_id: str
     dataset: DatasetConfig
     cohort: CohortConfig

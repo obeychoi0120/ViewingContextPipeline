@@ -11,7 +11,7 @@ from artifact_io import atomic_write_json, atomic_write_jsonl
 
 
 CONFIG_PATH = Path("config/pipeline.yaml")
-CONFIG_SCHEMA = "viewing-context-config/v2"
+CONFIG_SCHEMA = "viewing-context-config/v3"
 
 
 class ConfigError(RuntimeError):
@@ -105,6 +105,16 @@ class RunContext:
     def initialize(self) -> None:
         self.run_root.mkdir(parents=True, exist_ok=True)
 
+    def require_ready_cohort(self) -> dict[str, Any]:
+        from validation.cohort import load_ready_cohort
+
+        return load_ready_cohort(
+            self.cohort_dir,
+            run_id=self.run_id,
+            settings=self.config["validation"]["cohort"],
+            inputs={key: str(self.path("data", key)) for key in self.config["data"]},
+        )
+
     @property
     def cohort_dir(self) -> Path:
         return self.run_root / "data" / "cohort"
@@ -185,6 +195,8 @@ def _validate_config(value: dict[str, Any]) -> None:
         "dataset": "microlens_100k",
         "modality": "visual_only",
         "sampling": "fixed_30s",
+        "cohort_sampling": "user_first_nested_stratified",
+        "catalog_scope": "selected_user_sequence_union",
         "graph_extractors": ["qwen", "gemini"],
         "graph_summarizer": "qwen",
         "description_model": "qwen",
@@ -345,7 +357,7 @@ def _validate_config(value: dict[str, Any]) -> None:
 
         ValidationConfig.model_validate(
             {
-                "schema_version": "validation-config/v2",
+                "schema_version": "validation-config/v3",
                 "run_id": "config-validation",
                 "dataset": data,
                 "cohort": validation.get("cohort"),
