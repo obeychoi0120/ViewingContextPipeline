@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from PIL import Image
+import pytest
 
 from extraction.data_preparation.fixed30 import (
     build_fixed_30s_windows,
@@ -13,6 +14,7 @@ from extraction.data_preparation.fixed30 import (
 )
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.data_preparation.video_processor import (
+    _decodable_frame_tail_timestamps_seconds,
     _last_decodable_frame_timestamp_seconds,
     extract_resized_keyframes,
 )
@@ -37,7 +39,10 @@ def test_fixed_30s_sampling_uses_5_15_25_second_keyframes() -> None:
     ]
 
 
-def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_path: Path) -> None:
+def test_direct_keyframe_uses_preceding_frame_for_safe_trailing_seek(
+    tmp_path: Path,
+    capsys,
+) -> None:
     video = tmp_path / "video.mp4"
     video.touch()
     destination = tmp_path / ".keyframes.direct_tmp" / "0301.png"
@@ -56,15 +61,39 @@ def test_direct_keyframe_clamps_trailing_timestamp_to_last_decodable_frame(tmp_p
             side_effect=[None, (64, 48)],
         ),
         mock.patch(
-            "extraction.data_preparation.video_processor._last_decodable_frame_timestamp_seconds",
-            return_value=300.96,
+            "extraction.data_preparation.video_processor._decodable_frame_tail_timestamps_seconds",
+            return_value=(300.92, 300.96),
         ),
     ):
         extract_resized_keyframes(video, [301], tmp_path / "keyframes", (64, 48))
 
     assert run.call_count == 2
     assert run.call_args_list[0].args[0][6] == "301"
-    assert run.call_args_list[1].args[0][6] == "300.96"
+    assert run.call_args_list[1].args[0][6] == "300.92"
+    assert "safe seek at 300.92s before last decodable frame at 300.96s" in capsys.readouterr().out
+
+
+def test_failed_trailing_seek_does_not_log_success(tmp_path: Path, capsys) -> None:
+    video = tmp_path / "video.mp4"
+    video.touch()
+    with (
+        mock.patch(
+            "extraction.data_preparation.video_processor.subprocess.run",
+            return_value=mock.Mock(returncode=0, stderr=""),
+        ),
+        mock.patch(
+            "extraction.data_preparation.video_processor.verified_image_size",
+            side_effect=[None, None],
+        ),
+        mock.patch(
+            "extraction.data_preparation.video_processor._decodable_frame_tail_timestamps_seconds",
+            return_value=(190.93, 190.96),
+        ),
+        pytest.raises(RuntimeError, match="Could not read extracted keyframe"),
+    ):
+        extract_resized_keyframes(video, [191], tmp_path / "keyframes", (64, 48))
+
+    assert "Clamped trailing keyframe" not in capsys.readouterr().out
 
 
 def test_verified_keyframe_cache_rejects_corrupt_or_wrong_size_images(tmp_path: Path) -> None:
@@ -98,8 +127,18 @@ def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path
     video = tmp_path / "video.mp4"
     with mock.patch(
         "extraction.data_preparation.video_processor.subprocess.run",
-        return_value=mock.Mock(stdout="0.000000\n300.960000\n", stderr="", returncode=0),
+        return_value=mock.Mock(
+            stdout="0.000000\n300.960000\n300.920000\n300.960000\n",
+            stderr="",
+            returncode=0,
+        ),
     ) as run:
+        assert _decodable_frame_tail_timestamps_seconds(video) == (300.92, 300.96)
+
+    with mock.patch(
+        "extraction.data_preparation.video_processor._decodable_frame_tail_timestamps_seconds",
+        return_value=(300.92, 300.96),
+    ):
         assert _last_decodable_frame_timestamp_seconds(video) == 300.96
 
     command = run.call_args.args[0]
