@@ -439,7 +439,7 @@ def test_reused_summary_rejects_noncanonical_text(
 
     with pytest.raises(
         summary_executor.ExtractionStepError,
-        match="use --force or a new run_id",
+        match="mismatched fields: text",
     ):
         summary_executor.reuse_summary_document(
             path,
@@ -450,7 +450,7 @@ def test_reused_summary_rejects_noncanonical_text(
         )
 
 
-def test_reused_summary_rejects_v2_and_requires_new_run_or_force(tmp_path: Path) -> None:
+def test_reused_summary_rejects_v2_with_field_diagnostics(tmp_path: Path) -> None:
     sections = {
         "setting_and_environments": "An indoor room",
         "main_characters_and_objects": "A person",
@@ -476,7 +476,7 @@ def test_reused_summary_rejects_v2_and_requires_new_run_or_force(tmp_path: Path)
 
     with pytest.raises(
         summary_executor.ExtractionStepError,
-        match="use --force or a new run_id",
+        match="mismatched fields: schema_version, text",
     ):
         summary_executor.reuse_summary_document(
             path,
@@ -485,6 +485,112 @@ def test_reused_summary_rejects_v2_and_requires_new_run_or_force(tmp_path: Path)
             arm="graph_qwen",
             scene_count=1,
         )
+
+
+@pytest.mark.parametrize("source", ["qwen", "gemini", None])
+@pytest.mark.parametrize(
+    "problem", ["text", "scene_count", "arm", "schema_version", "sections", "invalid_json"]
+)
+def test_summary_resume_retries_only_unusable_or_missing_outputs(
+    context, monkeypatch, capsys, source, problem,
+):
+    content_ids = ["c1", "c2", "c3", "c4", "c5"]
+    write_jsonl(context.cohort_dir / "catalog.jsonl", [
+        {"content_id": cid, "source_video_path": f"{cid}.mp4"} for cid in content_ids
+    ])
+    monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _: [
+        {"content_id": cid} for cid in content_ids
+    ])
+    if source:
+        scene_dir = context.graph_scene_dir(source)
+        summary_dir = context.graph_summary_dir(source)
+        schema = "graph-video-summary/v3"
+        arm = f"graph_{source}"
+
+        def run(**kwargs):
+            return extraction_steps.summarize_graph(context, source=source, **kwargs)
+    else:
+        scene_dir = context.description_scene_dir
+        summary_dir = context.description_summary_dir
+        schema = "description-video-summary/v3"
+        arm = "description"
+
+        def run(**kwargs):
+            return extraction_steps.summarize_description(context, **kwargs)
+
+    sections = dict.fromkeys(SUMMARY_SECTIONS, "")
+    sections["setting_and_environments"] = "An indoor room."
+    for cid in content_ids:
+        record = {"scene_idx": 0, "keyframes": [5]}
+        if source:
+            record.update(graph={"setting_context": "indoor"},
+                          parse_mode="native", semantic_warnings=[])
+        else:
+            record.update(schema_version="scene-description/v1", content_id=cid,
+                          description="An indoor room.")
+        write_jsonl(scene_dir / f"{cid}.jsonl", [] if cid == "c5" else [record])
+    for cid in ("c1", "c2"):
+        document = dict(
+            schema_version=schema, content_id=cid, arm=arm, status="complete",
+            sections=sections, text=summary_executor.serialize_summary_sections(sections),
+            scene_count=1,
+        )
+        if cid == "c2" and problem != "invalid_json":
+            document[problem] = {"scene_count": 2, "sections": None}.get(problem, "legacy")
+        write_json(summary_dir / f"{cid}.json", document)
+    invalid_path = summary_dir / "c2.json"
+    if problem == "invalid_json":
+        invalid_path.write_text('{"truncated":', encoding="utf-8")
+    original_invalid = invalid_path.read_bytes()
+    successful_path = summary_dir / "c1.json"
+    original_success = successful_path.read_bytes()
+    write_jsonl(summary_dir / "failures/c3.jsonl", [{"error": "previous failure"}])
+    submitted = []
+    bars = []
+    real_tqdm = extraction_steps.tqdm
+
+    def tracked_tqdm(*args, **kwargs):
+        bar = real_tqdm(*args, **kwargs)
+        bars.append(bar)
+        return bar
+
+    monkeypatch.setattr(extraction_steps, "tqdm", tracked_tqdm)
+
+    @contextmanager
+    def generator(**_kwargs):
+        def generate(tasks, callback):
+            submitted.append([task.task_id for task in tasks])
+            for task in tasks:
+                assert task.repetition_penalty == context.config["extraction"][
+                    "summary_repetition_penalty"
+                ]
+                fail = len(submitted) == 1 and task.task_id == "c2"
+                callback(task.task_id, "invalid response" if fail else _summary_lines(sections))
+            return {}
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", generator)
+    with pytest.raises(extraction_steps.ExtractionStepError, match="structured summary failed"):
+        run()
+    assert submitted == [["c2", "c3", "c4"]]
+    assert bars[-1].initial == 2 and bars[-1].n == 5
+    assert invalid_path.read_bytes() == original_invalid
+    assert successful_path.read_bytes() == original_success
+    assert not (summary_dir / "failures/c3.jsonl").exists()
+    stderr = capsys.readouterr().err
+    assert "reused=1 pending=3 incompatible=1" in stderr
+    assert "[SUMMARY RETRY]" in stderr and str(invalid_path) in stderr
+
+    context.config["extraction"]["summary_repetition_penalty"] = 1.3
+    assert run()["content_count"] == 4
+    assert submitted[-1] == ["c2"]
+    assert bars[-1].initial == 4 and bars[-1].n == 5
+    assert successful_path.read_bytes() == original_success
+    assert not (summary_dir / "failures/c2.jsonl").exists()
+    assert run()["content_count"] == 4
+    assert len(submitted) == 2  # Fully cached: no model is loaded.
+    assert run(force=True)["content_count"] == 4
+    assert submitted[-1] == ["c1", "c2", "c3", "c4"]
 
 
 def test_runtime_has_no_orchestration_manifest_paths(context: RunContext) -> None:

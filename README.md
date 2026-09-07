@@ -360,13 +360,15 @@ diagnosis/v4
 
 Summary는 누락 content를 batch 처리하고 content마다 한 번만 생성합니다. 자동 retry와 retry 전용 prompt는 없습니다. Validation failure 때만 `[Qwen_summary_*_fail]` 로그와 raw output을 콘솔에 표시하고 `summaries/failures/`에 기록합니다. 다음 실행은 완료 artifact를 재사용하고 실패·누락 content만 다시 처리합니다.
 
+실패 summary를 재시도하려면 `summary_repetition_penalty`를 조정한 뒤 **같은 run ID와 source로 `--force` 없이** 재실행합니다. 기존 summary의 형식·내용이 재사용 계약에 맞지 않으면 이유를 `[SUMMARY RETRY]`에 표시하고 해당 content만 재생성합니다. 기존 파일은 새 생성이 성공할 때 교체합니다. `--force`는 정상 summary도 전부 재생성합니다. 시작 로그의 `reused`는 재사용 수, `pending`은 이번 생성 대상 수, `incompatible`은 그중 기존 summary가 재사용 불가능한 수이며 `output`은 조회·저장 경로입니다. Scene 파일과 failure JSONL은 성공 summary로 세지 않습니다. 진행률은 재사용·성공·실패·빈 scene 처리를 합친 처리 건수이며 성공률이 아닙니다.
+
 - `extraction.greedy_decoding: true`: `do_sample=false`
 - `extraction.greedy_decoding: false`: 별도 fixed seed 없이 `temperature=0.2`, `top_p=0.8`, `top_k=20`
 - `extraction.graph_repetition_penalty=1.05`: 로컬 Qwen Graph scene에 적용
 - `extraction.description_repetition_penalty=1.0`: 로컬 Qwen Description scene에 적용 (1.0은 비활성)
 - `extraction.summary_repetition_penalty=1.05`: Qwen Graph/Description summary에 공통 적용 (Graph source가 Gemini인 경우도 포함)
 
-세 repetition penalty는 각각 `[1, 2]` 범위에서 독립적으로 설정합니다. Prompt token은 제외하고 생성된 token에만 적용하며, greedy/sampled decoding 모두 사용할 수 있습니다. Scene의 기존 greedy decoding은 유지합니다. Gemini Graph API 호출에는 적용하지 않습니다. JSON의 반복 key·ID·구두점도 영향을 받을 수 있으므로 penalty가 JSON 형식 준수를 보장하지는 않습니다. 값을 변경하면 기존 cache가 자동 무효화되지 않으므로 변경 전후 출력이 섞이지 않도록 새 `run_id`를 사용합니다.
+세 repetition penalty는 각각 `[1, 2]` 범위에서 독립적으로 설정합니다. Prompt token은 제외하고 생성된 token에만 적용하며, greedy/sampled decoding 모두 사용할 수 있습니다. Scene의 기존 greedy decoding은 유지합니다. Gemini Graph API 호출에는 적용하지 않습니다. JSON의 반복 key·ID·구두점도 영향을 받을 수 있으므로 penalty가 JSON 형식 준수를 보장하지는 않습니다. 값을 변경해도 기존 cache는 자동 무효화되지 않습니다. 실패 복구에서는 기존 성공 summary를 유지하고 새 penalty를 재시도 대상에만 적용할 수 있습니다. Penalty별 전체 결과를 비교하는 실험은 별도 `run_id`로 수행합니다.
 - Graph/Description summary output 상한: 512 tokens
 
 Prompt, decoding, model을 바꾼 실험은 새 `run_id`가 필요합니다.
