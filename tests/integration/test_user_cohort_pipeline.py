@@ -113,6 +113,21 @@ def _snapshot(root):
     }
 
 
+def test_ready_cohort_uses_saved_plan_after_runtime_config_changes(context):
+    validation_steps.prepare_cohort_step(context)
+    expected = context.require_ready_cohort()
+    before = _snapshot(context.cohort_dir)
+    config = deepcopy(context.config)
+    config["data"] = {key: f"/relocated/{key}" for key in config["data"]}
+    config["validation"]["cohort"].update(
+        user_count=1000, seed=99, min_sequence_length=10,
+        max_sequence_length=20, history_strata=[5, 20, 50],
+    )
+    resumed = replace(context, config=config)
+    assert resumed.require_ready_cohort() == expected
+    assert _snapshot(context.cohort_dir) == before
+
+
 def test_reuse_copies_only_required_verified_evidence_and_leaves_donor_unchanged(
     context, extracted
 ):

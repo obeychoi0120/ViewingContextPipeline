@@ -251,8 +251,6 @@ def load_ready_cohort(
     output: Path,
     *,
     run_id: str,
-    settings: dict[str, Any],
-    inputs: dict[str, str],
 ) -> dict[str, Any]:
     """Shared artifact gate. No original videos, ffprobe, Torch or VLM imports."""
     eligibility = _read(output / "eligibility_summary.json")
@@ -266,7 +264,7 @@ def load_ready_cohort(
     plan = _read(output / "cohort_plan.json")
     selected = _read(output / "selected_users.jsonl", jsonl=True)
     items = _read(output / "required_items.jsonl", jsonl=True)
-    validate_plan(plan, selected, items, run_id=run_id, settings=settings, inputs=inputs)
+    validate_plan(plan, selected, items, run_id=run_id)
     sequences = _read(output / "sequences.jsonl", jsonl=True)
     if sequences != sorted(selected, key=lambda row: row["user_id"]):
         raise CohortError("cohort sequences differ from the frozen selected users")
@@ -353,7 +351,7 @@ def prepare_cohort(
     eligibility = _read(eligibility_path)
     if plan_only:
         if eligibility.get("status") == "ready":
-            load_ready_cohort(output, run_id=config.run_id, settings=settings, inputs=inputs)
+            load_ready_cohort(output, run_id=config.run_id)
         print(
             f"[COHORT PLAN] status={eligibility['status']} "
             f"candidate_users={plan['candidate_user_count']} selected_users={len(selected)} "

@@ -41,8 +41,6 @@ def _ready(config):
     return load_ready_cohort(
         config.output_dir / "data/cohort",
         run_id=config.run_id,
-        settings=config.cohort.model_dump(mode="json"),
-        inputs={key: str(path.resolve()) for key, path in config.dataset.model_dump().items()},
     )
 
 
@@ -289,6 +287,8 @@ def test_interrupted_plan_commit_can_resume_identical_partial_files(tmp_path, mo
         ("item_inventory.jsonl", lambda rows: rows[0].update(duration_seconds=float("nan"))),
         ("cohort_plan.json", lambda doc: doc.update(required_item_count=999)),
         ("cohort_plan.json", lambda doc: doc.update(scale_statistics=None)),
+        ("cohort_plan.json", lambda doc: doc.update(settings=None)),
+        ("cohort_plan.json", lambda doc: doc["settings"].update(user_count=999)),
         ("eligibility_summary.json", lambda doc: doc.update(candidate_user_count=999)),
     ],
 )
