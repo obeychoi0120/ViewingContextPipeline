@@ -11,7 +11,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one Viewing Context extraction step.")
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Regenerate all outputs for this step, including completed summaries.",
+    )
     parser.add_argument(
         "--reuse-run-id",
         help="Validate and copy matching PNG/timestamps from a donor run (prepare-input-data only).",

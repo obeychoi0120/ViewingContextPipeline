@@ -401,6 +401,7 @@ def summarize_graph(
     pending: list[tuple[list[dict[str, Any]], Path, str]] = []
     tasks: list[QwenGenerationTask] = []
     summary_failures_by_content: dict[str, list[dict[str, Any]]] = {}
+    incompatible_summaries: dict[str, str] = {}
     empty_scene_files = 0
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
@@ -425,15 +426,19 @@ def summarize_graph(
         records = _minimal_graph_records(records, scene_path)
         output_path = summary_dir / f"{content_id}.json"
         if output_path.is_file() and not force:
-            documents_by_content[content_id] = reuse_summary_document(
-                output_path,
-                schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
-                content_id=content_id,
-                arm=f"graph_{source}",
-                scene_count=len(records),
-            )
-            summary_failure_path.unlink(missing_ok=True)
-            continue
+            try:
+                documents_by_content[content_id] = reuse_summary_document(
+                    output_path,
+                    schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
+                    content_id=content_id,
+                    arm=f"graph_{source}",
+                    scene_count=len(records),
+                )
+            except ExtractionStepError as exc:
+                incompatible_summaries[content_id] = str(exc)
+            else:
+                summary_failure_path.unlink(missing_ok=True)
+                continue
         prompt = graph_summary_prompt(template, records)
         task_id = content_id
         tasks.append(
@@ -454,10 +459,20 @@ def summarize_graph(
     }
     with tqdm(
         total=len(visual_rows),
-        initial=len(documents_by_content),
+        initial=len(documents_by_content) + empty_scene_files,
         desc=f"Graph summaries ({source})",
         unit="content",
     ) as progress:
+        _write_progress(
+            progress,
+            f"[SUMMARY] {stage} | reused={len(documents_by_content)} "
+            f"pending={len(tasks)} incompatible={len(incompatible_summaries)} "
+            f"empty_scenes={empty_scene_files} force={force} "
+            f"repetition_penalty={summary_generation['repetition_penalty']} output={summary_dir}",
+        )
+        for reason in incompatible_summaries.values():
+            _write_progress(progress, f"[SUMMARY RETRY] {reason}")
+
         def complete_graph_summary(task_id: str, text: str) -> None:
             records, output_path = pending_by_task[task_id]
             sections = validate_graph_summary(text)
@@ -509,6 +524,7 @@ def summarize_graph(
                     f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
                     f"Raw output:\n{raw_response or '<empty>'}",
                 )
+                progress.update(1)
 
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 generate_summaries_once(
@@ -711,6 +727,7 @@ def summarize_description(
     pending: list[tuple[list[dict[str, Any]], Path, str]] = []
     tasks: list[QwenGenerationTask] = []
     summary_failures_by_content: dict[str, list[dict[str, Any]]] = {}
+    incompatible_summaries: dict[str, str] = {}
     empty_scene_files = 0
     for scene_path in scene_paths:
         records = read_jsonl(scene_path)
@@ -740,15 +757,19 @@ def summarize_description(
         output_path = context.description_summary_dir / f"{records[0]['content_id']}.json"
         if output_path.is_file() and not force:
             content_id = str(records[0]["content_id"])
-            documents_by_content[content_id] = reuse_summary_document(
-                output_path,
-                schema_version=SUMMARY_SCHEMA_VERSION,
-                content_id=content_id,
-                arm="description",
-                scene_count=len(records),
-            )
-            summary_failure_path.unlink(missing_ok=True)
-            continue
+            try:
+                documents_by_content[content_id] = reuse_summary_document(
+                    output_path,
+                    schema_version=SUMMARY_SCHEMA_VERSION,
+                    content_id=content_id,
+                    arm="description",
+                    scene_count=len(records),
+                )
+            except ExtractionStepError as exc:
+                incompatible_summaries[content_id] = str(exc)
+            else:
+                summary_failure_path.unlink(missing_ok=True)
+                continue
         prompt = description_summary_prompt(template, records)
         task_id = str(records[0]["content_id"])
         tasks.append(
@@ -773,6 +794,17 @@ def summarize_description(
         desc="Description summaries",
         unit="content",
     ) as progress:
+        _write_progress(
+            progress,
+            f"[SUMMARY] summarize-description | reused={len(documents_by_content)} "
+            f"pending={len(tasks)} incompatible={len(incompatible_summaries)} "
+            f"empty_scenes={empty_scene_files} force={force} "
+            f"repetition_penalty={summary_generation['repetition_penalty']} "
+            f"output={context.description_summary_dir}",
+        )
+        for reason in incompatible_summaries.values():
+            _write_progress(progress, f"[SUMMARY RETRY] {reason}")
+
         def complete_description_summary(task_id: str, text: str) -> None:
             records, output_path = pending_by_task[task_id]
             sections = validate_description_summary(text)
@@ -824,6 +856,7 @@ def summarize_description(
                     f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
                     f"Raw output:\n{raw_response or '<empty>'}",
                 )
+                progress.update(1)
 
             with qwen_generator(model_path=model_path, gpus=gpus) as generate:
                 generate_summaries_once(

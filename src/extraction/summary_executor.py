@@ -38,8 +38,8 @@ def reuse_summary_document(
     arm: str,
     scene_count: int,
 ) -> dict[str, Any]:
-    existing = read_json(output_path)
     try:
+        existing = read_json(output_path)
         raw_sections = existing.get("sections")
         if not isinstance(raw_sections, dict):
             raise SummaryContractError("summary sections must be an object")
@@ -50,10 +50,9 @@ def reuse_summary_document(
             )
         )
         text = serialize_summary_sections(sections)
-    except (AttributeError, KeyError, SummaryContractError, TypeError) as exc:
+    except (AttributeError, KeyError, ValueError, TypeError) as exc:
         raise ExtractionStepError(
-            f"incompatible structured summary output: {output_path}; "
-            "use --force or a new run_id"
+            f"incompatible structured summary output: {output_path}; {exc}"
         ) from exc
     expected = {
         "schema_version": schema_version,
@@ -65,9 +64,13 @@ def reuse_summary_document(
         "scene_count": scene_count,
     }
     if existing != expected:
+        mismatched = sorted(
+            key for key in existing.keys() | expected.keys()
+            if key not in existing or key not in expected or existing[key] != expected[key]
+        )
         raise ExtractionStepError(
             f"incompatible structured summary output: {output_path}; "
-            "use --force or a new run_id"
+            f"mismatched fields: {', '.join(mismatched)}"
         )
     return expected
 
