@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any
 
+from validation.config import CohortConfig
+
 
 PLAN_SCHEMA_VERSION = "microlens-user-cohort-plan/v1"
 ELIGIBILITY_SCHEMA_VERSION = "microlens-cohort-eligibility/v3"
@@ -226,19 +228,19 @@ def validate_plan(
     items: list[dict[str, Any]],
     *,
     run_id: str,
-    settings: dict[str, Any],
-    inputs: dict[str, str],
 ) -> None:
-    """Validate saved selection without consulting external media or annotation files."""
+    """Validate saved selection against its own plan, independent of runtime config."""
     if (
         plan.get("schema_version") != PLAN_SCHEMA_VERSION
         or plan.get("run_id") != run_id
         or plan.get("cohort_sampling") != COHORT_SAMPLING
         or plan.get("catalog_scope") != CATALOG_SCOPE
-        or plan.get("settings") != settings
-        or plan.get("inputs") != inputs
     ):
-        raise CohortError("cohort plan/config mismatch; use a new run_id")
+        raise CohortError("invalid cohort plan schema, run_id, or protocol")
+    try:
+        settings = CohortConfig.model_validate(plan.get("settings")).model_dump(mode="json")
+    except ValueError as exc:
+        raise CohortError("invalid saved cohort settings") from exc
     if (
         type(plan.get("selected_user_count")) is not int
         or len(selected) != settings["user_count"]

@@ -161,6 +161,8 @@ python -m validation.complete_titles \
 
 자산을 보완한 뒤 같은 명령으로 재개하십시오. 최종 catalog·sequence·title이 일치할 때만 마지막으로 `ready`를 기록합니다. 일반 `prepare-cohort`는 재실행 시에도 자산을 재검사합니다. 기존 최종 파일이 남아 있어도 `planned`/`blocked` 상태에서는 downstream이 실행되지 않습니다. 이미 `ready`인 run을 `--plan-only`로 확인해도 상태를 낮추지 않습니다.
 
+Downstream은 저장된 cohort plan을 기준으로 사용자·item·split·통계의 무결성을 검사하며, 현재 설정의 입력 경로나 cohort 설정과 일치하는지는 검사하지 않습니다. 현재 설정을 바꾸어도 이미 생성된 run의 선정 결과는 바뀌지 않습니다.
+
 <details>
 <summary>중첩 선정 규칙과 user-10K / user-100K 확장</summary>
 

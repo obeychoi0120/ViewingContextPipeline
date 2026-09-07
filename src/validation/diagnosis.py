@@ -366,8 +366,6 @@ def _cohort_plan_contract(
         cohort = load_ready_cohort(
             cohort_dir,
             run_id=config.run_id,
-            settings=config.cohort.model_dump(mode="json"),
-            inputs={key: str(path.resolve()) for key, path in config.dataset.model_dump().items()},
         )
     except (CohortError, KeyError, TypeError, ValueError) as exc:
         _error(

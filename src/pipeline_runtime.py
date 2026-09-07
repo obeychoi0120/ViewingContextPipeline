@@ -111,8 +111,6 @@ class RunContext:
         return load_ready_cohort(
             self.cohort_dir,
             run_id=self.run_id,
-            settings=self.config["validation"]["cohort"],
-            inputs={key: str(self.path("data", key)) for key in self.config["data"]},
         )
 
     @property
