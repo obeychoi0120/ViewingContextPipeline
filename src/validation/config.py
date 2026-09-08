@@ -90,3 +90,14 @@ class ValidationConfig(StrictModel):
     model: ModelConfig
     evaluation: EvaluationConfig
     output_dir: Path
+
+
+def build_validation_config(*, run_id, dataset, settings, model_path, output_dir) -> ValidationConfig:
+    """Assemble the shared contract after the caller resolves its own paths."""
+    return ValidationConfig.model_validate({
+        "schema_version": "validation-config/v3", "run_id": run_id, "dataset": dataset,
+        "cohort": settings.get("cohort"),
+        "encoder": {**settings["encoder"], "model_path": model_path},
+        "model": settings.get("model"), "evaluation": settings.get("evaluation"),
+        "output_dir": output_dir,
+    })

@@ -8,7 +8,7 @@ from typing import Any, Callable
 import numpy as np
 
 from validation.cohort import prepare_cohort
-from validation.config import ValidationConfig
+from validation.config import ValidationConfig, build_validation_config
 from validation.recommendation_contracts import (
     ARCHITECTURE_VERSION,
     RECOMMENDATION_ARMS,
@@ -23,25 +23,11 @@ class ValidationStepError(RuntimeError):
 
 
 def validation_config(context: RunContext) -> ValidationConfig:
-    settings = context.config["validation"]
-    return ValidationConfig.model_validate(
-        {
-            "schema_version": "validation-config/v3",
-            "run_id": context.run_id,
-            "dataset": {
-                "pairs_tsv": context.path("data", "pairs_tsv"),
-                "videos_dir": context.path("data", "videos_dir"),
-                "titles_csv": context.path("data", "titles_csv"),
-            },
-            "cohort": settings["cohort"],
-            "encoder": {
-                **settings["encoder"],
-                "model_path": context.path("models", "bge"),
-            },
-            "model": settings["model"],
-            "evaluation": settings["evaluation"],
-            "output_dir": context.run_root,
-        }
+    return build_validation_config(
+        run_id=context.run_id,
+        dataset={key: context.path("data", key) for key in ("pairs_tsv", "videos_dir", "titles_csv")},
+        settings=context.config["validation"], model_path=context.path("models", "bge"),
+        output_dir=context.run_root,
     )
 
 
@@ -177,14 +163,7 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
-    context.initialize()
-    cohort = context.require_ready_cohort()
-    from validation.features import BGETextEncoder
-
-    config = validation_config(context)
-    catalog = cohort["catalog"]
-    content_ids = [str(row["content_id"]) for row in catalog]
+def _embedding_work(context, catalog, config, force):
     sources = {
         "metadata": None,
         "graph_qwen": context.graph_summary_dir("qwen"),
@@ -203,7 +182,6 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         for row in catalog
         if not (context.graph_summary_dir("gemini") / f"{row['content_id']}.json").is_file()
     ]
-    fallback_ids = {row["content_id"] for row in gemini_fallbacks}
     fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
     item_index_path = context.representations_dir / "item_index.json"
     pending = [
@@ -219,6 +197,11 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         or branch == "graph_gemini" and not _gemini_fallbacks_match(fallback_path, gemini_fallbacks)
     ]
 
+    return sources, gemini_fallbacks, pending
+
+
+def _embedding_documents(context, catalog, sources, pending, fallback_ids):
+    content_ids = [str(row["content_id"]) for row in catalog]
     documents_by_branch: dict[str, list[dict[str, Any]]] = {}
     for branch in pending:
         if branch == "metadata":
@@ -256,6 +239,51 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             documents.append(document)
         documents_by_branch[branch] = documents
 
+    return documents_by_branch
+
+
+def _encode_representations(encoder, pending, documents_by_branch, catalog, config):
+    matrices: dict[str, np.ndarray] = {}
+    for branch in pending:
+        documents = documents_by_branch[branch]
+        matrix = np.asarray(
+            encoder.encode([str(row["text"]) for row in documents]),
+            dtype=np.float32,
+        )
+        expected_shape = (len(catalog), config.encoder.embedding_dim)
+        if matrix.shape != expected_shape or not np.isfinite(matrix).all():
+            raise ValidationStepError(f"invalid embedding matrix for {branch}: {matrix.shape}")
+        matrices[branch] = matrix
+        del documents_by_branch[branch]
+
+    return matrices
+
+
+def _persist_representations(context, matrices, catalog, gemini_fallbacks):
+    fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
+    item_index_path = context.representations_dir / "item_index.json"
+    for branch, matrix in matrices.items():
+        _write_embedding(_embedding_path(context, branch), matrix)
+        if branch == "graph_gemini":
+            write_json(fallback_path, {"fallbacks": gemini_fallbacks})
+
+    write_json(
+        item_index_path,
+        {str(row["item_id"]): index for index, row in enumerate(catalog)},
+    )
+
+
+def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    context.initialize()
+    cohort = context.require_ready_cohort()
+    from validation.features import BGETextEncoder
+
+    config = validation_config(context)
+    catalog = cohort["catalog"]
+    sources, gemini_fallbacks, pending = _embedding_work(context, catalog, config, force)
+    documents_by_branch = _embedding_documents(
+        context, catalog, sources, pending, {row["content_id"] for row in gemini_fallbacks},
+    )
     print(
         f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
         + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
@@ -272,28 +300,8 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)
     encoder = BGETextEncoder(config.encoder)
-    matrices: dict[str, np.ndarray] = {}
-    for branch in pending:
-        documents = documents_by_branch[branch]
-        matrix = np.asarray(
-            encoder.encode([str(row["text"]) for row in documents]),
-            dtype=np.float32,
-        )
-        expected_shape = (len(catalog), config.encoder.embedding_dim)
-        if matrix.shape != expected_shape or not np.isfinite(matrix).all():
-            raise ValidationStepError(f"invalid embedding matrix for {branch}: {matrix.shape}")
-        matrices[branch] = matrix
-        del documents_by_branch[branch]
-
-    for branch, matrix in matrices.items():
-        _write_embedding(_embedding_path(context, branch), matrix)
-        if branch == "graph_gemini":
-            write_json(fallback_path, {"fallbacks": gemini_fallbacks})
-
-    write_json(
-        item_index_path,
-        {str(row["item_id"]): index for index, row in enumerate(catalog)},
-    )
+    matrices = _encode_representations(encoder, pending, documents_by_branch, catalog, config)
+    _persist_representations(context, matrices, catalog, gemini_fallbacks)
     return _result("embed-representations", content_count=len(catalog))
 
 

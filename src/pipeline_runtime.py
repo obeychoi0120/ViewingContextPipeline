@@ -190,6 +190,13 @@ def _validate_config(value: dict[str, Any]) -> None:
         raise ConfigError(f"pipeline config must contain exactly {sorted(expected_keys)}")
     if value.get("schema_version") != CONFIG_SCHEMA:
         raise ConfigError(f"schema_version must be {CONFIG_SCHEMA}")
+    _validate_protocol(value)
+    _validate_extraction(value)
+    _validate_models(value)
+    _validate_validation(value)
+
+
+def _validate_protocol(value: dict[str, Any]) -> None:
     protocol = _require_mapping(value, "protocol")
     expected = {
         "dataset": "microlens_100k",
@@ -207,6 +214,9 @@ def _validate_config(value: dict[str, Any]) -> None:
     for key, expected_value in expected.items():
         if protocol.get(key) != expected_value:
             raise ConfigError(f"protocol.{key} must be {expected_value!r}")
+
+
+def _validate_extraction(value: dict[str, Any]) -> None:
     extraction = _require_mapping(value, "extraction")
     if set(extraction) != {
         "greedy_decoding",
@@ -306,6 +316,9 @@ def _validate_config(value: dict[str, Any]) -> None:
     if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency <= 0:
         raise ConfigError("extraction.graph.gemini_concurrency must be a positive integer")
     _require_mapping(value, "validation")
+
+
+def _validate_models(value: dict[str, Any]) -> None:
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
     if set(data) != {"videos_dir", "pairs_tsv", "titles_csv"}:
@@ -353,6 +366,9 @@ def _validate_config(value: dict[str, Any]) -> None:
         raise ConfigError(
             f"models.gemini.media_resolution must be one of {sorted(media_resolutions)}"
         )
+
+
+def _validate_validation(value: dict[str, Any]) -> None:
     validation = _require_mapping(value, "validation")
     expected_validation_keys = {"cohort", "encoder", "model", "evaluation"}
     if set(validation) != expected_validation_keys:
@@ -360,22 +376,12 @@ def _validate_config(value: dict[str, Any]) -> None:
     try:
         from pydantic import ValidationError
 
-        from validation.config import ValidationConfig
+        from validation.config import build_validation_config
 
-        ValidationConfig.model_validate(
-            {
-                "schema_version": "validation-config/v3",
-                "run_id": "config-validation",
-                "dataset": data,
-                "cohort": validation.get("cohort"),
-                "encoder": {
-                    **_require_mapping(validation, "encoder"),
-                    "model_path": models.get("bge"),
-                },
-                "model": validation.get("model"),
-                "evaluation": validation.get("evaluation"),
-                "output_dir": value.get("artifacts_root"),
-            }
+        build_validation_config(
+            run_id="config-validation", dataset=value["data"],
+            settings={**validation, "encoder": _require_mapping(validation, "encoder")},
+            model_path=value["models"].get("bge"), output_dir=value.get("artifacts_root"),
         )
     except ValidationError as exc:
         raise ConfigError(f"invalid validation config: {exc}") from exc

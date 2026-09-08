@@ -29,6 +29,24 @@ def assign_worker_indices(task_count: int, gpu_count: int) -> list[int]:
     return [index % gpu_count for index in range(task_count)]
 
 
+def _start_worker(context, worker_index, gpu_id, model_path, result_queue):
+    """Create and start one process; the pool retains lifecycle ownership."""
+    task_queue = context.Queue()
+    process = context.Process(
+        target=_worker_main,
+        args=(
+            worker_index,
+            gpu_id,
+            model_path,
+            task_queue,
+            result_queue,
+        ),
+        daemon=True,
+    )
+    process.start()
+    return task_queue, process
+
+
 class QwenWorkerPool:
     """One persistent Qwen process per requested CUDA device."""
 
@@ -41,19 +59,9 @@ class QwenWorkerPool:
         self._processes: list[Any] = []
         self._closed = False
         for worker_index, gpu_id in enumerate(gpu_ids):
-            task_queue = self._context.Queue()
-            process = self._context.Process(
-                target=_worker_main,
-                args=(
-                    worker_index,
-                    gpu_id,
-                    model_path,
-                    task_queue,
-                    self._result_queue,
-                ),
-                daemon=True,
+            task_queue, process = _start_worker(
+                self._context, worker_index, gpu_id, model_path, self._result_queue,
             )
-            process.start()
             self._task_queues.append(task_queue)
             self._processes.append(process)
 
