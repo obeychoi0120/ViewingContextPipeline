@@ -26,7 +26,7 @@ def validation_config(context: RunContext) -> ValidationConfig:
     return build_validation_config(
         run_id=context.run_id,
         dataset={
-            key: context.path("data", key) for key in ("pairs_tsv", "videos_dir", "titles_csv")
+            key: context.path("data", key) for key in context.config["data"]
         },
         settings=context.config["validation"],
         model_path=context.path("models", "bge"),
@@ -65,6 +65,9 @@ def prepare_cohort_step(
     context: RunContext, *, force: bool = False, plan_only: bool = False
 ) -> dict[str, Any]:
     context.initialize()
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        from validation.rolling_data import prepare_full_cohort
+        return prepare_full_cohort(context, plan_only=plan_only)
     prepared = prepare_cohort(
         validation_config(context),
         output_dir=context.cohort_dir,
@@ -236,6 +239,19 @@ def _embedding_documents(context, catalog, sources, pending, fallback_ids):
                 label = f"graph_qwen fallback summary (Gemini summary missing: {summary_path})"
                 summary_path = context.graph_summary_dir("qwen") / f"{content_id}.json"
             document = read_json(_require_file(summary_path, label))
+            if context.config["schema_version"] == "viewing-context-config/v4":
+                from extraction.summary_executor import reuse_summary_document
+                actual_branch = "graph_qwen" if content_id in fallback_ids and branch == "graph_gemini" else branch
+                if actual_branch == "desc":
+                    actual_branch = "description"
+                scene_count = document.get("scene_count")
+                if type(scene_count) is not int or scene_count <= 0:
+                    raise ValidationStepError(f"invalid {label} scene count: {summary_path}")
+                document = reuse_summary_document(
+                    summary_path,
+                    schema_version="description-video-summary/v3" if branch == "desc" else "graph-video-summary/v3",
+                    content_id=content_id, arm=actual_branch, scene_count=scene_count,
+                )
             if (
                 str(document.get("content_id")) != content_id
                 or not isinstance(document.get("text"), str)
@@ -287,13 +303,38 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     config = validation_config(context)
     catalog = cohort["catalog"]
     sources, gemini_fallbacks, pending = _embedding_work(context, catalog, config, force)
+    full = context.config["schema_version"] == "viewing-context-config/v4"
     documents_by_branch = _embedding_documents(
         context,
         catalog,
         sources,
-        pending,
+        list(sources) if full else pending,
         {row["content_id"] for row in gemini_fallbacks},
     )
+    if full:
+        from validation.provenance import bind_stage, fingerprint, model_identity, require_stage
+        for name in ("summarize-graph-qwen", "summarize-description"):
+            require_stage(context, name)
+        if len(gemini_fallbacks) < len(catalog):
+            require_stage(context, "summarize-graph-gemini")
+        if not (context.run_root / "fingerprints" / "representations.json").exists() and any(
+                context.representations_dir.glob("*_embeddings.npz")):
+            raise ValidationStepError("unbound representation cache; use a new run ID")
+        bind_stage(context, "representations", {
+            "documents": {b: fingerprint(d) for b, d in documents_by_branch.items()},
+            "model": model_identity(context.path("models", "bge")),
+            "cohort": cohort["eligibility"]["hashes"],
+        })
+        from validation.provenance import file_hash
+        try:
+            saved_hashes = read_json(context.representations_dir / "complete.json")["hashes"]
+        except (OSError, ValueError, KeyError):
+            saved_hashes = {}
+        for branch in sources:
+            if branch not in pending:
+                output = _embedding_path(context, branch)
+                if saved_hashes.get(output.name) != file_hash(output):
+                    pending.append(branch)
     print(
         f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
         + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
@@ -306,12 +347,18 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             flush=True,
         )
     if not pending:
+        if full:
+            from validation.provenance import verify_representations
+            verify_representations(context)
         return _result("embed-representations", content_count=len(catalog))
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)
     encoder = BGETextEncoder(config.encoder)
     matrices = _encode_representations(encoder, pending, documents_by_branch, catalog, config)
     _persist_representations(context, matrices, catalog, gemini_fallbacks)
+    if full:
+        from validation.provenance import complete_representations
+        complete_representations(context)
     return _result("embed-representations", content_count=len(catalog))
 
 
@@ -360,6 +407,9 @@ def _training_runs_complete(
 
 def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        from validation.rolling_recommendation import run_rolling
+        return run_rolling(context, force=force)
     context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
 
@@ -385,6 +435,9 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
 
 
 def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        from validation.rolling_diagnosis import diagnose
+        return diagnose(context)
     from validation.diagnosis import diagnose_recommendations
 
     context.initialize()

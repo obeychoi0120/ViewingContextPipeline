@@ -43,6 +43,13 @@ def context(tmp_path: Path) -> RunContext:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)
     config = yaml.safe_load((ROOT / "config/pipeline.yaml").read_text(encoding="utf-8"))
+    # These fixtures exercise the preserved v3 artifact contracts.
+    config["schema_version"] = "viewing-context-config/v3"
+    config["protocol"].update(cohort_sampling="user_first_nested_stratified",
+                              catalog_scope="selected_user_sequence_union")
+    config["validation"]["cohort"] = dict(user_count=1000, seed=42,
+        min_sequence_length=5, max_sequence_length=13, history_strata=[5, 10, 20, 50])
+    config["validation"]["evaluation"]["cutoffs"] = [4, 8, 10, 20]
     config["artifacts_root"] = str(tmp_path / "artifacts")
     config["data"] = {
         "videos_dir": str(videos),

@@ -193,6 +193,8 @@ def extract_graph_scenes(
     visual_rows = _visual_rows(context)
     names = _video_name_map(context)
     scene_dir = context.graph_scene_dir(model)
+    from validation.provenance import bind_extraction
+    bind_extraction(context, stage, model=model)
     failure_dir = context.graph_failure_dir(model)
     records_by_content, failures_by_content, pending = _graph_scene_work(
         context,
@@ -280,12 +282,24 @@ def summarize_graph(
     visuals = _visual_rows(context)
     names = _video_name_map(context)
     scene_dir = context.graph_scene_dir(source)
+    from validation.provenance import bind_extraction
+    bind_extraction(context, stage, scene_dir=scene_dir)
     if not scene_dir.is_dir():
         raise ExtractionStepError(f"missing graph scene directory: {scene_dir}")
     paths = [scene_dir / f"{row['content_id']}.jsonl" for row in visuals]
     if not all(path.is_file() for path in paths):
         missing = next(path for path in paths if not path.is_file())
         raise ExtractionStepError(f"missing graph scene output: {missing}")
+    if source == "gemini" and not force and context.config["schema_version"] == "viewing-context-config/v4":
+        from extraction.summary_executor import reuse_summary_document
+        for path in paths:
+            output = context.graph_summary_dir(source) / f"{path.stem}.json"
+            if output.is_file():
+                reuse_summary_document(
+                    output, schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
+                    content_id=path.stem, arm="graph_gemini",
+                    scene_count=len(_minimal_graph_records(read_jsonl(path), path)),
+                )
     return run_summary_stage(
         SummaryBranch(
             stage=stage,
@@ -319,6 +333,8 @@ def extract_description_scenes(
     gpus: int | None = None,
 ) -> dict[str, Any]:
     context.initialize()
+    from validation.provenance import bind_extraction
+    bind_extraction(context, "extract-description-scenes")
     settings = context.config["extraction"]["description"]
     prompt_path = context.config_path("extraction", "description", "scene_prompt")
     prompt = prompt_path.read_text(encoding="utf-8")
@@ -376,6 +392,8 @@ def summarize_description(
     gpus: int | None = None,
 ) -> dict[str, Any]:
     context.initialize()
+    from validation.provenance import bind_extraction
+    bind_extraction(context, "summarize-description", scene_dir=context.description_scene_dir)
     settings = context.config["extraction"]["description"]
     generation = _summary_generation_settings(context)
     template = context.config_path("extraction", "description", "summary_prompt").read_text(

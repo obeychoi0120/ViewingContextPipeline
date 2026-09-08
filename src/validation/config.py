@@ -15,6 +15,10 @@ class DatasetConfig(StrictModel):
     titles_csv: Path
 
 
+class RollingDatasetConfig(DatasetConfig):
+    pairs_csv: Path
+
+
 class CohortConfig(StrictModel):
     user_count: int = Field(gt=0)
     seed: int
@@ -76,20 +80,41 @@ class EvaluationConfig(StrictModel):
 
     @model_validator(mode="after")
     def validate_cutoffs(self) -> "EvaluationConfig":
-        if self.cutoffs != [4, 8, 10, 20]:
-            raise ValueError("cutoffs must be exactly [4, 8, 10, 20]")
+        if self.cutoffs not in ([4, 8, 10, 20], [4, 8, 10, 20, 30]):
+            raise ValueError("cutoffs must be [4, 8, 10, 20] with optional @30")
         return self
 
 
+class FullCohortConfig(StrictModel):
+    mode: Literal["full_rolling"]
+    user_count: int = Field(gt=0)
+    interaction_count: int = Field(gt=0)
+    item_count: int = Field(gt=0)
+    timezone: Literal["UTC"]
+    evaluation_days: Literal[7]
+    exclude_final_day: Literal[True]
+
+
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v3"]
+    schema_version: Literal["validation-config/v3", "validation-config/v4"]
     run_id: str
-    dataset: DatasetConfig
-    cohort: CohortConfig
+    dataset: DatasetConfig | RollingDatasetConfig
+    cohort: CohortConfig | FullCohortConfig
     encoder: EncoderConfig
     model: ModelConfig
     evaluation: EvaluationConfig
     output_dir: Path
+
+    @model_validator(mode="after")
+    def validate_protocol(self):
+        full = isinstance(self.cohort, FullCohortConfig)
+        if full != (self.schema_version == "validation-config/v4"):
+            raise ValueError("cohort and config versions do not match")
+        if full and (not isinstance(self.dataset, RollingDatasetConfig) or self.evaluation.cutoffs[-1] != 30):
+            raise ValueError("rolling requires pairs_csv and @30")
+        if not full and (isinstance(self.dataset, RollingDatasetConfig) or self.evaluation.cutoffs != [4, 8, 10, 20]):
+            raise ValueError("v3 requires the legacy dataset and cutoffs")
+        return self
 
 
 def build_validation_config(
@@ -98,7 +123,10 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v3",
+            "schema_version": (
+                "validation-config/v4" if settings["cohort"].get("mode") == "full_rolling"
+                else "validation-config/v3"
+            ),
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),

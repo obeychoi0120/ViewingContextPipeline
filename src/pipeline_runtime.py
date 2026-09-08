@@ -105,8 +105,14 @@ class RunContext:
 
     def initialize(self) -> None:
         self.run_root.mkdir(parents=True, exist_ok=True)
+        if self.config["schema_version"] == "viewing-context-config/v4":
+            from validation.provenance import initialize_run
+            initialize_run(self)
 
     def require_ready_cohort(self) -> dict[str, Any]:
+        if self.config["schema_version"] == "viewing-context-config/v4":
+            from validation.rolling_data import load_cohort
+            return load_cohort(self.cohort_dir, self.run_id)
         from validation.cohort import load_ready_cohort
 
         return load_ready_cohort(
@@ -188,7 +194,7 @@ def _validate_config(value: dict[str, Any]) -> None:
     }
     if set(value) != expected_keys:
         raise ConfigError(f"pipeline config must contain exactly {sorted(expected_keys)}")
-    if value.get("schema_version") != CONFIG_SCHEMA:
+    if value.get("schema_version") not in (CONFIG_SCHEMA, "viewing-context-config/v4"):
         raise ConfigError(f"schema_version must be {CONFIG_SCHEMA}")
     _validate_protocol(value)
     _validate_extraction(value)
@@ -209,6 +215,8 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "description_model": "qwen",
         "arms": ["metadata", "graph_qwen", "graph_gemini", "description"],
     }
+    if value["schema_version"] == "viewing-context-config/v4":
+        expected.update(cohort_sampling="full_rolling", catalog_scope="full_source_catalog")
     if set(protocol) != set(expected):
         raise ConfigError(f"protocol must contain exactly {sorted(expected)}")
     for key, expected_value in expected.items():
@@ -321,8 +329,11 @@ def _validate_extraction(value: dict[str, Any]) -> None:
 def _validate_models(value: dict[str, Any]) -> None:
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
-    if set(data) != {"videos_dir", "pairs_tsv", "titles_csv"}:
-        raise ConfigError("data must contain exactly videos_dir, pairs_tsv, and titles_csv")
+    data_keys = {"videos_dir", "pairs_tsv", "titles_csv"}
+    if value["schema_version"] == "viewing-context-config/v4":
+        data_keys.add("pairs_csv")
+    if set(data) != data_keys:
+        raise ConfigError(f"data must contain exactly {sorted(data_keys)}")
     if set(models) != {"qwen", "bge", "gemini"}:
         raise ConfigError("models must contain exactly qwen, bge, and gemini")
     gemini = _require_mapping(models, "gemini")
