@@ -29,6 +29,7 @@ def prepare_input_data(
         if donor.run_root.resolve() == context.run_root.resolve():
             raise ExtractionStepError("--reuse-run-id must name a different run")
     context.initialize()
+    print("[PREPARE INPUT] Loading prepared cohort...", flush=True)
     cohort = context.require_ready_cohort()
     catalog = cohort["catalog"]
     settings = context.config["extraction"]["visual_evidence"]
@@ -37,6 +38,10 @@ def prepare_input_data(
     donors = donor_inventory(donor.run_root) if donor is not None else {}
     pending = []
     reused_target = reused_donor = 0
+    print(
+        f"[PREPARE INPUT] Checking sources and reusable keyframes for {len(catalog)} videos...",
+        flush=True,
+    )
     for item, inventory in zip(catalog, cohort["inventory"], strict=True):
         if not source_matches_inventory(inventory):
             raise ExtractionStepError(
@@ -66,7 +71,18 @@ def prepare_input_data(
             reused_donor += 1
         else:
             pending.append(item)
+    print(
+        f"[PREPARE INPUT] reused_target={reused_target} reused_donor={reused_donor} "
+        f"pending={len(pending)}",
+        flush=True,
+    )
     if pending:
+        print(
+            f"[PREPARE INPUT] Extracting resized keyframes: {len(pending)} videos, "
+            f"{image_size[0]}x{image_size[1]}, scene={sampling['scene_duration']}s, "
+            f"up to {sampling['num_keyframes']} frames/scene...",
+            flush=True,
+        )
         prepared = prepare_catalog(
             pending,
             assets_root=context.cohort_dir / "source_assets",
@@ -79,6 +95,7 @@ def prepare_input_data(
             raise ExtractionStepError(f"visual evidence preparation is incomplete: {prepared}")
     else:
         (context.cohort_dir / "preparation_failures.jsonl").unlink(missing_ok=True)
+    print("[PREPARE INPUT] Verifying prepared timestamps and images...", flush=True)
     for item in catalog:
         timestamp, frames = evidence_paths(
             context.run_root, item["content_id"], sampling["scene_duration"],

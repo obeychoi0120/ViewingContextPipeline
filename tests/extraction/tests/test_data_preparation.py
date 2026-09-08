@@ -202,8 +202,9 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
     assert result["workers"] == 4
     progress_factory.assert_called_once_with(
         total=2,
-        desc="Prepare input data",
-        unit="content",
+        desc="Extract resized keyframes",
+        unit="video",
+        dynamic_ncols=True,
     )
     assert progress.update.call_count == 2
     progress.update.assert_has_calls([mock.call(1), mock.call(1)])

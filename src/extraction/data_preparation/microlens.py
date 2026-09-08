@@ -52,22 +52,22 @@ def prepare_catalog(
                 "error": str(exc),
             }
 
-    with ThreadPoolExecutor(max_workers=PREPARATION_WORKERS) as executor:
+    with tqdm(
+        total=len(catalog),
+        desc="Extract resized keyframes",
+        unit="video",
+        dynamic_ncols=True,
+    ) as progress, ThreadPoolExecutor(max_workers=PREPARATION_WORKERS) as executor:
         futures = [executor.submit(prepare, index, row) for index, row in enumerate(catalog)]
-        with tqdm(
-            total=len(catalog),
-            desc="Prepare input data",
-            unit="content",
-        ) as progress:
-            for future in as_completed(futures):
-                index, content_id, prepared, failure = future.result()
-                results[index] = (prepared, failure)
-                if failure is not None:
-                    tqdm.write(
-                        f"[FAILURE] prepare_data {content_id} {failure['error']}",
-                        file=progress.fp,
-                    )
-                progress.update(1)
+        for future in as_completed(futures):
+            index, content_id, prepared, failure = future.result()
+            results[index] = (prepared, failure)
+            if failure is not None:
+                tqdm.write(
+                    f"[FAILURE] prepare_data {content_id} {failure['error']}",
+                    file=progress.fp,
+                )
+            progress.update(1)
     prepared_rows = [prepared for prepared, _ in results if prepared is not None]
     failures = [failure for _, failure in results if failure is not None]
     cohort_root = Path(output_root) / "data" / "cohort"

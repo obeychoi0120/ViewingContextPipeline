@@ -340,6 +340,7 @@ def prepare_cohort(
     output = output_dir or config.output_dir / "data" / "cohort"
     settings = config.cohort.model_dump(mode="json")
     inputs = {key: str(path.resolve()) for key, path in config.dataset.model_dump().items()}
+    print("[COHORT] Loading interactions and preparing the cohort plan...", flush=True)
     plan, selected, items = build_cohort_plan(
         load_pairs(config.dataset.pairs_tsv),
         run_id=config.run_id,
@@ -367,9 +368,11 @@ def prepare_cohort(
         # users or permits a changed plan, and does not invalidate downstream files.
         eligibility = _eligibility(plan, "blocked")
         atomic_write_json(eligibility_path, eligibility)
+        print(f"[COHORT] Checking {len(items)} videos and probing durations...", flush=True)
         inventory, failures = build_item_inventory(
             {row["item_id"] for row in items}, config.dataset.videos_dir, probe or probe_duration
         )
+        print("[COHORT] Checking metadata titles...", flush=True)
         titles: dict[str, str] = {}
         try:
             titles = load_metadata_titles(config.dataset.titles_csv)
