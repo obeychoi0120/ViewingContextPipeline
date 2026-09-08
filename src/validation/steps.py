@@ -89,6 +89,8 @@ def _embedding_path(context: RunContext, branch: str) -> Path:
 def _metadata_titles_match_catalog(
     path: Path,
     catalog: list[dict[str, Any]],
+    *,
+    allow_blank: bool = False,
 ) -> bool:
     if not path.is_file():
         return False
@@ -101,7 +103,7 @@ def _metadata_titles_match_catalog(
         and str(title_row["item_id"]) == str(catalog_row["item_id"])
         and str(title_row["content_id"]) == str(catalog_row["content_id"])
         and isinstance(title_row["title"], str)
-        and bool(title_row["title"].strip())
+        and (allow_blank or bool(title_row["title"].strip()))
         for title_row, catalog_row in zip(rows, catalog, strict=True)
     )
 
@@ -215,7 +217,10 @@ def _embedding_documents(context, catalog, sources, pending, fallback_ids):
     for branch in pending:
         if branch == "metadata":
             metadata_titles_path = context.cohort_dir / "metadata_titles.jsonl"
-            if not _metadata_titles_match_catalog(metadata_titles_path, catalog):
+            if not _metadata_titles_match_catalog(
+                metadata_titles_path, catalog,
+                allow_blank=context.config["schema_version"] == "viewing-context-config/v4",
+            ):
                 raise ValidationStepError(
                     "metadata titles do not match the cohort catalog; rerun prepare-cohort"
                 )
@@ -268,11 +273,22 @@ def _encode_representations(encoder, pending, documents_by_branch, catalog, conf
     matrices: dict[str, np.ndarray] = {}
     for branch in pending:
         documents = documents_by_branch[branch]
-        matrix = np.asarray(
-            encoder.encode([str(row["text"]) for row in documents]),
-            dtype=np.float32,
-        )
         expected_shape = (len(catalog), config.encoder.embedding_dim)
+        if branch == "metadata" and config.schema_version == "validation-config/v4":
+            # Do not send empty titles through BGE, even as part of a padded batch.
+            nonempty = [i for i, row in enumerate(documents) if row["text"].strip()]
+            matrix = np.zeros(expected_shape, dtype=np.float32)
+            if nonempty:
+                encoded = np.asarray(
+                    encoder.encode([documents[i]["text"] for i in nonempty]), dtype=np.float32,
+                )
+                if encoded.shape != (len(nonempty), config.encoder.embedding_dim):
+                    raise ValidationStepError(f"invalid metadata embedding matrix: {encoded.shape}")
+                matrix[nonempty] = encoded
+        else:
+            matrix = np.asarray(
+                encoder.encode([str(row["text"]) for row in documents]), dtype=np.float32,
+            )
         if matrix.shape != expected_shape or not np.isfinite(matrix).all():
             raise ValidationStepError(f"invalid embedding matrix for {branch}: {matrix.shape}")
         matrices[branch] = matrix
@@ -311,30 +327,6 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         list(sources) if full else pending,
         {row["content_id"] for row in gemini_fallbacks},
     )
-    if full:
-        from validation.provenance import bind_stage, fingerprint, model_identity, require_stage
-        for name in ("summarize-graph-qwen", "summarize-description"):
-            require_stage(context, name)
-        if len(gemini_fallbacks) < len(catalog):
-            require_stage(context, "summarize-graph-gemini")
-        if not (context.run_root / "fingerprints" / "representations.json").exists() and any(
-                context.representations_dir.glob("*_embeddings.npz")):
-            raise ValidationStepError("unbound representation cache; use a new run ID")
-        bind_stage(context, "representations", {
-            "documents": {b: fingerprint(d) for b, d in documents_by_branch.items()},
-            "model": model_identity(context.path("models", "bge")),
-            "cohort": cohort["eligibility"]["hashes"],
-        })
-        from validation.provenance import file_hash
-        try:
-            saved_hashes = read_json(context.representations_dir / "complete.json")["hashes"]
-        except (OSError, ValueError, KeyError):
-            saved_hashes = {}
-        for branch in sources:
-            if branch not in pending:
-                output = _embedding_path(context, branch)
-                if saved_hashes.get(output.name) != file_hash(output):
-                    pending.append(branch)
     print(
         f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
         + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
@@ -348,8 +340,8 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         )
     if not pending:
         if full:
-            from validation.provenance import verify_representations
-            verify_representations(context)
+            from validation.representation_checks import verify_representations
+            verify_representations(context, cohort)
         return _result("embed-representations", content_count=len(catalog))
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)
@@ -357,8 +349,8 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     matrices = _encode_representations(encoder, pending, documents_by_branch, catalog, config)
     _persist_representations(context, matrices, catalog, gemini_fallbacks)
     if full:
-        from validation.provenance import complete_representations
-        complete_representations(context)
+        from validation.representation_checks import verify_representations
+        verify_representations(context, cohort)
     return _result("embed-representations", content_count=len(catalog))
 
 

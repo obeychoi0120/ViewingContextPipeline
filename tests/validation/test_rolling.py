@@ -89,7 +89,7 @@ def test_100k_bootstrap_arrays_are_bounded():
 
 
 @pytest.fixture
-def full_context(tmp_path, monkeypatch):
+def full_context(tmp_path, monkeypatch, request):
     config = yaml.safe_load((ROOT / "config/pipeline.yaml").read_text(encoding="utf-8"))
     config["artifacts_root"] = str(tmp_path / "artifacts")
     for key in config["data"]:
@@ -98,7 +98,10 @@ def full_context(tmp_path, monkeypatch):
     videos.mkdir()
     for item in range(1, 5):
         (videos / f"{item}.mp4").write_bytes(b"fixture video")
-    Path(config["data"]["titles_csv"]).write_text("".join(f"{i},title {i}\n" for i in range(1, 5)))
+    blank_items = getattr(request, "param", ())
+    Path(config["data"]["titles_csv"]).write_text(
+        "".join(f"{i}," + (" \n" if i in blank_items else f"title {i}\n") for i in range(1, 5))
+    )
     origin = int(datetime(2022, 9, 1, tzinfo=timezone.utc).timestamp() * 1000)
     rows = [(user, i % 4 + 1, origin + i * DAY // 2) for user in range(1, 4) for i in range(24)]
     Path(config["data"]["pairs_csv"]).write_text(
@@ -126,20 +129,27 @@ def full_context(tmp_path, monkeypatch):
     return context
 
 
-def test_full_preparation_and_portable_fingerprints(full_context):
+def test_full_preparation_allows_changed_settings_without_binding(full_context):
     context = full_context
     cohort = context.require_ready_cohort()
     assert cohort["plan"]["interaction_count"] == 72
     assert cohort["plan"]["eligible_test_count"] == 42
     preflight = read_json(context.cohort_dir / "media_preflight.json")
     assert preflight["scene_count"] == 8 and preflight["keyframe_count"] == 28
-    before = read_json(context.run_root / "experiment.json")["fingerprint"]
+    before = read_json(context.run_root / "experiment.json")
+    assert set(before) == {"schema_version", "config_snapshot"}
+    assert not (context.run_root / "fingerprints").exists()
     context.config["data"]["videos_dir"] = "D:/host-specific/videos"
     context.initialize()
-    assert read_json(context.run_root / "experiment.json")["fingerprint"] == before
+    assert read_json(context.run_root / "experiment.json") == before
     context.config["extraction"]["visual_evidence"]["num_keyframes"] = 3
-    with pytest.raises(RuntimeError, match="new run ID"):
-        context.initialize()
+    context.initialize()
+    # Legacy identity files are neither interpreted nor rewritten.
+    legacy = {"fingerprint": "old", "identity": {"code": "old revision"}}
+    write_json(context.run_root / "experiment.json", legacy)
+    write_json(context.run_root / "fingerprints" / "source.json", {"invalid": True})
+    context.initialize()
+    assert read_json(context.run_root / "experiment.json") == legacy
 
 
 def test_cardinality_and_tampered_source_fail(full_context):
@@ -147,17 +157,69 @@ def test_cardinality_and_tampered_source_fail(full_context):
     path = context.cohort_dir / "events.jsonl"
     with path.open("a") as handle:
         handle.write("{}\n")
-    with pytest.raises(RuntimeError, match="changed"):
+    with pytest.raises((ValueError, KeyError, RuntimeError)):
         context.require_ready_cohort()
     context.config["validation"]["cohort"]["interaction_count"] = 719405
     with pytest.raises(ValueError, match="cardinality"):
         prepare_full_cohort(context, plan_only=True)
 
 
+@pytest.mark.parametrize("full_context", [[2, 4], [1, 2, 3, 4]], indirect=True)
+def test_missing_metadata_is_zero_without_encoding_empty_titles(full_context):
+    from validation.steps import _embedding_documents, _encode_representations, _write_embedding
+    from validation.metadata import verify_missing_metadata
+
+    context = full_context
+    cohort = context.require_ready_cohort()
+    assert cohort["plan"]["interaction_count"] == 72
+    assert len(cohort["catalog"]) == 4
+    documents = _embedding_documents(
+        context, cohort["catalog"], {"metadata": None}, ["metadata"], set()
+    )
+    nonempty = [row["text"] for row in documents["metadata"] if row["text"].strip()]
+    missing = [i for i, row in enumerate(documents["metadata"]) if not row["text"].strip()]
+    documents["graph_qwen"] = [{"text": "graph evidence"}] * 4
+    documents["desc"] = [{"text": "description evidence"}] * 4
+
+    class Encoder:
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, texts):
+            assert all(t.strip() for t in texts)
+            self.calls.append(texts)
+            return np.array(
+                [np.full(1024, int(t.split()[-1]) if t.startswith("title ") else 7) for t in texts],
+                dtype=np.float32,
+            )
+
+    encoder = Encoder()
+    matrices = _encode_representations(
+        encoder, list(documents), documents, cohort["catalog"], validation_config(context)
+    )
+    assert encoder.calls == ([nonempty] if nonempty else []) + [
+        ["graph evidence"] * 4,
+        ["description evidence"] * 4,
+    ]
+    assert np.all(matrices["metadata"][missing] == 0)
+    for index in set(range(4)) - set(missing):
+        assert np.all(matrices["metadata"][index] == index + 1)
+    assert np.all(matrices["graph_qwen"] == 7) and np.all(matrices["desc"] == 7)
+    output = context.representations_dir / "metadata_embeddings.npz"
+    _write_embedding(output, matrices["metadata"])
+    report = verify_missing_metadata(context, cohort)
+    assert report["missing_count"] == len(missing)
+    assert [r["embedding_row"] for r in report["items"]] == missing
+    matrices["metadata"][missing[0], 0] = 1
+    _write_embedding(output, matrices["metadata"])
+    with pytest.raises(RuntimeError, match="requires a zero vector"):
+        verify_missing_metadata(context, cohort)
+
+
 def test_gemini_fallback_and_invalid_present_summary(full_context, monkeypatch):
     from extraction.summary_validation import SUMMARY_SECTIONS, serialize_summary_sections
     from validation.steps import embed_representations
-    from validation.provenance import verify_representations
+    from validation.representation_checks import verify_representations
 
     context = full_context
     cohort = context.require_ready_cohort()
@@ -188,21 +250,21 @@ def test_gemini_fallback_and_invalid_present_summary(full_context, monkeypatch):
             return np.ones((len(texts), 1024), dtype=np.float32)
 
     monkeypatch.setattr("validation.features.BGETextEncoder", Encoder)
-    from validation.provenance import bind_stage
-
-    for stage in ("summarize-graph-qwen", "summarize-description"):
-        bind_stage(context, stage, {"fixture": "structured summary"})
     embed_representations(context)
     fallbacks = read_json(context.representations_dir / "graph_gemini_fallbacks.json")["fallbacks"]
     assert len(fallbacks) == 4
     verify_representations(context)
-    # A missing branch must not cause another corrupt, finite-shaped matrix to be re-signed.
+    # A changed but structurally valid matrix is reused; only a missing branch is rebuilt.
     np.savez(context.representations_dir / "metadata_embeddings.npz", values=np.zeros((4, 1024)))
     (context.representations_dir / "graph_qwen_embeddings.npz").unlink()
     embed_representations(context)
     with np.load(context.representations_dir / "metadata_embeddings.npz") as data:
-        assert np.all(data["values"] == 1)
+        assert np.all(data["values"] == 0)
     verify_representations(context)
+    # Force rebuild still replaces valid cached values, without any dependency binding.
+    embed_representations(context, force=True)
+    with np.load(context.representations_dir / "metadata_embeddings.npz") as data:
+        assert np.all(data["values"] == 1)
     # Cached representations still validate a present malformed Gemini summary.
     content = cohort["catalog"][0]["content_id"]
     write_json(
@@ -224,14 +286,12 @@ def test_zero_relative_denominator_cannot_produce_a_decision():
 
 def test_invalid_gemini_summary_is_not_automatically_replaced(full_context, monkeypatch):
     from pipeline_runtime import write_jsonl
-    from validation.provenance import bind_extraction
     from extraction.steps import summarize_graph
 
     context = full_context
     catalog = context.require_ready_cohort()["catalog"]
     for row in catalog:
         write_jsonl(context.graph_scene_dir("gemini") / f"{row['content_id']}.jsonl", [])
-    bind_extraction(context, "summarize-graph-gemini", scene_dir=context.graph_scene_dir("gemini"))
     path = context.graph_summary_dir("gemini") / f"{catalog[0]['content_id']}.json"
     write_json(path, {"text": "malformed existing Gemini summary"})
     before = path.read_bytes()
@@ -267,6 +327,7 @@ def test_evaluation_masks_history_older_than_the_ten_item_context():
 
 
 @pytest.mark.torch
+@pytest.mark.parametrize("full_context", [[2, 4]], indirect=True)
 def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, monkeypatch):
     import torch
     from validation.model import SASRec
@@ -279,13 +340,12 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     write_json(directory / "item_index.json", {str(i): i - 1 for i in range(1, 5)})
     write_json(directory / "graph_gemini_fallbacks.json", {"fallbacks": []})
     for branch in RECOMMENDATION_ARMS.values():
+        values = np.ones((4, 1024), dtype=np.float32)
+        if branch == "metadata":
+            values[[1, 3]] = 0
         np.savez(
-            directory / f"{branch}_embeddings.npz", values=np.ones((4, 1024), dtype=np.float32)
+            directory / f"{branch}_embeddings.npz", values=values
         )
-    from validation.provenance import bind_stage, complete_representations
-
-    bind_stage(context, "representations", {"fixture": "synthetic fixed features"})
-    complete_representations(context)
 
     def tiny_model(config, *, item_count, branch, features, device):
         return SASRec(item_count, 10, 8, 1, 2, 0, arm="metadata", item_features=features).to(device)
@@ -312,6 +372,13 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     assert result == {"stage": "run-recommendation", "completed": 84, "skipped": 0}
     completions = list(context.recommendations_dir.rglob("complete.json"))
     assert len(completions) == 84
+    assert "fingerprint" not in read_json(completions[0])["identity"]
+    assert "hashes" not in read_json(completions[0])
+    # Previously saved dependency fields no longer block completed combinations.
+    legacy = read_json(completions[0])
+    legacy["identity"]["fingerprint"] = "old dependency"
+    legacy["hashes"] = {"sasrec.pt": "old checksum"}
+    write_json(completions[0], legacy)
     protected = completions[-1].read_bytes()
     assert run_rolling(context)["skipped"] == 84
     # A corrupt combination restarts; other completed combinations stay byte-identical.
@@ -369,17 +436,14 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     assert diagnose(context)["status"] == "pass"
     diagnosis = read_json(context.diagnosis_path)
     assert diagnosis["statistics"]["status"] == "computed"
+    assert diagnosis["metadata_missing"]["missing_count"] == 2
+    assert [row["item_id"] for row in diagnosis["metadata_missing"]["items"]] == ["2", "4"]
     assert diagnosis["scene_coverage"]["arms"]["graph_gemini"]["success_coverage"] == 1
-    # Even if a writer updates the checksum, repeated events cannot pass validation.
-    from validation.provenance import file_hash
-
+    # Repeated events cannot pass content validation without checksums.
     path = completions[0].with_name("per_event_metrics.jsonl")
     with path.open("a") as handle:
         handle.write(path.read_text().splitlines()[0] + "\n")
-    document = read_json(completions[0])
-    document["hashes"][path.name] = file_hash(path)
-    write_json(completions[0], document)
-    with pytest.raises(ValueError, match="duplicate"):
+    with pytest.raises(ValueError, match="incomplete/corrupt"):
         collect_metrics(context, config, context.require_ready_cohort())
 
 
