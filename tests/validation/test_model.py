@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -97,13 +98,9 @@ def test_xavier_normal_and_zero_bias_initialization() -> None:
         if isinstance(module, torch.nn.Linear) and module.bias is not None:
             assert torch.count_nonzero(module.bias).item() == 0
         if isinstance(module, torch.nn.MultiheadAttention):
-            fan_in, fan_out = torch.nn.init._calculate_fan_in_and_fan_out(
-                module.in_proj_weight
-            )
+            fan_in, fan_out = torch.nn.init._calculate_fan_in_and_fan_out(module.in_proj_weight)
             expected_variance = 2.0 / (fan_in + fan_out)
-            observed_variance = float(
-                module.in_proj_weight.detach().var(unbiased=False)
-            )
+            observed_variance = float(module.in_proj_weight.detach().var(unbiased=False))
             assert observed_variance == pytest.approx(expected_variance, rel=0.5)
             assert torch.count_nonzero(module.in_proj_bias).item() == 0
 
@@ -229,7 +226,8 @@ def test_popularity_distribution_and_non_finite_guards() -> None:
         )
 
 
-def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(tmp_path) -> None:
+@pytest.fixture
+def training_case(tmp_path):
     run_root = tmp_path / "run"
     cohort = run_root / "data" / "cohort"
     representations = run_root / "validation" / "representations"
@@ -242,9 +240,7 @@ def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(tmp_path) -> None
     config.dataset.videos_dir.mkdir()
     for item in range(1, 9):
         (config.dataset.videos_dir / f"{item}.mp4").write_bytes(b"video")
-    config.dataset.pairs_tsv.write_text(
-        "u1\t1 2 3 4 5 6\nu2\t2 3 4 5 6 7\n", encoding="utf-8"
-    )
+    config.dataset.pairs_tsv.write_text("u1\t1 2 3 4 5 6\nu2\t2 3 4 5 6 7\n", encoding="utf-8")
     config.dataset.titles_csv.write_text(
         "".join(f"{item},Title {item}\n" for item in range(1, 9)), encoding="utf-8"
     )
@@ -264,17 +260,21 @@ def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(tmp_path) -> None
             values=rng.normal(size=(len(catalog), 1024)).astype(np.float32),
         )
 
-    result = train_recommendation_arms(
-        config,
-        {
-            "run_id": "train-smoke",
-            "run_root": str(run_root),
-            "paths": {
-                "representations_dir": str(representations),
-                "recommendations_dir": str(recommendations),
-            },
+    runtime = {
+        "run_id": "train-smoke",
+        "run_root": str(run_root),
+        "paths": {
+            "representations_dir": str(representations),
+            "recommendations_dir": str(recommendations),
         },
-    )
+    }
+    return config, runtime
+
+
+def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(training_case) -> None:
+    config, runtime = training_case
+    recommendations = Path(runtime["paths"]["recommendations_dir"])
+    result = train_recommendation_arms(config, runtime)
 
     training_runs = read_jsonl(recommendations / "training_runs.jsonl")
     checkpoints = list((recommendations / "checkpoints").glob("**/sasrec.pt"))
@@ -290,3 +290,50 @@ def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(tmp_path) -> None
         assert row["selection"]["epochs_completed"] == 1
         assert row["refit"]["data"] == "train+valid_target"
         assert row["refit"]["epochs_completed"] == 1
+
+
+def test_selection_ties_keep_first_best_epoch_and_refit_only_selected_epochs(
+    training_case,
+    monkeypatch,
+) -> None:
+    import validation.recommendation as recommendation
+
+    config, runtime = training_case
+    config.model.max_epochs = 8
+    config.model.patience = 2
+    config.model.seeds = [42]
+    scores = iter([0.1, 0.3, 0.3, 0.2] * len(RECOMMENDATION_ARMS))
+    monkeypatch.setattr(recommendation, "_validation_ndcg", lambda *args: next(scores))
+    epoch_calls = []
+    original_train_epoch = recommendation._train_epoch
+
+    def record_epoch(model, optimizer, sequences, order, *args):
+        epoch_calls.append((model, optimizer, [list(items) for items in sequences]))
+        return original_train_epoch(model, optimizer, sequences, order, *args)
+
+    monkeypatch.setattr(recommendation, "_train_epoch", record_epoch)
+    result = train_recommendation_arms(config, runtime)
+
+    assert len(epoch_calls) == 6 * len(RECOMMENDATION_ARMS)
+    for arm_index, run in enumerate(result["runs"]):
+        assert run["selection"]["best_validation"] == {
+            "metric": "NDCG@10",
+            "value": 0.3,
+            "epoch": 2,
+        }
+        assert run["selection"]["epochs_completed"] == 4
+        assert run["selection"]["early_stopped"] is True
+        assert [row["NDCG@10"] for row in run["selection"]["epochs"]] == [0.1, 0.3, 0.3, 0.2]
+        assert run["refit"]["epochs_completed"] == 2
+        calls = epoch_calls[arm_index * 6 : (arm_index + 1) * 6]
+        assert all(call[0] is calls[0][0] for call in calls[:4])
+        assert all(call[0] is calls[4][0] for call in calls[4:])
+        assert calls[0][0] is not calls[4][0]
+        assert calls[0][1] is not calls[4][1]
+        assert all(
+            len(refit) == len(train) + 1
+            for train, refit in zip(calls[0][2], calls[4][2], strict=True)
+        )
+        checkpoint = torch.load(run["checkpoint"], map_location="cpu", weights_only=True)
+        assert checkpoint["metadata"]["selection_best_epoch"] == 2
+        assert checkpoint["metadata"]["refit_epochs_completed"] == 2
