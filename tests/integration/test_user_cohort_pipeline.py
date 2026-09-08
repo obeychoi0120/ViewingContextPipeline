@@ -36,6 +36,12 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture
 def context(tmp_path, monkeypatch):
     config = yaml.safe_load((ROOT / "config/pipeline.yaml").read_text(encoding="utf-8"))
+    config["schema_version"] = "viewing-context-config/v3"
+    config["protocol"].update(cohort_sampling="user_first_nested_stratified",
+                              catalog_scope="selected_user_sequence_union")
+    config["validation"]["cohort"] = dict(user_count=1000, seed=42,
+        min_sequence_length=5, max_sequence_length=13, history_strata=[5, 10, 20, 50])
+    config["validation"]["evaluation"]["cutoffs"] = [4, 8, 10, 20]
     config["artifacts_root"] = str(tmp_path / "artifacts")
     config["data"] = {
         "pairs_tsv": str(tmp_path / "pairs.tsv"),

@@ -1,16 +1,17 @@
-schema_version: viewing-context-config/v3
+schema_version: viewing-context-config/v4
 protocol:
   dataset: microlens_100k
   modality: visual_only
   sampling: fixed_windows
-  cohort_sampling: user_first_nested_stratified
-  catalog_scope: selected_user_sequence_union
+  cohort_sampling: full_rolling
+  catalog_scope: full_source_catalog
   graph_extractors: [qwen, gemini]
   graph_summarizer: qwen
   description_model: qwen
   arms: [metadata, graph_qwen, graph_gemini, description]
 artifacts_root: artifacts
 data:
+  pairs_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs.csv
   videos_dir: /home_nvme/shared/data/microlens_100k/MicroLens-100k_videos
   pairs_tsv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs.tsv
   titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en_completed.csv
@@ -51,11 +52,13 @@ extraction:
     summary_max_new_tokens: 512
 validation:
   cohort:
-    user_count: 1000
-    seed: 42
-    min_sequence_length: 5
-    max_sequence_length: 13
-    history_strata: [5, 10, 20, 50]
+    mode: full_rolling
+    user_count: 100000
+    interaction_count: 719405
+    item_count: 19738
+    timezone: UTC
+    evaluation_days: 7
+    exclude_final_day: true
   encoder:
     embedding_dim: 1024
     max_length: 512
@@ -73,12 +76,12 @@ validation:
     popularity_power: 1.0
     seeds: [42, 43, 44]
   evaluation:
-    cutoffs: [4, 8, 10, 20]
+    cutoffs: [4, 8, 10, 20, 30]
     primary_cutoff: 10
     bootstrap_samples: 10000
     non_inferiority_margin: 0.05
     familywise_alpha: 0.05
     multiple_comparison_correction: bonferroni
-    # Provisional PoC gates: confirm these before interpreting a pilot result.
+    # Retain original scene coverage gates; fallback does not increase coverage.
     min_scene_coverage: 0.95
     max_arm_coverage_gap: 0.05

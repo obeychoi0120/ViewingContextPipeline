@@ -8,7 +8,7 @@ from typing import Any, Callable
 import numpy as np
 
 from validation.cohort import prepare_cohort
-from validation.config import ValidationConfig
+from validation.config import ValidationConfig, build_validation_config
 from validation.recommendation_contracts import (
     ARCHITECTURE_VERSION,
     RECOMMENDATION_ARMS,
@@ -23,25 +23,14 @@ class ValidationStepError(RuntimeError):
 
 
 def validation_config(context: RunContext) -> ValidationConfig:
-    settings = context.config["validation"]
-    return ValidationConfig.model_validate(
-        {
-            "schema_version": "validation-config/v3",
-            "run_id": context.run_id,
-            "dataset": {
-                "pairs_tsv": context.path("data", "pairs_tsv"),
-                "videos_dir": context.path("data", "videos_dir"),
-                "titles_csv": context.path("data", "titles_csv"),
-            },
-            "cohort": settings["cohort"],
-            "encoder": {
-                **settings["encoder"],
-                "model_path": context.path("models", "bge"),
-            },
-            "model": settings["model"],
-            "evaluation": settings["evaluation"],
-            "output_dir": context.run_root,
-        }
+    return build_validation_config(
+        run_id=context.run_id,
+        dataset={
+            key: context.path("data", key) for key in context.config["data"]
+        },
+        settings=context.config["validation"],
+        model_path=context.path("models", "bge"),
+        output_dir=context.run_root,
     )
 
 
@@ -76,9 +65,14 @@ def prepare_cohort_step(
     context: RunContext, *, force: bool = False, plan_only: bool = False
 ) -> dict[str, Any]:
     context.initialize()
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        from validation.rolling_data import prepare_full_cohort
+        return prepare_full_cohort(context, plan_only=plan_only)
     prepared = prepare_cohort(
-        validation_config(context), output_dir=context.cohort_dir,
-        plan_only=plan_only, force=force,
+        validation_config(context),
+        output_dir=context.cohort_dir,
+        plan_only=plan_only,
+        force=force,
     )
     return {
         **_result("prepare-cohort", content_count=int(prepared["catalog_size"])),
@@ -177,14 +171,7 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
-    context.initialize()
-    cohort = context.require_ready_cohort()
-    from validation.features import BGETextEncoder
-
-    config = validation_config(context)
-    catalog = cohort["catalog"]
-    content_ids = [str(row["content_id"]) for row in catalog]
+def _embedding_work(context, catalog, config, force):
     sources = {
         "metadata": None,
         "graph_qwen": context.graph_summary_dir("qwen"),
@@ -196,14 +183,13 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             "item_id": str(row["item_id"]),
             "content_id": str(row["content_id"]),
             "source": "graph_qwen",
-            "summary_path": (
-                context.graph_summary_dir("qwen") / f"{row['content_id']}.json"
-            ).relative_to(context.run_root).as_posix(),
+            "summary_path": (context.graph_summary_dir("qwen") / f"{row['content_id']}.json")
+            .relative_to(context.run_root)
+            .as_posix(),
         }
         for row in catalog
         if not (context.graph_summary_dir("gemini") / f"{row['content_id']}.json").is_file()
     ]
-    fallback_ids = {row["content_id"] for row in gemini_fallbacks}
     fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
     item_index_path = context.representations_dir / "item_index.json"
     pending = [
@@ -216,9 +202,15 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             catalog,
             config.encoder.embedding_dim,
         )
-        or branch == "graph_gemini" and not _gemini_fallbacks_match(fallback_path, gemini_fallbacks)
+        or branch == "graph_gemini"
+        and not _gemini_fallbacks_match(fallback_path, gemini_fallbacks)
     ]
 
+    return sources, gemini_fallbacks, pending
+
+
+def _embedding_documents(context, catalog, sources, pending, fallback_ids):
+    content_ids = [str(row["content_id"]) for row in catalog]
     documents_by_branch: dict[str, list[dict[str, Any]]] = {}
     for branch in pending:
         if branch == "metadata":
@@ -247,6 +239,19 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
                 label = f"graph_qwen fallback summary (Gemini summary missing: {summary_path})"
                 summary_path = context.graph_summary_dir("qwen") / f"{content_id}.json"
             document = read_json(_require_file(summary_path, label))
+            if context.config["schema_version"] == "viewing-context-config/v4":
+                from extraction.summary_executor import reuse_summary_document
+                actual_branch = "graph_qwen" if content_id in fallback_ids and branch == "graph_gemini" else branch
+                if actual_branch == "desc":
+                    actual_branch = "description"
+                scene_count = document.get("scene_count")
+                if type(scene_count) is not int or scene_count <= 0:
+                    raise ValidationStepError(f"invalid {label} scene count: {summary_path}")
+                document = reuse_summary_document(
+                    summary_path,
+                    schema_version="description-video-summary/v3" if branch == "desc" else "graph-video-summary/v3",
+                    content_id=content_id, arm=actual_branch, scene_count=scene_count,
+                )
             if (
                 str(document.get("content_id")) != content_id
                 or not isinstance(document.get("text"), str)
@@ -256,22 +261,10 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             documents.append(document)
         documents_by_branch[branch] = documents
 
-    print(
-        f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
-        + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
-        flush=True,
-    )
-    for row in gemini_fallbacks:
-        print(
-            f"  item_id={row['item_id']} | content_id={row['content_id']} | "
-            f"summary={row['summary_path']}",
-            flush=True,
-        )
-    if not pending:
-        return _result("embed-representations", content_count=len(catalog))
+    return documents_by_branch
 
-    context.representations_dir.mkdir(parents=True, exist_ok=True)
-    encoder = BGETextEncoder(config.encoder)
+
+def _encode_representations(encoder, pending, documents_by_branch, catalog, config):
     matrices: dict[str, np.ndarray] = {}
     for branch in pending:
         documents = documents_by_branch[branch]
@@ -285,6 +278,12 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         matrices[branch] = matrix
         del documents_by_branch[branch]
 
+    return matrices
+
+
+def _persist_representations(context, matrices, catalog, gemini_fallbacks):
+    fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
+    item_index_path = context.representations_dir / "item_index.json"
     for branch, matrix in matrices.items():
         _write_embedding(_embedding_path(context, branch), matrix)
         if branch == "graph_gemini":
@@ -294,6 +293,72 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         item_index_path,
         {str(row["item_id"]): index for index, row in enumerate(catalog)},
     )
+
+
+def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    context.initialize()
+    cohort = context.require_ready_cohort()
+    from validation.features import BGETextEncoder
+
+    config = validation_config(context)
+    catalog = cohort["catalog"]
+    sources, gemini_fallbacks, pending = _embedding_work(context, catalog, config, force)
+    full = context.config["schema_version"] == "viewing-context-config/v4"
+    documents_by_branch = _embedding_documents(
+        context,
+        catalog,
+        sources,
+        list(sources) if full else pending,
+        {row["content_id"] for row in gemini_fallbacks},
+    )
+    if full:
+        from validation.provenance import bind_stage, fingerprint, model_identity, require_stage
+        for name in ("summarize-graph-qwen", "summarize-description"):
+            require_stage(context, name)
+        if len(gemini_fallbacks) < len(catalog):
+            require_stage(context, "summarize-graph-gemini")
+        if not (context.run_root / "fingerprints" / "representations.json").exists() and any(
+                context.representations_dir.glob("*_embeddings.npz")):
+            raise ValidationStepError("unbound representation cache; use a new run ID")
+        bind_stage(context, "representations", {
+            "documents": {b: fingerprint(d) for b, d in documents_by_branch.items()},
+            "model": model_identity(context.path("models", "bge")),
+            "cohort": cohort["eligibility"]["hashes"],
+        })
+        from validation.provenance import file_hash
+        try:
+            saved_hashes = read_json(context.representations_dir / "complete.json")["hashes"]
+        except (OSError, ValueError, KeyError):
+            saved_hashes = {}
+        for branch in sources:
+            if branch not in pending:
+                output = _embedding_path(context, branch)
+                if saved_hashes.get(output.name) != file_hash(output):
+                    pending.append(branch)
+    print(
+        f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
+        + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
+        flush=True,
+    )
+    for row in gemini_fallbacks:
+        print(
+            f"  item_id={row['item_id']} | content_id={row['content_id']} | "
+            f"summary={row['summary_path']}",
+            flush=True,
+        )
+    if not pending:
+        if full:
+            from validation.provenance import verify_representations
+            verify_representations(context)
+        return _result("embed-representations", content_count=len(catalog))
+
+    context.representations_dir.mkdir(parents=True, exist_ok=True)
+    encoder = BGETextEncoder(config.encoder)
+    matrices = _encode_representations(encoder, pending, documents_by_branch, catalog, config)
+    _persist_representations(context, matrices, catalog, gemini_fallbacks)
+    if full:
+        from validation.provenance import complete_representations
+        complete_representations(context)
     return _result("embed-representations", content_count=len(catalog))
 
 
@@ -342,6 +407,9 @@ def _training_runs_complete(
 
 def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str, Any]:
     context.initialize()
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        from validation.rolling_recommendation import run_rolling
+        return run_rolling(context, force=force)
     context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
 
@@ -367,6 +435,9 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
 
 
 def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        from validation.rolling_diagnosis import diagnose
+        return diagnose(context)
     from validation.diagnosis import diagnose_recommendations
 
     context.initialize()
@@ -378,7 +449,9 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         "multiple_comparison_correction": (config.evaluation.multiple_comparison_correction),
     }
     document = diagnose_recommendations(
-        config, _runtime(context), decision_config,
+        config,
+        _runtime(context),
+        decision_config,
         scene_duration=context.config["extraction"]["visual_evidence"]["scene_duration"],
     )
     write_json(context.diagnosis_path, document)

@@ -14,7 +14,7 @@ from extraction.data_preparation.fixed30 import (
 )
 from extraction.data_preparation.video_processor import extract_resized_keyframes
 from extraction.evidence import build_scene_evidence, image_path_for_timestamp
-from validation.diagnosis import _nonempty_timestamp_list
+from validation.diagnosis_scenes import _nonempty_timestamp_list
 from visual_sampling import build_fixed_windows, timestamp_stem, truncate_timestamp
 
 

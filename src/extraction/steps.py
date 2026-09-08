@@ -5,8 +5,7 @@ from typing import Any, Callable
 
 from tqdm import tqdm
 
-from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool
-from extraction.backends.qwen_workers import QwenGenerationTask
+from extraction.backends import GeminiGenerationOutcome as GeminiGenerationOutcome, GeminiWorkerPool
 from extraction.descriptions import (
     SCENE_SCHEMA_VERSION,
     SUMMARY_SCHEMA_VERSION,
@@ -14,28 +13,19 @@ from extraction.descriptions import (
     validate_summary as validate_description_summary,
 )
 from extraction.errors import ExtractionStepError
-from extraction.monitoring import (
-    graph_skip_message,
-    scene_messages,
-)
 from extraction.preparation import prepare_input_data
+from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
 from extraction.semantic_graph import (
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
-    graph_semantic_warnings,
     graph_summary_prompt,
-    parse_or_repair_graph,
     validate_summary as validate_graph_summary,
 )
-from extraction.summary_validation import (
-    serialize_summary_sections,
-)
 from extraction.summary_executor import (
-    generate_summaries_once,
+    SummaryBranch,
+    run_summary_stage,
     qwen_generator,
-    reuse_summary_document,
 )
 from extraction.step_support import (
-    complete_content_progress as _complete_content_progress,
     minimal_description_records as _minimal_description_records,
     minimal_graph_failures as _minimal_graph_failures,
     minimal_graph_records as _minimal_graph_records,
@@ -45,18 +35,15 @@ from extraction.step_support import (
     video_name_map as _video_name_map,
     visual_rows as _visual_rows,
     write_progress as _write_progress,
-    write_scene_checkpoint as _write_scene_checkpoint,
+    write_failure_jsonl,
 )
 from pipeline_runtime import (
     RunContext,
     read_jsonl,
-    write_json,
-    write_jsonl,
 )
 
 
 GRAPH_SOURCES = ("qwen", "gemini")
-SUMMARY_FAILURE_SCHEMA_VERSION = "summary-generation-failure/v1"
 
 
 def graph_stage_name(stage: str, source: str) -> str:
@@ -65,68 +52,26 @@ def graph_stage_name(stage: str, source: str) -> str:
     return f"{stage}-{source}"
 
 
-def _summary_failure_record(
-    content_id: str,
-    *,
-    attempt: int | None,
-    seed: int | None,
-    failure_kind: str,
-    error: str,
-    raw_response: str,
-) -> dict[str, Any]:
-    return {
-        "schema_version": SUMMARY_FAILURE_SCHEMA_VERSION,
-        "content_id": content_id,
-        "attempt": attempt,
-        "seed": seed,
-        "failure_kind": failure_kind,
-        "error": error,
-        "raw_response": raw_response,
-    }
-
-
 def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     extraction = context.config["extraction"]
     settings: dict[str, Any] = {
-        "repetition_penalty": float(
-            extraction["summary_repetition_penalty"]
-        ),
+        "repetition_penalty": float(extraction["summary_repetition_penalty"]),
     }
     if bool(extraction["greedy_decoding"]):
         return settings
     sampling = extraction["summary_sampling"]
-    settings.update({
-        "do_sample": True,
-        "temperature": float(sampling["temperature"]),
-        "top_p": float(sampling["top_p"]),
-        "top_k": int(sampling["top_k"]),
-    })
+    settings.update(
+        {
+            "do_sample": True,
+            "temperature": float(sampling["temperature"]),
+            "top_p": float(sampling["top_p"]),
+            "top_k": int(sampling["top_k"]),
+        }
+    )
     return settings
 
 
-def extract_graph_scenes(
-    context: RunContext,
-    *,
-    model: str,
-    force: bool = False,
-    gpus: int | None = None,
-) -> dict[str, Any]:
-    if model not in GRAPH_SOURCES:
-        raise ValueError(f"unsupported graph extractor model: {model}")
-    if model == "gemini" and gpus is not None:
-        raise ValueError("--gpus cannot be used with --model gemini")
-    stage = graph_stage_name("extract-graph-scenes", model)
-    context.initialize()
-    settings = context.config["extraction"]["graph"]
-    prompt_path = context.config_path("extraction", "graph", "scene_prompt")
-    prompt = prompt_path.read_text(encoding="utf-8")
-    model_path: Path | None = None
-    if model == "qwen":
-        model_path = context.path("models", "qwen")
-    visual_rows = _visual_rows(context)
-    names = _video_name_map(context)
-    scene_dir = context.graph_scene_dir(model)
-    failure_dir = context.graph_failure_dir(model)
+def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure_dir, model, force):
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -175,13 +120,13 @@ def extract_graph_scenes(
         if path.is_file() and not force:
             existing = read_jsonl(path)
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
-            failures = _minimal_graph_failures(failures, failure_path)
+            normalized = _minimal_graph_failures(failures)
+            if normalized != failures:
+                write_failure_jsonl(failure_path, normalized)
+            failures = normalized
             if not failures:
                 failure_path.unlink(missing_ok=True)
-            covered = {
-                int(row["scene_idx"])
-                for row in [*existing, *failures]
-            }
+            covered = {int(row["scene_idx"]) for row in [*existing, *failures]}
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
                 existing = _minimal_graph_records(existing, path)
@@ -190,409 +135,10 @@ def extract_graph_scenes(
                 continue
         pending.append((visual, scene_rows))
 
-    with tqdm(
-        total=len(visual_rows),
-        initial=len(visual_rows) - len(pending),
-        desc=f"Graph scenes ({model})",
-        unit="content",
-    ) as progress:
-        if model == "gemini" and not force:
-            _write_progress(
-                progress,
-                f"[Gemini] processing {sum(len(rows) for _, rows in pending)} failed or "
-                f"missing scenes across {len(pending)} contents; successful scenes are reused",
-            )
-
-        def complete_content(
-            visual: dict[str, Any],
-            scene_rows: list[dict[str, Any]],
-            generated: dict[str, GeminiGenerationOutcome],
-        ) -> None:
-            content_id = str(visual["content_id"])
-            records = list(records_by_content.get(content_id, [])) if not force else []
-            new_records: list[dict[str, Any]] = []
-            failures: list[dict[str, Any]] = []
-            for row in scene_rows:
-                outcome = generated[row["task"].task_id]
-                raw_response, generation_error = outcome.text, outcome.error
-                result = (
-                    parse_or_repair_graph(raw_response)
-                    if generation_error is None
-                    else None
-                )
-                if result is not None and result.graph is not None:
-                    new_records.append({
-                        "scene_idx": row["scene_idx"],
-                        "keyframes": row["keyframes"],
-                        "graph": result.graph,
-                        "parse_mode": result.parse_mode,
-                        "semantic_warnings": graph_semantic_warnings(result.graph),
-                    })
-                else:
-                    failures.append({
-                        "scene_idx": row["scene_idx"],
-                        "keyframes": row["keyframes"],
-                        "failure_kind": (
-                            "generation" if generation_error else "json_repair"
-                        ),
-                        "error": generation_error
-                        or (result.error if result is not None else None)
-                        or "JSON repair failed",
-                        "raw_response": raw_response,
-                    })
-                    if outcome.response_diagnostics is not None:
-                        failures[-1]["response_diagnostics"] = outcome.response_diagnostics
-            records.extend(new_records)
-            path = scene_dir / f"{visual['content_id']}.jsonl"
-            failure_path = failure_dir / f"{visual['content_id']}.jsonl"
-            _write_scene_checkpoint(path, failure_path, records, failures)
-            records_by_content[content_id] = records
-            failures_by_content[content_id] = failures
-            video_name = names.get(content_id, f"{content_id}.mp4")
-            for message in scene_messages(
-                video_name,
-                new_records,
-                arm="graph",
-                source=model,
-            ):
-                _write_progress(progress, message)
-            for failure in failures:
-                _write_progress(
-                    progress,
-                    graph_skip_message(video_name, failure, source=model),
-                )
-            _complete_content_progress(progress)
-
-        if pending and model == "qwen":
-            assert model_path is not None
-            _write_progress(
-                progress,
-                "[Qwen] starting GPU workers; each completed scene is checkpointed immediately",
-            )
-            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                for visual, scene_rows in pending:
-                    content_id = str(visual["content_id"])
-                    video_name = names.get(content_id, f"{content_id}.mp4")
-                    path = scene_dir / f"{content_id}.jsonl"
-                    failure_path = failure_dir / f"{content_id}.jsonl"
-                    rows_by_task = {
-                        row["task"].task_id: row for row in scene_rows
-                    }
-                    records_by_task: dict[str, dict[str, Any]] = {}
-                    failures_by_task: dict[str, dict[str, Any]] = {}
-
-                    _write_progress(
-                        progress,
-                        f"[Qwen_graph] {video_name} | submitted "
-                        f"{len(scene_rows)} scenes",
-                    )
-
-                    def complete_qwen_scene(task_id: str, text: str) -> None:
-                        row = rows_by_task[task_id]
-                        result = parse_or_repair_graph(text)
-                        if result.graph is not None:
-                            record = {
-                                "scene_idx": row["scene_idx"],
-                                "keyframes": row["keyframes"],
-                                "graph": result.graph,
-                                "parse_mode": result.parse_mode,
-                                "semantic_warnings": graph_semantic_warnings(
-                                    result.graph
-                                ),
-                            }
-                            records_by_task[task_id] = record
-                            _write_progress(
-                                progress,
-                                scene_messages(
-                                    video_name,
-                                    [record],
-                                    arm="graph",
-                                    source=model,
-                                )[0],
-                            )
-                        else:
-                            failure = {
-                                "scene_idx": row["scene_idx"],
-                                "keyframes": row["keyframes"],
-                                "failure_kind": "json_repair",
-                                "error": result.error or "JSON repair failed",
-                                "raw_response": text,
-                            }
-                            failures_by_task[task_id] = failure
-                            _write_progress(
-                                progress,
-                                graph_skip_message(
-                                    video_name,
-                                    failure,
-                                    source=model,
-                                ),
-                            )
-
-                        records = list(records_by_task.values())
-                        failures = list(failures_by_task.values())
-                        _write_scene_checkpoint(
-                            path,
-                            failure_path,
-                            records,
-                            failures,
-                        )
-                        if len(records_by_task) + len(failures_by_task) == len(
-                            scene_rows
-                        ):
-                            records_by_content[content_id] = records
-                            failures_by_content[content_id] = failures
-                            _complete_content_progress(progress)
-
-                    returned = generate(
-                        [row["task"] for row in scene_rows],
-                        complete_qwen_scene,
-                    )
-                    # Test doubles and custom in-process generators may return a
-                    # mapping instead of invoking the completion callback.
-                    for task_id, text in returned.items():
-                        if (
-                            task_id not in records_by_task
-                            and task_id not in failures_by_task
-                        ):
-                            complete_qwen_scene(task_id, text)
-                    if not scene_rows:
-                        _write_scene_checkpoint(path, failure_path, [], [])
-                        records_by_content[content_id] = []
-                        failures_by_content[content_id] = []
-                        _complete_content_progress(progress)
-        elif pending:
-            gemini = context.config["models"]["gemini"]
-            task_context: dict[
-                str,
-                tuple[str, dict[str, Any], list[dict[str, Any]]],
-            ] = {}
-            generated_by_content: dict[str, dict[str, GeminiGenerationOutcome]] = {}
-            tasks: list[QwenGenerationTask] = []
-            for visual, scene_rows in pending:
-                content_id = str(visual["content_id"])
-                generated_by_content[content_id] = {}
-                for row in scene_rows:
-                    task = row["task"]
-                    tasks.append(task)
-                    task_context[task.task_id] = (
-                        content_id,
-                        visual,
-                        scene_rows,
-                    )
-
-            def complete_gemini_scene(outcome: GeminiGenerationOutcome) -> None:
-                content_id, visual, scene_rows = task_context[outcome.task_id]
-                responses = generated_by_content[content_id]
-                responses[outcome.task_id] = outcome
-                if len(responses) == len(scene_rows):
-                    complete_content(visual, scene_rows, responses)
-
-            pool = GeminiWorkerPool(
-                int(settings["gemini_concurrency"]),
-                project_id=str(gemini["project_id"]),
-                location=str(gemini["location"]),
-                model_id=str(gemini["model_id"]),
-                temperature=float(gemini["temperature"]),
-                max_output_tokens=int(gemini["max_output_tokens"]),
-                thinking_level=str(gemini["thinking_level"]),
-                media_resolution=str(gemini["media_resolution"]),
-            )
-            pool.generate(tasks, complete_gemini_scene)
-    failures = [
-        record
-        for visual in visual_rows
-        for record in failures_by_content[str(visual["content_id"])]
-    ]
-    return _result(
-        stage,
-        content_count=len(visual_rows),
-        failure_count=len(failures),
-    )
+    return records_by_content, failures_by_content, pending
 
 
-def summarize_graph(
-    context: RunContext,
-    *,
-    source: str,
-    force: bool = False,
-    gpus: int | None = None,
-) -> dict[str, Any]:
-    if source not in GRAPH_SOURCES:
-        raise ValueError(f"unsupported graph source: {source}")
-    stage = graph_stage_name("summarize-graph", source)
-    context.initialize()
-    settings = context.config["extraction"]["graph"]
-    summary_generation = _summary_generation_settings(context)
-    prompt_path = context.config_path("extraction", "graph", "summary_prompt")
-    template = prompt_path.read_text(encoding="utf-8")
-    model_path = context.path("models", "qwen")
-    visual_rows = _visual_rows(context)
-    names = _video_name_map(context)
-    scene_dir = context.graph_scene_dir(source)
-    summary_dir = context.graph_summary_dir(source)
-    summary_failure_dir = context.graph_summary_failure_dir(source)
-    if not scene_dir.is_dir():
-        raise ExtractionStepError(f"missing graph scene directory: {scene_dir}")
-    scene_paths = [scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows]
-    if not all(path.is_file() for path in scene_paths):
-        missing = next(path for path in scene_paths if not path.is_file())
-        raise ExtractionStepError(f"missing graph scene output: {missing}")
-    documents_by_content: dict[str, dict[str, Any]] = {}
-    pending: list[tuple[list[dict[str, Any]], Path, str]] = []
-    tasks: list[QwenGenerationTask] = []
-    summary_failures_by_content: dict[str, list[dict[str, Any]]] = {}
-    incompatible_summaries: dict[str, str] = {}
-    empty_scene_files = 0
-    for scene_path in scene_paths:
-        records = read_jsonl(scene_path)
-        content_id = scene_path.stem
-        summary_failure_path = summary_failure_dir / f"{content_id}.jsonl"
-        if not records:
-            empty_scene_files += 1
-            write_jsonl(
-                summary_failure_path,
-                [
-                    _summary_failure_record(
-                        content_id,
-                        attempt=None,
-                        seed=None,
-                        failure_kind="empty_scene_records",
-                        error="graph summary requires at least one successful scene",
-                        raw_response="",
-                    )
-                ],
-            )
-            continue
-        records = _minimal_graph_records(records, scene_path)
-        output_path = summary_dir / f"{content_id}.json"
-        if output_path.is_file() and not force:
-            try:
-                documents_by_content[content_id] = reuse_summary_document(
-                    output_path,
-                    schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
-                    content_id=content_id,
-                    arm=f"graph_{source}",
-                    scene_count=len(records),
-                )
-            except ExtractionStepError as exc:
-                incompatible_summaries[content_id] = str(exc)
-            else:
-                summary_failure_path.unlink(missing_ok=True)
-                continue
-        prompt = graph_summary_prompt(template, records)
-        task_id = content_id
-        tasks.append(
-            QwenGenerationTask(
-                task_id=task_id,
-                image_paths=(),
-                prompt=prompt,
-                max_new_tokens=int(settings["summary_max_new_tokens"]),
-                **summary_generation,
-            )
-        )
-        pending.append((records, output_path, task_id))
-        summary_failures_by_content[task_id] = []
-
-    pending_by_task = {
-        task_id: (records, output_path)
-        for records, output_path, task_id in pending
-    }
-    with tqdm(
-        total=len(visual_rows),
-        initial=len(documents_by_content) + empty_scene_files,
-        desc=f"Graph summaries ({source})",
-        unit="content",
-    ) as progress:
-        _write_progress(
-            progress,
-            f"[SUMMARY] {stage} | reused={len(documents_by_content)} "
-            f"pending={len(tasks)} incompatible={len(incompatible_summaries)} "
-            f"empty_scenes={empty_scene_files} force={force} "
-            f"repetition_penalty={summary_generation['repetition_penalty']} output={summary_dir}",
-        )
-        for reason in incompatible_summaries.values():
-            _write_progress(progress, f"[SUMMARY RETRY] {reason}")
-
-        def complete_graph_summary(task_id: str, text: str) -> None:
-            records, output_path = pending_by_task[task_id]
-            sections = validate_graph_summary(text)
-            summary = serialize_summary_sections(sections)
-            content_id = task_id
-            document = {
-                "schema_version": GRAPH_SUMMARY_SCHEMA_VERSION,
-                "content_id": content_id,
-                "arm": f"graph_{source}",
-                "status": "complete",
-                "sections": sections,
-                "text": summary,
-                "scene_count": len(records),
-            }
-            write_json(output_path, document)
-            (
-                summary_failure_dir / f"{content_id}.jsonl"
-            ).unlink(missing_ok=True)
-            documents_by_content[content_id] = document
-            progress.update(1)
-
-        if tasks:
-            def report_validation_failure(
-                task_id: str,
-                _attempt: int,
-                seed: int | None,
-                raw_response: str,
-                error: Exception,
-            ) -> None:
-                message = " ".join(str(error).splitlines())
-                failures = summary_failures_by_content[task_id]
-                failures.append(
-                    _summary_failure_record(
-                        task_id,
-                        attempt=1,
-                        seed=seed,
-                        failure_kind="schema_validation",
-                        error=str(error),
-                        raw_response=raw_response,
-                    )
-                )
-                write_jsonl(
-                    summary_failure_dir / f"{task_id}.jsonl",
-                    failures,
-                )
-                _write_progress(
-                    progress,
-                    f"[Qwen_summary_graph_{source}_fail] "
-                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
-                    f"Raw output:\n{raw_response or '<empty>'}",
-                )
-                progress.update(1)
-
-            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                generate_summaries_once(
-                    generate,
-                    tasks,
-                    complete_graph_summary,
-                    report_validation_failure,
-                )
-    return _result(
-        stage,
-        content_count=len(documents_by_content),
-        failure_count=empty_scene_files,
-    )
-
-
-def extract_description_scenes(
-    context: RunContext,
-    *,
-    force: bool = False,
-    gpus: int | None = None,
-) -> dict[str, Any]:
-    context.initialize()
-    settings = context.config["extraction"]["description"]
-    prompt_path = context.config_path("extraction", "description", "scene_prompt")
-    prompt = prompt_path.read_text(encoding="utf-8")
-    model_path = context.path("models", "qwen")
-    visual_rows = _visual_rows(context)
-    names = _video_name_map(context)
+def _description_scene_work(context, visual_rows, prompt, settings, force):
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -613,10 +159,7 @@ def extract_description_scenes(
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
             if not failures:
                 failure_path.unlink(missing_ok=True)
-            covered = {
-                int(row["scene_idx"])
-                for row in [*existing, *failures]
-            }
+            covered = {int(row["scene_idx"]) for row in [*existing, *failures]}
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
                 existing = _minimal_description_records(existing, path)
@@ -625,6 +168,186 @@ def extract_description_scenes(
                 continue
         pending.append((visual, scene_rows))
 
+    return records_by_content, failures_by_content, pending
+
+
+def extract_graph_scenes(
+    context: RunContext,
+    *,
+    model: str,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
+    if model not in GRAPH_SOURCES:
+        raise ValueError(f"unsupported graph extractor model: {model}")
+    if model == "gemini" and gpus is not None:
+        raise ValueError("--gpus cannot be used with --model gemini")
+    stage = graph_stage_name("extract-graph-scenes", model)
+    context.initialize()
+    settings = context.config["extraction"]["graph"]
+    prompt_path = context.config_path("extraction", "graph", "scene_prompt")
+    prompt = prompt_path.read_text(encoding="utf-8")
+    model_path: Path | None = None
+    if model == "qwen":
+        model_path = context.path("models", "qwen")
+    visual_rows = _visual_rows(context)
+    names = _video_name_map(context)
+    scene_dir = context.graph_scene_dir(model)
+    from validation.provenance import bind_extraction
+    bind_extraction(context, stage, model=model)
+    failure_dir = context.graph_failure_dir(model)
+    records_by_content, failures_by_content, pending = _graph_scene_work(
+        context,
+        visual_rows,
+        prompt,
+        settings,
+        scene_dir,
+        failure_dir,
+        model,
+        force,
+    )
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(visual_rows) - len(pending),
+        desc=f"Graph scenes ({model})",
+        unit="content",
+    ) as progress:
+        if model == "gemini" and not force:
+            _write_progress(
+                progress,
+                f"[Gemini] processing {sum(len(rows) for _, rows in pending)} failed or "
+                f"missing scenes across {len(pending)} contents; successful scenes are reused",
+            )
+        if pending and model == "qwen":
+            completed, failed = run_qwen_scenes(
+                pending,
+                scene_dir=scene_dir,
+                failure_dir=failure_dir,
+                model_path=model_path,
+                gpus=gpus,
+                generator_factory=qwen_generator,
+                names=names,
+                progress=progress,
+                arm="graph",
+                source=model,
+            )
+            records_by_content.update(completed)
+            failures_by_content.update(failed)
+        elif pending:
+            gemini = context.config["models"]["gemini"]
+            pool = GeminiWorkerPool(
+                int(settings["gemini_concurrency"]),
+                project_id=str(gemini["project_id"]),
+                location=str(gemini["location"]),
+                model_id=str(gemini["model_id"]),
+                temperature=float(gemini["temperature"]),
+                max_output_tokens=int(gemini["max_output_tokens"]),
+                thinking_level=str(gemini["thinking_level"]),
+                media_resolution=str(gemini["media_resolution"]),
+            )
+            run_gemini_scenes(
+                pending,
+                pool=pool,
+                records_by_content=records_by_content,
+                failures_by_content=failures_by_content,
+                scene_dir=scene_dir,
+                failure_dir=failure_dir,
+                force=force,
+                names=names,
+                progress=progress,
+            )
+    failures = [
+        record
+        for visual in visual_rows
+        for record in failures_by_content[str(visual["content_id"])]
+    ]
+    return _result(stage, content_count=len(visual_rows), failure_count=len(failures))
+
+
+def summarize_graph(
+    context: RunContext,
+    *,
+    source: str,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
+    stage = graph_stage_name("summarize-graph", source)
+    context.initialize()
+    settings = context.config["extraction"]["graph"]
+    generation = _summary_generation_settings(context)
+    template = context.config_path("extraction", "graph", "summary_prompt").read_text(
+        encoding="utf-8"
+    )
+    model_path = context.path("models", "qwen")
+    visuals = _visual_rows(context)
+    names = _video_name_map(context)
+    scene_dir = context.graph_scene_dir(source)
+    from validation.provenance import bind_extraction
+    bind_extraction(context, stage, scene_dir=scene_dir)
+    if not scene_dir.is_dir():
+        raise ExtractionStepError(f"missing graph scene directory: {scene_dir}")
+    paths = [scene_dir / f"{row['content_id']}.jsonl" for row in visuals]
+    if not all(path.is_file() for path in paths):
+        missing = next(path for path in paths if not path.is_file())
+        raise ExtractionStepError(f"missing graph scene output: {missing}")
+    if source == "gemini" and not force and context.config["schema_version"] == "viewing-context-config/v4":
+        from extraction.summary_executor import reuse_summary_document
+        for path in paths:
+            output = context.graph_summary_dir(source) / f"{path.stem}.json"
+            if output.is_file():
+                reuse_summary_document(
+                    output, schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
+                    content_id=path.stem, arm="graph_gemini",
+                    scene_count=len(_minimal_graph_records(read_jsonl(path), path)),
+                )
+    return run_summary_stage(
+        SummaryBranch(
+            stage=stage,
+            arm=f"graph_{source}",
+            label="graph",
+            schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
+            summary_dir=context.graph_summary_dir(source),
+            failure_dir=context.graph_summary_failure_dir(source),
+            normalize_records=_minimal_graph_records,
+            content_id=lambda records, path: path.stem,
+            build_prompt=graph_summary_prompt,
+            validate=validate_graph_summary,
+        ),
+        scene_paths=paths,
+        template=template,
+        max_new_tokens=int(settings["summary_max_new_tokens"]),
+        generation=generation,
+        model_path=model_path,
+        gpus=gpus,
+        force=force,
+        names=names,
+        generator_factory=qwen_generator,
+        progress_factory=tqdm,
+    )
+
+
+def extract_description_scenes(
+    context: RunContext,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
+) -> dict[str, Any]:
+    context.initialize()
+    from validation.provenance import bind_extraction
+    bind_extraction(context, "extract-description-scenes")
+    settings = context.config["extraction"]["description"]
+    prompt_path = context.config_path("extraction", "description", "scene_prompt")
+    prompt = prompt_path.read_text(encoding="utf-8")
+    model_path = context.path("models", "qwen")
+    visual_rows = _visual_rows(context)
+    names = _video_name_map(context)
+    records_by_content, failures_by_content, pending = _description_scene_work(
+        context,
+        visual_rows,
+        prompt,
+        settings,
+        force,
+    )
     with tqdm(
         total=len(visual_rows),
         initial=len(records_by_content),
@@ -632,112 +355,34 @@ def extract_description_scenes(
         unit="content",
     ) as progress:
         if pending:
-            _write_progress(
-                progress,
-                "[Qwen] starting GPU workers; each completed scene is checkpointed immediately",
+            completed, failed = run_qwen_scenes(
+                pending,
+                scene_dir=context.description_scene_dir,
+                failure_dir=context.description_failure_dir,
+                model_path=model_path,
+                gpus=gpus,
+                generator_factory=qwen_generator,
+                names=names,
+                progress=progress,
+                arm="description",
             )
-            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                for visual, scene_rows in pending:
-                    content_id = str(visual["content_id"])
-                    video_name = names.get(content_id, f"{content_id}.mp4")
-                    path = context.description_scene_dir / f"{content_id}.jsonl"
-                    failure_path = (
-                        context.description_failure_dir / f"{content_id}.jsonl"
-                    )
-                    rows_by_task = {
-                        row["task"].task_id: row for row in scene_rows
-                    }
-                    records_by_task: dict[str, dict[str, Any]] = {}
-                    failures_by_task: dict[str, dict[str, Any]] = {}
-
-                    _write_progress(
-                        progress,
-                        f"[Qwen_desc] {video_name} | submitted "
-                        f"{len(scene_rows)} scenes",
-                    )
-
-                    def complete_description_scene(task_id: str, text: str) -> None:
-                        row = rows_by_task[task_id]
-                        description = text.strip()
-                        common = {
-                            "content_id": visual["content_id"],
-                            "scene_idx": row["scene_idx"],
-                            "keyframes": row["keyframes"],
-                        }
-                        if not description:
-                            failure = {
-                                "schema_version": "description-generation-failure/v1",
-                                **common,
-                                "failure_kind": "empty_response",
-                                "error": "model produced an empty description",
-                            }
-                            failures_by_task[task_id] = failure
-                            _write_progress(
-                                progress,
-                                f"[SKIPPED] {video_name} | description scene "
-                                f"#{int(failure['scene_idx']):03d} | "
-                                f"{failure['error']}",
-                            )
-                        else:
-                            record = {
-                                "schema_version": SCENE_SCHEMA_VERSION,
-                                **common,
-                                "description": description,
-                            }
-                            records_by_task[task_id] = record
-                            _write_progress(
-                                progress,
-                                scene_messages(
-                                    video_name,
-                                    [record],
-                                    arm="description",
-                                )[0],
-                            )
-
-                        records = list(records_by_task.values())
-                        failures = list(failures_by_task.values())
-                        _write_scene_checkpoint(
-                            path,
-                            failure_path,
-                            records,
-                            failures,
-                        )
-                        if len(records_by_task) + len(failures_by_task) == len(
-                            scene_rows
-                        ):
-                            records_by_content[content_id] = records
-                            failures_by_content[content_id] = failures
-                            _complete_content_progress(progress)
-
-                    returned = generate(
-                        [row["task"] for row in scene_rows],
-                        complete_description_scene,
-                    )
-                    for task_id, text in returned.items():
-                        if (
-                            task_id not in records_by_task
-                            and task_id not in failures_by_task
-                        ):
-                            complete_description_scene(task_id, text)
-                    if not scene_rows:
-                        _write_scene_checkpoint(path, failure_path, [], [])
-                        records_by_content[content_id] = []
-                        failures_by_content[content_id] = []
-                        _write_progress(
-                            progress,
-                            f"[SKIPPED] {video_name} | no scenes to extract",
-                        )
-                        _complete_content_progress(progress)
+            records_by_content.update(completed)
+            failures_by_content.update(failed)
     failures = [
         record
         for visual in visual_rows
         for record in failures_by_content[str(visual["content_id"])]
     ]
     return _result(
-        "extract-description-scenes",
-        content_count=len(visual_rows),
-        failure_count=len(failures),
+        "extract-description-scenes", content_count=len(visual_rows), failure_count=len(failures)
     )
+
+
+def _description_summary_records(records, path):
+    records = _minimal_description_records(records, path)
+    if any(row.get("schema_version") != SCENE_SCHEMA_VERSION for row in records):
+        raise ExtractionStepError(f"invalid description scene file: {path}")
+    return records
 
 
 def summarize_description(
@@ -747,168 +392,46 @@ def summarize_description(
     gpus: int | None = None,
 ) -> dict[str, Any]:
     context.initialize()
+    from validation.provenance import bind_extraction
+    bind_extraction(context, "summarize-description", scene_dir=context.description_scene_dir)
     settings = context.config["extraction"]["description"]
-    summary_generation = _summary_generation_settings(context)
-    prompt_path = context.config_path("extraction", "description", "summary_prompt")
-    template = prompt_path.read_text(encoding="utf-8")
+    generation = _summary_generation_settings(context)
+    template = context.config_path("extraction", "description", "summary_prompt").read_text(
+        encoding="utf-8"
+    )
     model_path = context.path("models", "qwen")
-    visual_rows = _visual_rows(context)
+    visuals = _visual_rows(context)
     names = _video_name_map(context)
     if not context.description_scene_dir.is_dir():
         raise ExtractionStepError(
             f"missing description scene directory: {context.description_scene_dir}"
         )
-    scene_paths = [
-        context.description_scene_dir / f"{row['content_id']}.jsonl" for row in visual_rows
-    ]
-    for path in scene_paths:
+    paths = [context.description_scene_dir / f"{row['content_id']}.jsonl" for row in visuals]
+    for path in paths:
         _require_file(path, "description scene output")
-    documents_by_content: dict[str, dict[str, Any]] = {}
-    pending: list[tuple[list[dict[str, Any]], Path, str]] = []
-    tasks: list[QwenGenerationTask] = []
-    summary_failures_by_content: dict[str, list[dict[str, Any]]] = {}
-    incompatible_summaries: dict[str, str] = {}
-    empty_scene_files = 0
-    for scene_path in scene_paths:
-        records = read_jsonl(scene_path)
-        content_id = scene_path.stem
-        summary_failure_path = (
-            context.description_summary_failure_dir / f"{content_id}.jsonl"
-        )
-        if not records:
-            empty_scene_files += 1
-            write_jsonl(
-                summary_failure_path,
-                [
-                    _summary_failure_record(
-                        content_id,
-                        attempt=None,
-                        seed=None,
-                        failure_kind="empty_scene_records",
-                        error="description summary requires at least one successful scene",
-                        raw_response="",
-                    )
-                ],
-            )
-            continue
-        records = _minimal_description_records(records, scene_path)
-        if any(row.get("schema_version") != SCENE_SCHEMA_VERSION for row in records):
-            raise ExtractionStepError(f"invalid description scene file: {scene_path}")
-        output_path = context.description_summary_dir / f"{records[0]['content_id']}.json"
-        if output_path.is_file() and not force:
-            content_id = str(records[0]["content_id"])
-            try:
-                documents_by_content[content_id] = reuse_summary_document(
-                    output_path,
-                    schema_version=SUMMARY_SCHEMA_VERSION,
-                    content_id=content_id,
-                    arm="description",
-                    scene_count=len(records),
-                )
-            except ExtractionStepError as exc:
-                incompatible_summaries[content_id] = str(exc)
-            else:
-                summary_failure_path.unlink(missing_ok=True)
-                continue
-        prompt = description_summary_prompt(template, records)
-        task_id = str(records[0]["content_id"])
-        tasks.append(
-            QwenGenerationTask(
-                task_id=task_id,
-                image_paths=(),
-                prompt=prompt,
-                max_new_tokens=int(settings["summary_max_new_tokens"]),
-                **summary_generation,
-            )
-        )
-        pending.append((records, output_path, task_id))
-        summary_failures_by_content[task_id] = []
-
-    pending_by_task = {
-        task_id: (records, output_path)
-        for records, output_path, task_id in pending
-    }
-    with tqdm(
-        total=len(visual_rows),
-        initial=len(documents_by_content) + empty_scene_files,
-        desc="Description summaries",
-        unit="content",
-    ) as progress:
-        _write_progress(
-            progress,
-            f"[SUMMARY] summarize-description | reused={len(documents_by_content)} "
-            f"pending={len(tasks)} incompatible={len(incompatible_summaries)} "
-            f"empty_scenes={empty_scene_files} force={force} "
-            f"repetition_penalty={summary_generation['repetition_penalty']} "
-            f"output={context.description_summary_dir}",
-        )
-        for reason in incompatible_summaries.values():
-            _write_progress(progress, f"[SUMMARY RETRY] {reason}")
-
-        def complete_description_summary(task_id: str, text: str) -> None:
-            records, output_path = pending_by_task[task_id]
-            sections = validate_description_summary(text)
-            summary = serialize_summary_sections(sections)
-            content_id = str(records[0]["content_id"])
-            document = {
-                "schema_version": SUMMARY_SCHEMA_VERSION,
-                "content_id": content_id,
-                "arm": "description",
-                "status": "complete",
-                "sections": sections,
-                "text": summary,
-                "scene_count": len(records),
-            }
-            write_json(output_path, document)
-            (
-                context.description_summary_failure_dir / f"{content_id}.jsonl"
-            ).unlink(missing_ok=True)
-            documents_by_content[content_id] = document
-            progress.update(1)
-
-        if tasks:
-            def record_description_summary_failure(
-                task_id: str,
-                attempt: int,
-                seed: int | None,
-                raw_response: str,
-                error: Exception,
-            ) -> None:
-                failures = summary_failures_by_content[task_id]
-                failures.append(
-                    _summary_failure_record(
-                        task_id,
-                        attempt=attempt,
-                        seed=seed,
-                        failure_kind="schema_validation",
-                        error=str(error),
-                        raw_response=raw_response,
-                    )
-                )
-                write_jsonl(
-                    context.description_summary_failure_dir / f"{task_id}.jsonl",
-                    failures,
-                )
-                message = " ".join(str(error).splitlines())
-                _write_progress(
-                    progress,
-                    f"[Qwen_summary_description_fail] "
-                    f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
-                    f"Raw output:\n{raw_response or '<empty>'}",
-                )
-                progress.update(1)
-
-            with qwen_generator(model_path=model_path, gpus=gpus) as generate:
-                generate_summaries_once(
-                    generate,
-                    tasks,
-                    complete_description_summary,
-                    record_description_summary_failure,
-                )
-    return _result(
-        "summarize-description",
-        content_count=len(documents_by_content),
-        failure_count=empty_scene_files,
+    return run_summary_stage(
+        SummaryBranch(
+            stage="summarize-description",
+            arm="description",
+            label="description",
+            schema_version=SUMMARY_SCHEMA_VERSION,
+            summary_dir=context.description_summary_dir,
+            failure_dir=context.description_summary_failure_dir,
+            normalize_records=_description_summary_records,
+            content_id=lambda records, path: str(records[0]["content_id"]),
+            build_prompt=description_summary_prompt,
+            validate=validate_description_summary,
+        ),
+        scene_paths=paths,
+        template=template,
+        max_new_tokens=int(settings["summary_max_new_tokens"]),
+        generation=generation,
+        model_path=model_path,
+        gpus=gpus,
+        force=force,
+        names=names,
+        generator_factory=qwen_generator,
+        progress_factory=tqdm,
     )
 
 

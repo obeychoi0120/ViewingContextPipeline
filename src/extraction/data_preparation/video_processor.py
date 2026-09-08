@@ -53,10 +53,6 @@ def _decodable_frame_tail_timestamps_seconds(video_path: Path) -> tuple[float, f
     return safe_seek_timestamp, last_timestamp
 
 
-def _last_decodable_frame_timestamp_seconds(video_path: Path) -> float:
-    return _decodable_frame_tail_timestamps_seconds(video_path)[1]
-
-
 def extract_resized_keyframes(
     video_path: str | Path,
     timestamps: list[int | float],

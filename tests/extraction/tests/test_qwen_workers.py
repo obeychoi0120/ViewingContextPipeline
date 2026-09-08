@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 import extraction.backends.qwen as qwen_module
+import extraction.backends.qwen_workers as workers
 import extraction.evidence as evidence_module
 from extraction.backends.qwen_workers import (
     QwenGenerationTask,
@@ -15,6 +16,25 @@ from extraction.backends.qwen_workers import (
     _worker_main,
     assign_worker_indices,
 )
+
+
+@pytest.fixture
+def pool_factory(monkeypatch):
+    def create(task_queues, result_queue, processes):
+        monkeypatch.setattr(
+            workers, "_visible_gpu_ids", lambda count: [str(i) for i in range(count)]
+        )
+        monkeypatch.setattr(
+            workers.mp, "get_context", lambda method: SimpleNamespace(Queue=lambda: result_queue)
+        )
+        monkeypatch.setattr(
+            workers,
+            "_start_worker",
+            lambda context, index, gpu, model, result: (task_queues[index], processes[index]),
+        )
+        return QwenWorkerPool(len(task_queues), "model")
+
+    return create
 
 
 def test_tasks_are_assigned_round_robin_by_gpu_count() -> None:
@@ -82,7 +102,7 @@ def test_worker_selects_cuda_device_and_reuses_one_model(
     assert result_queue.values[0]["text"] == "['a.png']:prompt:32"
 
 
-def test_pool_callback_uses_worker_completion_order() -> None:
+def test_pool_callback_uses_worker_completion_order(pool_factory) -> None:
     class TaskQueue:
         def __init__(self) -> None:
             self.values = []
@@ -100,11 +120,7 @@ def test_pool_callback_uses_worker_completion_order() -> None:
         def get(self, timeout):
             return self.values.pop(0)
 
-    pool = object.__new__(QwenWorkerPool)
-    pool.gpu_count = 2
-    pool._task_queues = [TaskQueue(), TaskQueue()]
-    pool._result_queue = ResultQueue()
-    pool._processes = []
+    pool = pool_factory([TaskQueue(), TaskQueue()], ResultQueue(), [None, None])
     tasks = [
         QwenGenerationTask("a", (), "a", 1),
         QwenGenerationTask("b", (), "b", 1),
@@ -120,7 +136,7 @@ def test_pool_callback_uses_worker_completion_order() -> None:
     assert results == {}
 
 
-def test_pool_interrupt_terminates_then_kills_stubborn_workers() -> None:
+def test_pool_interrupt_terminates_then_kills_stubborn_workers(pool_factory) -> None:
     class TaskQueue:
         def __init__(self) -> None:
             self.cancelled = False
@@ -162,12 +178,7 @@ def test_pool_interrupt_terminates_then_kills_stubborn_workers() -> None:
     task_queue = TaskQueue()
     result_queue = InterruptingResultQueue()
     process = StubbornProcess()
-    pool = object.__new__(QwenWorkerPool)
-    pool.gpu_count = 1
-    pool._closed = False
-    pool._task_queues = [task_queue]
-    pool._result_queue = result_queue
-    pool._processes = [process]
+    pool = pool_factory([task_queue], result_queue, [process])
 
     with pytest.raises(KeyboardInterrupt):
         pool.generate([QwenGenerationTask("a", (), "a", 1)])
@@ -180,3 +191,62 @@ def test_pool_interrupt_terminates_then_kills_stubborn_workers() -> None:
     assert task_queue.closed is True
     assert result_queue.cancelled is True
     assert result_queue.closed is True
+
+
+def test_pool_starts_workers_on_construction_and_closes_once(monkeypatch):
+    events = []
+    queues = []
+
+    class Queue:
+        def __init__(self):
+            self.index = len(queues)
+            queues.append(self)
+
+        def put(self, value):
+            events.append(("put", self.index, value))
+
+        def close(self):
+            events.append(("close", self.index))
+
+    class Process:
+        def __init__(self, *, target, args, daemon):
+            assert target is workers._worker_main
+            index, gpu, model, task_queue, result_queue = args
+            assert gpu == str(index + 4)
+            assert model == "model"
+            assert task_queue is queues[index + 1]
+            assert result_queue is queues[0]
+            assert daemon is True
+            self.index = index
+
+        def start(self):
+            events.append(("start", self.index))
+
+        def join(self, timeout):
+            events.append(("join", self.index, timeout))
+
+        def is_alive(self):
+            return False
+
+    def get_context(method):
+        assert method == "spawn"
+        return SimpleNamespace(Queue=Queue, Process=Process)
+
+    monkeypatch.setattr(workers, "_visible_gpu_ids", lambda count: ["4", "5"])
+    monkeypatch.setattr(workers.mp, "get_context", get_context)
+    pool = QwenWorkerPool(2, "model")
+    assert events == [("start", 0), ("start", 1)]
+    with pool:
+        pass
+    pool.close()
+    assert events == [
+        ("start", 0),
+        ("start", 1),
+        ("put", 1, None),
+        ("put", 2, None),
+        ("join", 0, 5),
+        ("join", 1, 5),
+        ("close", 1),
+        ("close", 2),
+        ("close", 0),
+    ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections import Counter
 import json
 from pathlib import Path
@@ -206,11 +207,23 @@ def _persist_training_runs(path: Path, runs: list[dict[str, Any]]) -> None:
     atomic_write_jsonl(path, runs)
 
 
-def train_recommendation_arms(
-    config: ValidationConfig,
-    runtime: dict[str, Any],
-) -> dict[str, Any]:
-    require_torch()
+@dataclass(frozen=True)
+class _RecommendationInputs:
+    sequences: list[dict[str, Any]]
+    item_index: dict[str, int]
+    index_item: dict[int, str]
+    item_content: dict[str, str]
+    branch_features: dict[str, np.ndarray]
+    train_sequences: list[list[int]]
+    refit_sequences: list[list[int]]
+    valid_history: list[list[int]]
+    test_history: list[list[int]]
+    valid_targets: list[int]
+    test_targets: list[int]
+    buckets: list[str]
+
+
+def _prepare_inputs(config: ValidationConfig, runtime: dict[str, Any]) -> _RecommendationInputs:
     root = Path(runtime["run_root"])
     representations_dir = Path(runtime["paths"]["representations_dir"])
     sequences = read_jsonl(root / "data" / "cohort" / "sequences.jsonl")
@@ -265,6 +278,163 @@ def train_recommendation_arms(
         for target in test_targets
     ]
 
+    return _RecommendationInputs(
+        sequences=sequences,
+        item_index=item_index,
+        index_item=index_item,
+        item_content=item_content,
+        branch_features=branch_features,
+        train_sequences=train_sequences,
+        refit_sequences=refit_sequences,
+        valid_history=valid_history,
+        test_history=test_history,
+        valid_targets=valid_targets,
+        test_targets=test_targets,
+        buckets=buckets,
+    )
+
+
+def _select_epoch(config, inputs, seed, arm, branch, features, device, selection_probabilities):
+    seed_everything(seed)
+    selection_model = _new_model(
+        config,
+        item_count=len(inputs.item_index),
+        branch=branch,
+        features=features,
+        device=device,
+    )
+    selection_optimizer = _optimizer(selection_model, config)
+    best_ndcg = -1.0
+    best_epoch = 0
+    stale = 0
+    selection_rng = np.random.default_rng(seed)
+    selection_history: list[dict[str, Any]] = []
+    for epoch in range(1, config.model.max_epochs + 1):
+        loss = _train_epoch(
+            selection_model,
+            selection_optimizer,
+            inputs.train_sequences,
+            selection_rng.permutation(len(inputs.train_sequences)),
+            config,
+            selection_probabilities,
+            device,
+        )
+        ndcg = _validation_ndcg(
+            selection_model,
+            inputs.train_sequences,
+            inputs.valid_history,
+            inputs.valid_targets,
+            config,
+            device,
+        )
+        selection_history.append({"epoch": epoch, "loss": loss, "NDCG@10": ndcg})
+        if ndcg > best_ndcg:
+            best_ndcg, best_epoch, stale = ndcg, epoch, 0
+        else:
+            stale += 1
+            if stale >= config.model.patience:
+                break
+    if best_epoch <= 0:
+        raise RuntimeError(f"selection produced no best epoch for {arm} seed {seed}")
+    del selection_optimizer, selection_model
+
+    return best_epoch, best_ndcg, selection_history
+
+
+def _refit_model(config, inputs, seed, branch, features, device, refit_probabilities, best_epoch):
+    seed_everything(seed)
+    model = _new_model(
+        config,
+        item_count=len(inputs.item_index),
+        branch=branch,
+        features=features,
+        device=device,
+    )
+    optimizer = _optimizer(model, config)
+    refit_rng = np.random.default_rng(seed)
+    refit_history: list[dict[str, Any]] = []
+    for epoch in range(1, best_epoch + 1):
+        loss = _train_epoch(
+            model,
+            optimizer,
+            inputs.refit_sequences,
+            refit_rng.permutation(len(inputs.refit_sequences)),
+            config,
+            refit_probabilities,
+            device,
+        )
+        refit_history.append({"epoch": epoch, "loss": loss})
+
+    return model, optimizer, refit_history
+
+
+def _evaluate_arm(config, inputs, model, seed, arm, branch, device, rows):
+    for start, batch_scores in catalog_score_batches(
+        model,
+        inputs.refit_sequences,
+        batch_size=config.model.batch_size,
+        device=device,
+    ):
+        for offset, scores in enumerate(batch_scores):
+            index = start + offset
+            masked = mask_history(
+                scores,
+                inputs.test_history[index],
+                inputs.test_targets[index],
+            )
+            rank = rank_of_target(masked, inputs.test_targets[index])
+            count = min(20, len(masked))
+            top = top_k_rows(masked, count)
+            top_item_ids = [inputs.index_item[value] for value in top]
+            rows.append(
+                {
+                    "seed": seed,
+                    "user_id": inputs.sequences[index]["user_id"],
+                    "arm": arm,
+                    "branch": branch,
+                    "candidate_count": len(inputs.item_index),
+                    "history_stratum": inputs.sequences[index]["stratum"],
+                    "target_frequency_bucket": inputs.buckets[index],
+                    "rank": rank,
+                    "target_item_id": inputs.index_item[inputs.test_targets[index]],
+                    "target_content_id": inputs.item_content[
+                        inputs.index_item[inputs.test_targets[index]]
+                    ],
+                    "top_item_ids": top_item_ids,
+                    "top_content_ids": [inputs.item_content[item] for item in top_item_ids],
+                    **metrics_from_rank(rank, config.evaluation.cutoffs),
+                }
+            )
+
+
+def _save_refit_checkpoint(
+    output, inputs, model, seed, arm, branch, best_ndcg, best_epoch, refit_history
+):
+    checkpoint = output / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
+    save_checkpoint(
+        checkpoint,
+        model,
+        {
+            "architecture_version": ARCHITECTURE_VERSION,
+            "training_phase": "refit",
+            "seed": seed,
+            "arm": arm,
+            "branch": branch,
+            "selection_best_ndcg_at_10": best_ndcg,
+            "selection_best_epoch": best_epoch,
+            "refit_epochs_completed": len(refit_history),
+            "candidate_count": len(inputs.item_index),
+        },
+    )
+    return checkpoint
+
+
+def train_recommendation_arms(
+    config: ValidationConfig,
+    runtime: dict[str, Any],
+) -> dict[str, Any]:
+    require_torch()
+    inputs = _prepare_inputs(config, runtime)
     output = Path(runtime["paths"]["recommendations_dir"])
     output.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -277,13 +447,13 @@ def train_recommendation_arms(
     started = perf_counter()
 
     selection_probabilities = popularity_probabilities(
-        train_sequences,
-        len(item_index),
+        inputs.train_sequences,
+        len(inputs.item_index),
         config.model.popularity_power,
     )
     refit_probabilities = popularity_probabilities(
-        refit_sequences,
-        len(item_index),
+        inputs.refit_sequences,
+        len(inputs.item_index),
         config.model.popularity_power,
     )
 
@@ -294,128 +464,46 @@ def train_recommendation_arms(
                 flush=True,
             )
             arm_started = perf_counter()
-            features = branch_features[branch]
+            features = inputs.branch_features[branch]
 
-            seed_everything(seed)
-            selection_model = _new_model(
+            best_epoch, best_ndcg, selection_history = _select_epoch(
                 config,
-                item_count=len(item_index),
-                branch=branch,
-                features=features,
-                device=device,
+                inputs,
+                seed,
+                arm,
+                branch,
+                features,
+                device,
+                selection_probabilities,
             )
-            selection_optimizer = _optimizer(selection_model, config)
-            best_ndcg = -1.0
-            best_epoch = 0
-            stale = 0
-            selection_rng = np.random.default_rng(seed)
-            selection_history: list[dict[str, Any]] = []
-            for epoch in range(1, config.model.max_epochs + 1):
-                loss = _train_epoch(
-                    selection_model,
-                    selection_optimizer,
-                    train_sequences,
-                    selection_rng.permutation(len(train_sequences)),
-                    config,
-                    selection_probabilities,
-                    device,
-                )
-                ndcg = _validation_ndcg(
-                    selection_model,
-                    train_sequences,
-                    valid_history,
-                    valid_targets,
-                    config,
-                    device,
-                )
-                selection_history.append({"epoch": epoch, "loss": loss, "NDCG@10": ndcg})
-                if ndcg > best_ndcg:
-                    best_ndcg, best_epoch, stale = ndcg, epoch, 0
-                else:
-                    stale += 1
-                    if stale >= config.model.patience:
-                        break
-            if best_epoch <= 0:
-                raise RuntimeError(f"selection produced no best epoch for {arm} seed {seed}")
-            del selection_optimizer, selection_model
 
             print(
                 f"[PHASE] run_recommendation refit seed={seed} arm={arm} epochs={best_epoch}",
                 flush=True,
             )
-            seed_everything(seed)
-            model = _new_model(
+            model, optimizer, refit_history = _refit_model(
                 config,
-                item_count=len(item_index),
-                branch=branch,
-                features=features,
-                device=device,
+                inputs,
+                seed,
+                branch,
+                features,
+                device,
+                refit_probabilities,
+                best_epoch,
             )
-            optimizer = _optimizer(model, config)
-            refit_rng = np.random.default_rng(seed)
-            refit_history: list[dict[str, Any]] = []
-            for epoch in range(1, best_epoch + 1):
-                loss = _train_epoch(
-                    model,
-                    optimizer,
-                    refit_sequences,
-                    refit_rng.permutation(len(refit_sequences)),
-                    config,
-                    refit_probabilities,
-                    device,
-                )
-                refit_history.append({"epoch": epoch, "loss": loss})
 
-            for start, batch_scores in catalog_score_batches(
-                model,
-                refit_sequences,
-                batch_size=config.model.batch_size,
-                device=device,
-            ):
-                for offset, scores in enumerate(batch_scores):
-                    index = start + offset
-                    masked = mask_history(
-                        scores,
-                        test_history[index],
-                        test_targets[index],
-                    )
-                    rank = rank_of_target(masked, test_targets[index])
-                    count = min(20, len(masked))
-                    top = top_k_rows(masked, count)
-                    top_item_ids = [index_item[value] for value in top]
-                    rows.append(
-                        {
-                            "seed": seed,
-                            "user_id": sequences[index]["user_id"],
-                            "arm": arm,
-                            "branch": branch,
-                            "candidate_count": len(item_index),
-                            "history_stratum": sequences[index]["stratum"],
-                            "target_frequency_bucket": buckets[index],
-                            "rank": rank,
-                            "target_item_id": index_item[test_targets[index]],
-                            "target_content_id": item_content[index_item[test_targets[index]]],
-                            "top_item_ids": top_item_ids,
-                            "top_content_ids": [item_content[item] for item in top_item_ids],
-                            **metrics_from_rank(rank, config.evaluation.cutoffs),
-                        }
-                    )
+            _evaluate_arm(config, inputs, model, seed, arm, branch, device, rows)
 
-            checkpoint = output / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
-            save_checkpoint(
-                checkpoint,
+            checkpoint = _save_refit_checkpoint(
+                output,
+                inputs,
                 model,
-                {
-                    "architecture_version": ARCHITECTURE_VERSION,
-                    "training_phase": "refit",
-                    "seed": seed,
-                    "arm": arm,
-                    "branch": branch,
-                    "selection_best_ndcg_at_10": best_ndcg,
-                    "selection_best_epoch": best_epoch,
-                    "refit_epochs_completed": len(refit_history),
-                    "candidate_count": len(item_index),
-                },
+                seed,
+                arm,
+                branch,
+                best_ndcg,
+                best_epoch,
+                refit_history,
             )
             runs.append(
                 _training_run_record(
@@ -428,7 +516,7 @@ def train_recommendation_arms(
                     best_epoch=best_epoch,
                     refit_history=refit_history,
                     checkpoint=checkpoint,
-                    candidate_count=len(item_index),
+                    candidate_count=len(inputs.item_index),
                     elapsed_seconds=perf_counter() - arm_started,
                     max_epochs=config.model.max_epochs,
                 )
@@ -447,7 +535,7 @@ def train_recommendation_arms(
     atomic_write_jsonl(metrics_path, rows)
     return {
         "run_id": runtime["run_id"],
-        "user_count": len(sequences),
+        "user_count": len(inputs.sequences),
         "per_user_metrics": str(metrics_path),
         "training_runs": str(training_runs_path),
         "runs": runs,
