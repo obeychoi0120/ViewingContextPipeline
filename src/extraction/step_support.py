@@ -150,7 +150,6 @@ def minimal_description_records(
 
 def minimal_graph_failures(
     failures: list[dict[str, Any]],
-    path: Path,
 ) -> list[dict[str, Any]]:
     minimal = [
         {
@@ -167,8 +166,6 @@ def minimal_graph_failures(
         }
         for row in failures
     ]
-    if minimal != failures:
-        write_failure_jsonl(path, minimal)
     return minimal
 
 

@@ -802,7 +802,7 @@ def test_gemini_default_resumes_failed_and_missing_scenes_preserving_successes(
     assert remaining[0]["response_diagnostics"] == diagnostics
     assert "SAFETY" in capsys.readouterr().err
     # Normal cache normalization must retain the new diagnostic fields.
-    assert extraction_steps._minimal_graph_failures(remaining, failure_path) == remaining
+    assert extraction_steps._minimal_graph_failures(remaining) == remaining
 
     outcomes["c1:2"] = GeminiGenerationOutcome("c1:2", json.dumps(successful["graph"]))
     result = extraction_steps.extract_graph_scenes(context, model="gemini")
