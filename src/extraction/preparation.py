@@ -33,6 +33,7 @@ def prepare_input_data(
     catalog = cohort["catalog"]
     settings = context.config["extraction"]["visual_evidence"]
     image_size = tuple(settings["image_resolution"])
+    sampling = {key: settings[key] for key in ("scene_duration", "num_keyframes")}
     donors = donor_inventory(donor.run_root) if donor is not None else {}
     pending = []
     reused_target = reused_donor = 0
@@ -42,14 +43,16 @@ def prepare_input_data(
                 f"source video changed or is missing after prepare-cohort: {item['content_id']}; "
                 "repair missing assets and rerun prepare-cohort; changed inputs need a new run_id"
             )
-        timestamp, frames = evidence_paths(context.run_root, item["content_id"])
+        timestamp, frames = evidence_paths(
+            context.run_root, item["content_id"], sampling["scene_duration"],
+        )
         if any(
             not path.resolve().is_relative_to(context.run_root.resolve())
             for path in (timestamp, frames)
         ):
             raise ExtractionStepError("evidence destination must remain inside the target run")
         if not force and visual_evidence_matches(
-            timestamp, frames, image_size, item["duration_seconds"]
+            timestamp, frames, image_size, item["duration_seconds"], **sampling,
         ):
             reused_target += 1
         elif donor is not None and copy_matching_evidence(
@@ -58,6 +61,7 @@ def prepare_input_data(
             current=inventory,
             donor=donors.get(item["item_id"]),
             image_size=image_size,
+            **sampling,
         ):
             reused_donor += 1
         else:
@@ -68,6 +72,7 @@ def prepare_input_data(
             assets_root=context.cohort_dir / "source_assets",
             output_root=context.run_root,
             image_size=image_size,
+            **sampling,
             force=force,
         )
         if prepared["failed"] or prepared["succeeded"] != len(pending):
@@ -75,8 +80,12 @@ def prepare_input_data(
     else:
         (context.cohort_dir / "preparation_failures.jsonl").unlink(missing_ok=True)
     for item in catalog:
-        timestamp, frames = evidence_paths(context.run_root, item["content_id"])
-        if not visual_evidence_matches(timestamp, frames, image_size, item["duration_seconds"]):
+        timestamp, frames = evidence_paths(
+            context.run_root, item["content_id"], sampling["scene_duration"],
+        )
+        if not visual_evidence_matches(
+            timestamp, frames, image_size, item["duration_seconds"], **sampling,
+        ):
             raise ExtractionStepError(f"invalid prepared visual evidence for {item['content_id']}")
     rows = visual_rows(context)
     print(

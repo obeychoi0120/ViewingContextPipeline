@@ -4,6 +4,7 @@ from collections import Counter
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
+import json
 from pathlib import Path
 import shutil
 
@@ -26,6 +27,7 @@ from extraction.summary_validation import SUMMARY_SECTIONS
 from pipeline_runtime import RunContext, read_json, read_jsonl, write_json, write_jsonl
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import RECOMMENDATION_ARMS
+from visual_sampling import build_fixed_windows, timestamp_stem
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,7 +82,7 @@ def extracted(monkeypatch):
             shutil.rmtree(output)
         output.mkdir(parents=True)
         for timestamp in timestamps:
-            Image.new("RGB", size, "white").save(output / f"{timestamp:04d}.png")
+            Image.new("RGB", size, "white").save(output / f"{timestamp_stem(timestamp)}.png")
 
     monkeypatch.setattr(fixed30, "extract_resized_keyframes", extract)
     return calls
@@ -178,7 +180,7 @@ def test_invalid_donor_falls_back_per_content_without_changing_selection(
     donor, cohort = _donor_and_target(context, extracted)
     row = cohort["catalog"][0]
     timestamp, frames = evidence_paths(donor.run_root, row["content_id"])
-    image = frames / "0005.png"
+    image = frames / "0002_5.png"
     inventory_path = donor.cohort_dir / "item_inventory.jsonl"
     inventory = read_jsonl(inventory_path)
     record = next(value for value in inventory if value["item_id"] == row["item_id"])
@@ -223,11 +225,43 @@ def test_same_run_corrupt_evidence_is_not_reused_by_exists_only_fast_path(contex
     prepare_input_data(context)
     row = context.require_ready_cohort()["catalog"][0]
     _, frames = evidence_paths(context.run_root, row["content_id"])
-    (frames / "0005.png").write_bytes(b"")
+    (frames / "0002_5.png").write_bytes(b"")
     extracted.clear()
     result = prepare_input_data(context)
     assert result["extracted"] == 1
     assert extracted == [row["item_id"]]
+
+
+@pytest.mark.parametrize("key,value", [("num_keyframes", 3), ("scene_duration", 20)])
+def test_changed_sampling_rejects_old_target_and_donor_evidence(context, extracted, key, value):
+    donor, cohort = _donor_and_target(context, extracted)
+    prepare_input_data(context, reuse_run_id=donor.run_id)
+    before = _snapshot(donor.run_root)
+    config = deepcopy(context.config)
+    sampling = config["extraction"]["visual_evidence"]
+    sampling[key] = value
+    changed = replace(context, config=config)
+    extracted.clear()
+    result = prepare_input_data(changed, reuse_run_id=donor.run_id)
+    assert result["reused_target"] == result["reused_donor"] == 0
+    assert result["extracted"] == len(cohort["catalog"]) == len(extracted)
+    assert _snapshot(donor.run_root) == before
+    for item in cohort["catalog"]:
+        stamp, frames = evidence_paths(
+            changed.run_root, item["content_id"], sampling["scene_duration"],
+        )
+        expected = build_fixed_windows(
+            item["duration_seconds"], scene_duration=sampling["scene_duration"],
+            num_keyframes=sampling["num_keyframes"],
+        )
+        assert json.loads(stamp.read_text(encoding="utf-8")) == expected
+        assert {path.name for path in frames.iterdir()} == {
+            f"{timestamp_stem(value)}.png"
+            for scene in expected for value in scene["keyframe_timestamps"]
+        }
+    extracted.clear()
+    assert prepare_input_data(changed)["reused_target"] == len(cohort["catalog"])
+    assert extracted == []
 
 
 def test_failed_copy_does_not_commit_a_partial_content(context, extracted, monkeypatch):
@@ -399,15 +433,24 @@ def _mock_recommendation(config, runtime):
     write_jsonl(output / "per_user_metrics.jsonl", metrics)
 
 
-@pytest.mark.parametrize("user_count,expected_catalog", [(1, 6), (3, 8)])
+@pytest.mark.parametrize("user_count,expected_catalog,scene_duration", [(1, 6, 30), (3, 8, 20)])
 def test_eleven_stage_cli_runs_on_selected_user_catalog(
-    context, extracted, monkeypatch, user_count, expected_catalog
+    context, extracted, monkeypatch, user_count, expected_catalog, scene_duration,
 ):
     context.config["validation"]["cohort"]["user_count"] = user_count
+    context.config["extraction"]["visual_evidence"]["scene_duration"] = scene_duration
     monkeypatch.setattr(RunContext, "load", lambda _run_id: context)
     graph_prompt = context.config_path("extraction", "graph", "scene_prompt").read_text(
         encoding="utf-8"
     )
+    expected_scenes = build_fixed_windows(30.1, scene_duration=scene_duration, num_keyframes=6)
+
+    def assert_task_images(task):
+        scene_index = int(task.task_id.rsplit(":", 1)[1])
+        assert [Path(path).name for path in task.image_paths] == [
+            f"{timestamp_stem(value)}.png"
+            for value in expected_scenes[scene_index]["keyframe_timestamps"]
+        ]
 
     @contextmanager
     def generator(**_kwargs):
@@ -415,10 +458,9 @@ def test_eleven_stage_cli_runs_on_selected_user_catalog(
             for task in tasks:
                 if not task.image_paths:
                     response = "\n".join(f"{field}: A person walks." for field in SUMMARY_SECTIONS)
-                elif task.prompt.startswith(graph_prompt.strip()):
-                    response = "{}"
                 else:
-                    response = "A person walks."
+                    assert_task_images(task)
+                    response = "{}" if task.prompt.startswith(graph_prompt.strip()) else "A person walks."
                 callback(task.task_id, response)
             return {}
 
@@ -430,6 +472,7 @@ def test_eleven_stage_cli_runs_on_selected_user_catalog(
 
         def generate(self, tasks, callback):
             for task in reversed(tasks):
+                assert_task_images(task)
                 callback(extraction_steps.GeminiGenerationOutcome(task.task_id, "{}"))
 
     class Encoder:
@@ -460,6 +503,7 @@ def test_eleven_stage_cli_runs_on_selected_user_catalog(
     report = read_json(context.diagnosis_path)
     assert report["schema_version"] == "diagnosis/v4"
     assert report["runtime_decision"]["status"] == "pass"
+    assert report["scene_coverage"]["denominator_source"] == f"fixed_{scene_duration}s timestamp artifacts"
     assert report["cohort"]["catalog_scope"] == "selected_user_sequence_union"
     assert report["cohort"]["selected_user_count"] == user_count
     assert report["artifact_integrity"]["catalog_size"] == expected_catalog

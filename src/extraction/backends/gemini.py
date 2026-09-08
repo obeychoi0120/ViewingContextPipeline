@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import io
+import json
 from dataclasses import dataclass
 from typing import Any, Sequence
 
 RETRYABLE_HTTP_STATUS_CODES = [408, 429, 500, 502, 503, 504]
+
+
+class GeminiEmptyResponseError(RuntimeError):
+    def __init__(self, diagnostics: dict[str, Any]) -> None:
+        self.diagnostics = diagnostics
+        super().__init__(
+            "Gemini returned an empty response; "
+            + json.dumps(diagnostics, ensure_ascii=False)
+        )
 
 
 @dataclass
@@ -79,7 +89,26 @@ class GeminiBackend:
         )
         text = str(getattr(response, "text", "") or "").strip()
         if not text:
-            raise RuntimeError("Gemini returned an empty response")
+            candidates = getattr(response, "candidates", None) or []
+            feedback = getattr(response, "prompt_feedback", None)
+            usage = getattr(response, "usage_metadata", None)
+            raise GeminiEmptyResponseError({
+                "candidates": [
+                    {
+                        "finish_reason": getattr(candidate, "finish_reason", None),
+                        "finish_message": getattr(candidate, "finish_message", None),
+                    }
+                    for candidate in candidates
+                ],
+                "prompt_feedback": (
+                    feedback.model_dump(mode="json", exclude_none=True)
+                    if feedback is not None else None
+                ),
+                "usage_metadata": (
+                    usage.model_dump(mode="json", exclude_none=True)
+                    if usage is not None else None
+                ),
+            })
         return text
 
 

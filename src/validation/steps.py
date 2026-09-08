@@ -147,6 +147,15 @@ def _representation_matches_catalog(
     )
 
 
+def _gemini_fallbacks_match(path: Path, fallbacks: list[dict[str, str]]) -> bool:
+    if not path.is_file():
+        return not fallbacks
+    try:
+        return read_json(path).get("fallbacks") == fallbacks
+    except (OSError, ValueError):
+        return False
+
+
 def _write_embedding(path: Path, matrix: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
@@ -182,6 +191,20 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         "graph_gemini": context.graph_summary_dir("gemini"),
         "desc": context.description_summary_dir,
     }
+    gemini_fallbacks = [
+        {
+            "item_id": str(row["item_id"]),
+            "content_id": str(row["content_id"]),
+            "source": "graph_qwen",
+            "summary_path": (
+                context.graph_summary_dir("qwen") / f"{row['content_id']}.json"
+            ).relative_to(context.run_root).as_posix(),
+        }
+        for row in catalog
+        if not (context.graph_summary_dir("gemini") / f"{row['content_id']}.json").is_file()
+    ]
+    fallback_ids = {row["content_id"] for row in gemini_fallbacks}
+    fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
     item_index_path = context.representations_dir / "item_index.json"
     pending = [
         branch
@@ -193,11 +216,9 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             catalog,
             config.encoder.embedding_dim,
         )
+        or branch == "graph_gemini" and not _gemini_fallbacks_match(fallback_path, gemini_fallbacks)
     ]
-    if not pending:
-        return _result("embed-representations", content_count=len(catalog))
 
-    context.representations_dir.mkdir(parents=True, exist_ok=True)
     documents_by_branch: dict[str, list[dict[str, Any]]] = {}
     for branch in pending:
         if branch == "metadata":
@@ -216,21 +237,40 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             continue
         directory = sources[branch]
         assert directory is not None
-        if not directory.is_dir():
+        if not directory.is_dir() and branch != "graph_gemini":
             raise ValidationStepError(f"missing {branch} summary directory: {directory}")
-        documents = [
-            read_json(_require_file(directory / f"{content_id}.json", f"{branch} summary"))
-            for content_id in content_ids
-        ]
-        if any(
-            str(row.get("content_id")) != content_id
-            or not isinstance(row.get("text"), str)
-            or not row["text"].strip()
-            for content_id, row in zip(content_ids, documents, strict=True)
-        ):
-            raise ValidationStepError(f"invalid {branch} summaries in {directory}")
+        documents = []
+        for content_id in content_ids:
+            summary_path = directory / f"{content_id}.json"
+            label = f"{branch} summary"
+            if branch == "graph_gemini" and content_id in fallback_ids:
+                label = f"graph_qwen fallback summary (Gemini summary missing: {summary_path})"
+                summary_path = context.graph_summary_dir("qwen") / f"{content_id}.json"
+            document = read_json(_require_file(summary_path, label))
+            if (
+                str(document.get("content_id")) != content_id
+                or not isinstance(document.get("text"), str)
+                or not document["text"].strip()
+            ):
+                raise ValidationStepError(f"invalid {label}: {summary_path}")
+            documents.append(document)
         documents_by_branch[branch] = documents
 
+    print(
+        f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
+        + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
+        flush=True,
+    )
+    for row in gemini_fallbacks:
+        print(
+            f"  item_id={row['item_id']} | content_id={row['content_id']} | "
+            f"summary={row['summary_path']}",
+            flush=True,
+        )
+    if not pending:
+        return _result("embed-representations", content_count=len(catalog))
+
+    context.representations_dir.mkdir(parents=True, exist_ok=True)
     encoder = BGETextEncoder(config.encoder)
     matrices: dict[str, np.ndarray] = {}
     for branch in pending:
@@ -247,6 +287,8 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
 
     for branch, matrix in matrices.items():
         _write_embedding(_embedding_path(context, branch), matrix)
+        if branch == "graph_gemini":
+            write_json(fallback_path, {"fallbacks": gemini_fallbacks})
 
     write_json(
         item_index_path,
@@ -335,7 +377,10 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         "familywise_alpha": config.evaluation.familywise_alpha,
         "multiple_comparison_correction": (config.evaluation.multiple_comparison_correction),
     }
-    document = diagnose_recommendations(config, _runtime(context), decision_config)
+    document = diagnose_recommendations(
+        config, _runtime(context), decision_config,
+        scene_duration=context.config["extraction"]["visual_evidence"]["scene_duration"],
+    )
     write_json(context.diagnosis_path, document)
     decision = document.get("runtime_decision", {})
     if decision.get("status") != "pass":

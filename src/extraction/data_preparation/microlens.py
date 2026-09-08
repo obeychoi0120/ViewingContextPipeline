@@ -19,6 +19,8 @@ def prepare_catalog(
     assets_root: str | Path,
     output_root: str | Path,
     image_size: tuple[int, int],
+    scene_duration: int = 30,
+    num_keyframes: int = 6,
     force: bool = False,
 ) -> dict[str, Any]:
     """Prepare exactly the cohort catalog from caller-owned MicroLens MP4 files."""
@@ -38,6 +40,8 @@ def prepare_catalog(
                 output_root=output_root,
                 duration_seconds=row.get("duration_seconds"),
                 image_size=image_size,
+                scene_duration=scene_duration,
+                num_keyframes=num_keyframes,
                 force=force,
             )
             return index, content_id, prepared, None

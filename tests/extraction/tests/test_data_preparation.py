@@ -34,7 +34,7 @@ def test_fixed_30s_sampling_uses_5_15_25_second_keyframes() -> None:
             "scene_end": 31,
             "duration": 1,
             "shot_change_timestamps": [30],
-            "keyframe_timestamps": [30],
+            "keyframe_timestamps": [30.5],
         },
     ]
 
@@ -171,8 +171,8 @@ def test_prepare_visual_item_reuses_catalog_duration_and_removes_legacy_metadata
     assert result == {"content_id": "content-1"}
     timestamp_path = tmp_path / "assets/content-1/assets/timestamp_fixed_30s.json"
     scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
-    assert scenes[-1]["scene_end"] == 31
-    assert extract.call_args.args[1] == [5, 15, 25, 30]
+    assert scenes[-1]["scene_end"] == 30.1
+    assert extract.call_args.args[1] == [2.5, 7.5, 12.5, 17.5, 22.5, 27.5, 30]
     assert not metadata_path.exists()
     assert not metadata_path.parent.exists()
 

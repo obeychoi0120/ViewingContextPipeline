@@ -94,7 +94,7 @@ def test_raw_graph_is_not_compacted_when_semantic_warnings_are_emitted() -> None
 def test_graph_scene_prompt_is_file_backed_and_contains_the_contract() -> None:
     prompt = (ROOT / "config/prompts/graph_scene_v2.md").read_text(encoding="utf-8")
 
-    assert "one to three chronological keyframes" in prompt
+    assert "one scene represented by chronological keyframes" in prompt
     assert "Output one to six semantically meaningful visible entities" in prompt
     assert '"salience"' in prompt
     assert '"function"' in prompt

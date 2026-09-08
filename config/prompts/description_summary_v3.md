@@ -1,6 +1,7 @@
 Using only the chronological scene descriptions below, produce a selective video-level summary of the visible content.
 
 This is a synthesis task, not an exhaustive inventory of every entity, action, or relation.
+Focus on representative visual patterns across the video.
 
 Chronological scene descriptions:
 
@@ -11,6 +12,7 @@ Now synthesize the evidence above.
 Before writing, silently compress the evidence:
 
 - Merge repeated or equivalent observations.
+- Mention a recurring action or relation once instead of reproducing every occurrence.
 - Select at most three setting categories.
 - Select at most four principal subject or object groups.
 - Select at most three representative action patterns.
@@ -29,18 +31,21 @@ Hard output rules:
 - Use at most 20 English words per field.
 - Use no more than two commas per field.
 - Do not output keyword lists, tag lists, sentence fragments, exhaustive inventories, or repeated clauses.
+- Prefer subject-verb sentences and conjunctions over comma-separated enumeration.
 - Do not repeatedly connect observations with "then", "followed by", or similar enumeration phrases.
 - Leave the value after the colon empty when no grounded evidence exists.
+- Do not add facts absent from the input evidence.
 - Do not infer identity, demographics, intent, story, genre, audience, private mental state, or audio information.
+- Do not output JSON, Markdown, bullets, commentary, or additional fields.
 - Stop immediately after the semantic_topics line.
 
-Field rules:
+Field guidance:
 
 - setting_and_environments: Summarize only the dominant setting categories; do not narrate every setting transition.
 - main_characters_and_objects: Group similar visible subjects and objects into broad grounded categories; do not enumerate individual appearances.
 - chronological_events: Summarize up to three representative action patterns; do not list every scene in order.
 - relations: Summarize up to three explicitly described relation patterns; do not enumerate relation instances.
-- visual_atmosphere: State the dominant atmosphere or one major contrast using only explicitly described visual evidence.
+- visual_atmosphere: State the dominant atmosphere or one major contrast using only explicit input evidence; do not invent lighting, color, weather, or composition.
 - visible_affect: Summarize the dominant visible expressions, postures, or interaction tone without inferring mental states.
 - semantic_topics: State up to three high-level grounded visual topics as one sentence.
 

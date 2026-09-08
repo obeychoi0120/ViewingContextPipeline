@@ -144,6 +144,34 @@ def extract_graph_scenes(
             ),
         )
         expected_scene_indices = {int(row["scene_idx"]) for row in scene_rows}
+        if model == "gemini" and not force:
+            existing = _minimal_graph_records(read_jsonl(path), path) if path.is_file() else []
+            failures = read_jsonl(failure_path) if failure_path.is_file() else []
+            expected = {int(row["scene_idx"]): row["keyframes"] for row in scene_rows}
+            cached = [*existing, *failures]
+            indices = [int(row["scene_idx"]) for row in cached]
+            if len(indices) != len(set(indices)) or any(
+                int(row["scene_idx"]) not in expected
+                or row.get("keyframes") != expected[int(row["scene_idx"])]
+                for row in cached
+            ):
+                raise ExtractionStepError(
+                    f"incompatible cached scene indices/keyframes: {path}; "
+                    "resuming requires unchanged inputs and settings; "
+                    "use --force or a new run_id for changed inputs"
+                )
+            content_id = str(visual["content_id"])
+            records_by_content[content_id] = existing
+            failures_by_content[content_id] = failures
+            successful_indices = {int(row["scene_idx"]) for row in existing}
+            pending_rows = [
+                row for row in scene_rows if int(row["scene_idx"]) not in successful_indices
+            ]
+            if pending_rows:
+                pending.append((visual, pending_rows))
+            elif not failures:
+                failure_path.unlink(missing_ok=True)
+            continue
         if path.is_file() and not force:
             existing = read_jsonl(path)
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
@@ -164,26 +192,36 @@ def extract_graph_scenes(
 
     with tqdm(
         total=len(visual_rows),
-        initial=len(records_by_content),
+        initial=len(visual_rows) - len(pending),
         desc=f"Graph scenes ({model})",
         unit="content",
     ) as progress:
+        if model == "gemini" and not force:
+            _write_progress(
+                progress,
+                f"[Gemini] processing {sum(len(rows) for _, rows in pending)} failed or "
+                f"missing scenes across {len(pending)} contents; successful scenes are reused",
+            )
+
         def complete_content(
             visual: dict[str, Any],
             scene_rows: list[dict[str, Any]],
-            generated: dict[str, tuple[str, str | None]],
+            generated: dict[str, GeminiGenerationOutcome],
         ) -> None:
-            records: list[dict[str, Any]] = []
+            content_id = str(visual["content_id"])
+            records = list(records_by_content.get(content_id, [])) if not force else []
+            new_records: list[dict[str, Any]] = []
             failures: list[dict[str, Any]] = []
             for row in scene_rows:
-                raw_response, generation_error = generated[row["task"].task_id]
+                outcome = generated[row["task"].task_id]
+                raw_response, generation_error = outcome.text, outcome.error
                 result = (
                     parse_or_repair_graph(raw_response)
                     if generation_error is None
                     else None
                 )
                 if result is not None and result.graph is not None:
-                    records.append({
+                    new_records.append({
                         "scene_idx": row["scene_idx"],
                         "keyframes": row["keyframes"],
                         "graph": result.graph,
@@ -202,16 +240,18 @@ def extract_graph_scenes(
                         or "JSON repair failed",
                         "raw_response": raw_response,
                     })
+                    if outcome.response_diagnostics is not None:
+                        failures[-1]["response_diagnostics"] = outcome.response_diagnostics
+            records.extend(new_records)
             path = scene_dir / f"{visual['content_id']}.jsonl"
             failure_path = failure_dir / f"{visual['content_id']}.jsonl"
             _write_scene_checkpoint(path, failure_path, records, failures)
-            content_id = str(visual["content_id"])
             records_by_content[content_id] = records
             failures_by_content[content_id] = failures
             video_name = names.get(content_id, f"{content_id}.mp4")
             for message in scene_messages(
                 video_name,
-                records,
+                new_records,
                 arm="graph",
                 source=model,
             ):
@@ -326,7 +366,7 @@ def extract_graph_scenes(
                 str,
                 tuple[str, dict[str, Any], list[dict[str, Any]]],
             ] = {}
-            generated_by_content: dict[str, dict[str, tuple[str, str | None]]] = {}
+            generated_by_content: dict[str, dict[str, GeminiGenerationOutcome]] = {}
             tasks: list[QwenGenerationTask] = []
             for visual, scene_rows in pending:
                 content_id = str(visual["content_id"])
@@ -343,7 +383,7 @@ def extract_graph_scenes(
             def complete_gemini_scene(outcome: GeminiGenerationOutcome) -> None:
                 content_id, visual, scene_rows = task_context[outcome.task_id]
                 responses = generated_by_content[content_id]
-                responses[outcome.task_id] = (outcome.text, outcome.error)
+                responses[outcome.task_id] = outcome
                 if len(responses) == len(scene_rows):
                     complete_content(visual, scene_rows, responses)
 

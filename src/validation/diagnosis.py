@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from visual_sampling import truncate_timestamp
 
 from .config import ValidationConfig
 from .cohort import load_ready_cohort
@@ -1045,6 +1046,7 @@ def _expected_scenes(
     run_root: Path,
     content_ids: list[str],
     errors: list[dict[str, Any]],
+    scene_duration: int = 30,
 ) -> tuple[set[tuple[str, int]], bool]:
     expected: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
@@ -1057,11 +1059,11 @@ def _expected_scenes(
             / "source_assets"
             / content_id
             / "assets"
-            / "timestamp_fixed_30s.json"
+            / f"timestamp_fixed_{scene_duration}s.json"
         )
         value, loaded = _read_json(
             path,
-            "fixed-30s timestamp artifact",
+            "fixed-window timestamp artifact",
             errors,
             report_error=False,
         )
@@ -1095,20 +1097,25 @@ def _expected_scenes(
         _error(
             errors,
             "invalid_scene_denominator",
-            "fixed-30s timestamp artifacts do not define one valid scene denominator",
+            "fixed-window timestamp artifacts do not define one valid scene denominator",
             issue_counts=dict(sorted(issues.items())),
             examples=_bounded_examples(examples),
         )
     if not expected:
-        _error(errors, "empty_scene_denominator", "fixed-30s scene denominator is empty")
+        _error(errors, "empty_scene_denominator", "fixed-window scene denominator is empty")
     return expected, valid
 
 
-def _nonempty_int_list(value: Any) -> bool:
+def _nonempty_timestamp_list(value: Any) -> bool:
     return (
         isinstance(value, list)
         and bool(value)
-        and all(isinstance(item, int) and not isinstance(item, bool) for item in value)
+        and all(
+            type(item) in (int, float) and math.isfinite(item) and item >= 0
+            and truncate_timestamp(item) == item
+            for item in value
+        )
+        and value == sorted(set(value))
     )
 
 
@@ -1118,7 +1125,7 @@ def _success_scene_row_issues(
     content_id: str,
 ) -> list[str]:
     invalid: list[str] = []
-    if not _nonempty_int_list(row.get("keyframes")):
+    if not _nonempty_timestamp_list(row.get("keyframes")):
         invalid.append("invalid_success_keyframes")
     if arm.startswith("graph_"):
         if set(row) != {
@@ -1372,6 +1379,8 @@ def diagnose_recommendations(
     config: ValidationConfig,
     runtime: dict[str, Any],
     decision_config: dict[str, Any],
+    *,
+    scene_duration: int = 30,
 ) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     settings, decision_config_valid = _validate_decision_config(decision_config, errors)
@@ -1463,7 +1472,9 @@ def diagnose_recommendations(
         errors=errors,
     )
 
-    expected_scenes, scene_denominator_valid = _expected_scenes(run_root, content_ids, errors)
+    expected_scenes, scene_denominator_valid = _expected_scenes(
+        run_root, content_ids, errors, scene_duration,
+    )
     scene_documents: dict[str, Any] = {}
     successful_scenes: dict[str, set[tuple[str, int]]] = {}
     scene_arm_valid: dict[str, bool] = {}
@@ -1508,7 +1519,7 @@ def diagnose_recommendations(
         runtime_paths_valid and scene_denominator_valid and all(scene_arm_valid.values())
     )
     scene_coverage = {
-        "denominator_source": "fixed_30s timestamp artifacts",
+        "denominator_source": f"fixed_{scene_duration}s timestamp artifacts",
         "expected_scene_count": len(expected_scenes),
         "minimum_success_coverage": settings.get("min_scene_coverage"),
         "maximum_arm_coverage_gap": settings.get("max_arm_coverage_gap"),

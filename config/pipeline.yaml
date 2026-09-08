@@ -2,7 +2,7 @@ schema_version: viewing-context-config/v3
 protocol:
   dataset: microlens_100k
   modality: visual_only
-  sampling: fixed_30s
+  sampling: fixed_windows
   cohort_sampling: user_first_nested_stratified
   catalog_scope: selected_user_sequence_union
   graph_extractors: [qwen, gemini]
@@ -28,6 +28,8 @@ models:
 extraction:
   visual_evidence:
     image_resolution: [640, 352]
+    scene_duration: 30
+    num_keyframes: 6
   greedy_decoding: true
   graph_repetition_penalty: 1.05
   description_repetition_penalty: 1.00

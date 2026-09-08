@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 from typing import Any
 
 from .video_processor import extract_resized_keyframes
 from extraction.image_validation import verified_image_size
-
-
-SCENE_SECONDS = 30
-REFERENCE_SECONDS = 10
-KEYFRAME_OFFSETS = (5, 15, 25)
+from visual_sampling import build_fixed_windows, timestamp_stem, truncate_timestamp
 
 
 def prepare_visual_item(
@@ -22,6 +17,8 @@ def prepare_visual_item(
     output_root: str | Path,
     duration_seconds: object,
     image_size: tuple[int, int],
+    scene_duration: int = 30,
+    num_keyframes: int = 6,
     force: bool = False,
 ) -> dict[str, str]:
     source = Path(source_video_path)
@@ -30,11 +27,11 @@ def prepare_visual_item(
     content_id = _safe_content_id(content_id)
     item_root = Path(assets_root) / content_id
     item_assets = item_root / "assets"
-    timestamp_path = item_assets / "timestamp_fixed_30s.json"
+    timestamp_path = item_assets / f"timestamp_fixed_{scene_duration}s.json"
     frames_dir = (
         Path(output_root)
         / "data"
-        / "fixed_30s"
+        / f"fixed_{scene_duration}s"
         / "resized_keyframes"
         / content_id
     )
@@ -50,11 +47,13 @@ def prepare_visual_item(
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
     complete = visual_evidence_matches(
-        timestamp_path, frames_dir, image_size, duration_seconds
+        timestamp_path, frames_dir, image_size, duration_seconds,
+        scene_duration=scene_duration, num_keyframes=num_keyframes,
     )
     if force or not complete:
-        duration = _ceil_duration_seconds(duration_seconds)
-        scenes = build_fixed_30s_windows(duration)
+        scenes = build_fixed_windows(
+            duration_seconds, scene_duration=scene_duration, num_keyframes=num_keyframes,
+        )
         extract_resized_keyframes(
             source,
             [timestamp for scene in scenes for timestamp in scene["keyframe_timestamps"]],
@@ -67,45 +66,26 @@ def prepare_visual_item(
 
 
 def build_fixed_30s_windows(video_duration: int) -> list[dict[str, Any]]:
-    duration = int(video_duration)
-    if duration <= 0:
-        raise ValueError("video_duration must be positive")
-    windows: list[dict[str, Any]] = []
-    for scene_start in range(0, duration, SCENE_SECONDS):
-        scene_end = min(scene_start + SCENE_SECONDS, duration)
-        boundaries = list(range(scene_start, scene_end, REFERENCE_SECONDS))
-        keyframes = [
-            (start + min(start + REFERENCE_SECONDS, scene_end)) // 2
-            for start in boundaries
-        ]
-        windows.append(
-            {
-                "scene_start": scene_start,
-                "scene_end": scene_end,
-                "duration": scene_end - scene_start,
-                "shot_change_timestamps": boundaries,
-                "keyframe_timestamps": keyframes,
-            }
-        )
-    return windows
+    """Legacy three-keyframe entrypoint, using the shared timestamp precision."""
+    return build_fixed_windows(video_duration, scene_duration=30, num_keyframes=3)
 
 
-def selected_keyframe_timestamps(timestamp_file: str | Path) -> list[int]:
+def selected_keyframe_timestamps(timestamp_file: str | Path) -> list[int | float]:
     scenes = json.loads(Path(timestamp_file).read_text(encoding="utf-8"))
     if not isinstance(scenes, list):
-        raise ValueError("fixed-30s timestamp file must contain a list")
-    values: list[int] = []
-    seen: set[int] = set()
+        raise ValueError("fixed-window timestamp file must contain a list")
+    values: list[int | float] = []
+    seen: set[int | float] = set()
     for scene in scenes:
         if not isinstance(scene, dict):
-            raise ValueError("fixed-30s timestamp scene must be an object")
+            raise ValueError("fixed-window timestamp scene must be an object")
         for raw in scene.get("keyframe_timestamps", []):
-            timestamp = int(round(float(raw)))
+            timestamp = truncate_timestamp(raw)
             if timestamp not in seen:
                 values.append(timestamp)
                 seen.add(timestamp)
     if not values:
-        raise ValueError("fixed-30s timestamp file contains no keyframes")
+        raise ValueError("fixed-window timestamp file contains no keyframes")
     return values
 
 
@@ -116,7 +96,7 @@ def resized_keyframes_match_timestamps(
 ) -> bool:
     try:
         expected = {
-            f"{timestamp:04d}.png"
+            f"{timestamp_stem(timestamp)}.png"
             for timestamp in selected_keyframe_timestamps(timestamp_file)
         }
         output = Path(output_dir)
@@ -140,9 +120,14 @@ def visual_evidence_matches(
     output_dir: Path,
     image_size: tuple[int, int],
     duration_seconds: object,
+    *,
+    scene_duration: int = 30,
+    num_keyframes: int = 6,
 ) -> bool:
     try:
-        expected = build_fixed_30s_windows(_ceil_duration_seconds(duration_seconds))
+        expected = build_fixed_windows(
+            duration_seconds, scene_duration=scene_duration, num_keyframes=num_keyframes,
+        )
         observed = json.loads(timestamp_file.read_text(encoding="utf-8"))
         return observed == expected and resized_keyframes_match_timestamps(
             timestamp_file, output_dir, image_size
@@ -156,16 +141,6 @@ def _safe_content_id(value: object) -> str:
     if not text or text in {".", ".."} or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_." for char in text):
         raise ValueError(f"content_id is not filesystem-safe: {value!r}")
     return text
-
-
-def _ceil_duration_seconds(value: object) -> int:
-    try:
-        duration = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"duration_seconds must be a positive finite number: {value!r}") from exc
-    if not math.isfinite(duration) or duration <= 0:
-        raise ValueError(f"duration_seconds must be a positive finite number: {value!r}")
-    return max(1, math.ceil(duration))
 
 
 def _write_json(path: Path, value: Any) -> None:

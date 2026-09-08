@@ -23,7 +23,7 @@ gemini = ["google-genai"]
 dev = ["pytest", "ruff"]
 
 [tool.setuptools]
-py-modules = ["artifact_io", "pipeline_runtime"]
+py-modules = ["artifact_io", "pipeline_runtime", "visual_sampling"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
