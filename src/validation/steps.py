@@ -25,8 +25,11 @@ class ValidationStepError(RuntimeError):
 def validation_config(context: RunContext) -> ValidationConfig:
     return build_validation_config(
         run_id=context.run_id,
-        dataset={key: context.path("data", key) for key in ("pairs_tsv", "videos_dir", "titles_csv")},
-        settings=context.config["validation"], model_path=context.path("models", "bge"),
+        dataset={
+            key: context.path("data", key) for key in ("pairs_tsv", "videos_dir", "titles_csv")
+        },
+        settings=context.config["validation"],
+        model_path=context.path("models", "bge"),
         output_dir=context.run_root,
     )
 
@@ -63,8 +66,10 @@ def prepare_cohort_step(
 ) -> dict[str, Any]:
     context.initialize()
     prepared = prepare_cohort(
-        validation_config(context), output_dir=context.cohort_dir,
-        plan_only=plan_only, force=force,
+        validation_config(context),
+        output_dir=context.cohort_dir,
+        plan_only=plan_only,
+        force=force,
     )
     return {
         **_result("prepare-cohort", content_count=int(prepared["catalog_size"])),
@@ -175,9 +180,9 @@ def _embedding_work(context, catalog, config, force):
             "item_id": str(row["item_id"]),
             "content_id": str(row["content_id"]),
             "source": "graph_qwen",
-            "summary_path": (
-                context.graph_summary_dir("qwen") / f"{row['content_id']}.json"
-            ).relative_to(context.run_root).as_posix(),
+            "summary_path": (context.graph_summary_dir("qwen") / f"{row['content_id']}.json")
+            .relative_to(context.run_root)
+            .as_posix(),
         }
         for row in catalog
         if not (context.graph_summary_dir("gemini") / f"{row['content_id']}.json").is_file()
@@ -194,7 +199,8 @@ def _embedding_work(context, catalog, config, force):
             catalog,
             config.encoder.embedding_dim,
         )
-        or branch == "graph_gemini" and not _gemini_fallbacks_match(fallback_path, gemini_fallbacks)
+        or branch == "graph_gemini"
+        and not _gemini_fallbacks_match(fallback_path, gemini_fallbacks)
     ]
 
     return sources, gemini_fallbacks, pending
@@ -282,7 +288,11 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     catalog = cohort["catalog"]
     sources, gemini_fallbacks, pending = _embedding_work(context, catalog, config, force)
     documents_by_branch = _embedding_documents(
-        context, catalog, sources, pending, {row["content_id"] for row in gemini_fallbacks},
+        context,
+        catalog,
+        sources,
+        pending,
+        {row["content_id"] for row in gemini_fallbacks},
     )
     print(
         f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
@@ -386,7 +396,9 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         "multiple_comparison_correction": (config.evaluation.multiple_comparison_correction),
     }
     document = diagnose_recommendations(
-        config, _runtime(context), decision_config,
+        config,
+        _runtime(context),
+        decision_config,
         scene_duration=context.config["extraction"]["visual_evidence"]["scene_duration"],
     )
     write_json(context.diagnosis_path, document)

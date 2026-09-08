@@ -55,19 +55,19 @@ def graph_stage_name(stage: str, source: str) -> str:
 def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     extraction = context.config["extraction"]
     settings: dict[str, Any] = {
-        "repetition_penalty": float(
-            extraction["summary_repetition_penalty"]
-        ),
+        "repetition_penalty": float(extraction["summary_repetition_penalty"]),
     }
     if bool(extraction["greedy_decoding"]):
         return settings
     sampling = extraction["summary_sampling"]
-    settings.update({
-        "do_sample": True,
-        "temperature": float(sampling["temperature"]),
-        "top_p": float(sampling["top_p"]),
-        "top_k": int(sampling["top_k"]),
-    })
+    settings.update(
+        {
+            "do_sample": True,
+            "temperature": float(sampling["temperature"]),
+            "top_p": float(sampling["top_p"]),
+            "top_k": int(sampling["top_k"]),
+        }
+    )
     return settings
 
 
@@ -126,10 +126,7 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
             failures = normalized
             if not failures:
                 failure_path.unlink(missing_ok=True)
-            covered = {
-                int(row["scene_idx"])
-                for row in [*existing, *failures]
-            }
+            covered = {int(row["scene_idx"]) for row in [*existing, *failures]}
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
                 existing = _minimal_graph_records(existing, path)
@@ -162,10 +159,7 @@ def _description_scene_work(context, visual_rows, prompt, settings, force):
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
             if not failures:
                 failure_path.unlink(missing_ok=True)
-            covered = {
-                int(row["scene_idx"])
-                for row in [*existing, *failures]
-            }
+            covered = {int(row["scene_idx"]) for row in [*existing, *failures]}
             if covered == expected_scene_indices:
                 content_id = str(visual["content_id"])
                 existing = _minimal_description_records(existing, path)
@@ -201,19 +195,39 @@ def extract_graph_scenes(
     scene_dir = context.graph_scene_dir(model)
     failure_dir = context.graph_failure_dir(model)
     records_by_content, failures_by_content, pending = _graph_scene_work(
-        context, visual_rows, prompt, settings, scene_dir, failure_dir, model, force,
+        context,
+        visual_rows,
+        prompt,
+        settings,
+        scene_dir,
+        failure_dir,
+        model,
+        force,
     )
-    with tqdm(total=len(visual_rows), initial=len(visual_rows) - len(pending),
-              desc=f"Graph scenes ({model})", unit="content") as progress:
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(visual_rows) - len(pending),
+        desc=f"Graph scenes ({model})",
+        unit="content",
+    ) as progress:
         if model == "gemini" and not force:
-            _write_progress(progress,
+            _write_progress(
+                progress,
                 f"[Gemini] processing {sum(len(rows) for _, rows in pending)} failed or "
-                f"missing scenes across {len(pending)} contents; successful scenes are reused")
+                f"missing scenes across {len(pending)} contents; successful scenes are reused",
+            )
         if pending and model == "qwen":
             completed, failed = run_qwen_scenes(
-                pending, scene_dir=scene_dir, failure_dir=failure_dir, model_path=model_path,
-                gpus=gpus, generator_factory=qwen_generator, names=names, progress=progress,
-                arm="graph", source=model,
+                pending,
+                scene_dir=scene_dir,
+                failure_dir=failure_dir,
+                model_path=model_path,
+                gpus=gpus,
+                generator_factory=qwen_generator,
+                names=names,
+                progress=progress,
+                arm="graph",
+                source=model,
             )
             records_by_content.update(completed)
             failures_by_content.update(failed)
@@ -221,31 +235,47 @@ def extract_graph_scenes(
             gemini = context.config["models"]["gemini"]
             pool = GeminiWorkerPool(
                 int(settings["gemini_concurrency"]),
-                project_id=str(gemini["project_id"]), location=str(gemini["location"]),
-                model_id=str(gemini["model_id"]), temperature=float(gemini["temperature"]),
+                project_id=str(gemini["project_id"]),
+                location=str(gemini["location"]),
+                model_id=str(gemini["model_id"]),
+                temperature=float(gemini["temperature"]),
                 max_output_tokens=int(gemini["max_output_tokens"]),
                 thinking_level=str(gemini["thinking_level"]),
                 media_resolution=str(gemini["media_resolution"]),
             )
             run_gemini_scenes(
-                pending, pool=pool, records_by_content=records_by_content,
-                failures_by_content=failures_by_content, scene_dir=scene_dir,
-                failure_dir=failure_dir, force=force, names=names, progress=progress,
+                pending,
+                pool=pool,
+                records_by_content=records_by_content,
+                failures_by_content=failures_by_content,
+                scene_dir=scene_dir,
+                failure_dir=failure_dir,
+                force=force,
+                names=names,
+                progress=progress,
             )
-    failures = [record for visual in visual_rows
-                for record in failures_by_content[str(visual["content_id"])]]
+    failures = [
+        record
+        for visual in visual_rows
+        for record in failures_by_content[str(visual["content_id"])]
+    ]
     return _result(stage, content_count=len(visual_rows), failure_count=len(failures))
 
 
-
 def summarize_graph(
-    context: RunContext, *, source: str, force: bool = False, gpus: int | None = None,
+    context: RunContext,
+    *,
+    source: str,
+    force: bool = False,
+    gpus: int | None = None,
 ) -> dict[str, Any]:
     stage = graph_stage_name("summarize-graph", source)
     context.initialize()
     settings = context.config["extraction"]["graph"]
     generation = _summary_generation_settings(context)
-    template = context.config_path("extraction", "graph", "summary_prompt").read_text(encoding="utf-8")
+    template = context.config_path("extraction", "graph", "summary_prompt").read_text(
+        encoding="utf-8"
+    )
     model_path = context.path("models", "qwen")
     visuals = _visual_rows(context)
     names = _video_name_map(context)
@@ -258,17 +288,27 @@ def summarize_graph(
         raise ExtractionStepError(f"missing graph scene output: {missing}")
     return run_summary_stage(
         SummaryBranch(
-            stage=stage, arm=f"graph_{source}", label="graph",
+            stage=stage,
+            arm=f"graph_{source}",
+            label="graph",
             schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
             summary_dir=context.graph_summary_dir(source),
             failure_dir=context.graph_summary_failure_dir(source),
             normalize_records=_minimal_graph_records,
             content_id=lambda records, path: path.stem,
-            build_prompt=graph_summary_prompt, validate=validate_graph_summary,
+            build_prompt=graph_summary_prompt,
+            validate=validate_graph_summary,
         ),
-        scene_paths=paths, template=template, max_new_tokens=int(settings["summary_max_new_tokens"]),
-        generation=generation, model_path=model_path, gpus=gpus, force=force, names=names,
-        generator_factory=qwen_generator, progress_factory=tqdm,
+        scene_paths=paths,
+        template=template,
+        max_new_tokens=int(settings["summary_max_new_tokens"]),
+        generation=generation,
+        model_path=model_path,
+        gpus=gpus,
+        force=force,
+        names=names,
+        generator_factory=qwen_generator,
+        progress_factory=tqdm,
     )
 
 
@@ -286,24 +326,40 @@ def extract_description_scenes(
     visual_rows = _visual_rows(context)
     names = _video_name_map(context)
     records_by_content, failures_by_content, pending = _description_scene_work(
-        context, visual_rows, prompt, settings, force,
+        context,
+        visual_rows,
+        prompt,
+        settings,
+        force,
     )
-    with tqdm(total=len(visual_rows), initial=len(records_by_content),
-              desc="Description scenes", unit="content") as progress:
+    with tqdm(
+        total=len(visual_rows),
+        initial=len(records_by_content),
+        desc="Description scenes",
+        unit="content",
+    ) as progress:
         if pending:
             completed, failed = run_qwen_scenes(
-                pending, scene_dir=context.description_scene_dir,
-                failure_dir=context.description_failure_dir, model_path=model_path,
-                gpus=gpus, generator_factory=qwen_generator, names=names, progress=progress,
+                pending,
+                scene_dir=context.description_scene_dir,
+                failure_dir=context.description_failure_dir,
+                model_path=model_path,
+                gpus=gpus,
+                generator_factory=qwen_generator,
+                names=names,
+                progress=progress,
                 arm="description",
             )
             records_by_content.update(completed)
             failures_by_content.update(failed)
-    failures = [record for visual in visual_rows
-                for record in failures_by_content[str(visual["content_id"])]]
-    return _result("extract-description-scenes", content_count=len(visual_rows),
-                   failure_count=len(failures))
-
+    failures = [
+        record
+        for visual in visual_rows
+        for record in failures_by_content[str(visual["content_id"])]
+    ]
+    return _result(
+        "extract-description-scenes", content_count=len(visual_rows), failure_count=len(failures)
+    )
 
 
 def _description_summary_records(records, path):
@@ -314,32 +370,50 @@ def _description_summary_records(records, path):
 
 
 def summarize_description(
-    context: RunContext, *, force: bool = False, gpus: int | None = None,
+    context: RunContext,
+    *,
+    force: bool = False,
+    gpus: int | None = None,
 ) -> dict[str, Any]:
     context.initialize()
     settings = context.config["extraction"]["description"]
     generation = _summary_generation_settings(context)
-    template = context.config_path("extraction", "description", "summary_prompt").read_text(encoding="utf-8")
+    template = context.config_path("extraction", "description", "summary_prompt").read_text(
+        encoding="utf-8"
+    )
     model_path = context.path("models", "qwen")
     visuals = _visual_rows(context)
     names = _video_name_map(context)
     if not context.description_scene_dir.is_dir():
-        raise ExtractionStepError(f"missing description scene directory: {context.description_scene_dir}")
+        raise ExtractionStepError(
+            f"missing description scene directory: {context.description_scene_dir}"
+        )
     paths = [context.description_scene_dir / f"{row['content_id']}.jsonl" for row in visuals]
     for path in paths:
         _require_file(path, "description scene output")
     return run_summary_stage(
         SummaryBranch(
-            stage="summarize-description", arm="description", label="description",
-            schema_version=SUMMARY_SCHEMA_VERSION, summary_dir=context.description_summary_dir,
+            stage="summarize-description",
+            arm="description",
+            label="description",
+            schema_version=SUMMARY_SCHEMA_VERSION,
+            summary_dir=context.description_summary_dir,
             failure_dir=context.description_summary_failure_dir,
             normalize_records=_description_summary_records,
             content_id=lambda records, path: str(records[0]["content_id"]),
-            build_prompt=description_summary_prompt, validate=validate_description_summary,
+            build_prompt=description_summary_prompt,
+            validate=validate_description_summary,
         ),
-        scene_paths=paths, template=template, max_new_tokens=int(settings["summary_max_new_tokens"]),
-        generation=generation, model_path=model_path, gpus=gpus, force=force, names=names,
-        generator_factory=qwen_generator, progress_factory=tqdm,
+        scene_paths=paths,
+        template=template,
+        max_new_tokens=int(settings["summary_max_new_tokens"]),
+        generation=generation,
+        model_path=model_path,
+        gpus=gpus,
+        force=force,
+        names=names,
+        generator_factory=qwen_generator,
+        progress_factory=tqdm,
     )
 
 

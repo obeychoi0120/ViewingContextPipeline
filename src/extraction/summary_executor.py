@@ -62,11 +62,19 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
         failure_path = branch.failure_dir / f"{content_id}.jsonl"
         if not records:
             empty += 1
-            write_jsonl(failure_path, [_summary_failure_record(
-                content_id, attempt=None, seed=None, failure_kind="empty_scene_records",
-                error=f"{branch.label} summary requires at least one successful scene",
-                raw_response="",
-            )])
+            write_jsonl(
+                failure_path,
+                [
+                    _summary_failure_record(
+                        content_id,
+                        attempt=None,
+                        seed=None,
+                        failure_kind="empty_scene_records",
+                        error=f"{branch.label} summary requires at least one successful scene",
+                        raw_response="",
+                    )
+                ],
+            )
             continue
         records = branch.normalize_records(records, scene_path)
         task_id = branch.content_id(records, scene_path)
@@ -74,39 +82,68 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
         if output_path.is_file() and not force:
             try:
                 documents[task_id] = reuse_summary_document(
-                    output_path, schema_version=branch.schema_version, content_id=task_id,
-                    arm=branch.arm, scene_count=len(records),
+                    output_path,
+                    schema_version=branch.schema_version,
+                    content_id=task_id,
+                    arm=branch.arm,
+                    scene_count=len(records),
                 )
             except ExtractionStepError as exc:
                 incompatible[task_id] = str(exc)
             else:
                 failure_path.unlink(missing_ok=True)
                 continue
-        tasks.append(QwenGenerationTask(
-            task_id=task_id, image_paths=(), prompt=branch.build_prompt(template, records),
-            max_new_tokens=max_new_tokens, **generation,
-        ))
+        tasks.append(
+            QwenGenerationTask(
+                task_id=task_id,
+                image_paths=(),
+                prompt=branch.build_prompt(template, records),
+                max_new_tokens=max_new_tokens,
+                **generation,
+            )
+        )
         pending[task_id] = (records, output_path)
     return documents, pending, tasks, incompatible, empty
 
 
 def run_summary_stage(
-    branch: SummaryBranch, *, scene_paths, template, max_new_tokens, generation,
-    model_path, gpus, force, names, generator_factory, progress_factory,
+    branch: SummaryBranch,
+    *,
+    scene_paths,
+    template,
+    max_new_tokens,
+    generation,
+    model_path,
+    gpus,
+    force,
+    names,
+    generator_factory,
+    progress_factory,
 ):
     documents, pending, tasks, incompatible, empty = _prepare_summaries(
-        branch, scene_paths, template, max_new_tokens, generation, force,
+        branch,
+        scene_paths,
+        template,
+        max_new_tokens,
+        generation,
+        force,
     )
-    description = (f"Graph summaries ({branch.arm.removeprefix('graph_')})"
-                   if branch.label == "graph" else "Description summaries")
+    description = (
+        f"Graph summaries ({branch.arm.removeprefix('graph_')})"
+        if branch.label == "graph"
+        else "Description summaries"
+    )
     failures_by_content = {task.task_id: [] for task in tasks}
-    with progress_factory(total=len(scene_paths), initial=len(documents) + empty,
-                          desc=description, unit="content") as progress:
-        write_progress(progress,
+    with progress_factory(
+        total=len(scene_paths), initial=len(documents) + empty, desc=description, unit="content"
+    ) as progress:
+        write_progress(
+            progress,
             f"[SUMMARY] {branch.stage} | reused={len(documents)} "
             f"pending={len(tasks)} incompatible={len(incompatible)} "
             f"empty_scenes={empty} force={force} "
-            f"repetition_penalty={generation['repetition_penalty']} output={branch.summary_dir}")
+            f"repetition_penalty={generation['repetition_penalty']} output={branch.summary_dir}",
+        )
         for reason in incompatible.values():
             write_progress(progress, f"[SUMMARY RETRY] {reason}")
 
@@ -114,9 +151,13 @@ def run_summary_stage(
             records, output_path = pending[task_id]
             sections = branch.validate(text)
             document = {
-                "schema_version": branch.schema_version, "content_id": task_id,
-                "arm": branch.arm, "status": "complete", "sections": sections,
-                "text": serialize_summary_sections(sections), "scene_count": len(records),
+                "schema_version": branch.schema_version,
+                "content_id": task_id,
+                "arm": branch.arm,
+                "status": "complete",
+                "sections": sections,
+                "text": serialize_summary_sections(sections),
+                "scene_count": len(records),
             }
             write_json(output_path, document)
             (branch.failure_dir / f"{task_id}.jsonl").unlink(missing_ok=True)
@@ -125,16 +166,24 @@ def run_summary_stage(
 
         def failed(task_id, attempt, seed, raw_response, error):
             failures = failures_by_content[task_id]
-            failures.append(_summary_failure_record(
-                task_id, attempt=attempt, seed=seed, failure_kind="schema_validation",
-                error=str(error), raw_response=raw_response,
-            ))
+            failures.append(
+                _summary_failure_record(
+                    task_id,
+                    attempt=attempt,
+                    seed=seed,
+                    failure_kind="schema_validation",
+                    error=str(error),
+                    raw_response=raw_response,
+                )
+            )
             write_jsonl(branch.failure_dir / f"{task_id}.jsonl", failures)
             message = " ".join(str(error).splitlines())
-            write_progress(progress,
+            write_progress(
+                progress,
                 f"[Qwen_summary_{branch.arm}_fail] "
                 f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
-                f"Raw output:\n{raw_response or '<empty>'}")
+                f"Raw output:\n{raw_response or '<empty>'}",
+            )
             progress.update(1)
 
         if tasks:
@@ -168,10 +217,7 @@ def reuse_summary_document(
         if not isinstance(raw_sections, dict):
             raise SummaryContractError("summary sections must be an object")
         sections = parse_summary_sections(
-            "\n".join(
-                f"{name}: {raw_sections[name]}"
-                for name in SUMMARY_SECTIONS
-            )
+            "\n".join(f"{name}: {raw_sections[name]}" for name in SUMMARY_SECTIONS)
         )
         text = serialize_summary_sections(sections)
     except (AttributeError, KeyError, ValueError, TypeError) as exc:
@@ -189,7 +235,8 @@ def reuse_summary_document(
     }
     if existing != expected:
         mismatched = sorted(
-            key for key in existing.keys() | expected.keys()
+            key
+            for key in existing.keys() | expected.keys()
             if key not in existing or key not in expected or existing[key] != expected[key]
         )
         raise ExtractionStepError(
@@ -230,9 +277,7 @@ def generate_summaries_once(
     if last_errors:
         task_ids = [task.task_id for task in tasks if task.task_id in last_errors]
         cause = last_errors[task_ids[0]]
-        raise ExtractionStepError(
-            f"structured summary failed: task_ids={task_ids}"
-        ) from cause
+        raise ExtractionStepError(f"structured summary failed: task_ids={task_ids}") from cause
 
 
 @contextmanager

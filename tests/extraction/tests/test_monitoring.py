@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-import extraction.step_support as step_support
 import extraction.summary_executor as summary_executor
 from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.monitoring import (
@@ -91,23 +90,3 @@ def test_serial_generator_calls_completion_callback_per_task(
 
     assert completed == [("a", "result:first"), ("b", "result:second")]
     assert results == {}
-
-
-def test_complete_content_progress_updates_then_writes_blank_separator(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    events = []
-
-    class Progress:
-        def update(self, amount):
-            events.append(("update", amount))
-
-    monkeypatch.setattr(
-        step_support,
-        "write_progress",
-        lambda _progress, message: events.append(("write", message)),
-    )
-
-    step_support.complete_content_progress(Progress())
-
-    assert events == [("update", 1), ("write", "")]

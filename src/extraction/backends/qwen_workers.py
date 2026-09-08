@@ -60,7 +60,11 @@ class QwenWorkerPool:
         self._closed = False
         for worker_index, gpu_id in enumerate(gpu_ids):
             task_queue, process = _start_worker(
-                self._context, worker_index, gpu_id, model_path, self._result_queue,
+                self._context,
+                worker_index,
+                gpu_id,
+                model_path,
+                self._result_queue,
             )
             self._task_queues.append(task_queue)
             self._processes.append(process)

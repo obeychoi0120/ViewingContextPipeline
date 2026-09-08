@@ -6,7 +6,9 @@ from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.monitoring import graph_skip_message, scene_messages
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.step_support import (
-    complete_content_progress, write_progress, write_scene_checkpoint,
+    complete_content_progress,
+    write_progress,
+    write_scene_checkpoint,
 )
 
 
@@ -15,10 +17,15 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None):
     parsed = parse_or_repair_graph(text) if error is None else None
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
     if parsed is not None and parsed.graph is not None:
-        return {**common, "graph": parsed.graph, "parse_mode": parsed.parse_mode,
-                "semantic_warnings": graph_semantic_warnings(parsed.graph)}, None
+        return {
+            **common,
+            "graph": parsed.graph,
+            "parse_mode": parsed.parse_mode,
+            "semantic_warnings": graph_semantic_warnings(parsed.graph),
+        }, None
     failure = {
-        **common, "failure_kind": "generation" if error else "json_repair",
+        **common,
+        "failure_kind": "generation" if error else "json_repair",
         "error": error or (parsed.error if parsed is not None else None) or "JSON repair failed",
         "raw_response": text,
     }
@@ -28,14 +35,20 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None):
 
 
 def description_scene_result(row, text, *, content_id):
-    common = {"content_id": content_id, "scene_idx": row["scene_idx"],
-              "keyframes": row["keyframes"]}
+    common = {
+        "content_id": content_id,
+        "scene_idx": row["scene_idx"],
+        "keyframes": row["keyframes"],
+    }
     description = text.strip()
     if description:
-        return {"schema_version": SCENE_SCHEMA_VERSION, **common,
-                "description": description}, None
-    return None, {"schema_version": "description-generation-failure/v1", **common,
-                  "failure_kind": "empty_response", "error": "model produced an empty description"}
+        return {"schema_version": SCENE_SCHEMA_VERSION, **common, "description": description}, None
+    return None, {
+        "schema_version": "description-generation-failure/v1",
+        **common,
+        "failure_kind": "empty_response",
+        "error": "model produced an empty description",
+    }
 
 
 def _report_scene(progress, name, record, failure, *, arm, source):
@@ -44,18 +57,31 @@ def _report_scene(progress, name, record, failure, *, arm, source):
     elif arm == "graph":
         write_progress(progress, graph_skip_message(name, failure, source=source))
     else:
-        write_progress(progress, f"[SKIPPED] {name} | description scene "
-                       f"#{int(failure['scene_idx']):03d} | {failure['error']}")
+        write_progress(
+            progress,
+            f"[SKIPPED] {name} | description scene "
+            f"#{int(failure['scene_idx']):03d} | {failure['error']}",
+        )
 
 
 def run_qwen_scenes(
-    pending, *, scene_dir, failure_dir, model_path, gpus, generator_factory,
-    names, progress, arm, source=None,
+    pending,
+    *,
+    scene_dir,
+    failure_dir,
+    model_path,
+    gpus,
+    generator_factory,
+    names,
+    progress,
+    arm,
+    source=None,
 ):
     records_by_content = {}
     failures_by_content = {}
-    write_progress(progress,
-        "[Qwen] starting GPU workers; each completed scene is checkpointed immediately")
+    write_progress(
+        progress, "[Qwen] starting GPU workers; each completed scene is checkpointed immediately"
+    )
     with generator_factory(model_path=model_path, gpus=gpus) as generate:
         for visual, scene_rows in pending:
             content_id = str(visual["content_id"])
@@ -71,8 +97,9 @@ def run_qwen_scenes(
             def complete(task_id, text):
                 row = rows_by_task[task_id]
                 record, failure = (
-                    graph_scene_result(row, text) if arm == "graph" else
-                    description_scene_result(row, text, content_id=visual["content_id"])
+                    graph_scene_result(row, text)
+                    if arm == "graph"
+                    else description_scene_result(row, text, content_id=visual["content_id"])
                 )
                 if record is not None:
                     records[task_id] = record
@@ -102,8 +129,17 @@ def run_qwen_scenes(
 
 
 def _complete_gemini_content(
-    visual, scene_rows, generated, *, records_by_content, failures_by_content,
-    scene_dir, failure_dir, force, names, progress,
+    visual,
+    scene_rows,
+    generated,
+    *,
+    records_by_content,
+    failures_by_content,
+    scene_dir,
+    failure_dir,
+    force,
+    names,
+    progress,
 ):
     content_id = str(visual["content_id"])
     records = list(records_by_content.get(content_id, [])) if not force else []
@@ -112,13 +148,18 @@ def _complete_gemini_content(
     for row in scene_rows:
         outcome = generated[row["task"].task_id]
         record, failure = graph_scene_result(
-            row, outcome.text, error=outcome.error, diagnostics=outcome.response_diagnostics,
+            row,
+            outcome.text,
+            error=outcome.error,
+            diagnostics=outcome.response_diagnostics,
         )
         (new_records if record is not None else failures).append(
-            record if record is not None else failure)
+            record if record is not None else failure
+        )
     records.extend(new_records)
-    write_scene_checkpoint(scene_dir / f"{content_id}.jsonl",
-                           failure_dir / f"{content_id}.jsonl", records, failures)
+    write_scene_checkpoint(
+        scene_dir / f"{content_id}.jsonl", failure_dir / f"{content_id}.jsonl", records, failures
+    )
     records_by_content[content_id] = records
     failures_by_content[content_id] = failures
     name = names.get(content_id, f"{content_id}.mp4")
@@ -130,8 +171,16 @@ def _complete_gemini_content(
 
 
 def run_gemini_scenes(
-    pending, *, pool, records_by_content, failures_by_content, scene_dir, failure_dir,
-    force, names, progress,
+    pending,
+    *,
+    pool,
+    records_by_content,
+    failures_by_content,
+    scene_dir,
+    failure_dir,
+    force,
+    names,
+    progress,
 ):
     task_context = {}
     generated_by_content: dict[str, dict[str, GeminiGenerationOutcome]] = {}
@@ -150,8 +199,16 @@ def run_gemini_scenes(
         responses[outcome.task_id] = outcome
         if len(responses) == len(scene_rows):
             _complete_gemini_content(
-                visual, scene_rows, responses, records_by_content=records_by_content,
-                failures_by_content=failures_by_content, scene_dir=scene_dir,
-                failure_dir=failure_dir, force=force, names=names, progress=progress,
+                visual,
+                scene_rows,
+                responses,
+                records_by_content=records_by_content,
+                failures_by_content=failures_by_content,
+                scene_dir=scene_dir,
+                failure_dir=failure_dir,
+                force=force,
+                names=names,
+                progress=progress,
             )
+
     pool.generate(tasks, complete)

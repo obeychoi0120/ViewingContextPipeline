@@ -15,7 +15,6 @@ from extraction.data_preparation.fixed30 import (
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.data_preparation.video_processor import (
     _decodable_frame_tail_timestamps_seconds,
-    _last_decodable_frame_timestamp_seconds,
     extract_resized_keyframes,
 )
 
@@ -134,12 +133,6 @@ def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path
         ),
     ) as run:
         assert _decodable_frame_tail_timestamps_seconds(video) == (300.92, 300.96)
-
-    with mock.patch(
-        "extraction.data_preparation.video_processor._decodable_frame_tail_timestamps_seconds",
-        return_value=(300.92, 300.96),
-    ):
-        assert _last_decodable_frame_timestamp_seconds(video) == 300.96
 
     command = run.call_args.args[0]
     assert command[0] == "ffprobe"

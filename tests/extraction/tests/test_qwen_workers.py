@@ -21,12 +21,19 @@ from extraction.backends.qwen_workers import (
 @pytest.fixture
 def pool_factory(monkeypatch):
     def create(task_queues, result_queue, processes):
-        monkeypatch.setattr(workers, "_visible_gpu_ids", lambda count: [str(i) for i in range(count)])
-        monkeypatch.setattr(workers.mp, "get_context",
-                            lambda method: SimpleNamespace(Queue=lambda: result_queue))
-        monkeypatch.setattr(workers, "_start_worker",
-                            lambda context, index, gpu, model, result: (task_queues[index], processes[index]))
+        monkeypatch.setattr(
+            workers, "_visible_gpu_ids", lambda count: [str(i) for i in range(count)]
+        )
+        monkeypatch.setattr(
+            workers.mp, "get_context", lambda method: SimpleNamespace(Queue=lambda: result_queue)
+        )
+        monkeypatch.setattr(
+            workers,
+            "_start_worker",
+            lambda context, index, gpu, model, result: (task_queues[index], processes[index]),
+        )
         return QwenWorkerPool(len(task_queues), "model")
+
     return create
 
 
@@ -184,3 +191,62 @@ def test_pool_interrupt_terminates_then_kills_stubborn_workers(pool_factory) -> 
     assert task_queue.closed is True
     assert result_queue.cancelled is True
     assert result_queue.closed is True
+
+
+def test_pool_starts_workers_on_construction_and_closes_once(monkeypatch):
+    events = []
+    queues = []
+
+    class Queue:
+        def __init__(self):
+            self.index = len(queues)
+            queues.append(self)
+
+        def put(self, value):
+            events.append(("put", self.index, value))
+
+        def close(self):
+            events.append(("close", self.index))
+
+    class Process:
+        def __init__(self, *, target, args, daemon):
+            assert target is workers._worker_main
+            index, gpu, model, task_queue, result_queue = args
+            assert gpu == str(index + 4)
+            assert model == "model"
+            assert task_queue is queues[index + 1]
+            assert result_queue is queues[0]
+            assert daemon is True
+            self.index = index
+
+        def start(self):
+            events.append(("start", self.index))
+
+        def join(self, timeout):
+            events.append(("join", self.index, timeout))
+
+        def is_alive(self):
+            return False
+
+    def get_context(method):
+        assert method == "spawn"
+        return SimpleNamespace(Queue=Queue, Process=Process)
+
+    monkeypatch.setattr(workers, "_visible_gpu_ids", lambda count: ["4", "5"])
+    monkeypatch.setattr(workers.mp, "get_context", get_context)
+    pool = QwenWorkerPool(2, "model")
+    assert events == [("start", 0), ("start", 1)]
+    with pool:
+        pass
+    pool.close()
+    assert events == [
+        ("start", 0),
+        ("start", 1),
+        ("put", 1, None),
+        ("put", 2, None),
+        ("join", 0, 5),
+        ("join", 1, 5),
+        ("close", 1),
+        ("close", 2),
+        ("close", 0),
+    ]
