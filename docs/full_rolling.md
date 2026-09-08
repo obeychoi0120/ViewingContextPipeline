@@ -21,6 +21,8 @@
 
 ## 실행과 환경 간 전달
 
+v4의 `prepare-cohort`는 영상 파일 존재·크기·중복만 검사하고 길이는 조회하지 않습니다. `prepare-input-data`의 4개 worker가 영상별로 ffprobe → Scene 계산 → keyframe 추출을 수행하며 진행률을 표시합니다. 길이는 `data/cohort/source_assets/{content_id}/assets/video_duration.json`에 원본 경로·크기·수정 시각과 함께 저장되어 중단 후 재사용됩니다. 새 cohort의 catalog/inventory에서 `duration_seconds`는 `null`일 수 있습니다. 기존 run에 숫자 길이가 있으면 그대로 사용합니다. 전체 `media_preflight.json`은 입력 영상 추출·검증이 모두 끝난 뒤 작성하고, cohort 또는 입력 준비 재실행 시 이전 통계는 제거합니다. v3의 cohort 준비 계약은 유지합니다.
+
 README의 전체 단계 명령을 사용합니다. 현재 작업용 `run.sh`는 `--plan-only`와 title 보완을 실행하고 후속 단계는 주석으로 남겨 두었습니다. 기본 run ID는 `Full_v2_260908_zero_metadata`이며 `RUN_ID=새이름 bash run.sh`로 지정할 수 있습니다. GPU 배정과 후속 단계 실행 여부는 스크립트에서 설정합니다. SASRec은 현재 visible GPU 중 첫 장을 사용하며 조합은 순차 실행합니다.
 
 1. Ubuntu: 전체 CSV 검사·title 보완·cohort·영상 준비, Qwen Graph와 Description 추출·요약.
@@ -30,6 +32,8 @@ README의 전체 단계 명령을 사용합니다. 현재 작업용 `run.sh`는 
 양쪽에서 동일 파일을 동시에 쓰지 않습니다. 원본 cohort의 절대 영상 경로는 provenance로 보존됩니다. Windows에서 cohort를 다시 만들지 않습니다. 기존 v3 run과 다른 sampling의 결과를 v4 run에 복사하여 재사용하지 않습니다.
 
 Gemini summary가 없는 경우에만 Qwen Graph summary가 대체됩니다. 존재하는 잘못된 summary는 오류입니다. 빈 성공 장면 파일과 실패 기록은 원본 추출 결과로 남고, summary fallback이 scene 성공률을 높이지 않습니다. 원본 coverage 최소 0.95와 Arm gap 최대 0.05를 통과하지 못하면 통계 판정을 중단합니다.
+
+Qwen Graph·Description과 Gemini 추출은 기본 재실행에서 성공 장면을 보존하고 실패·미완료 장면만 재시도합니다. 장면 복구로 성공 장면 수가 바뀌면 요약 명령을 다시 실행하여 해당 정상 요약만 갱신합니다. Gemini 요약의 형식·ID·Arm 오류는 자동으로 무시하지 않습니다. 새 Gemini 요약이 7개 필드 검증에 실패하고 기존 요약 파일이 없으면 실패 기록을 남기고 임베딩 단계의 Qwen fallback으로 이어집니다. 기존 요약의 갱신 실패, 모델 실행 오류, 파일 저장 오류는 계속 단계 실패로 처리합니다. 성공한 요약은 재사용하므로 같은 명령으로 미해결 요약만 다시 시도할 수 있습니다.
 
 ## 저장과 재개
 

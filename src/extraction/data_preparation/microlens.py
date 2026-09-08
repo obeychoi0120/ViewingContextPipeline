@@ -8,6 +8,7 @@ from typing import Any
 from tqdm import tqdm
 
 from .fixed30 import prepare_visual_item
+from .media import resolve_duration
 
 
 PREPARATION_WORKERS = 4
@@ -33,12 +34,13 @@ def prepare_catalog(
         item_id = str(row.get("item_id", ""))
         content_id = str(row.get("content_id", ""))
         try:
+            duration = resolve_duration(Path(assets_root), row)
             prepared = prepare_visual_item(
                 content_id=content_id,
                 source_video_path=Path(str(row["source_video_path"])),
                 assets_root=assets_root,
                 output_root=output_root,
-                duration_seconds=row.get("duration_seconds"),
+                duration_seconds=duration,
                 image_size=image_size,
                 scene_duration=scene_duration,
                 num_keyframes=num_keyframes,

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from extraction.data_preparation.fixed30 import visual_evidence_matches
+from extraction.data_preparation.media import cached_duration, save_duration
 from extraction.data_preparation.microlens import prepare_catalog
 from extraction.evidence_reuse import (
+    SOURCE_IDENTITY_KEYS,
     copy_matching_evidence,
     donor_inventory,
     evidence_paths,
@@ -12,7 +15,8 @@ from extraction.evidence_reuse import (
 )
 from extraction.errors import ExtractionStepError
 from extraction.step_support import result, visual_rows
-from pipeline_runtime import RunContext
+from pipeline_runtime import RunContext, write_json
+from visual_sampling import build_fixed_windows
 
 
 def prepare_input_data(
@@ -32,6 +36,9 @@ def prepare_input_data(
     print("[PREPARE INPUT] Loading prepared cohort...", flush=True)
     cohort = context.require_ready_cohort()
     catalog = cohort["catalog"]
+    assets_root = context.cohort_dir / "source_assets"
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        (context.cohort_dir / "media_preflight.json").unlink(missing_ok=True)
     settings = context.config["extraction"]["visual_evidence"]
     image_size = tuple(settings["image_resolution"])
     sampling = {key: settings[key] for key in ("scene_duration", "num_keyframes")}
@@ -56,6 +63,22 @@ def prepare_input_data(
             for path in (timestamp, frames)
         ):
             raise ExtractionStepError("evidence destination must remain inside the target run")
+        duration = cached_duration(assets_root, inventory)
+        donor_row = donors.get(item["item_id"])
+        if donor is not None and donor_row is not None:
+            donor_row = dict(donor_row)
+            donor_row["duration_seconds"] = cached_duration(
+                donor.cohort_dir / "source_assets", donor_row,
+            )
+            if (
+                duration is None
+                and donor_row.get("eligible") is True
+                and donor_row["duration_seconds"] is not None
+                and all(donor_row.get(key) == inventory[key] for key in SOURCE_IDENTITY_KEYS)
+            ):
+                duration = donor_row["duration_seconds"]
+                save_duration(assets_root, inventory, duration)
+        item["duration_seconds"] = inventory["duration_seconds"] = duration
         if not force and visual_evidence_matches(
             timestamp, frames, image_size, item["duration_seconds"], **sampling,
         ):
@@ -64,13 +87,13 @@ def prepare_input_data(
             target_root=context.run_root,
             donor_root=donor.run_root,
             current=inventory,
-            donor=donors.get(item["item_id"]),
+            donor=donor_row,
             image_size=image_size,
             **sampling,
         ):
             reused_donor += 1
         else:
-            pending.append(item)
+            pending.append({**inventory, **item})
     print(
         f"[PREPARE INPUT] reused_target={reused_target} reused_donor={reused_donor} "
         f"pending={len(pending)}",
@@ -78,14 +101,15 @@ def prepare_input_data(
     )
     if pending:
         print(
-            f"[PREPARE INPUT] Extracting resized keyframes: {len(pending)} videos, "
+            f"[PREPARE INPUT] Probing durations as needed and extracting resized keyframes: "
+            f"{len(pending)} videos, "
             f"{image_size[0]}x{image_size[1]}, scene={sampling['scene_duration']}s, "
             f"up to {sampling['num_keyframes']} frames/scene...",
             flush=True,
         )
         prepared = prepare_catalog(
             pending,
-            assets_root=context.cohort_dir / "source_assets",
+            assets_root=assets_root,
             output_root=context.run_root,
             image_size=image_size,
             **sampling,
@@ -96,7 +120,8 @@ def prepare_input_data(
     else:
         (context.cohort_dir / "preparation_failures.jsonl").unlink(missing_ok=True)
     print("[PREPARE INPUT] Verifying prepared timestamps and images...", flush=True)
-    for item in catalog:
+    for item, inventory in zip(catalog, cohort["inventory"], strict=True):
+        item["duration_seconds"] = cached_duration(assets_root, inventory)
         timestamp, frames = evidence_paths(
             context.run_root, item["content_id"], sampling["scene_duration"],
         )
@@ -105,6 +130,8 @@ def prepare_input_data(
         ):
             raise ExtractionStepError(f"invalid prepared visual evidence for {item['content_id']}")
     rows = visual_rows(context)
+    if context.config["schema_version"] == "viewing-context-config/v4":
+        _write_media_preflight(context, catalog, cohort["inventory"])
     print(
         f"[EVIDENCE] reused_target={reused_target} reused_donor={reused_donor} "
         f"extracted={len(pending)}",
@@ -116,3 +143,31 @@ def prepare_input_data(
         "reused_donor": reused_donor,
         "extracted": len(pending),
     }
+
+
+def _write_media_preflight(context: RunContext, catalog: list, inventory: list) -> None:
+    sampling = context.config["extraction"]["visual_evidence"]
+    scene_count = frame_count = 0
+    for row in catalog:
+        windows = build_fixed_windows(
+            row["duration_seconds"],
+            scene_duration=sampling["scene_duration"],
+            num_keyframes=sampling["num_keyframes"],
+        )
+        scene_count += len(windows)
+        frame_count += sum(len(w["keyframe_timestamps"]) for w in windows)
+    write_json(context.cohort_dir / "media_preflight.json", {
+        "video_count": len(catalog),
+        "duration_seconds": sum(r["duration_seconds"] for r in catalog),
+        "source_bytes": sum(r["source_file_size"] for r in inventory),
+        "scene_count": scene_count,
+        "keyframe_count": frame_count,
+        "uncompressed_rgb_bytes": frame_count * math.prod(sampling["image_resolution"]) * 3,
+        "storage_note": "RGB payload estimate; PNG size and extraction outputs are additional/variable",
+        "sampling": sampling,
+    })
+    print(
+        f"[PREPARE INPUT] Media report saved: videos={len(catalog)} "
+        f"scenes={scene_count} keyframes={frame_count}",
+        flush=True,
+    )

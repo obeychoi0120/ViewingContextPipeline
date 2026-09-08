@@ -78,7 +78,9 @@ python -m extraction prepare-input-data --run-id "$RUN_ID"
 
 보완 후에도 없는 title은 `--unresolved-policy zero-vector`로 빈 필드를 유지하고 별도 기록합니다. v4의 `validation.cohort.metadata_missing_policy: zero_vector`에 따라 해당 아이템의 Metadata 입력은 1024차원 영벡터가 됩니다. 빈 문자열을 BGE에 보내지 않으며 아이템·interaction을 제거하지 않습니다. 정상 title과 Graph/Description 처리는 그대로입니다. 결측 목록은 `data/cohort/metadata_missing.json` 및 diagnosis의 `metadata_missing`에 기록됩니다.
 
-영상이나 title CSV 자체·필수 아이템 행이 없으면 여전히 준비가 중단됩니다. `preparation_failures.jsonl`의 자산을 보완한 뒤 같은 명령으로 재개합니다. `media_preflight.json`에서 전체 영상 길이·scene·keyframe 수·저장공간 추정치를 확인합니다.
+v4의 `prepare-cohort`는 영상 존재·파일 크기·중복과 Title을 검사하며, ffprobe를 실행하지 않습니다. 영상이나 title CSV 자체·필수 아이템 행이 없으면 준비가 중단됩니다. `prepare-input-data`는 영상 4개를 병렬로 처리하면서 각 영상의 길이 조회 → Scene 계산 → resized keyframe 추출을 이어서 수행하고, 영상 단위 progress bar를 표시합니다.
+
+조회한 길이는 `data/cohort/source_assets/{content_id}/assets/video_duration.json`에 바로 저장합니다. 같은 원본 경로·파일 크기·수정 시각이면 재실행 시 길이를 재사용하며, 기존 run의 inventory에 저장된 길이도 사용할 수 있습니다. 추출 실패 시 `preparation_failures.jsonl`을 확인한 뒤 같은 명령으로 재개하면 정상 keyframe과 저장된 길이는 재사용합니다. 원본 영상을 교체했다면 `prepare-cohort`로 파일 정보를 갱신해야 합니다. `prepare-input-data`가 완료되면 `data/cohort/media_preflight.json`에 전체 영상 길이·Scene·keyframe 수·저장공간 추정치를 저장합니다. v4 cohort의 `duration_seconds`는 `null`일 수 있으며, 이후 조회 결과는 catalog/inventory를 덮어쓰지 않고 별도 duration 파일에 저장됩니다.
 
 **2. Graph·Description 추출과 요약**
 
@@ -115,7 +117,7 @@ python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
 
-`embed-representations`는 Gemini Graph summary 파일이 없는 항목에 같은 항목의 Qwen Graph summary를 사용합니다. BGE 로딩 전에 대체 항목을 콘솔에 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. 존재하는 Gemini summary가 잘못됐거나 대체할 Qwen summary가 없으면 오류입니다. Gemini branch의 대체 목록과 원본 scene coverage를 함께 해석합니다. v4에서 임베딩에 사용된 요약이나 대체 목록을 바꾸려면 새 run ID가 필요합니다.
+`embed-representations`는 Gemini Graph summary 파일이 없는 항목에 같은 항목의 Qwen Graph summary를 사용합니다. BGE 로딩 전에 대체 항목을 콘솔에 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini summary가 7개 필드 검증에 실패하면 실패 기록을 남기고 `[SUMMARY FALLBACK]`을 출력한 뒤 임베딩 단계로 진행할 수 있습니다. 존재하는 Gemini summary가 잘못됐거나 대체할 Qwen summary가 없으면 오류입니다. 모델 실행·파일 저장 오류는 fallback으로 숨기지 않습니다. Gemini branch의 대체 목록과 원본 scene coverage를 함께 해석합니다. 갱신된 요약을 반영하려면 임베딩과 추천을 `--force`로 재생성합니다.
 
 ## 결과 확인 및 유의사항
 
@@ -131,7 +133,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 먼저 `diagnosis.json`의 `runtime_decision.status`가 `pass`, `statistics.status`가 `computed`인지 확인합니다. `recommendations.daily`는 날짜·seed·Arm별 사건 평균, `recommendations.means`는 seed·날짜 균등 평균입니다. HR/NDCG@4·8·10·20·30과 NDCG@10 비교 CI를 제공합니다. 빈 날짜·잘못된 분모·불완전한 결과는 실패로 기록하며 가설 판정을 중단합니다.
 
 - **중단 후 재개:** 같은 조건이면 같은 명령을 재실행합니다. 추천은 완료 기록·필수 파일·결과 형식과 사건 수가 유효한 조합을 건너뛰고, 불완전한 조합만 처음부터 학습합니다. epoch 중간 재개는 지원하지 않습니다.
-- **Gemini 실패 장면 재시도:** 현재 추출 프로세스가 끝난 뒤 같은 명령을 다시 실행합니다. 별도 옵션 없이 성공 장면은 재사용하고, 실패 장면과 아직 결과가 없는 장면만 한 번씩 호출합니다. 재시도 성공 시 해당 실패 기록을 제거하며, 실패가 남으면 진단 정보를 갱신합니다. 실행 중 같은 실패를 반복 재시도하지는 않습니다. 모델·prompt·입력·생성 설정은 기존 run과 같아야 합니다. 기존 요약이 있다면 요약 이후 단계도 재생성해야 합니다.
+- **실패 장면 재시도:** Qwen Graph·Description과 Gemini 모두 현재 추출 프로세스가 끝난 뒤 같은 명령을 다시 실행합니다. 별도 옵션 없이 성공 장면은 재사용하고, 실패 장면과 아직 결과가 없는 장면만 한 번씩 호출합니다. 재시도 성공 시 해당 실패 기록을 제거하며, 중간에 중단되어도 기존 성공과 미처리 실패 기록을 보존합니다. 실행 중 같은 실패를 반복 재시도하지는 않습니다. 모델·prompt·입력·생성 설정은 기존 run과 같아야 합니다. 장면 복구 후 요약 명령을 다시 실행하면 `scene_count`가 달라진 정상 요약만 갱신합니다. 임베딩·추천이 이미 있으면 해당 후속 단계도 재생성합니다.
 - **Gemini 빈 응답 진단:** 콘솔과 `extraction/graph/gemini/scenes/failures/{content_id}.jsonl`의 `response_diagnostics`에 `candidates[].finish_reason`, `finish_message`, `prompt_feedback`, `usage_metadata`를 기록합니다. 과거 실패에는 이 정보가 없으며, 다음 빈 응답부터 기록됩니다. `MAX_TOKENS`는 출력 한도 도달, `SAFETY`나 `prompt_feedback.block_reason`은 차단 원인을 확인하는 단서입니다. 단순히 텍스트가 비었다는 이유만으로 차단으로 분류하지 않습니다.
 - **강제 재생성:** `--force`는 해당 단계를 재실행합니다. 입력·설정·코드 변경으로 cache를 자동 무효화하지 않으므로, 영향을 받는 후속 단계도 `--force`로 재실행합니다.
 - **조건 변경:** fingerprint 생성·비교와 파일 해시 검증은 사용하지 않습니다. 기존 run도 변경된 설정으로 실행할 수 있습니다. 조건을 구분해 보존하려면 새 run ID를 사용하고, 같은 run을 사용하면 변경된 단계와 후속 산출물을 직접 재생성합니다. `experiment.json`에는 최초 설정 snapshot만 보존합니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 섞지 않습니다.

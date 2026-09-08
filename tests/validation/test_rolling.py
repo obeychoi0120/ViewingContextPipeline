@@ -118,14 +118,12 @@ def full_context(tmp_path, monkeypatch, request):
         Path(config["models"][model]).mkdir()
         (Path(config["models"][model]) / "config.json").write_text("{}")
     context = RunContext(tmp_path, "full", config, tmp_path / "artifacts" / "full")
-    from validation.cohort import build_item_inventory
-
-    monkeypatch.setattr(
-        "validation.rolling_data.build_item_inventory",
-        lambda items, path: build_item_inventory(items, path, probe=lambda _: 31.0),
-    )
     context.initialize()
-    prepare_full_cohort(context)
+    with monkeypatch.context() as guard:
+        def forbid_probe(*args, **kwargs):
+            raise AssertionError("prepare-cohort must not execute ffprobe")
+        guard.setattr("validation.cohort.subprocess.run", forbid_probe)
+        prepare_full_cohort(context)
     return context
 
 
@@ -134,8 +132,9 @@ def test_full_preparation_allows_changed_settings_without_binding(full_context):
     cohort = context.require_ready_cohort()
     assert cohort["plan"]["interaction_count"] == 72
     assert cohort["plan"]["eligible_test_count"] == 42
-    preflight = read_json(context.cohort_dir / "media_preflight.json")
-    assert preflight["scene_count"] == 8 and preflight["keyframe_count"] == 28
+    assert all(row["duration_seconds"] is None for row in cohort["catalog"])
+    assert all(row["duration_seconds"] is None for row in cohort["inventory"])
+    assert not (context.cohort_dir / "media_preflight.json").exists()
     before = read_json(context.run_root / "experiment.json")
     assert set(before) == {"schema_version", "config_snapshot"}
     assert not (context.run_root / "fingerprints").exists()
@@ -299,6 +298,168 @@ def test_invalid_gemini_summary_is_not_automatically_replaced(full_context, monk
     with pytest.raises(RuntimeError, match="incompatible structured summary"):
         summarize_graph(context, source="gemini")
     assert path.read_bytes() == before
+
+
+@pytest.fixture
+def gemini_summary_recovery(full_context, monkeypatch):
+    from pipeline_runtime import write_jsonl
+    from extraction.summary_validation import SUMMARY_SECTIONS, serialize_summary_sections
+
+    context = full_context
+    catalog = context.require_ready_cohort()["catalog"]
+    monkeypatch.setattr("extraction.steps._visual_rows", lambda _: catalog)
+    sections = dict.fromkeys(SUMMARY_SECTIONS, "Visible evidence.")
+    for item in catalog:
+        content = item["content_id"]
+        write_jsonl(context.graph_scene_dir("gemini") / f"{content}.jsonl", [
+            dict(scene_idx=0, keyframes=[5], graph={"setting_context": "room"},
+                 parse_mode="native", semantic_warnings=[]),
+        ])
+        for arm, directory in (
+            ("graph_qwen", context.graph_summary_dir("qwen")),
+            ("graph_gemini", context.graph_summary_dir("gemini")),
+            ("description", context.description_summary_dir),
+        ):
+            write_json(directory / f"{content}.json", dict(
+                schema_version="description-video-summary/v3" if arm == "description" else "graph-video-summary/v3",
+                content_id=content, arm=arm, status="complete", scene_count=1,
+                sections=sections, text=serialize_summary_sections(sections),
+            ))
+    raw_response = "\n".join(f"{name}: {sections[name]}" for name in SUMMARY_SECTIONS)
+    return context, [r["content_id"] for r in catalog], raw_response
+
+
+@pytest.mark.parametrize("valid_output", [True, False])
+def test_gemini_recovered_scenes_refresh_only_stale_valid_summary(
+    gemini_summary_recovery, monkeypatch, valid_output,
+):
+    from contextlib import contextmanager
+    from extraction.steps import summarize_graph
+    from pipeline_runtime import read_jsonl, write_jsonl
+
+    context, contents, text = gemini_summary_recovery
+    scene_path = context.graph_scene_dir("gemini") / f"{contents[0]}.jsonl"
+    rows = read_jsonl(scene_path)
+    write_jsonl(scene_path, [*rows, {**rows[0], "scene_idx": 1, "keyframes": [35]}])
+    output = context.graph_summary_dir("gemini") / f"{contents[0]}.json"
+    before = output.read_bytes()
+    protected = {cid: (context.graph_summary_dir("gemini") / f"{cid}.json").read_bytes() for cid in contents[1:]}
+    calls = []
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            calls.append([task.task_id for task in tasks])
+            for task in tasks:
+                callback(task.task_id, text if valid_output else "not labeled text")
+            return {}
+        yield generate
+
+    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
+    if valid_output:
+        assert summarize_graph(context, source="gemini")["failure_count"] == 0
+        assert read_json(output)["scene_count"] == 2
+        assert summarize_graph(context, source="gemini")["content_count"] == 4
+    else:
+        with pytest.raises(RuntimeError, match="structured summary failed"):
+            summarize_graph(context, source="gemini")
+        assert output.read_bytes() == before
+    assert calls == [[contents[0]]]
+    assert all((context.graph_summary_dir("gemini") / f"{cid}.json").read_bytes() == original for cid, original in protected.items())
+
+
+def test_missing_gemini_summary_failure_continues_to_fallback_then_recovers(
+    gemini_summary_recovery, monkeypatch,
+):
+    from contextlib import contextmanager
+    from extraction.cli import main
+    from pipeline_runtime import read_jsonl
+    from validation.steps import embed_representations
+
+    context, contents, text = gemini_summary_recovery
+    missing = context.graph_summary_dir("gemini") / f"{contents[0]}.json"
+    missing.unlink()
+    another = context.graph_summary_dir("gemini") / f"{contents[1]}.json"
+    another.unlink()
+    calls = []
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            calls.append([task.task_id for task in tasks])
+            for task in tasks:
+                callback(task.task_id, "not labeled text" if len(calls) == 1 and task.task_id == contents[0] else text)
+            return {}
+        yield generate
+
+    class Encoder:
+        def __init__(self, config):
+            pass
+
+        def encode(self, texts):
+            return np.ones((len(texts), 1024), dtype=np.float32)
+
+    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
+    monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: context)
+    monkeypatch.setattr("validation.features.BGETextEncoder", Encoder)
+    command = ["summarize-graph", "--source", "gemini", "--run-id", context.run_id]
+    assert main(command) == 0
+    assert not missing.exists() and another.exists()
+    failure = context.graph_summary_failure_dir("gemini") / f"{contents[0]}.jsonl"
+    assert read_jsonl(failure)[0]["failure_kind"] == "schema_validation"
+    embed_representations(context)
+    fallbacks = context.representations_dir / "graph_gemini_fallbacks.json"
+    assert [row["content_id"] for row in read_json(fallbacks)["fallbacks"]] == [contents[0]]
+    assert main(command) == 0
+    assert calls == [contents[:2], [contents[0]]]
+    assert missing.exists() and not failure.exists()
+    embed_representations(context)
+    assert read_json(fallbacks)["fallbacks"] == []
+
+
+@pytest.mark.parametrize("failure", ["generation", "write"])
+def test_gemini_runtime_errors_are_not_hidden_by_missing_summary_fallback(
+    gemini_summary_recovery, monkeypatch, capsys, failure,
+):
+    from contextlib import contextmanager
+    from extraction.cli import main
+
+    context, contents, text = gemini_summary_recovery
+    missing = context.graph_summary_dir("gemini") / f"{contents[0]}.json"
+    missing.unlink()
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            if failure == "generation":
+                raise RuntimeError("worker failed")
+            callback(tasks[0].task_id, text)
+            return {}
+        yield generate
+
+    def fail_write(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
+    monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: context)
+    if failure == "write":
+        monkeypatch.setattr("extraction.summary_executor.write_json", fail_write)
+    assert main(["summarize-graph", "--source", "gemini", "--run-id", context.run_id]) == 1
+    assert not missing.exists()
+    assert "[SUMMARY FALLBACK]" not in capsys.readouterr().err
+
+
+def test_gemini_empty_scenes_do_not_reuse_an_existing_summary(gemini_summary_recovery):
+    from extraction.steps import summarize_graph
+    from pipeline_runtime import write_jsonl
+
+    context, contents, _ = gemini_summary_recovery
+    output = context.graph_summary_dir("gemini") / f"{contents[0]}.json"
+    before = output.read_bytes()
+    write_jsonl(context.graph_scene_dir("gemini") / f"{contents[0]}.jsonl", [])
+    with pytest.raises(RuntimeError, match="scene_count"):
+        summarize_graph(context, source="gemini")
+    assert output.read_bytes() == before
 
 
 @pytest.mark.torch

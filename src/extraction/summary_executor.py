@@ -36,6 +36,7 @@ class SummaryBranch:
     content_id: Callable
     build_prompt: Callable
     validate: Callable
+    allow_missing: bool = False
 
 
 def _summary_failure_record(content_id, *, attempt, seed, failure_kind, error, raw_response):
@@ -187,9 +188,22 @@ def run_summary_stage(
             progress.update(1)
 
         if tasks:
+            allowed_failures = {
+                task.task_id for task in tasks
+                if branch.allow_missing and not pending[task.task_id][1].exists()
+            }
             with generator_factory(model_path=model_path, gpus=gpus) as generate:
-                generate_summaries_once(generate, tasks, complete, failed)
-    return result(branch.stage, content_count=len(documents), failure_count=empty)
+                generate_summaries_once(
+                    generate, tasks, complete, failed, allowed_failures=allowed_failures,
+                )
+        failure_count = empty + sum(bool(rows) for rows in failures_by_content.values())
+        if branch.allow_missing and failure_count:
+            write_progress(
+                progress,
+                f"[SUMMARY FALLBACK] {branch.arm}: {failure_count} missing summaries; "
+                "embed-representations will use Qwen Graph summaries",
+            )
+    return result(branch.stage, content_count=len(documents), failure_count=failure_count)
 
 
 GenerationCallback = Callable[[str, str], None]
@@ -209,10 +223,14 @@ def reuse_summary_document(
     schema_version: str,
     content_id: str,
     arm: str,
-    scene_count: int,
+    scene_count: int | None,
 ) -> dict[str, Any]:
+    """Validate the document; None checks its stored count before a refresh decision."""
     try:
         existing = read_json(output_path)
+        stored_count = existing.get("scene_count")
+        if type(stored_count) is not int or stored_count <= 0:
+            raise SummaryContractError("summary scene_count must be a positive integer")
         raw_sections = existing.get("sections")
         if not isinstance(raw_sections, dict):
             raise SummaryContractError("summary sections must be an object")
@@ -231,7 +249,7 @@ def reuse_summary_document(
         "status": "complete",
         "sections": sections,
         "text": text,
-        "scene_count": scene_count,
+        "scene_count": stored_count if scene_count is None else scene_count,
     }
     if existing != expected:
         mismatched = sorted(
@@ -251,6 +269,8 @@ def generate_summaries_once(
     tasks: list[QwenGenerationTask],
     complete: GenerationCallback,
     on_validation_failure: ValidationFailureCallback | None = None,
+    *,
+    allowed_failures: set[str] | None = None,
 ) -> None:
     last_errors: dict[str, Exception] = {}
     tasks_by_id = {task.task_id: task for task in tasks}
@@ -274,8 +294,12 @@ def generate_summaries_once(
         if task.task_id not in handled:
             handle_result(task.task_id, results[task.task_id])
 
-    if last_errors:
-        task_ids = [task.task_id for task in tasks if task.task_id in last_errors]
+    permitted = allowed_failures or set()
+    task_ids = [
+        task.task_id for task in tasks
+        if task.task_id in last_errors and task.task_id not in permitted
+    ]
+    if task_ids:
         cause = last_errors[task_ids[0]]
         raise ExtractionStepError(f"structured summary failed: task_ids={task_ids}") from cause
 
