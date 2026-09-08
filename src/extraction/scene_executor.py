@@ -75,6 +75,8 @@ def run_qwen_scenes(
     names,
     progress,
     arm,
+    existing_records,
+    existing_failures,
     source=None,
 ):
     records_by_content = {}
@@ -91,6 +93,9 @@ def run_qwen_scenes(
             rows_by_task = {row["task"].task_id: row for row in scene_rows}
             records = {}
             failures = {}
+            handled_indices = set()
+            cached_records = existing_records.get(content_id, [])
+            cached_failures = existing_failures.get(content_id, [])
             label = "graph" if arm == "graph" else "desc"
             write_progress(progress, f"[Qwen_{label}] {name} | submitted {len(scene_rows)} scenes")
 
@@ -105,9 +110,13 @@ def run_qwen_scenes(
                     records[task_id] = record
                 else:
                     failures[task_id] = failure
+                handled_indices.add(int(row["scene_idx"]))
                 _report_scene(progress, name, record, failure, arm=arm, source=source)
-                completed = list(records.values())
-                failed = list(failures.values())
+                completed = [*cached_records, *records.values()]
+                failed = [
+                    *[r for r in cached_failures if int(r["scene_idx"]) not in handled_indices],
+                    *failures.values(),
+                ]
                 write_scene_checkpoint(path, failure_path, completed, failed)
                 if len(records) + len(failures) == len(scene_rows):
                     records_by_content[content_id] = completed

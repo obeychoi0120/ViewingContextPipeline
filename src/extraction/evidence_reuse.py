@@ -14,14 +14,14 @@ from pipeline_runtime import read_jsonl
 from visual_sampling import timestamp_stem
 
 
-SOURCE_KEYS = (
+SOURCE_IDENTITY_KEYS = (
     "item_id",
     "content_id",
     "source_video_path",
     "source_file_size",
     "source_mtime_ns",
-    "duration_seconds",
 )
+SOURCE_KEYS = (*SOURCE_IDENTITY_KEYS, "duration_seconds")
 
 
 def evidence_paths(

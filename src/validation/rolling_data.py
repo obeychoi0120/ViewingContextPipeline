@@ -11,10 +11,9 @@ from pathlib import Path
 import numpy as np
 
 from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
-from validation.cohort import build_item_inventory, load_metadata_titles, load_pairs
+from validation.cohort import _positive_finite, build_item_inventory, load_metadata_titles, load_pairs
 from validation.cohort_selection import content_id_for_item, normalize_item_id
 from validation.metadata import missing_metadata_report
-from visual_sampling import build_fixed_windows
 
 DAY = 86_400_000
 SCHEMA = "microlens-full-rolling/v1"
@@ -188,8 +187,28 @@ def prepare_full_cohort(context, *, plan_only=False):
         print(f"[COHORT] Plan saved: {directory} (plan-only complete)", flush=True)
         return result
     write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
-    print(f"[COHORT] Checking {len(table.items)} videos and probing durations...", flush=True)
-    inventory, failures = build_item_inventory(set(table.items), context.path("data", "videos_dir"))
+    # A previous extraction report may describe an older source or sampling setup.
+    (directory / "media_preflight.json").unlink(missing_ok=True)
+    print(f"[COHORT] Checking {len(table.items)} video files (existence, size, duplicates)...", flush=True)
+    inventory, failures = build_item_inventory(
+        set(table.items), context.path("data", "videos_dir"), probe=None,
+    )
+    # Preserve durations from older runs without probing when the source is unchanged.
+    try:
+        previous_rows = read_jsonl(directory / "item_inventory.jsonl")
+        previous = {row["item_id"]: row for row in previous_rows}
+        if len(previous) != len(previous_rows):
+            previous = {}
+    except (OSError, KeyError, TypeError, ValueError):
+        previous = {}
+    for row in inventory:
+        old = previous.get(row["item_id"], {})
+        if (
+            row["eligible"] and old.get("eligible") is True
+            and _positive_finite(old.get("duration_seconds"))
+            and all(row[key] == old.get(key) for key in row if key != "duration_seconds")
+        ):
+            row["duration_seconds"] = old["duration_seconds"]
     print("[COHORT] Checking metadata titles...", flush=True)
     titles_path = context.path("data", "titles_csv")
     titles = load_metadata_titles(titles_path, keep_blank=True) if titles_path.is_file() else {}
@@ -200,30 +219,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         raise RuntimeError(
             f"{len(failures)} unresolved assets; see {directory / 'preparation_failures.jsonl'}"
         )
-    print("[COHORT] Estimating scenes/keyframes and saving catalog...", flush=True)
-    sampling = context.config["extraction"]["visual_evidence"]
-    scene_count = frame_count = 0
-    for row in inventory:
-        windows = build_fixed_windows(
-            row["duration_seconds"],
-            scene_duration=sampling["scene_duration"],
-            num_keyframes=sampling["num_keyframes"],
-        )
-        scene_count += len(windows)
-        frame_count += sum(len(w["keyframe_timestamps"]) for w in windows)
-    write_json(
-        directory / "media_preflight.json",
-        {
-            "video_count": len(inventory),
-            "duration_seconds": sum(r["duration_seconds"] for r in inventory),
-            "source_bytes": sum(r["source_file_size"] for r in inventory),
-            "scene_count": scene_count,
-            "keyframe_count": frame_count,
-            "uncompressed_rgb_bytes": frame_count * int(np.prod(sampling["image_resolution"])) * 3,
-            "storage_note": "RGB payload estimate; PNG size and extraction outputs are additional/variable",
-            "sampling": sampling,
-        },
-    )
+    print("[COHORT] Saving catalog; duration probing is deferred to prepare-input-data...", flush=True)
     catalog = [
         {
             key: row[key]
@@ -249,8 +245,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         },
     )
     print(
-        f"[COHORT] Ready: videos={len(catalog)} scenes={scene_count} "
-        f"keyframes={frame_count}; output={directory}",
+        f"[COHORT] Ready: videos={len(catalog)}; output={directory}",
         flush=True,
     )
     return {**result, "status": "ready"}

@@ -97,7 +97,7 @@ def probe_duration(path: Path) -> float:
 def build_item_inventory(
     referenced_items: set[str],
     videos_dir: Path,
-    probe: Callable[[Path], float] = probe_duration,
+    probe: Callable[[Path], float] | None = probe_duration,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     videos: dict[str, list[Path]] = {}
     for path in sorted(videos_dir.glob("*.mp4")):
@@ -125,9 +125,10 @@ def build_item_inventory(
                 size, mtime = stat.st_size, stat.st_mtime_ns
                 if not path.is_file() or size <= 0:
                     raise ValueError("video must be a non-empty file")
-                duration = probe(path)
-                if not _positive_finite(duration):
-                    raise ValueError("duration must be positive and finite")
+                if probe is not None:
+                    duration = probe(path)
+                    if not _positive_finite(duration):
+                        raise ValueError("duration must be positive and finite")
             except Exception as exc:
                 duration = None
                 reasons.append("invalid_video")

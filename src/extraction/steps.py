@@ -88,10 +88,14 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
                 else 1.0
             ),
         )
-        expected_scene_indices = {int(row["scene_idx"]) for row in scene_rows}
-        if model == "gemini" and not force:
+        if not force:
             existing = _minimal_graph_records(read_jsonl(path), path) if path.is_file() else []
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
+            if model == "qwen":
+                normalized = _minimal_graph_failures(failures)
+                if normalized != failures:
+                    write_failure_jsonl(failure_path, normalized)
+                failures = normalized
             expected = {int(row["scene_idx"]): row["keyframes"] for row in scene_rows}
             cached = [*existing, *failures]
             indices = [int(row["scene_idx"]) for row in cached]
@@ -117,22 +121,6 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
             elif not failures:
                 failure_path.unlink(missing_ok=True)
             continue
-        if path.is_file() and not force:
-            existing = read_jsonl(path)
-            failures = read_jsonl(failure_path) if failure_path.is_file() else []
-            normalized = _minimal_graph_failures(failures)
-            if normalized != failures:
-                write_failure_jsonl(failure_path, normalized)
-            failures = normalized
-            if not failures:
-                failure_path.unlink(missing_ok=True)
-            covered = {int(row["scene_idx"]) for row in [*existing, *failures]}
-            if covered == expected_scene_indices:
-                content_id = str(visual["content_id"])
-                existing = _minimal_graph_records(existing, path)
-                records_by_content[content_id] = existing
-                failures_by_content[content_id] = failures
-                continue
         pending.append((visual, scene_rows))
 
     return records_by_content, failures_by_content, pending
@@ -153,19 +141,28 @@ def _description_scene_work(context, visual_rows, prompt, settings, force):
                 context.config["extraction"]["description_repetition_penalty"]
             ),
         )
-        expected_scene_indices = {int(row["scene_idx"]) for row in scene_rows}
-        if path.is_file() and not force:
-            existing = read_jsonl(path)
+        if not force:
+            existing = _minimal_description_records(read_jsonl(path), path) if path.is_file() else []
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
+            expected = {int(row["scene_idx"]): row["keyframes"] for row in scene_rows}
+            cached = [*existing, *failures]
+            indices = [int(row["scene_idx"]) for row in cached]
+            if len(indices) != len(set(indices)) or any(
+                int(row["scene_idx"]) not in expected
+                or row.get("keyframes") != expected[int(row["scene_idx"])]
+                for row in cached
+            ):
+                raise ExtractionStepError(f"incompatible cached scene indices/keyframes: {path}; use --force")
+            content_id = str(visual["content_id"])
+            records_by_content[content_id] = existing
+            failures_by_content[content_id] = failures
+            successful_indices = {int(row["scene_idx"]) for row in existing}
+            pending_rows = [row for row in scene_rows if int(row["scene_idx"]) not in successful_indices]
+            if pending_rows:
+                pending.append((visual, pending_rows))
             if not failures:
                 failure_path.unlink(missing_ok=True)
-            covered = {int(row["scene_idx"]) for row in [*existing, *failures]}
-            if covered == expected_scene_indices:
-                content_id = str(visual["content_id"])
-                existing = _minimal_description_records(existing, path)
-                records_by_content[content_id] = existing
-                failures_by_content[content_id] = failures
-                continue
+            continue
         pending.append((visual, scene_rows))
 
     return records_by_content, failures_by_content, pending
@@ -228,6 +225,8 @@ def extract_graph_scenes(
                 progress=progress,
                 arm="graph",
                 source=model,
+                existing_records=records_by_content,
+                existing_failures=failures_by_content,
             )
             records_by_content.update(completed)
             failures_by_content.update(failed)
@@ -294,7 +293,7 @@ def summarize_graph(
                 reuse_summary_document(
                     output, schema_version=GRAPH_SUMMARY_SCHEMA_VERSION,
                     content_id=path.stem, arm="graph_gemini",
-                    scene_count=len(_minimal_graph_records(read_jsonl(path), path)),
+                    scene_count=None if read_jsonl(path) else 0,
                 )
     return run_summary_stage(
         SummaryBranch(
@@ -308,6 +307,7 @@ def summarize_graph(
             content_id=lambda records, path: path.stem,
             build_prompt=graph_summary_prompt,
             validate=validate_graph_summary,
+            allow_missing=(source == "gemini" and context.config["schema_version"] == "viewing-context-config/v4"),
         ),
         scene_paths=paths,
         template=template,
@@ -344,7 +344,7 @@ def extract_description_scenes(
     )
     with tqdm(
         total=len(visual_rows),
-        initial=len(records_by_content),
+        initial=len(visual_rows) - len(pending),
         desc="Description scenes",
         unit="content",
     ) as progress:
@@ -359,6 +359,8 @@ def extract_description_scenes(
                 names=names,
                 progress=progress,
                 arm="description",
+                existing_records=records_by_content,
+                existing_failures=failures_by_content,
             )
             records_by_content.update(completed)
             failures_by_content.update(failed)
