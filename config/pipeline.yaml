@@ -53,6 +53,7 @@ extraction:
 validation:
   cohort:
     mode: full_rolling
+    metadata_missing_policy: zero_vector
     user_count: 100000
     interaction_count: 719405
     item_count: 19738

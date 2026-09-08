@@ -14,6 +14,7 @@ from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
 from validation.cohort import build_item_inventory, load_metadata_titles, load_pairs
 from validation.cohort_selection import content_id_for_item, normalize_item_id
 from validation.provenance import bind_stage, file_hash
+from validation.metadata import missing_metadata_report
 from visual_sampling import build_fixed_windows
 
 DAY = 86_400_000
@@ -150,6 +151,7 @@ def prepare_full_cohort(context, *, plan_only=False):
     directory.mkdir(parents=True, exist_ok=True)
     plan = {
         "schema_version": SCHEMA,
+        "metadata_missing_policy": settings["metadata_missing_policy"],
         "run_id": context.run_id,
         **observed,
         "source_hashes": hashes,
@@ -189,7 +191,7 @@ def prepare_full_cohort(context, *, plan_only=False):
     write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
     inventory, failures = build_item_inventory(set(table.items), context.path("data", "videos_dir"))
     titles_path = context.path("data", "titles_csv")
-    titles = load_metadata_titles(titles_path) if titles_path.is_file() else {}
+    titles = load_metadata_titles(titles_path, keep_blank=True) if titles_path.is_file() else {}
     failures += [{"item_id": i, "reason": "missing_title"} for i in table.items if i not in titles]
     write_jsonl(directory / "preparation_failures.jsonl", failures)
     write_jsonl(directory / "item_inventory.jsonl", inventory)
@@ -228,9 +230,13 @@ def prepare_full_cohort(context, *, plan_only=False):
         for row in inventory
     ]
     write_jsonl(directory / "catalog.jsonl", catalog)
-    write_jsonl(
-        directory / "metadata_titles.jsonl",
-        [{**r, "title": titles[r["item_id"]]} for r in required],
+    metadata_titles = [{**r, "title": titles[r["item_id"]]} for r in required]
+    write_jsonl(directory / "metadata_titles.jsonl", metadata_titles)
+    missing_metadata = missing_metadata_report(metadata_titles)
+    write_json(directory / "metadata_missing.json", missing_metadata)
+    print(
+        f"[Metadata] zero-vector items={missing_metadata['missing_count']}: "
+        + ",".join(r["item_id"] for r in missing_metadata["items"]), flush=True,
     )
     assets = {
         "titles": file_hash(titles_path),
@@ -247,6 +253,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         "catalog.jsonl",
         "item_inventory.jsonl",
         "metadata_titles.jsonl",
+        "metadata_missing.json",
         "media_preflight.json",
     ]
     write_json(

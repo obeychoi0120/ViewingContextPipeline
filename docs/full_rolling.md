@@ -21,7 +21,7 @@
 
 ## 실행과 환경 간 전달
 
-README의 전체 단계 명령을 사용하거나 Ubuntu에서 `bash run.sh RUN_ID prepare`, `bash run.sh RUN_ID local`, `bash run.sh RUN_ID finish`로 묶어서 실행합니다. `prepare` 전에 README의 `--plan-only`와 공식 title 보완을 수행합니다. `CUDA_VISIBLE_DEVICES`와 `QWEN_GPUS`는 실행 환경 변수입니다. SASRec은 현재 visible GPU 중 첫 장을 사용하며 조합은 순차 실행합니다.
+README의 전체 단계 명령을 사용합니다. 현재 작업용 `run.sh`는 `--plan-only`와 title 보완을 실행하고 후속 단계는 주석으로 남겨 두었습니다. 기본 run ID는 `Full_v2_260908_zero_metadata`이며 `RUN_ID=새이름 bash run.sh`로 지정할 수 있습니다. GPU 배정과 후속 단계 실행 여부는 스크립트에서 설정합니다. SASRec은 현재 visible GPU 중 첫 장을 사용하며 조합은 순차 실행합니다.
 
 1. Ubuntu: 전체 CSV 검사·title 보완·cohort·영상 준비, Qwen Graph와 Description 추출·요약.
 2. Windows: 같은 run의 `experiment.json`, `fingerprints/`, `data/`, prepared keyframes를 전달하고 같은 코드 revision을 사용합니다. `artifacts_root`, 데이터/모델 경로만 해당 호스트에 맞춥니다. `conda activate llmjg` 후 README의 Gemini 명령을 실행합니다. Gemini는 원본 MP4 대신 준비된 이미지에 접근합니다.
@@ -32,6 +32,14 @@ README의 전체 단계 명령을 사용하거나 Ubuntu에서 `bash run.sh RUN_
 Gemini summary가 없는 경우에만 Qwen Graph summary가 대체됩니다. 존재하는 잘못된 summary는 오류입니다. 빈 성공 장면 파일과 실패 기록은 원본 추출 결과로 남고, summary fallback이 scene 성공률을 높이지 않습니다. 원본 coverage 최소 0.95와 Arm gap 최대 0.05를 통과하지 못하면 통계 판정을 중단합니다.
 
 ## 저장과 재개
+
+### 공백 Metadata의 영벡터 정책
+
+공식 title 보완에는 `--unresolved-policy zero-vector`를 사용합니다. 보완 가능한 항목은 정상 title로 채우고, 여전히 없는 항목은 CSV에 빈 필드로 유지합니다. 완료 보고서 v2의 `unresolved_item_ids`에 목록을 남깁니다. 옵션이 없는 독립 title 보완 도구는 기존처럼 미해결 항목을 오류로 처리합니다.
+
+v4 설정의 `validation.cohort.metadata_missing_policy: zero_vector`는 원본 title이 공백인 아이템을 catalog와 모든 interaction에 유지합니다. 정상 title만 BGE로 인코딩하고 빈 title 행은 1024차원 영벡터로 남깁니다. 다른 Arm에 영벡터를 전파하지 않습니다. `data/cohort/metadata_missing.json`에 정책·개수·아이템 ID·임베딩 행 인덱스를 기록하며, 추천 재사용 검증 및 diagnosis에서 실제 영벡터인지 검사합니다. CSV 파일 자체나 필수 아이템 행이 누락된 경우는 입력 오류로 구분합니다.
+
+영벡터는 SASRec 입력 feature에만 적용합니다. 실제 아이템 ID와 위치 정보는 유지하며, projection bias와 후속 네트워크 때문에 최종 아이템 표현까지 영벡터로 고정되는 것은 아닙니다. 기존 `Full_v1_260908`의 설정·코드 fingerprint와 다르므로 새 run ID에서 `prepare-cohort --plan-only`부터 시작합니다. 기존 산출물은 자동 변환하거나 삭제하지 않습니다.
 
 - `experiment.json`: 설정 snapshot, host 경로를 제외한 실험 fingerprint, prompt/구현 식별 정보. 코드·prompt의 CRLF/LF 차이는 정규화합니다.
 - `fingerprints/`: 원본 입력, 영상/title, 추출 모델/입력, 요약 입력, 임베딩, 추천 의존성의 SHA-256. 동일 이름의 로컬 모델 변경도 해시로 식별합니다.

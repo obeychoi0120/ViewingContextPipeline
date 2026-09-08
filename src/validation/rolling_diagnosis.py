@@ -231,6 +231,8 @@ def diagnose(context):
     try:
         cohort = context.require_ready_cohort()
         document["cohort"] = cohort["plan"]
+        from validation.metadata import verify_missing_metadata
+        document["metadata_missing"] = verify_missing_metadata(context, cohort)
         scene = _scene_coverage(
             context.run_root,
             [r["content_id"] for r in cohort["catalog"]],

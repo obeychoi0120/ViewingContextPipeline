@@ -87,6 +87,7 @@ class EvaluationConfig(StrictModel):
 
 class FullCohortConfig(StrictModel):
     mode: Literal["full_rolling"]
+    metadata_missing_policy: Literal["zero_vector"]
     user_count: int = Field(gt=0)
     interaction_count: int = Field(gt=0)
     item_count: int = Field(gt=0)

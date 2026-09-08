@@ -69,13 +69,16 @@ python -m validation.complete_titles \
   --primary "$ANNOTATIONS/MicroLens-100k_title_en.csv" \
   --supplement "$ANNOTATIONS/MicroLens-50k_titles.csv" \
   --required-items "artifacts/$RUN_ID/data/cohort/required_items.jsonl" \
-  --output "$ANNOTATIONS/MicroLens-100k_title_en_completed.csv"
+  --output "$ANNOTATIONS/MicroLens-100k_title_en_completed.csv" \
+  --unresolved-policy zero-vector
 
 python -m validation prepare-cohort --run-id "$RUN_ID"
 python -m extraction prepare-input-data --run-id "$RUN_ID"
 ```
 
-필수 영상/title이 누락되면 준비가 중단됩니다. `preparation_failures.jsonl`의 자산을 보완한 뒤 같은 명령으로 재개합니다. `media_preflight.json`에서 전체 영상 길이·scene·keyframe 수·저장공간 추정치를 확인합니다. 이번 실험의 GPU/Vertex 단계는 확정한 전체 데이터 범위로 실행합니다.
+보완 후에도 없는 title은 `--unresolved-policy zero-vector`로 빈 필드를 유지하고 별도 기록합니다. v4의 `validation.cohort.metadata_missing_policy: zero_vector`에 따라 해당 아이템의 Metadata 입력은 1024차원 영벡터가 됩니다. 빈 문자열을 BGE에 보내지 않으며 아이템·interaction을 제거하지 않습니다. 정상 title과 Graph/Description 처리는 그대로입니다. 결측 목록은 `data/cohort/metadata_missing.json` 및 diagnosis의 `metadata_missing`에 기록됩니다.
+
+영상이나 title CSV 자체·필수 아이템 행이 없으면 여전히 준비가 중단됩니다. `preparation_failures.jsonl`의 자산을 보완한 뒤 같은 명령으로 재개합니다. `media_preflight.json`에서 전체 영상 길이·scene·keyframe 수·저장공간 추정치를 확인합니다.
 
 **2. Graph·Description 추출과 요약**
 

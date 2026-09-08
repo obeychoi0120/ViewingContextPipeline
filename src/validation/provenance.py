@@ -143,6 +143,8 @@ def complete_representations(context):
 
 
 def verify_representations(context):
+    from validation.metadata import verify_missing_metadata
+    verify_missing_metadata(context, context.require_ready_cohort())
     stage = require_stage(context, "representations")
     complete = read_json(context.representations_dir / "complete.json")
     if complete.get("schema_version") != "rolling-representations/v1" or (

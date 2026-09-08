@@ -40,7 +40,7 @@ def load_pairs(path: Path) -> list[tuple[str, list[str]]]:
     return users
 
 
-def load_metadata_titles(path: Path) -> dict[str, str]:
+def load_metadata_titles(path: Path, *, keep_blank: bool = False) -> dict[str, str]:
     """Blank titles outside the required catalog do not block preparation."""
     titles: dict[str, str] = {}
     seen: set[str] = set()
@@ -66,7 +66,7 @@ def load_metadata_titles(path: Path) -> dict[str, str]:
                 )
             seen.add(item_id)
             title = raw_title.strip()
-            if title:
+            if title or keep_blank:
                 titles[item_id] = title
     return titles
 

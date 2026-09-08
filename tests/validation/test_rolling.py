@@ -89,7 +89,7 @@ def test_100k_bootstrap_arrays_are_bounded():
 
 
 @pytest.fixture
-def full_context(tmp_path, monkeypatch):
+def full_context(tmp_path, monkeypatch, request):
     config = yaml.safe_load((ROOT / "config/pipeline.yaml").read_text(encoding="utf-8"))
     config["artifacts_root"] = str(tmp_path / "artifacts")
     for key in config["data"]:
@@ -98,7 +98,10 @@ def full_context(tmp_path, monkeypatch):
     videos.mkdir()
     for item in range(1, 5):
         (videos / f"{item}.mp4").write_bytes(b"fixture video")
-    Path(config["data"]["titles_csv"]).write_text("".join(f"{i},title {i}\n" for i in range(1, 5)))
+    blank_items = getattr(request, "param", ())
+    Path(config["data"]["titles_csv"]).write_text(
+        "".join(f"{i}," + (" \n" if i in blank_items else f"title {i}\n") for i in range(1, 5))
+    )
     origin = int(datetime(2022, 9, 1, tzinfo=timezone.utc).timestamp() * 1000)
     rows = [(user, i % 4 + 1, origin + i * DAY // 2) for user in range(1, 4) for i in range(24)]
     Path(config["data"]["pairs_csv"]).write_text(
@@ -152,6 +155,58 @@ def test_cardinality_and_tampered_source_fail(full_context):
     context.config["validation"]["cohort"]["interaction_count"] = 719405
     with pytest.raises(ValueError, match="cardinality"):
         prepare_full_cohort(context, plan_only=True)
+
+
+@pytest.mark.parametrize("full_context", [[2, 4], [1, 2, 3, 4]], indirect=True)
+def test_missing_metadata_is_zero_without_encoding_empty_titles(full_context):
+    from validation.steps import _embedding_documents, _encode_representations, _write_embedding
+    from validation.metadata import verify_missing_metadata
+
+    context = full_context
+    cohort = context.require_ready_cohort()
+    assert cohort["plan"]["interaction_count"] == 72
+    assert len(cohort["catalog"]) == 4
+    documents = _embedding_documents(
+        context, cohort["catalog"], {"metadata": None}, ["metadata"], set()
+    )
+    nonempty = [row["text"] for row in documents["metadata"] if row["text"].strip()]
+    missing = [i for i, row in enumerate(documents["metadata"]) if not row["text"].strip()]
+    documents["graph_qwen"] = [{"text": "graph evidence"}] * 4
+    documents["desc"] = [{"text": "description evidence"}] * 4
+
+    class Encoder:
+        def __init__(self):
+            self.calls = []
+
+        def encode(self, texts):
+            assert all(t.strip() for t in texts)
+            self.calls.append(texts)
+            return np.array(
+                [np.full(1024, int(t.split()[-1]) if t.startswith("title ") else 7) for t in texts],
+                dtype=np.float32,
+            )
+
+    encoder = Encoder()
+    matrices = _encode_representations(
+        encoder, list(documents), documents, cohort["catalog"], validation_config(context)
+    )
+    assert encoder.calls == ([nonempty] if nonempty else []) + [
+        ["graph evidence"] * 4,
+        ["description evidence"] * 4,
+    ]
+    assert np.all(matrices["metadata"][missing] == 0)
+    for index in set(range(4)) - set(missing):
+        assert np.all(matrices["metadata"][index] == index + 1)
+    assert np.all(matrices["graph_qwen"] == 7) and np.all(matrices["desc"] == 7)
+    output = context.representations_dir / "metadata_embeddings.npz"
+    _write_embedding(output, matrices["metadata"])
+    report = verify_missing_metadata(context, cohort)
+    assert report["missing_count"] == len(missing)
+    assert [r["embedding_row"] for r in report["items"]] == missing
+    matrices["metadata"][missing[0], 0] = 1
+    _write_embedding(output, matrices["metadata"])
+    with pytest.raises(RuntimeError, match="requires a zero vector"):
+        verify_missing_metadata(context, cohort)
 
 
 def test_gemini_fallback_and_invalid_present_summary(full_context, monkeypatch):
@@ -267,6 +322,7 @@ def test_evaluation_masks_history_older_than_the_ten_item_context():
 
 
 @pytest.mark.torch
+@pytest.mark.parametrize("full_context", [[2, 4]], indirect=True)
 def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, monkeypatch):
     import torch
     from validation.model import SASRec
@@ -279,8 +335,11 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     write_json(directory / "item_index.json", {str(i): i - 1 for i in range(1, 5)})
     write_json(directory / "graph_gemini_fallbacks.json", {"fallbacks": []})
     for branch in RECOMMENDATION_ARMS.values():
+        values = np.ones((4, 1024), dtype=np.float32)
+        if branch == "metadata":
+            values[[1, 3]] = 0
         np.savez(
-            directory / f"{branch}_embeddings.npz", values=np.ones((4, 1024), dtype=np.float32)
+            directory / f"{branch}_embeddings.npz", values=values
         )
     from validation.provenance import bind_stage, complete_representations
 
@@ -369,6 +428,8 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     assert diagnose(context)["status"] == "pass"
     diagnosis = read_json(context.diagnosis_path)
     assert diagnosis["statistics"]["status"] == "computed"
+    assert diagnosis["metadata_missing"]["missing_count"] == 2
+    assert [row["item_id"] for row in diagnosis["metadata_missing"]["items"]] == ["2", "4"]
     assert diagnosis["scene_coverage"]["arms"]["graph_gemini"]["success_coverage"] == 1
     # Even if a writer updates the checksum, repeated events cannot pass validation.
     from validation.provenance import file_hash

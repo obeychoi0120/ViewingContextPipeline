@@ -100,6 +100,43 @@ def test_completion_refuses_unresolved_required_title_without_output(tmp_path) -
     assert not Path(f"{output}.report.json").exists()
 
 
+def test_zero_vector_policy_retains_unresolved_rows_and_reports_actual_supplements(tmp_path):
+    primary = tmp_path / "primary.csv"
+    supplement = tmp_path / "supplement.csv"
+    required = tmp_path / "required.jsonl"
+    output = tmp_path / "completed.csv"
+    primary.write_text("1,Original\n2, \n3, \n", encoding="utf-8")
+    supplement.write_text("item,title\n2,Filled\n3, \n", encoding="utf-8")
+    _required(required, [1, 2, 3, 4])
+    before = primary.read_bytes()
+    assert (
+        main(
+            [
+                "--primary",
+                str(primary),
+                "--supplement",
+                str(supplement),
+                "--required-items",
+                str(required),
+                "--output",
+                str(output),
+                "--unresolved-policy",
+                "zero-vector",
+            ]
+        )
+        == 0
+    )
+    assert output.read_text(encoding="utf-8") == "1,Original\n2,Filled\n3,\n4,\n"
+    assert primary.read_bytes() == before
+    report = json.loads(Path(f"{output}.report.json").read_text(encoding="utf-8"))
+    assert report["schema_version"] == "metadata-title-completion/v2"
+    assert report["unresolved_policy"] == "zero_vector"
+    assert report["supplemented_required_item_count"] == 1
+    assert report["supplemented_item_ids"] == ["2"]
+    assert report["unresolved_required_item_count"] == 2
+    assert report["unresolved_item_ids"] == ["3", "4"]
+
+
 @pytest.mark.parametrize(
     ("required_text", "message"),
     [
