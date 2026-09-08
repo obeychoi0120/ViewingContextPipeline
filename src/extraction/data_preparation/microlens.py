@@ -11,7 +11,7 @@ from .fixed30 import prepare_visual_item
 from .media import resolve_duration
 
 
-PREPARATION_WORKERS = 4
+PREPARATION_WORKERS = 8
 
 
 def prepare_catalog(
