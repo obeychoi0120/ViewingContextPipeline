@@ -126,15 +126,15 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 | `validation/diagnosis/diagnosis.json`               | 실행 완전성, Arm별 지표와 비교, 통계 경고 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/per_event_metrics.jsonl` | 사건·날짜·Arm·seed별 ranking 지표 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/training.json` | epoch 선택·refit·optimizer update·빈도 기록 |
-| `validation/recommendations/{date}/seed_{seed}/{arm}/sasrec.pt`, `complete.json` | checkpoint와 원자적 완료·해시 검증 |
+| `validation/recommendations/{date}/seed_{seed}/{arm}/sasrec.pt`, `complete.json` | checkpoint와 원자적 완료 기록 |
 
 먼저 `diagnosis.json`의 `runtime_decision.status`가 `pass`, `statistics.status`가 `computed`인지 확인합니다. `recommendations.daily`는 날짜·seed·Arm별 사건 평균, `recommendations.means`는 seed·날짜 균등 평균입니다. HR/NDCG@4·8·10·20·30과 NDCG@10 비교 CI를 제공합니다. 빈 날짜·잘못된 분모·불완전한 결과는 실패로 기록하며 가설 판정을 중단합니다.
 
-- **중단 후 재개:** 같은 조건이면 같은 명령을 재실행합니다. 추천은 완료 파일·해시가 유효한 조합을 건너뛰고, 중단되거나 손상된 조합만 처음부터 학습합니다. epoch 중간 재개는 지원하지 않습니다.
+- **중단 후 재개:** 같은 조건이면 같은 명령을 재실행합니다. 추천은 완료 기록·필수 파일·결과 형식과 사건 수가 유효한 조합을 건너뛰고, 불완전한 조합만 처음부터 학습합니다. epoch 중간 재개는 지원하지 않습니다.
 - **Gemini 실패 장면 재시도:** 현재 추출 프로세스가 끝난 뒤 같은 명령을 다시 실행합니다. 별도 옵션 없이 성공 장면은 재사용하고, 실패 장면과 아직 결과가 없는 장면만 한 번씩 호출합니다. 재시도 성공 시 해당 실패 기록을 제거하며, 실패가 남으면 진단 정보를 갱신합니다. 실행 중 같은 실패를 반복 재시도하지는 않습니다. 모델·prompt·입력·생성 설정은 기존 run과 같아야 합니다. 기존 요약이 있다면 요약 이후 단계도 재생성해야 합니다.
 - **Gemini 빈 응답 진단:** 콘솔과 `extraction/graph/gemini/scenes/failures/{content_id}.jsonl`의 `response_diagnostics`에 `candidates[].finish_reason`, `finish_message`, `prompt_feedback`, `usage_metadata`를 기록합니다. 과거 실패에는 이 정보가 없으며, 다음 빈 응답부터 기록됩니다. `MAX_TOKENS`는 출력 한도 도달, `SAFETY`나 `prompt_feedback.block_reason`은 차단 원인을 확인하는 단서입니다. 단순히 텍스트가 비었다는 이유만으로 차단으로 분류하지 않습니다.
-- **강제 재생성:** `--force`는 동일 조건에서 해당 단계를 재실행합니다. 이미 후속 단계에 사용된 추출·요약 내용이 달라지면 fingerprint가 재사용을 거부하므로 새 run ID가 필요합니다.
-- **조건 변경:** 데이터·seed·모델·prompt·protocol·sampling·구현이 달라지면 새 run ID를 사용합니다. v4는 설정 snapshot, 원본·모델·prompt와 단계 입력 fingerprint를 기록합니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 섞지 않습니다. 호스트별 경로와 GPU 배정은 실험 조건과 분리됩니다.
+- **강제 재생성:** `--force`는 해당 단계를 재실행합니다. 입력·설정·코드 변경으로 cache를 자동 무효화하지 않으므로, 영향을 받는 후속 단계도 `--force`로 재실행합니다.
+- **조건 변경:** fingerprint 생성·비교와 파일 해시 검증은 사용하지 않습니다. 기존 run도 변경된 설정으로 실행할 수 있습니다. 조건을 구분해 보존하려면 새 run ID를 사용하고, 같은 run을 사용하면 변경된 단계와 후속 산출물을 직접 재생성합니다. `experiment.json`에는 최초 설정 snapshot만 보존합니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 섞지 않습니다.
 - **검증 범위:** 테스트 통과와 실제 MicroLens 전체 실험 완료는 구분합니다. 모델의 일반적 우열이나 온라인 추천 효과는 이 PoC 결과만으로 주장할 수 없습니다.
 
 확정한 기준은 primary NDCG@10, 상대 비열등성 허용폭 5%, familywise α=0.05와 기존 Bonferroni 비교군입니다. Gemini 요약이 없을 때만 Qwen Graph 대체를 허용하고 원본 scene coverage(최소 0.95, Arm 간 gap 최대 0.05)를 별도로 보고합니다.

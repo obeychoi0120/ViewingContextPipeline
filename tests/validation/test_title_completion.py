@@ -54,8 +54,8 @@ def test_completion_fills_only_required_blank_titles_and_writes_provenance(tmp_p
     assert report["unresolved_required_item_count"] == 0
     saved = json.loads(Path(f"{output}.report.json").read_text(encoding="utf-8"))
     assert saved == report
-    assert saved["sources"]["primary"]["sha256"]
-    assert saved["output"]["sha256"]
+    assert saved["sources"]["primary"] == {"path": str(primary)}
+    assert saved["output"] == {"path": str(output), "row_count": 4}
 
 
 def test_completion_adds_required_item_missing_from_primary(tmp_path) -> None:

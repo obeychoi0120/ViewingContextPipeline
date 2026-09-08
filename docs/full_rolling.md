@@ -24,8 +24,8 @@
 README의 전체 단계 명령을 사용합니다. 현재 작업용 `run.sh`는 `--plan-only`와 title 보완을 실행하고 후속 단계는 주석으로 남겨 두었습니다. 기본 run ID는 `Full_v2_260908_zero_metadata`이며 `RUN_ID=새이름 bash run.sh`로 지정할 수 있습니다. GPU 배정과 후속 단계 실행 여부는 스크립트에서 설정합니다. SASRec은 현재 visible GPU 중 첫 장을 사용하며 조합은 순차 실행합니다.
 
 1. Ubuntu: 전체 CSV 검사·title 보완·cohort·영상 준비, Qwen Graph와 Description 추출·요약.
-2. Windows: 같은 run의 `experiment.json`, `fingerprints/`, `data/`, prepared keyframes를 전달하고 같은 코드 revision을 사용합니다. `artifacts_root`, 데이터/모델 경로만 해당 호스트에 맞춥니다. `conda activate llmjg` 후 README의 Gemini 명령을 실행합니다. Gemini는 원본 MP4 대신 준비된 이미지에 접근합니다.
-3. Ubuntu: Windows의 `extraction/graph/gemini/` 및 추가된 `fingerprints/`를 같은 run으로 전달합니다. Gemini Graph 요약 → BGE → 추천 → 진단을 실행합니다.
+2. Windows: 같은 run의 `experiment.json`, `data/`, prepared keyframes를 전달하고 같은 코드 revision을 사용합니다. `artifacts_root`, 데이터/모델 경로만 해당 호스트에 맞춥니다. `conda activate llmjg` 후 README의 Gemini 명령을 실행합니다. Gemini는 원본 MP4 대신 준비된 이미지에 접근합니다.
+3. Ubuntu: Windows의 `extraction/graph/gemini/`를 같은 run으로 전달합니다. Gemini Graph 요약 → BGE → 추천 → 진단을 실행합니다.
 
 양쪽에서 동일 파일을 동시에 쓰지 않습니다. 원본 cohort의 절대 영상 경로는 provenance로 보존됩니다. Windows에서 cohort를 다시 만들지 않습니다. 기존 v3 run과 다른 sampling의 결과를 v4 run에 복사하여 재사용하지 않습니다.
 
@@ -39,17 +39,16 @@ Gemini summary가 없는 경우에만 Qwen Graph summary가 대체됩니다. 존
 
 v4 설정의 `validation.cohort.metadata_missing_policy: zero_vector`는 원본 title이 공백인 아이템을 catalog와 모든 interaction에 유지합니다. 정상 title만 BGE로 인코딩하고 빈 title 행은 1024차원 영벡터로 남깁니다. 다른 Arm에 영벡터를 전파하지 않습니다. `data/cohort/metadata_missing.json`에 정책·개수·아이템 ID·임베딩 행 인덱스를 기록하며, 추천 재사용 검증 및 diagnosis에서 실제 영벡터인지 검사합니다. CSV 파일 자체나 필수 아이템 행이 누락된 경우는 입력 오류로 구분합니다.
 
-영벡터는 SASRec 입력 feature에만 적용합니다. 실제 아이템 ID와 위치 정보는 유지하며, projection bias와 후속 네트워크 때문에 최종 아이템 표현까지 영벡터로 고정되는 것은 아닙니다. 기존 `Full_v1_260908`의 설정·코드 fingerprint와 다르므로 새 run ID에서 `prepare-cohort --plan-only`부터 시작합니다. 기존 산출물은 자동 변환하거나 삭제하지 않습니다.
+영벡터는 SASRec 입력 feature에만 적용합니다. 실제 아이템 ID와 위치 정보는 유지하며, projection bias와 후속 네트워크 때문에 최종 아이템 표현까지 영벡터로 고정되는 것은 아닙니다. 이전 정책에서 전환하면 title 보완·cohort 준비 후 임베딩과 추천을 재생성합니다. 기존 산출물은 자동 변환하거나 삭제하지 않습니다.
 
-- `experiment.json`: 설정 snapshot, host 경로를 제외한 실험 fingerprint, prompt/구현 식별 정보. 코드·prompt의 CRLF/LF 차이는 정규화합니다.
-- `fingerprints/`: 원본 입력, 영상/title, 추출 모델/입력, 요약 입력, 임베딩, 추천 의존성의 SHA-256. 동일 이름의 로컬 모델 변경도 해시로 식별합니다.
+- `experiment.json`: 최초 설정 snapshot. 재실행 시 비교하거나 덮어쓰지 않습니다.
 - `data/cohort/events.jsonl`: 전체 사건 한 벌. `cohort_plan.json`에 7개 split 경계·원본/적격/무이력 수·범위 밖 사건 수를 저장합니다.
 - `media_preflight.json`: 영상 길이 합계·원본 byte·scene·keyframe 수·RGB payload 추정. PNG 압축률 및 모델 출력 크기는 별도이며 정확한 총 디스크 사용량 보장은 아닙니다.
 - `validation/recommendations/{date}/seed_{seed}/{arm}/`: `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`.
 
-추천은 조합마다 결과를 임시 파일에 순차 기록하고 완성 후 rename합니다. 마지막에 `complete.json`을 확정합니다. 재실행하면 모든 필수 파일의 해시가 일치하는 조합은 유지하고 중단/손상된 조합만 처음부터 실행합니다. `--force`는 동일 조건의 조합 전부를 다시 실행합니다. epoch 중간 checkpoint 재개는 없습니다.
+추천은 조합마다 결과를 임시 파일에 순차 기록하고 완성 후 rename합니다. 마지막에 `complete.json`을 확정합니다. 재실행하면 완료 기록, 비어 있지 않은 필수 파일, 학습 기록, 결과 행의 식별자·순위·사건 수·중복 여부를 검사하여 유효한 조합을 유지합니다. 이 검사는 checkpoint 내부 손상이나 형식을 유지한 값 변경을 모두 검출하지는 않습니다. 불완전한 조합만 처음부터 실행하며 `--force`는 모든 조합을 다시 실행합니다. epoch 중간 checkpoint 재개는 없습니다.
 
-설정·입력·모델·prompt·구현이 달라지면 새 run ID를 사용합니다. 후속 단계가 이미 소비한 요약/추출 내용을 바꾸어도 이전 fingerprint를 덮어쓰지 않습니다. 잘못된 자산 목록은 `preparation_failures.jsonl`에 기록하며, 준비가 완료되기 전 누락 파일 보완은 같은 run에서 가능합니다.
+fingerprint 생성·비교와 파일 해시 검증은 제거되었습니다. 기존 `fingerprints/`, `experiment.json` 및 완료 기록의 과거 해시 필드는 읽거나 비교하지 않으며 파일은 그대로 둡니다. 설정·입력·모델·prompt·코드가 변경되어도 같은 run ID를 차단하지 않습니다. 구조가 유효한 cache는 재사용하므로 변경된 단계와 후속 단계는 직접 `--force`로 재생성하거나 새 run ID를 사용합니다. 원본 수·시간 경계·영벡터·임베딩 행 매핑·유한 값·결과 완전성 검사는 유지합니다. 잘못된 자산 목록은 `preparation_failures.jsonl`에 기록합니다.
 
 ## 지표·통계와 완료 판정
 

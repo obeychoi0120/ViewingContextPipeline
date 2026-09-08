@@ -13,7 +13,7 @@ import numpy as np
 from pipeline_runtime import read_json, write_json
 from validation.metrics import metrics_from_rank
 from validation.model import pad_sequences, require_torch, save_checkpoint, seed_everything, torch
-from validation.provenance import bind_stage, file_hash, verify_representations
+from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
 from validation.recommendation_contracts import ARCHITECTURE_VERSION, RECOMMENDATION_ARMS
 from validation.rolling_data import EventTable, iter_jsonl
@@ -101,53 +101,50 @@ def combination_dir(context, date, seed, arm):
 def combination_complete(directory, identity, expected_count):
     try:
         complete = read_json(directory / "complete.json")
-        if complete.get("schema_version") != SCHEMA or complete.get("identity") != identity:
+        if complete.get("schema_version") != SCHEMA or any(
+            complete.get("identity", {}).get(key) != value for key, value in identity.items()
+        ):
             return False
         if complete.get("event_count") != expected_count:
             return False
         names = {"sasrec.pt", "training.json", "per_event_metrics.jsonl"}
-        if set(complete.get("hashes", {})) != names:
+        if not all((directory / name).is_file() and (directory / name).stat().st_size for name in names):
             return False
-        return all(
-            file_hash(directory / name) == digest for name, digest in complete["hashes"].items()
-        )
-    except (OSError, ValueError, KeyError):
+        training = read_json(directory / "training.json")
+        if training.get("schema_version") != SCHEMA or any(
+            training.get(key) != value for key, value in identity.items()
+        ):
+            return False
+        if not training.get("selection") or len(training.get("refit", [])) != training.get("best_epoch"):
+            return False
+        seen = set()
+        for row in iter_jsonl(directory / "per_event_metrics.jsonl"):
+            event = row["event_id"]
+            if (
+                row.get("schema_version") != "sasrec-per-event-metrics/v1"
+                or type(event) is not int
+                or event < 0
+                or event in seen
+                or any(row.get(key) != value for key, value in identity.items())
+                or type(row["rank"]) is not int
+                or not 1 <= row["rank"] <= training["catalog_size"]
+                or row["candidate_count"] != training["catalog_size"]
+            ):
+                return False
+            seen.add(event)
+        return len(seen) == expected_count
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return False
 
 
-def recommendation_dependencies(context, cohort):
-    verify_representations(context)
-    files = ["item_index.json", "graph_gemini_fallbacks.json"] + [
-        f"{branch}_embeddings.npz" for branch in RECOMMENDATION_ARMS.values()
-    ]
-    return bind_stage(
-        context,
-        "recommendation",
-        {
-            "cohort": cohort["eligibility"]["hashes"],
-            "representations": {n: file_hash(context.representations_dir / n) for n in files},
-        },
-    )
-
-
 def run_rolling(context, *, force=False):
-    from validation.steps import validation_config, _representations_match_catalog
+    from validation.steps import validation_config
 
     require_torch()
     config = validation_config(context)
     cohort = context.require_ready_cohort()
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
-    outputs = [
-        context.representations_dir / f"{b}_embeddings.npz" for b in RECOMMENDATION_ARMS.values()
-    ]
-    if not _representations_match_catalog(
-        context.representations_dir / "item_index.json",
-        outputs,
-        cohort["catalog"],
-        config.encoder.embedding_dim,
-    ):
-        raise RuntimeError("invalid full catalog embedding mapping or values")
-    fingerprint = recommendation_dependencies(context, cohort)
+    verify_representations(context, cohort)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     completed = skipped = 0
     for split in cohort["plan"]["splits"]:
@@ -166,7 +163,6 @@ def run_rolling(context, *, force=False):
                     "evaluation_date": date,
                     "seed": seed,
                     "arm": arm,
-                    "fingerprint": fingerprint,
                 }
                 directory = combination_dir(context, date, seed, arm)
                 if not force and combination_complete(directory, identity, len(ids["test"])):
@@ -295,10 +291,6 @@ def run_rolling(context, *, force=False):
                         "schema_version": SCHEMA,
                         "identity": identity,
                         "event_count": count,
-                        "hashes": {
-                            name: file_hash(directory / name)
-                            for name in ("sasrec.pt", "training.json", "per_event_metrics.jsonl")
-                        },
                     },
                 )
                 completed += 1

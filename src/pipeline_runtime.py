@@ -106,8 +106,12 @@ class RunContext:
     def initialize(self) -> None:
         self.run_root.mkdir(parents=True, exist_ok=True)
         if self.config["schema_version"] == "viewing-context-config/v4":
-            from validation.provenance import initialize_run
-            initialize_run(self)
+            snapshot = self.run_root / "experiment.json"
+            if not snapshot.exists():
+                write_json(snapshot, {
+                    "schema_version": "rolling-experiment/v2",
+                    "config_snapshot": self.config,
+                })
 
     def require_ready_cohort(self) -> dict[str, Any]:
         if self.config["schema_version"] == "viewing-context-config/v4":

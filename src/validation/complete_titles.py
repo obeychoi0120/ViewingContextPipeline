@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import os
 from pathlib import Path
 import sys
@@ -18,14 +17,6 @@ REPORT_SCHEMA_VERSION = "metadata-title-completion/v1"
 
 class TitleCompletionError(RuntimeError):
     pass
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _decode_supplement_title(raw: str, *, line_number: int) -> str:
@@ -193,16 +184,14 @@ def complete_required_titles(
         ),
         "policy": "required_blank_or_missing_from_official_supplement",
         "sources": {
-            "primary": {"path": str(primary_path), "sha256": _sha256(primary_path)},
-            "supplement": {"path": str(supplement_path), "sha256": _sha256(supplement_path)},
+            "primary": {"path": str(primary_path)},
+            "supplement": {"path": str(supplement_path)},
             "required_items": {
                 "path": str(required_items_path),
-                "sha256": _sha256(required_items_path),
             },
         },
         "output": {
             "path": str(output_path),
-            "sha256": _sha256(output_path),
             "row_count": len(output_order),
         },
         "primary_blank_item_count": sum(not title.strip() for title in primary.values()),

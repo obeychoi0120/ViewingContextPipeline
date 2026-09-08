@@ -327,30 +327,6 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         list(sources) if full else pending,
         {row["content_id"] for row in gemini_fallbacks},
     )
-    if full:
-        from validation.provenance import bind_stage, fingerprint, model_identity, require_stage
-        for name in ("summarize-graph-qwen", "summarize-description"):
-            require_stage(context, name)
-        if len(gemini_fallbacks) < len(catalog):
-            require_stage(context, "summarize-graph-gemini")
-        if not (context.run_root / "fingerprints" / "representations.json").exists() and any(
-                context.representations_dir.glob("*_embeddings.npz")):
-            raise ValidationStepError("unbound representation cache; use a new run ID")
-        bind_stage(context, "representations", {
-            "documents": {b: fingerprint(d) for b, d in documents_by_branch.items()},
-            "model": model_identity(context.path("models", "bge")),
-            "cohort": cohort["eligibility"]["hashes"],
-        })
-        from validation.provenance import file_hash
-        try:
-            saved_hashes = read_json(context.representations_dir / "complete.json")["hashes"]
-        except (OSError, ValueError, KeyError):
-            saved_hashes = {}
-        for branch in sources:
-            if branch not in pending:
-                output = _embedding_path(context, branch)
-                if saved_hashes.get(output.name) != file_hash(output):
-                    pending.append(branch)
     print(
         f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
         + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
@@ -364,8 +340,8 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         )
     if not pending:
         if full:
-            from validation.provenance import verify_representations
-            verify_representations(context)
+            from validation.representation_checks import verify_representations
+            verify_representations(context, cohort)
         return _result("embed-representations", content_count=len(catalog))
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)
@@ -373,8 +349,8 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     matrices = _encode_representations(encoder, pending, documents_by_branch, catalog, config)
     _persist_representations(context, matrices, catalog, gemini_fallbacks)
     if full:
-        from validation.provenance import complete_representations
-        complete_representations(context)
+        from validation.representation_checks import verify_representations
+        verify_representations(context, cohort)
     return _result("embed-representations", content_count=len(catalog))
 
 

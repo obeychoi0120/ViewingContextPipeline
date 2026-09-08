@@ -9,12 +9,12 @@ from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import RECOMMENDATION_ARMS
+from validation.representation_checks import verify_representations
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_recommendation import (
     combination_complete,
     combination_dir,
     phase_ids,
-    recommendation_dependencies,
 )
 
 MEMORY_LIMIT = 128 * 1024**2
@@ -119,7 +119,7 @@ def collect_metrics(context, config, cohort):
     ) or splits != table.splits():
         raise ValueError("full source cardinality or rolling split manifest mismatch")
     arms = list(RECOMMENDATION_ARMS)
-    fingerprint = recommendation_dependencies(context, cohort)
+    verify_representations(context, cohort)
     sums = np.zeros((len(users), len(splits), len(arms)))
     counts = np.zeros((len(users), len(splits)))
     metrics = list(metrics_from_rank(1, config.evaluation.cutoffs))
@@ -139,7 +139,6 @@ def collect_metrics(context, config, cohort):
                     "evaluation_date": split["evaluation_date"],
                     "seed": seed,
                     "arm": arm,
-                    "fingerprint": fingerprint,
                 }
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
                 if not combination_complete(directory, identity, len(ids)):

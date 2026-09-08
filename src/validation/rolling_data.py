@@ -13,7 +13,6 @@ import numpy as np
 from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
 from validation.cohort import build_item_inventory, load_metadata_titles, load_pairs
 from validation.cohort_selection import content_id_for_item, normalize_item_id
-from validation.provenance import bind_stage, file_hash
 from validation.metadata import missing_metadata_report
 from visual_sampling import build_fixed_windows
 
@@ -135,7 +134,6 @@ def prepare_full_cohort(context, *, plan_only=False):
     }
     if any(observed[key] != settings[key] for key in observed):
         raise ValueError(f"full source cardinality mismatch: {observed}")
-    hashes = {"pairs_csv": file_hash(source)}
     tsv = context.path("data", "pairs_tsv")
     if tsv.is_file():
         pairs = load_pairs(tsv)
@@ -145,8 +143,6 @@ def prepare_full_cohort(context, *, plan_only=False):
         }
         if {u: Counter(v) for u, v in pairs} != expected:
             raise ValueError("CSV/TSV user interaction multisets differ")
-        hashes["pairs_tsv"] = file_hash(tsv)
-    bind_stage(context, "source", hashes)
     directory = context.cohort_dir
     directory.mkdir(parents=True, exist_ok=True)
     plan = {
@@ -154,7 +150,6 @@ def prepare_full_cohort(context, *, plan_only=False):
         "metadata_missing_policy": settings["metadata_missing_policy"],
         "run_id": context.run_id,
         **observed,
-        "source_hashes": hashes,
         "duplicate_rows_preserved": duplicates,
         "no_history_count": int(np.count_nonzero(table.history_ends == 0)),
         "splits": table.splits(settings["evaluation_days"]),
@@ -238,31 +233,12 @@ def prepare_full_cohort(context, *, plan_only=False):
         f"[Metadata] zero-vector items={missing_metadata['missing_count']}: "
         + ",".join(r["item_id"] for r in missing_metadata["items"]), flush=True,
     )
-    assets = {
-        "titles": file_hash(titles_path),
-        "videos": [
-            {"item_id": r["item_id"], "sha256": file_hash(Path(r["source_video_path"]))}
-            for r in inventory
-        ],
-    }
-    bind_stage(context, "assets", assets)
-    names = [
-        "events.jsonl",
-        "required_items.jsonl",
-        "cohort_plan.json",
-        "catalog.jsonl",
-        "item_inventory.jsonl",
-        "metadata_titles.jsonl",
-        "metadata_missing.json",
-        "media_preflight.json",
-    ]
     write_json(
         directory / "eligibility.json",
         {
             "schema_version": SCHEMA,
             "status": "ready",
             "run_id": context.run_id,
-            "hashes": {n: file_hash(directory / n) for n in names},
         },
     )
     return {**result, "status": "ready"}
@@ -276,10 +252,7 @@ def load_cohort(directory, run_id):
         eligibility.get("run_id"),
     ) != (SCHEMA, "ready", run_id):
         raise RuntimeError("full rolling cohort is not ready")
-    for name, digest in eligibility["hashes"].items():
-        if file_hash(directory / name) != digest:
-            raise RuntimeError(f"cohort artifact changed: {name}")
-    return {
+    cohort = {
         "eligibility": eligibility,
         "plan": read_json(directory / "cohort_plan.json"),
         "catalog": read_jsonl(directory / "catalog.jsonl"),
@@ -287,3 +260,36 @@ def load_cohort(directory, run_id):
         "required_items": read_jsonl(directory / "required_items.jsonl"),
         "metadata_titles": read_jsonl(directory / "metadata_titles.jsonl"),
     }
+    from validation.steps import _metadata_titles_match_catalog
+
+    plan, catalog = cohort["plan"], cohort["catalog"]
+    expected = [{"item_id": r["item_id"], "content_id": r["content_id"]} for r in catalog]
+    if (
+        len(catalog) != plan["item_count"]
+        or len({r["item_id"] for r in catalog}) != len(catalog)
+        or cohort["required_items"] != expected
+        or not _metadata_titles_match_catalog(
+            directory / "metadata_titles.jsonl", catalog, allow_blank=True
+        )
+    ):
+        raise RuntimeError("invalid full cohort catalog or metadata mapping")
+    users, items = set(), set()
+    count = 0
+    for index, row in enumerate(iter_jsonl(directory / "events.jsonl")):
+        if (
+            type(row.get("event_id")) is not int
+            or row["event_id"] != index
+            or type(row.get("timestamp")) is not int
+            or row["timestamp"] < 0
+        ):
+            raise ValueError("invalid source event ID or timestamp")
+        users.add(row["user_id"])
+        items.add(row["item_id"])
+        count += 1
+    if (
+        count != plan["interaction_count"]
+        or len(users) != plan["user_count"]
+        or items != {r["item_id"] for r in catalog}
+    ):
+        raise RuntimeError("full cohort cardinality mismatch")
+    return cohort
