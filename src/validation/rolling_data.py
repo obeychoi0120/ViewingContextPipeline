@@ -126,6 +126,7 @@ def load_csv(path):
 def prepare_full_cohort(context, *, plan_only=False):
     settings = context.config["validation"]["cohort"]
     source = context.path("data", "pairs_csv")
+    print("[COHORT] Loading interaction CSV and checking source counts...", flush=True)
     table, duplicates = load_csv(source)
     observed = {
         "user_count": len(table.users),
@@ -136,6 +137,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         raise ValueError(f"full source cardinality mismatch: {observed}")
     tsv = context.path("data", "pairs_tsv")
     if tsv.is_file():
+        print("[COHORT] Checking CSV/TSV consistency...", flush=True)
         pairs = load_pairs(tsv)
         expected = {
             user: Counter(table.rows[i]["item_id"] for i in ids)
@@ -145,6 +147,7 @@ def prepare_full_cohort(context, *, plan_only=False):
             raise ValueError("CSV/TSV user interaction multisets differ")
     directory = context.cohort_dir
     directory.mkdir(parents=True, exist_ok=True)
+    print("[COHORT] Building rolling splits and saving the cohort plan...", flush=True)
     plan = {
         "schema_version": SCHEMA,
         "metadata_missing_policy": settings["metadata_missing_policy"],
@@ -182,9 +185,12 @@ def prepare_full_cohort(context, *, plan_only=False):
         flush=True,
     )
     if plan_only:
+        print(f"[COHORT] Plan saved: {directory} (plan-only complete)", flush=True)
         return result
     write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
+    print(f"[COHORT] Checking {len(table.items)} videos and probing durations...", flush=True)
     inventory, failures = build_item_inventory(set(table.items), context.path("data", "videos_dir"))
+    print("[COHORT] Checking metadata titles...", flush=True)
     titles_path = context.path("data", "titles_csv")
     titles = load_metadata_titles(titles_path, keep_blank=True) if titles_path.is_file() else {}
     failures += [{"item_id": i, "reason": "missing_title"} for i in table.items if i not in titles]
@@ -194,6 +200,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         raise RuntimeError(
             f"{len(failures)} unresolved assets; see {directory / 'preparation_failures.jsonl'}"
         )
+    print("[COHORT] Estimating scenes/keyframes and saving catalog...", flush=True)
     sampling = context.config["extraction"]["visual_evidence"]
     scene_count = frame_count = 0
     for row in inventory:
@@ -240,6 +247,11 @@ def prepare_full_cohort(context, *, plan_only=False):
             "status": "ready",
             "run_id": context.run_id,
         },
+    )
+    print(
+        f"[COHORT] Ready: videos={len(catalog)} scenes={scene_count} "
+        f"keyframes={frame_count}; output={directory}",
+        flush=True,
     )
     return {**result, "status": "ready"}
 
