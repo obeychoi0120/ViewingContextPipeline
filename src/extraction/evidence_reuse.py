@@ -11,6 +11,7 @@ from extraction.data_preparation.fixed30 import (
 )
 from extraction.errors import ExtractionStepError
 from pipeline_runtime import read_jsonl
+from visual_sampling import timestamp_stem
 
 
 SOURCE_KEYS = (
@@ -23,10 +24,13 @@ SOURCE_KEYS = (
 )
 
 
-def evidence_paths(run_root: Path, content_id: str) -> tuple[Path, Path]:
+def evidence_paths(
+    run_root: Path, content_id: str, scene_duration: int = 30,
+) -> tuple[Path, Path]:
     return (
-        run_root / "data/cohort/source_assets" / content_id / "assets/timestamp_fixed_30s.json",
-        run_root / "data/fixed_30s/resized_keyframes" / content_id,
+        run_root / "data/cohort/source_assets" / content_id
+        / f"assets/timestamp_fixed_{scene_duration}s.json",
+        run_root / "data" / f"fixed_{scene_duration}s" / "resized_keyframes" / content_id,
     )
 
 
@@ -59,6 +63,8 @@ def copy_matching_evidence(
     current: dict[str, Any],
     donor: dict[str, Any] | None,
     image_size: tuple[int, int],
+    scene_duration: int = 30,
+    num_keyframes: int = 6,
 ) -> bool:
     if (
         donor is None
@@ -67,12 +73,15 @@ def copy_matching_evidence(
         or not source_matches_inventory(current)
     ):
         return False
-    source_timestamp, source_frames = evidence_paths(donor_root, current["content_id"])
+    source_timestamp, source_frames = evidence_paths(
+        donor_root, current["content_id"], scene_duration,
+    )
     if not visual_evidence_matches(
-        source_timestamp, source_frames, image_size, current["duration_seconds"]
+        source_timestamp, source_frames, image_size, current["duration_seconds"],
+        scene_duration=scene_duration, num_keyframes=num_keyframes,
     ):
         return False
-    timestamp, frames = evidence_paths(target_root, current["content_id"])
+    timestamp, frames = evidence_paths(target_root, current["content_id"], scene_duration)
     root = target_root.resolve()
     if any(not path.resolve().is_relative_to(root) for path in (timestamp, frames)):
         raise ExtractionStepError("evidence destination must remain inside the target run")
@@ -90,10 +99,11 @@ def copy_matching_evidence(
             staged_frames.mkdir()
             shutil.copy2(source_timestamp, staged_timestamp)
             for value in selected_keyframe_timestamps(staged_timestamp):
-                name = f"{value:04d}.png"
+                name = f"{timestamp_stem(value)}.png"
                 shutil.copy2(source_frames / name, staged_frames / name)
             if not visual_evidence_matches(
-                staged_timestamp, staged_frames, image_size, current["duration_seconds"]
+                staged_timestamp, staged_frames, image_size, current["duration_seconds"],
+                scene_duration=scene_duration, num_keyframes=num_keyframes,
             ) or not source_matches_inventory(current):
                 return False
             if frames.exists():

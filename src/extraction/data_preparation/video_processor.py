@@ -6,6 +6,7 @@ import shutil
 import subprocess
 
 from extraction.image_validation import verified_image_size
+from visual_sampling import timestamp_stem, truncate_timestamp
 
 
 def _decodable_frame_tail_timestamps_seconds(video_path: Path) -> tuple[float, float]:
@@ -58,7 +59,7 @@ def _last_decodable_frame_timestamp_seconds(video_path: Path) -> float:
 
 def extract_resized_keyframes(
     video_path: str | Path,
-    timestamps: list[int],
+    timestamps: list[int | float],
     output_folder: str | Path,
     image_size: tuple[int, int],
 ) -> None:
@@ -72,16 +73,20 @@ def extract_resized_keyframes(
         raise ValueError(f"image_size must be positive, got {image_size!r}")
     if (
         not timestamps
+        or any(
+            type(value) not in (int, float) or not math.isfinite(value) or value < 0
+            or truncate_timestamp(value) != value
+            for value in timestamps
+        )
         or timestamps != sorted(set(timestamps))
-        or any(type(value) is not int or value < 0 for value in timestamps)
     ):
-        raise ValueError("timestamps must be sorted unique non-negative integers")
+        raise ValueError("timestamps must be sorted unique non-negative numbers at 0.1s precision")
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     try:
         for timestamp in timestamps:
-            destination = staging / f"{timestamp:04d}.png"
+            destination = staging / f"{timestamp_stem(timestamp)}.png"
             filter_graph = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
             clamp_message: str | None = None
 

@@ -8,6 +8,7 @@ from PIL import Image
 import pytest
 
 from extraction.backends.gemini_workers import GeminiWorkerPool
+from extraction.backends.gemini import GeminiEmptyResponseError
 from extraction.backends.qwen_workers import QwenGenerationTask
 
 
@@ -76,6 +77,22 @@ def test_gemini_pool_rejects_duplicate_task_ids() -> None:
         assert "unique" in str(exc)
     else:
         raise AssertionError("duplicate task ids must fail")
+
+
+def test_gemini_pool_propagates_empty_response_diagnostics() -> None:
+    diagnostics = {"candidates": [{"finish_reason": "SAFETY"}]}
+
+    class Backend:
+        def generate(self, *_args):
+            raise GeminiEmptyResponseError(diagnostics)
+
+    pool = GeminiWorkerPool(
+        1, project_id="project", location="global", model_id="gemini",
+        backend_factory=Backend,
+    )
+    outcome = pool.generate([QwenGenerationTask("blocked", (), "prompt", 32)])["blocked"]
+    assert outcome.response_diagnostics == diagnostics
+    assert "SAFETY" in outcome.error
 
 
 def test_gemini_pool_propagates_ctrl_c_without_waiting_for_http_call() -> None:

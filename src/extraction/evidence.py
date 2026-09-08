@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from visual_sampling import timestamp_stem, truncate_timestamp
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -78,7 +79,7 @@ def select_scene_image_paths(
     for timestamp in normalize_keyframe_timestamps(
         get_keyframe_timestamps(scene, timestamps, fallback_idx)
     ):
-        match = indexed.get(f"{timestamp:04d}")
+        match = indexed.get(timestamp_stem(timestamp))
         if match is not None and match not in seen:
             selected.append(match)
             seen.add(match)
@@ -127,12 +128,12 @@ def get_keyframe_timestamps(
     return []
 
 
-def normalize_keyframe_timestamps(values: list[Any]) -> list[int]:
-    normalized: list[int] = []
-    seen: set[int] = set()
+def normalize_keyframe_timestamps(values: list[Any]) -> list[int | float]:
+    normalized: list[int | float] = []
+    seen: set[int | float] = set()
     for value in values:
         try:
-            timestamp = int(round(float(value)))
+            timestamp = truncate_timestamp(value)
         except (TypeError, ValueError):
             continue
         if timestamp >= 0 and timestamp not in seen:
@@ -146,7 +147,7 @@ def _scene_boundary(
     timeline: list[dict[str, Any]],
     fallback_idx: int,
     key: str,
-    fallback: int,
+    fallback: int | float,
 ) -> int | float:
     value = scene.get(key)
     if value is None and 0 <= fallback_idx < len(timeline):
@@ -160,7 +161,7 @@ def _scene_boundary(
 
 def image_path_for_timestamp(paths: list[Path], timestamp: Any) -> Path | None:
     try:
-        name = f"{int(round(float(timestamp))):04d}"
+        name = timestamp_stem(timestamp)
     except (TypeError, ValueError):
         return None
     return next((path for path in paths if path.stem == name), None)

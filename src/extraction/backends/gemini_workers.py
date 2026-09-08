@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import queue
 import threading
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from extraction.backends.base import VLMBackend
-from extraction.backends.gemini import GeminiBackend
+from extraction.backends.gemini import GeminiBackend, GeminiEmptyResponseError
 from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.evidence import load_images
 
@@ -16,6 +16,7 @@ class GeminiGenerationOutcome:
     task_id: str
     text: str
     error: str | None = None
+    response_diagnostics: dict[str, Any] | None = None
 
 
 class GeminiWorkerPool:
@@ -137,6 +138,7 @@ class GeminiWorkerPool:
                     task.task_id,
                     "",
                     f"{type(exc).__name__}: {exc}",
+                    exc.diagnostics if isinstance(exc, GeminiEmptyResponseError) else None,
                 )
             result_queue.put(outcome)
 

@@ -16,7 +16,7 @@ import validation.steps as validation_steps
 from validation.cohort import prepare_cohort
 from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.summary_validation import SUMMARY_SECTIONS, parse_summary_sections
-from pipeline_runtime import ConfigError, RunContext, read_jsonl, write_json, write_jsonl
+from pipeline_runtime import ConfigError, RunContext, read_json, read_jsonl, write_json, write_jsonl
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +79,9 @@ def context(tmp_path: Path) -> RunContext:
 
 
 def test_config_contract_remains_fixed(context: RunContext) -> None:
+    assert context.config["protocol"]["sampling"] == "fixed_windows"
+    assert context.config["extraction"]["visual_evidence"]["scene_duration"] == 30
+    assert context.config["extraction"]["visual_evidence"]["num_keyframes"] == 6
     assert context.config["schema_version"] == "viewing-context-config/v3"
     assert context.config["protocol"]["cohort_sampling"] == "user_first_nested_stratified"
     assert context.config["protocol"]["catalog_scope"] == "selected_user_sequence_union"
@@ -184,6 +187,23 @@ def test_summary_prompts_require_bounded_single_line_values(
     assert "Stop immediately after the semantic_topics line." in prompt
     for name in SUMMARY_SECTIONS:
         assert f"{name}: <one complete sentence or empty>" in prompt
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("scene_duration", 0), ("scene_duration", -1), ("scene_duration", True),
+        ("scene_duration", 2.5), ("scene_duration", "30"),
+        ("num_keyframes", 0), ("num_keyframes", -1), ("num_keyframes", True),
+        ("num_keyframes", 6.5), ("num_keyframes", "6"), ("num_keyframes", 301),
+    ],
+)
+def test_config_rejects_invalid_visual_sampling(context, key, value):
+    config = context.config
+    config["extraction"]["visual_evidence"][key] = value
+    (context.root / "config/pipeline.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    with pytest.raises(ConfigError, match="visual_evidence"):
+        RunContext.load("invalid-sampling", root=context.root)
 
 
 def test_config_rejects_non_boolean_greedy_decoding(context: RunContext) -> None:
@@ -698,6 +718,160 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
 
     assert result["failure_count"] == 0
     assert not failure_path.exists()
+
+
+@pytest.fixture()
+def gemini_retry_case(context, monkeypatch):
+    from extraction.backends import GeminiGenerationOutcome
+
+    visuals = [{"content_id": name} for name in ("c1", "c2", "c3")]
+    monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _: visuals)
+    monkeypatch.setattr(extraction_steps, "_video_name_map", lambda _: {})
+
+    def scene_rows(visual, **_kwargs):
+        content_id = visual["content_id"]
+        return [
+            {
+                "task": QwenGenerationTask(f"{content_id}:{index}", (), "prompt", 32),
+                "scene_idx": index, "keyframes": [index * 30 + 5],
+            }
+            for index in range(4 if content_id == "c1" else 1)
+        ]
+
+    monkeypatch.setattr(extraction_steps, "_scene_generation_rows", scene_rows)
+    graph = {
+        "setting_context": "indoor", "entities": [], "events": [],
+        "static_relations": [], "semantic_topics": [],
+        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+    }
+    successful = {
+        "scene_idx": 0, "keyframes": [5], "graph": graph,
+        "parse_mode": "native", "semantic_warnings": [],
+    }
+    for name in ("c1", "c2"):
+        write_jsonl(context.graph_scene_dir("gemini") / f"{name}.jsonl", [successful])
+    failures = [
+        {
+            "scene_idx": index, "keyframes": [index * 30 + 5],
+            "failure_kind": "generation", "error": "old empty response", "raw_response": "",
+        }
+        for index in (1, 2)
+    ]
+    failure_path = context.graph_failure_dir("gemini") / "c1.jsonl"
+    write_jsonl(failure_path, failures)
+    diagnostics = {"candidates": [{"finish_reason": "SAFETY", "finish_message": "blocked"}]}
+    outcomes = {
+        "c1:1": GeminiGenerationOutcome("c1:1", json.dumps(graph)),
+        "c1:2": GeminiGenerationOutcome("c1:2", "", "empty: SAFETY", diagnostics),
+        "c1:3": GeminiGenerationOutcome("c1:3", json.dumps(graph)),
+        "c3:0": GeminiGenerationOutcome("c3:0", json.dumps(graph)),
+    }
+    calls = []
+
+    class Pool:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, tasks, callback):
+            calls.append([task.task_id for task in tasks])
+            for task in reversed(tasks):
+                callback(outcomes[task.task_id])
+
+    monkeypatch.setattr(extraction_steps, "GeminiWorkerPool", Pool)
+    return successful, failure_path, outcomes, calls, diagnostics
+
+
+def test_gemini_default_resumes_failed_and_missing_scenes_preserving_successes(
+    context, gemini_retry_case, capsys,
+):
+    from extraction.backends import GeminiGenerationOutcome
+
+    successful, failure_path, outcomes, calls, diagnostics = gemini_retry_case
+    c2 = context.graph_scene_dir("gemini") / "c2.jsonl"
+    c2_bytes = c2.read_bytes()
+    result = extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert result["failure_count"] == 1
+    assert calls == [["c1:1", "c1:2", "c1:3", "c3:0"]]
+    rows = read_jsonl(context.graph_scene_dir("gemini") / "c1.jsonl")
+    assert [row["scene_idx"] for row in rows] == [0, 1, 3]
+    assert rows[0] == successful
+    assert c2.read_bytes() == c2_bytes
+    assert (context.graph_scene_dir("gemini") / "c3.jsonl").exists()
+    remaining = read_jsonl(failure_path)
+    assert len(remaining) == 1 and remaining[0]["scene_idx"] == 2
+    assert remaining[0]["response_diagnostics"] == diagnostics
+    assert "SAFETY" in capsys.readouterr().err
+    # Normal cache normalization must retain the new diagnostic fields.
+    assert extraction_steps._minimal_graph_failures(remaining, failure_path) == remaining
+
+    outcomes["c1:2"] = GeminiGenerationOutcome("c1:2", json.dumps(successful["graph"]))
+    result = extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert result["failure_count"] == 0
+    assert calls[-1] == ["c1:2"]
+    assert not failure_path.exists()
+    rows = read_jsonl(context.graph_scene_dir("gemini") / "c1.jsonl")
+    assert [row["scene_idx"] for row in rows] == [0, 1, 2, 3]
+    extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert len(calls) == 2  # No failures left: no additional API calls.
+
+
+@pytest.mark.parametrize("mismatch", ["keyframes", "unknown_index", "overlap"])
+def test_gemini_retry_rejects_incompatible_cache_before_calls(
+    context, gemini_retry_case, mismatch,
+):
+    _, failure_path, _, calls, _ = gemini_retry_case
+    failures = read_jsonl(failure_path)
+    if mismatch == "keyframes":
+        failures[0]["keyframes"] = [999]
+    elif mismatch == "unknown_index":
+        failures[0]["scene_idx"] = 99
+    else:
+        failures[0]["scene_idx"] = 0
+        failures[0]["keyframes"] = [5]
+    write_jsonl(failure_path, failures)
+    before = failure_path.read_bytes()
+    with pytest.raises(RuntimeError, match="incompatible cached"):
+        extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert calls == []
+    assert failure_path.read_bytes() == before
+
+
+def test_gemini_force_regenerates_all_and_default_retries_persistent_failure(
+    context, gemini_retry_case,
+):
+    from extraction.backends import GeminiGenerationOutcome
+
+    successful, failure_path, outcomes, calls, diagnostics = gemini_retry_case
+    for task_id in ("c1:0", "c1:3", "c2:0", "c3:0"):
+        outcomes[task_id] = GeminiGenerationOutcome(task_id, json.dumps(successful["graph"]))
+    result = extraction_steps.extract_graph_scenes(context, model="gemini", force=True)
+    assert calls == [["c1:0", "c1:1", "c1:2", "c1:3", "c2:0", "c3:0"]]
+    assert result["failure_count"] == 1
+    assert read_jsonl(failure_path)[0]["response_diagnostics"] == diagnostics
+    before = failure_path.read_bytes()
+    result = extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert result["failure_count"] == 1
+    assert failure_path.read_bytes() == before
+    assert len(calls) == 2
+    assert calls[-1] == ["c1:2"]
+
+
+def test_gemini_retry_interrupt_preserves_existing_checkpoint(context, gemini_retry_case, monkeypatch):
+    _, failure_path, _, _, _ = gemini_retry_case
+    scene_path = context.graph_scene_dir("gemini") / "c1.jsonl"
+    before = (scene_path.read_bytes(), failure_path.read_bytes())
+
+    class InterruptedPool:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def generate(self, *_args):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(extraction_steps, "GeminiWorkerPool", InterruptedPool)
+    with pytest.raises(KeyboardInterrupt):
+        extraction_steps.extract_graph_scenes(context, model="gemini")
+    assert (scene_path.read_bytes(), failure_path.read_bytes()) == before
 
 
 def test_description_failure_force_retry_and_cache_reuse(
@@ -1216,6 +1390,178 @@ def test_missing_summary_error_names_the_actual_path(context: RunContext) -> Non
     ) as raised:
         validation_steps.embed_representations(context)
     assert str(expected) in str(raised.value)
+
+
+@pytest.fixture()
+def embedding_fallback_case(context, monkeypatch, capsys):
+    catalog = [{"item_id": str(index), "content_id": f"c{index}"} for index in (1, 2)]
+    monkeypatch.setattr(RunContext, "require_ready_cohort", lambda _: {"catalog": catalog})
+    write_jsonl(
+        context.cohort_dir / "metadata_titles.jsonl",
+        [{**row, "title": f"title {row['item_id']}"} for row in catalog],
+    )
+    for row in catalog:
+        content_id = row["content_id"]
+        write_json(
+            context.graph_summary_dir("qwen") / f"{content_id}.json",
+            {"content_id": content_id, "text": f"qwen {content_id}"},
+        )
+        write_json(
+            context.description_summary_dir / f"{content_id}.json",
+            {"content_id": content_id, "text": f"description {content_id}"},
+        )
+    write_json(
+        context.graph_summary_dir("gemini") / "c2.json",
+        {"content_id": "c2", "text": "gemini c2"},
+    )
+    before_load = []
+    encoded = []
+    dimension = validation_steps.validation_config(context).encoder.embedding_dim
+
+    class Encoder:
+        def __init__(self, _settings):
+            before_load.append(capsys.readouterr().out)
+
+        def encode(self, texts):
+            encoded.append(list(texts))
+            return np.ones((len(texts), dimension), dtype=np.float32)
+
+    monkeypatch.setattr(validation_features, "BGETextEncoder", Encoder)
+    return encoded, before_load
+
+
+def test_embedding_falls_back_only_for_missing_gemini_and_reports_before_load(
+    context, embedding_fallback_case,
+):
+    encoded, before_load = embedding_fallback_case
+    qwen_path = context.graph_summary_dir("qwen") / "c1.json"
+    before = qwen_path.read_bytes()
+    validation_steps.embed_representations(context)
+    assert encoded == [
+        ["title 1", "title 2"], ["qwen c1", "qwen c2"],
+        ["qwen c1", "gemini c2"], ["description c1", "description c2"],
+    ]
+    assert "graph_gemini -> graph_qwen: 1 items" in before_load[0]
+    assert "item_id=1 | content_id=c1" in before_load[0]
+    assert "item_id=2" not in before_load[0]
+    assert qwen_path.read_bytes() == before
+    assert not (context.graph_summary_dir("gemini") / "c1.json").exists()
+    assert read_json(context.representations_dir / "graph_gemini_fallbacks.json") == {
+        "fallbacks": [{
+            "item_id": "1", "content_id": "c1", "source": "graph_qwen",
+            "summary_path": "extraction/graph/qwen/summaries/c1.json",
+        }],
+    }
+
+
+def test_embedding_falls_back_when_entire_gemini_summary_directory_is_missing(
+    context, embedding_fallback_case,
+):
+    encoded, before_load = embedding_fallback_case
+    (context.graph_summary_dir("gemini") / "c2.json").unlink()
+    context.graph_summary_dir("gemini").rmdir()
+    validation_steps.embed_representations(context)
+    assert encoded[2] == ["qwen c1", "qwen c2"]
+    assert "graph_gemini -> graph_qwen: 2 items" in before_load[0]
+    assert "item_id=2 | content_id=c2" in before_load[0]
+
+
+@pytest.mark.parametrize("contents", [
+    "not json", '{"content_id":"c1","text":" "}', '{"content_id":"wrong","text":"ok"}',
+])
+def test_embedding_does_not_hide_invalid_existing_gemini_summary(
+    context, embedding_fallback_case, contents,
+):
+    encoded, before_load = embedding_fallback_case
+    (context.graph_summary_dir("gemini") / "c1.json").write_text(contents, encoding="utf-8")
+    with pytest.raises((ValueError, validation_steps.ValidationStepError)):
+        validation_steps.embed_representations(context)
+    assert encoded == before_load == []
+    assert not (context.representations_dir / "graph_gemini_fallbacks.json").exists()
+
+
+def test_embedding_fallback_still_requires_qwen_summary_when_qwen_embeddings_are_cached(
+    context, embedding_fallback_case,
+):
+    encoded, before_load = embedding_fallback_case
+    validation_steps.embed_representations(context)
+    fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
+    before = fallback_path.read_bytes()
+    qwen_path = context.graph_summary_dir("qwen") / "c1.json"
+    qwen_path.unlink()
+    (context.representations_dir / "graph_gemini_embeddings.npz").unlink()
+    with pytest.raises(validation_steps.ValidationStepError, match="graph_qwen fallback summary") as err:
+        validation_steps.embed_representations(context)
+    assert str(qwen_path) in str(err.value)
+    assert len(encoded) == 4 and len(before_load) == 1
+    assert fallback_path.read_bytes() == before
+
+
+def test_embedding_cache_tracks_fallback_changes_and_prints_cached_list(
+    context, embedding_fallback_case, capsys,
+):
+    encoded, before_load = embedding_fallback_case
+    validation_steps.embed_representations(context)
+    stable = {
+        branch: (context.representations_dir / f"{branch}_embeddings.npz").read_bytes()
+        for branch in ("metadata", "graph_qwen", "desc")
+    }
+    validation_steps.embed_representations(context)
+    output = capsys.readouterr().out
+    assert "cached embeddings" in output and "item_id=1 | content_id=c1" in output
+    assert len(before_load) == 1
+
+    gemini_path = context.graph_summary_dir("gemini") / "c1.json"
+    write_json(gemini_path, {"content_id": "c1", "text": "gemini c1"})
+    validation_steps.embed_representations(context)
+    assert len(encoded) == 5 and encoded[-1] == ["gemini c1", "gemini c2"]
+    assert read_json(context.representations_dir / "graph_gemini_fallbacks.json") == {"fallbacks": []}
+    gemini_path.unlink()
+    validation_steps.embed_representations(context)
+    assert len(encoded) == 6 and encoded[-1] == ["qwen c1", "gemini c2"]
+    for branch, contents in stable.items():
+        assert (context.representations_dir / f"{branch}_embeddings.npz").read_bytes() == contents
+
+
+@pytest.mark.parametrize("sidecar", [None, "broken json"])
+def test_embedding_does_not_reuse_untracked_fallback_cache(
+    context, embedding_fallback_case, sidecar,
+):
+    encoded, _ = embedding_fallback_case
+    validation_steps.embed_representations(context)
+    fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
+    if sidecar is None:
+        fallback_path.unlink()
+    else:
+        fallback_path.write_text(sidecar, encoding="utf-8")
+    validation_steps.embed_representations(context)
+    assert len(encoded) == 5 and encoded[-1] == ["qwen c1", "gemini c2"]
+    assert read_json(fallback_path)["fallbacks"][0]["content_id"] == "c1"
+
+
+def test_embedding_failure_preserves_previous_fallback_record_and_matrix(
+    context, embedding_fallback_case, monkeypatch,
+):
+    validation_steps.embed_representations(context)
+    fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
+    embedding_path = context.representations_dir / "graph_gemini_embeddings.npz"
+    before = (fallback_path.read_bytes(), embedding_path.read_bytes())
+    write_json(
+        context.graph_summary_dir("gemini") / "c1.json",
+        {"content_id": "c1", "text": "gemini c1"},
+    )
+
+    class FailingEncoder:
+        def __init__(self, _settings):
+            pass
+
+        def encode(self, _texts):
+            raise RuntimeError("encoding failed")
+
+    monkeypatch.setattr(validation_features, "BGETextEncoder", FailingEncoder)
+    with pytest.raises(RuntimeError, match="encoding failed"):
+        validation_steps.embed_representations(context)
+    assert (fallback_path.read_bytes(), embedding_path.read_bytes()) == before
 
 
 def test_diagnosis_recomputes_runtime_data_and_overwrites_stale_pass(

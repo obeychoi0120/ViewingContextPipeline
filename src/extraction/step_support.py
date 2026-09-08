@@ -161,6 +161,7 @@ def minimal_graph_failures(
                 "failure_kind",
                 "error",
                 "raw_response",
+                "response_diagnostics",
             )
             if key in row
         }
@@ -173,6 +174,7 @@ def minimal_graph_failures(
 
 def visual_rows(context: RunContext) -> list[dict[str, Any]]:
     cohort = context.require_ready_cohort()
+    scene_duration = context.config["extraction"]["visual_evidence"]["scene_duration"]
     rows: list[dict[str, Any]] = []
     for item in cohort["catalog"]:
         content_id = str(item["content_id"])
@@ -182,7 +184,7 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
             / "source_assets"
             / content_id
             / "assets"
-            / "timestamp_fixed_30s.json"
+            / f"timestamp_fixed_{scene_duration}s.json"
         )
         frames = (
             sorted(

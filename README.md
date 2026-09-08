@@ -13,7 +13,7 @@
 | Graph Gemini         | Graph 기반 video summary       | Gemini 3.7 Flash |
 | Description          | Description 기반 video summary | Qwen3-VL-2B      |
 
-영상은 30초 구간마다 최대 3장의 keyframe으로 처리하고, Graph/Description을 Qwen으로 요약합니다. 모든 Arm은 frozen BGE embedding을 사용하며, 같은 사용자·item ID sequence·split·catalog와 동일한 SASRec 구조로 각각 학습합니다. **비교 대상은 각 ID에 연결되는 item representation**이며, 별도 ID embedding을 더하지 않습니다.
+영상은 기본 30초 구간마다 최대 6장의 keyframe으로 처리하고, Graph/Description을 Qwen으로 요약합니다. 모든 Arm은 frozen BGE embedding을 사용하며, 같은 사용자·item ID sequence·split·catalog와 동일한 SASRec 구조로 각각 학습합니다. **비교 대상은 각 ID에 연결되는 item representation**이며, 별도 ID embedding을 더하지 않습니다.
 
 기본 규모는 **사용자 1,000명**입니다. 각 사용자의 마지막 두 interaction을 validation/test로 사용하는 leave-two-out 방식이며, full-catalog ranking의 후보는 선정 사용자들의 보존된 train·valid·test item 합집합입니다.
 
@@ -41,7 +41,12 @@ python -m pip install -e ".[qwen,gemini,train,dev]"
 | `data.titles_csv`                     | 아래에서 생성할`MicroLens-100k_title_en_completed.csv` 경로 |
 | `models.qwen`, `models.bge`         | 로컬 checkpoint 디렉터리                                      |
 | `models.gemini`                       | Vertex project ID, location, model ID                         |
+| `extraction.visual_evidence`          | `scene_duration`: Scene 길이(초), `num_keyframes`: 완전한 Scene의 장수, `image_resolution`: 이미지 크기 |
 | `validation.cohort`                   | 사용자 수와 sampling seed. 기본값은 1,000명, seed 42          |
+
+`protocol.sampling: fixed_windows`는 `scene_duration / num_keyframes` 길이의 구간별 중앙점을 추출합니다. 기본값 `scene_duration: 30`, `num_keyframes: 6`은 Scene 시작 기준 `[2.5, 7.5, 12.5, 17.5, 22.5, 27.5]`초입니다. 마지막 짧은 Scene은 같은 구간 간격을 유지하고 마지막 구간만 실제 영상 끝에서 잘라 중앙점을 구합니다(방식 A). 예를 들어 12초가 남으면 `[2.5, 7.5, 11]`초를 사용합니다. 영상 길이를 정수 초로 올리지 않습니다.
+
+추출 시각은 영상 전체 기준이며 소수점 둘째 자리부터 버립니다(`1.666… → 1.6`). JSON과 추출 요청에 같은 시각을 사용하고, 이미지는 `data/fixed_{scene_duration}s/resized_keyframes/{content_id}/0002_5.png`, 정수 초는 `0005.png` 형식으로 저장합니다. Scene 정보는 `data/cohort/source_assets/{content_id}/assets/timestamp_fixed_{scene_duration}s.json`에 저장합니다. 두 설정은 양의 정수이며, 0.1초 정밀도에서 구분할 수 있도록 `num_keyframes <= scene_duration × 10`이어야 합니다. 마지막 짧은 구간에서 버림 후 같은 시각이 생기면 한 번만 추출합니다. Graph Qwen·Graph Gemini·Description은 같은 이미지 목록을 사용합니다.
 
 ## 실행 방법
 
@@ -107,6 +112,8 @@ python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
 
+`embed-representations`는 Gemini Graph summary 파일이 없는 항목에 같은 항목의 Qwen Graph summary를 사용합니다. BGE 로딩 전에 대체 항목의 `item_id`, `content_id`, summary 경로를 콘솔에 출력하고, 사용한 목록은 `representations/graph_gemini_fallbacks.json`에 저장합니다. 원본 summary 파일은 변경하지 않습니다. Gemini summary가 존재하지만 잘못됐거나 대체할 Qwen summary도 없으면 오류로 처리합니다. 대체 목록이 바뀌면 Gemini 임베딩을 재생성합니다. 이때 Gemini branch는 Qwen 대체가 포함된 결과이므로 모델별 비교 시 대체 목록을 함께 확인해야 합니다. 이미 추천을 실행했다면 `run-recommendation --force` 후 diagnosis를 다시 실행합니다.
+
 ## 결과 확인 및 유의사항
 
 결과는 `artifacts/{run_id}/`에 저장됩니다.
@@ -121,8 +128,10 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 먼저 `diagnosis.json`의 `runtime_decision.status`가 `pass`인지 확인하고, `statistical_analysis`의 상태·경고를 읽습니다. NDCG@K는 정답의 순위, HR@K는 상위 K개 내 정답 포함 여부를 평가합니다. Top-20 catalog coverage와 top-1 concentration은 추천의 분산·쏠림을 보여줍니다. `computed_with_warnings`는 경고 내용을 확인한 뒤 비교별 해석 가능 여부를 판단해야 합니다.
 
 - **중단 후 재개:** 같은 조건이면 같은 명령을 재실행합니다. 완료된 artifact는 재사용됩니다.
+- **Gemini 실패 장면 재시도:** 현재 추출 프로세스가 끝난 뒤 같은 명령을 다시 실행합니다. 별도 옵션 없이 성공 장면은 재사용하고, 실패 장면과 아직 결과가 없는 장면만 한 번씩 호출합니다. 재시도 성공 시 해당 실패 기록을 제거하며, 실패가 남으면 진단 정보를 갱신합니다. 실행 중 같은 실패를 반복 재시도하지는 않습니다. 모델·prompt·입력·생성 설정은 기존 run과 같아야 합니다. 기존 요약이 있다면 요약 이후 단계도 재생성해야 합니다.
+- **Gemini 빈 응답 진단:** 콘솔과 `extraction/graph/gemini/scenes/failures/{content_id}.jsonl`의 `response_diagnostics`에 `candidates[].finish_reason`, `finish_message`, `prompt_feedback`, `usage_metadata`를 기록합니다. 과거 실패에는 이 정보가 없으며, 다음 빈 응답부터 기록됩니다. `MAX_TOKENS`는 출력 한도 도달, `SAFETY`나 `prompt_feedback.block_reason`은 차단 원인을 확인하는 단서입니다. 단순히 텍스트가 비었다는 이유만으로 차단으로 분류하지 않습니다.
 - **강제 재생성:** `--force`는 해당 단계에만 적용됩니다. 추출을 다시 했다면 요약 → embedding → 추천도 각각 재생성하고 diagnosis를 다시 실행합니다.
-- **조건 변경:** 데이터·사용자 수·seed·모델·prompt·protocol을 바꾸면 새 run ID를 사용합니다. 기존 cache는 입력 변경을 자동 검증하지 않습니다.
+- **조건 변경:** 데이터·사용자 수·seed·모델·prompt·protocol·`scene_duration`·`num_keyframes`를 바꾸면 새 run ID를 사용합니다. 이미지 재사용은 현재 sampling 시각·Scene 구간·크기를 검증하지만, 기존 추출·요약·embedding·추천 cache는 입력 변경을 자동 검증하지 않습니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 같은 run에 섞지 않습니다.
 - **검증 범위:** 테스트 통과와 실제 MicroLens 전체 실험 완료는 구분합니다. 모델의 일반적 우열이나 온라인 추천 효과는 이 PoC 결과만으로 주장할 수 없습니다.
 
 > **[직접 결정 필요]** Pilot 결과 해석 전 scene coverage 기준(0.95), Arm 간 coverage gap(0.05), partial summary 허용 여부, primary NDCG@10, non-inferiority margin(0.05), comparison family·다중비교 정책을 승인해야 합니다. 현재 값은 provisional 설정입니다.

@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from artifact_io import atomic_write_json, atomic_write_jsonl
+from visual_sampling import validate_sampling
 
 
 CONFIG_PATH = Path("config/pipeline.yaml")
@@ -119,7 +120,8 @@ class RunContext:
 
     @property
     def evidence_dir(self) -> Path:
-        return self.run_root / "data" / "fixed_30s"
+        duration = self.config["extraction"]["visual_evidence"]["scene_duration"]
+        return self.run_root / "data" / f"fixed_{duration}s"
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.run_root / "extraction" / "graph" / source / "scenes"
@@ -192,7 +194,7 @@ def _validate_config(value: dict[str, Any]) -> None:
     expected = {
         "dataset": "microlens_100k",
         "modality": "visual_only",
-        "sampling": "fixed_30s",
+        "sampling": "fixed_windows",
         "cohort_sampling": "user_first_nested_stratified",
         "catalog_scope": "selected_user_sequence_union",
         "graph_extractors": ["qwen", "gemini"],
@@ -233,8 +235,15 @@ def _validate_config(value: dict[str, Any]) -> None:
         ):
             raise ConfigError(f"extraction.{key} must be in [1, 2]")
     visual_evidence = _require_mapping(extraction, "visual_evidence")
-    if set(visual_evidence) != {"image_resolution"}:
-        raise ConfigError("extraction.visual_evidence must contain image_resolution")
+    if set(visual_evidence) != {"image_resolution", "scene_duration", "num_keyframes"}:
+        raise ConfigError(
+            "extraction.visual_evidence must contain image_resolution, scene_duration, "
+            "and num_keyframes"
+        )
+    try:
+        validate_sampling(visual_evidence["scene_duration"], visual_evidence["num_keyframes"])
+    except ValueError as exc:
+        raise ConfigError(f"extraction.visual_evidence: {exc}") from exc
     resolution = visual_evidence.get("image_resolution")
     if (
         not isinstance(resolution, list)

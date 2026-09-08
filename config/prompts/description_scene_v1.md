@@ -1,4 +1,4 @@
-Describe one fixed-30s scene represented by one to three chronological keyframes.
+Describe one scene represented by chronological keyframes.
 Write a comprehensive, self-contained single paragraph using only facts directly visible in at least one keyframe. 
 Describe the visible setting, entities, objects, actions, events, spatial relationships, changes across keyframes, and notable visual details. 
 You may describe affect only as visible expression, posture, interaction, or action tone.
