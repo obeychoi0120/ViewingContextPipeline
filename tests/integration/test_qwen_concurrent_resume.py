@@ -39,6 +39,7 @@ def test_scene_progress_advances_before_video_finishes(context, monkeypatch, arm
     @contextmanager
     def generator(**kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             assert bars[-1].bar.total == 3
             for index, task_id in enumerate(("a:0", "b:0", "a:1")):
                 good = json.dumps({"setting_context": "indoor", "entities": [], "events": [], "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}}) if arm == "graph" else "A person indoors."
@@ -108,6 +109,7 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
         runtime.engine_ready({"worker_index": 0, "gpu_id": "0", "backend": "vllm"})
 
         def generate(tasks, callback):
+            tasks = list(tasks)
             assert [task.task_id for task in tasks] == (["a:1", "b:0"] if attempt == 0 else ["a:1"])
             for task in reversed(tasks):
                 if attempt == 0 and task.task_id == "a:1" and failure == "oom":
@@ -177,6 +179,7 @@ def test_summary_provenance_and_resume_after_interruption(context, monkeypatch, 
         runtime.engine_ready({"worker_index": 0, "gpu_id": "0", "backend": "vllm"})
 
         def generate(tasks, callback):
+            tasks = list(tasks)
             submissions.append([task.task_id for task in tasks])
             for task in reversed(tasks):
                 if len(submissions) == 1 and task.task_id == "a":

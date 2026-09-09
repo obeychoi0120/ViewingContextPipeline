@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+from itertools import chain
 import hashlib
 import json
 import math
@@ -75,10 +76,12 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
         if rounds_across_batches:
             log(f"[RECOVERY] scene pass={attempt_index + 1}/{len(penalties)} "
                 f"repetition_penalty={penalties[attempt_index]}")
-        for offset in range(0, len(tasks), batch_size):
-            batch = tasks[offset:offset + batch_size]
-            log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
-                "(input hashes and checkpoints)")
+        submission_size = (len(tasks) or 1) if rounds_across_batches else batch_size
+        for offset in range(0, len(tasks), submission_size):
+            batch = tasks[offset:offset + submission_size]
+            if not rounds_across_batches:
+                log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
+                    "(input hashes and checkpoints)")
             remaining.extend(_generate_recovery_batch(
                 generate, batch, penalties=penalties, directory=directory, identity=identity,
                 validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
@@ -99,7 +102,10 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
     """Only validation failures retry. Callbacks and engine errors propagate unchanged."""
     penalties = penalty_schedule(penalties)
     states = {}
-    for task in tasks:
+    streaming = attempt_index is not None
+    remaining = []
+
+    def prepare(task):
         if task.task_id in states:
             raise ValueError(f"duplicate recovery task: {task.task_id}")
         images = [file_fingerprint(path) for path in task.image_paths]
@@ -121,6 +127,10 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             if force_run_id:
                 cycles[-1]["force_run_id"] = force_run_id
         states[task.task_id] = (task, path, document, cycles[-1])
+
+    if not streaming:
+        for task in tasks:
+            prepare(task)
 
     done = set()
 
@@ -147,19 +157,43 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
     for task_id in states:
         commit(task_id)
 
-    while len(done) < len(states):
-        index = min(len(state[3]["attempts"]) for key, state in states.items() if key not in done)
+    while streaming or len(done) < len(states):
+        index = attempt_index if streaming else min(
+            len(state[3]["attempts"]) for key, state in states.items() if key not in done)
         if index >= len(penalties):
             raise ValueError("recovery checkpoint exceeds configured generation budget")
-        if attempt_index is not None and index > attempt_index:
-            break  # Resume later attempts only after the rest of this scene pass finishes.
-        batch = [replace(state[0], repetition_penalty=penalties[index])
-                 for key, state in states.items()
-                 if key not in done and len(state[3]["attempts"]) == index]
-        log(f"[RETRY] attempt={index + 1}/{len(penalties)} "
-            f"repetition_penalty={penalties[index]} pending={len(batch)}")
         handled = set()
-        batch_ids = {task.task_id for task in batch}
+        batch_ids = set()
+
+        def admit():
+            for task in tasks:
+                prepare(task)
+                commit(task.task_id)
+                count = len(states[task.task_id][3]["attempts"])
+                if task.task_id in done:
+                    del states[task.task_id]
+                elif count == index:
+                    batch_ids.add(task.task_id)
+                    yield replace(task, repetition_penalty=penalties[index])
+                else:
+                    if count >= len(penalties) or count < index:
+                        raise ValueError("recovery checkpoint has an invalid generation budget")
+                    remaining.append(task)
+                    del states[task.task_id]
+
+        if streaming:
+            iterator = admit()
+            first = next(iterator, None)
+            if first is None:
+                break
+            batch = chain((first,), iterator)
+        else:
+            batch = [replace(state[0], repetition_penalty=penalties[index])
+                     for key, state in states.items()
+                     if key not in done and len(state[3]["attempts"]) == index]
+            batch_ids = {task.task_id for task in batch}
+            log(f"[RETRY] attempt={index + 1}/{len(penalties)} "
+                f"repetition_penalty={penalties[index]} pending={len(batch)}")
 
         def handle(task_id, text):
             if task_id not in batch_ids:
@@ -198,11 +232,18 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             # A response is durable before publishing it; replay never needs another generation.
             _save(path, document)
             commit(task_id, live=True)
+            if streaming:
+                if task_id not in done:
+                    remaining.append(task)
+                del states[task_id]
 
         returned = generate(batch, handle)
-        for task in batch:
-            if task.task_id not in handled:
-                if task.task_id not in returned:
-                    raise RuntimeError(f"missing generation result: {task.task_id}")
-                handle(task.task_id, returned[task.task_id])
+        for task_id in batch_ids - handled:
+            if task_id not in returned:
+                raise RuntimeError(f"missing generation result: {task_id}")
+            handle(task_id, returned[task_id])
+        if streaming:
+            break
+    if streaming:
+        return remaining
     return [state[0] for key, state in states.items() if key not in done]
