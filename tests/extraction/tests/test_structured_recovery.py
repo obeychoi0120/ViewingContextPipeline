@@ -183,18 +183,21 @@ def test_middle_penalty_succeeds_and_stops_retrying(tmp_path):
 def test_scene_pass_finishes_all_batches_before_increasing_penalty(tmp_path):
     seen = []
     def generate(batch, _):
+        batch = list(batch)
         seen.append([(t.task_id, t.repetition_penalty) for t in batch])
         return {t.task_id: "valid" if t.task_id == "b" or t.repetition_penalty > 1 else "bad"
                 for t in batch}
     outputs, failures = run(tmp_path, generate, [task(n) for n in "abcd"],
                             batch_size=2, rounds_across_batches=True)
     assert not failures and len(outputs) == 4
-    assert seen == [[("a", 1), ("b", 1)], [("c", 1), ("d", 1)],
-                    [("a", 1.05), ("c", 1.05)], [("d", 1.05)]]
+    assert seen[0] == [("a", 1), ("b", 1), ("c", 1), ("d", 1)]
+    assert len(seen) == 2
+    assert set(seen[1]) == {("a", 1.05), ("c", 1.05), ("d", 1.05)}
 
 
 def test_scene_pass_resume_finishes_unstarted_scenes_before_retry(tmp_path):
     def interrupted(batch, callback):
+        next(iter(batch))
         callback("a", "bad")
         raise KeyboardInterrupt
     with pytest.raises(KeyboardInterrupt):
@@ -202,11 +205,36 @@ def test_scene_pass_resume_finishes_unstarted_scenes_before_retry(tmp_path):
             batch_size=1, rounds_across_batches=True)
     seen = []
     def generate(batch, _):
+        batch = list(batch)
         seen.extend((t.task_id, t.repetition_penalty) for t in batch)
         return {t.task_id: "valid" for t in batch}
     run(tmp_path, generate, [task("a"), task("b")],
         batch_size=1, rounds_across_batches=True)
     assert seen == [("b", 1), ("a", 1.05)]
+
+
+def test_scene_stream_prepares_only_admitted_tasks_and_refills_before_completion(tmp_path, monkeypatch):
+    import extraction.recovery as recovery
+    hashed = []
+    monkeypatch.setattr(recovery, "file_fingerprint", lambda path: (hashed.append(path) or "fixture"))
+    tasks = [replace(task(str(i)), image_paths=(str(i),)) for i in range(1000)]
+    calls = []
+    def generate(stream, callback):
+        calls.append(True)
+        assert hashed == ["0"]
+        assert not list(tmp_path.glob("*.json"))
+        iterator = iter(stream)
+        first, second, third = next(iterator), next(iterator), next(iterator)
+        assert hashed == ["0", "1", "2"]
+        callback(second.task_id, "valid")
+        fourth = next(iterator)  # The first scene is still running.
+        for item in (first, third, fourth):
+            callback(item.task_id, "valid")
+        for item in iterator:
+            callback(item.task_id, "valid")
+        return {}
+    outputs, failures = run(tmp_path, generate, tasks, rounds_across_batches=True)
+    assert len(calls) == 1 and len(outputs) == 1000 and not failures
 
 
 def test_graph_repair_never_invents_required_fields():

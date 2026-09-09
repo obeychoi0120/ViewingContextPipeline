@@ -41,6 +41,7 @@ def test_qwen_graph_raw_then_grammar_summary_and_content_refresh(context, monkey
     @contextmanager
     def graph_generator(**_):
         def generate(tasks, callback):
+            tasks = list(tasks)
             calls.append(tasks[0].repetition_penalty)
             assert "json" in tasks[0].structured_output
             callback(tasks[0].task_id, "Raw visible observations")
@@ -65,6 +66,7 @@ def test_qwen_graph_raw_then_grammar_summary_and_content_refresh(context, monkey
     @contextmanager
     def summary_generator(**_):
         def generate(tasks, callback):
+            tasks = list(tasks)
             summary_calls.append(tasks[0])
             assert "grammar" in tasks[0].structured_output
             assert "Raw scene observation" in tasks[0].prompt
@@ -95,6 +97,7 @@ def test_raw_summary_is_explicit_and_empty_summary_stays_failed(context, monkeyp
     @contextmanager
     def generator(**_):
         def generate(tasks, callback):
+            tasks = list(tasks)
             calls.append(tasks[0].repetition_penalty)
             return {"c1": "incomplete text" if len(calls) == 1 else ""}
         yield generate
@@ -191,6 +194,7 @@ def test_mixed_scene_summary_and_recovery_diagnosis(context, monkeypatch):
     @contextmanager
     def generator(**_):
         def generate(tasks, callback):
+            tasks = list(tasks)
             assert tasks[0].prompt.index("Scene 0") < tasks[0].prompt.index("Scene 2")
             assert "raw observation" in tasks[0].prompt and "indoor" in tasks[0].prompt
             return {"c1": "```\n" + summary() + "\n```"}
@@ -248,6 +252,7 @@ def test_force_interrupted_before_first_response_resumes_instead_of_reusing_old_
     @contextmanager
     def generator(**_):
         def generate(tasks, callback):
+            tasks = list(tasks)
             calls.append([t.task_id for t in tasks])
             if interrupted:
                 raise RuntimeError("worker failed before response")
