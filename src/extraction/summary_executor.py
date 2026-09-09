@@ -5,11 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from extraction.backends import QwenBackend
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import DescriptionError
 from extraction.errors import ExtractionStepError
-from extraction.evidence import load_images
 from extraction.semantic_graph import SemanticGraphError
 from extraction.summary_validation import (
     SUMMARY_SECTIONS,
@@ -120,6 +118,9 @@ def run_summary_stage(
     names,
     generator_factory,
     progress_factory,
+    qwen_options=None,
+    image_limit=6,
+    runtime=None,
 ):
     documents, pending, tasks, incompatible, empty = _prepare_summaries(
         branch,
@@ -147,6 +148,10 @@ def run_summary_stage(
         )
         for reason in incompatible.values():
             write_progress(progress, f"[SUMMARY RETRY] {reason}")
+        if runtime:
+            unknown = sum(runtime.classification(task_id, document) == "legacy_unknown"
+                          for task_id, document in documents.items())
+            write_progress(progress, f"[Qwen] reused={len(documents)} legacy_unknown={unknown} pending={len(tasks)}")
 
         def complete(task_id, text):
             records, output_path = pending[task_id]
@@ -163,6 +168,8 @@ def run_summary_stage(
             write_json(output_path, document)
             (branch.failure_dir / f"{task_id}.jsonl").unlink(missing_ok=True)
             documents[task_id] = document
+            if runtime:
+                runtime.record(task_id, document)
             progress.update(1)
 
         def failed(task_id, attempt, seed, raw_response, error):
@@ -178,6 +185,8 @@ def run_summary_stage(
                 )
             )
             write_jsonl(branch.failure_dir / f"{task_id}.jsonl", failures)
+            if runtime:
+                runtime.record(task_id, failures[-1], status="failed")
             message = " ".join(str(error).splitlines())
             write_progress(
                 progress,
@@ -192,7 +201,12 @@ def run_summary_stage(
                 task.task_id for task in tasks
                 if branch.allow_missing and not pending[task.task_id][1].exists()
             }
-            with generator_factory(model_path=model_path, gpus=gpus) as generate:
+            with generator_factory(
+                model_path=model_path, gpus=gpus, settings=qwen_options,
+                image_limit=image_limit, runtime=runtime,
+                log=lambda message: write_progress(progress, message),
+                on_progress=lambda stats: qwen_progress(progress, stats),
+            ) as generate:
                 generate_summaries_once(
                     generate, tasks, complete, failed, allowed_failures=allowed_failures,
                 )
@@ -304,39 +318,37 @@ def generate_summaries_once(
         raise ExtractionStepError(f"structured summary failed: task_ids={task_ids}") from cause
 
 
+def qwen_progress(progress, stats):
+    write_progress(progress, f"[Qwen] completed={stats['completed']} inflight={stats['inflight']} "
+                             f"requests/s={stats['requests_per_second']:.2f} "
+                             f"output_tokens/s={stats['output_tokens_per_second']:.1f} "
+                             f"gpu_inflight={stats['gpu_inflight']}")
+
+
 @contextmanager
 def qwen_generator(
-    *,
-    model_path: Path,
-    gpus: int | None,
+    *, model_path: Path, gpus: int | None, settings=None, image_limit=6,
+    runtime=None, log=None, on_progress=None,
 ) -> Iterator[GenerationFunction]:
-    if gpus is not None:
-        with QwenWorkerPool(gpus, str(model_path)) as worker_pool:
-            yield worker_pool.generate
-        return
-    backend = QwenBackend.from_pretrained(str(model_path), use_fc_patch=True)
+    def ready(event):
+        if runtime:
+            runtime.engine_ready(event)
+        if log:
+            log(f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | "
+                f"settings={event['settings']}")
 
-    def generate(
-        tasks: list[QwenGenerationTask],
-        on_task_complete: GenerationCallback | None = None,
-    ) -> dict[str, str]:
-        results: dict[str, str] = {}
-        for task in tasks:
-            text = backend.generate(
-                load_images(list(task.image_paths)),
-                task.prompt,
-                task.max_new_tokens,
-                do_sample=task.do_sample,
-                seed=task.seed,
-                temperature=task.temperature,
-                top_p=task.top_p,
-                top_k=task.top_k,
-                repetition_penalty=task.repetition_penalty,
-            )
-            if on_task_complete is not None:
-                on_task_complete(task.task_id, text)
-            else:
-                results[task.task_id] = text
-        return results
-
-    yield generate
+    with QwenWorkerPool(
+        1 if gpus is None else gpus, str(model_path), settings=settings,
+        image_limit=image_limit, on_runtime=ready, on_progress=on_progress,
+    ) as pool:
+        def generate(tasks, on_task_complete=None):
+            def complete(task_id, text):
+                if runtime:
+                    runtime.current_result = pool.last_result
+                try:
+                    on_task_complete(task_id, text)
+                finally:
+                    if runtime:
+                        runtime.current_result = None
+            return pool.generate(tasks, complete if on_task_complete else None)
+        yield generate

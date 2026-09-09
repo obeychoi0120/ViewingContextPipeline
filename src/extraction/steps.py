@@ -14,6 +14,7 @@ from extraction.descriptions import (
 )
 from extraction.errors import ExtractionStepError
 from extraction.preparation import prepare_input_data
+from extraction.qwen_runtime import QwenRuntimeLog
 from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
 from extraction.semantic_graph import (
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
@@ -213,7 +214,7 @@ def extract_graph_scenes(
                 f"[Gemini] processing {sum(len(rows) for _, rows in pending)} failed or "
                 f"missing scenes across {len(pending)} contents; successful scenes are reused",
             )
-        if pending and model == "qwen":
+        if model == "qwen":
             completed, failed = run_qwen_scenes(
                 pending,
                 scene_dir=scene_dir,
@@ -227,6 +228,9 @@ def extract_graph_scenes(
                 source=model,
                 existing_records=records_by_content,
                 existing_failures=failures_by_content,
+                qwen_options=context.config["extraction"].get("qwen"),
+                image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
+                runtime=QwenRuntimeLog(context.run_root, stage),
             )
             records_by_content.update(completed)
             failures_by_content.update(failed)
@@ -319,6 +323,9 @@ def summarize_graph(
         names=names,
         generator_factory=qwen_generator,
         progress_factory=tqdm,
+        qwen_options=context.config["extraction"].get("qwen"),
+        image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
+        runtime=QwenRuntimeLog(context.run_root, stage),
     )
 
 
@@ -348,22 +355,24 @@ def extract_description_scenes(
         desc="Description scenes",
         unit="content",
     ) as progress:
-        if pending:
-            completed, failed = run_qwen_scenes(
-                pending,
-                scene_dir=context.description_scene_dir,
-                failure_dir=context.description_failure_dir,
-                model_path=model_path,
-                gpus=gpus,
-                generator_factory=qwen_generator,
-                names=names,
-                progress=progress,
-                arm="description",
-                existing_records=records_by_content,
-                existing_failures=failures_by_content,
-            )
-            records_by_content.update(completed)
-            failures_by_content.update(failed)
+        completed, failed = run_qwen_scenes(
+            pending,
+            scene_dir=context.description_scene_dir,
+            failure_dir=context.description_failure_dir,
+            model_path=model_path,
+            gpus=gpus,
+            generator_factory=qwen_generator,
+            names=names,
+            progress=progress,
+            arm="description",
+            existing_records=records_by_content,
+            existing_failures=failures_by_content,
+            qwen_options=context.config["extraction"].get("qwen"),
+            image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
+            runtime=QwenRuntimeLog(context.run_root, "extract-description-scenes"),
+        )
+        records_by_content.update(completed)
+        failures_by_content.update(failed)
     failures = [
         record
         for visual in visual_rows
@@ -426,6 +435,9 @@ def summarize_description(
         names=names,
         generator_factory=qwen_generator,
         progress_factory=tqdm,
+        qwen_options=context.config["extraction"].get("qwen"),
+        image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
+        runtime=QwenRuntimeLog(context.run_root, "summarize-description"),
     )
 
 

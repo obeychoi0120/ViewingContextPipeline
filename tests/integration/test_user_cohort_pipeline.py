@@ -150,6 +150,7 @@ def test_reuse_copies_only_required_verified_evidence_and_leaves_donor_unchanged
     }
     for row in cohort["catalog"]:
         target_stamp, target_frames = evidence_paths(context.run_root, row["content_id"])
+        assert target_frames == context.run_root / "data/resized_keyframes" / row["content_id"]
         source_stamp, source_frames = evidence_paths(donor.run_root, row["content_id"])
         assert target_stamp.read_bytes() == source_stamp.read_bytes()
         assert _snapshot(target_frames) == _snapshot(source_frames)
@@ -256,6 +257,7 @@ def test_changed_sampling_rejects_old_target_and_donor_evidence(context, extract
         stamp, frames = evidence_paths(
             changed.run_root, item["content_id"], sampling["scene_duration"],
         )
+        assert frames == changed.run_root / "data/resized_keyframes" / item["content_id"]
         expected = build_fixed_windows(
             item["duration_seconds"], scene_duration=sampling["scene_duration"],
             num_keyframes=sampling["num_keyframes"],

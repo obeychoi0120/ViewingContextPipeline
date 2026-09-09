@@ -130,8 +130,7 @@ class RunContext:
 
     @property
     def evidence_dir(self) -> Path:
-        duration = self.config["extraction"]["visual_evidence"]["scene_duration"]
-        return self.run_root / "data" / f"fixed_{duration}s"
+        return self.run_root / "data"
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.run_root / "extraction" / "graph" / source / "scenes"
@@ -229,8 +228,14 @@ def _validate_protocol(value: dict[str, Any]) -> None:
 
 
 def _validate_extraction(value: dict[str, Any]) -> None:
+    from extraction.qwen_config import qwen_settings
+
     extraction = _require_mapping(value, "extraction")
-    if set(extraction) != {
+    try:
+        qwen_settings(extraction.get("qwen"))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    if set(extraction) - {"qwen"} != {
         "greedy_decoding",
         "visual_evidence",
         "graph_repetition_penalty",

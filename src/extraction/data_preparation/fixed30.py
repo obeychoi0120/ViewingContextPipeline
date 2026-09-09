@@ -28,13 +28,7 @@ def prepare_visual_item(
     item_root = Path(assets_root) / content_id
     item_assets = item_root / "assets"
     timestamp_path = item_assets / f"timestamp_fixed_{scene_duration}s.json"
-    frames_dir = (
-        Path(output_root)
-        / "data"
-        / f"fixed_{scene_duration}s"
-        / "resized_keyframes"
-        / content_id
-    )
+    frames_dir = Path(output_root) / "data" / "resized_keyframes" / content_id
     legacy_metadata_path = (
         Path(output_root) / "data" / "cohort" / "metadata" / f"{content_id}.json"
     )

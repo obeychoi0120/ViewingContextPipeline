@@ -30,7 +30,7 @@ def evidence_paths(
     return (
         run_root / "data/cohort/source_assets" / content_id
         / f"assets/timestamp_fixed_{scene_duration}s.json",
-        run_root / "data" / f"fixed_{scene_duration}s" / "resized_keyframes" / content_id,
+        run_root / "data" / "resized_keyframes" / content_id,
     )
 
 
