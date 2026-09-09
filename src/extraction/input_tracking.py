@@ -12,7 +12,9 @@ def marker(path):
 
 
 def mark_changed(path):
-    atomic_write_json(marker(path), {"changed": True}, durable=True)
+    changed = marker(path)
+    if not changed.exists():
+        atomic_write_json(changed, {"changed": True}, durable=True)
 
 
 def clear_changed(path):
@@ -44,5 +46,7 @@ def record_inputs(path, records):
 
 
 def invalidate_inputs(path):
-    atomic_write_json(input_state_path(path).with_suffix(".dirty"),
-                      {"changed": True}, durable=True)
+    dirty = input_state_path(path).with_suffix(".dirty")
+    # Missing summaries already require generation; one marker covers all scene changes.
+    if path.exists() and not dirty.exists():
+        atomic_write_json(dirty, {"changed": True}, durable=True)

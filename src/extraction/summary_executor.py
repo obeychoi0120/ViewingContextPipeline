@@ -19,7 +19,8 @@ from extraction.summary_validation import (
 )
 from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
 from extraction.step_support import result, write_progress
-from extraction.recovery import generate_with_recovery, has_pending_recovery
+from extraction.recovery import active_force_run, generate_with_recovery, has_pending_recovery
+from extraction.qwen_config import qwen_settings
 from extraction.structured_output import OutputValidationError
 from extraction.raw_output import RAW_SUMMARY_SCHEMA, raw_summary_document
 from extraction.input_tracking import inputs_match, record_inputs, mark_changed, invalidate_inputs
@@ -56,6 +57,7 @@ def _summary_failure_record(content_id, *, attempt, seed, failure_kind, error, r
 
 
 def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation, force):
+    force_run_id = active_force_run(branch.summary_dir / ".recovery")
     documents = {}
     pending = {}
     tasks = []
@@ -87,7 +89,7 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
         output_path = branch.summary_dir / f"{task_id}.json"
         if output_path.is_file() and not force:
             try:
-                if has_pending_recovery(branch.summary_dir / ".recovery", task_id):
+                if has_pending_recovery(branch.summary_dir / ".recovery", task_id, force_run_id):
                     raise ExtractionStepError(f"summary has an unfinished recovery: {output_path}")
                 if not inputs_match(output_path, records):
                     raise ExtractionStepError(f"summary scene input changed: {output_path}")
@@ -103,8 +105,6 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
             else:
                 failure_path.unlink(missing_ok=True)
                 continue
-        # Keep a failed regeneration pending even when a previous output is preserved.
-        invalidate_inputs(output_path)
         tasks.append(
             QwenGenerationTask(
                 task_id=task_id,
@@ -239,6 +239,7 @@ def run_summary_stage(
                     raw_fallback=lambda task_id, raw: raw_summary_document(
                         task_id, branch.arm, len(pending[task_id][0]), raw),
                     force=force, runtime=runtime,
+                    batch_size=4 * (gpus or 1) * qwen_settings(qwen_options)["max_num_seqs"],
                     log=lambda message: write_progress(progress, message),
                 )
             failed_ids = [key for key, rows in failures_by_content.items()
@@ -383,6 +384,8 @@ def qwen_generator(
         def generate(tasks, on_task_complete=None):
             nonlocal pool
             if pool is None:
+                if log:
+                    log("[Qwen] starting vLLM GPU workers")
                 pool = resources.enter_context(QwenWorkerPool(
                     1 if gpus is None else gpus, str(model_path), settings=settings,
                     image_limit=image_limit, on_runtime=ready, on_progress=on_progress,
