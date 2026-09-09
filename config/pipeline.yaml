@@ -27,6 +27,16 @@ models:
     thinking_level: low
     media_resolution: MEDIA_RESOLUTION_MEDIUM
 extraction:
+  qwen:
+    gpu_memory_utilization: 0.90
+    max_num_seqs: 32
+    max_num_batched_tokens: 16384
+    max_model_len: auto
+    renderer_num_workers: 4
+    enable_chunked_prefill: true
+    enable_prefix_caching: true
+    enforce_eager: false
+    async_scheduling: null
   visual_evidence:
     image_resolution: [640, 352]
     scene_duration: 30

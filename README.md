@@ -27,6 +27,8 @@ conda activate llmjg
 python -m pip install -e ".[qwen,gemini,train,dev]"
 ```
 
+Ubuntu의 Qwen 추론 의존성은 **`vllm==0.28.0`**입니다. 기존 vLLM 환경에서도 위 설치 후 `python -m pip check`로 의존성을 확인합니다. Windows VM에서 Gemini만 실행할 때는 `python -m pip install -e ".[gemini,dev]"`를 사용합니다. Windows에는 vLLM을 설치하거나 GPU 추론을 실행하지 않습니다.
+
 데이터는 [공식 MicroLens portal](https://recsys.westlake.edu.cn/)에서 준비합니다.
 
 - 사용자 사건: `MicroLens-100k_pairs.csv` (`user,item,timestamp`, timestamp는 정수 밀리초). TSV는 정합성 확인용입니다.
@@ -42,11 +44,14 @@ python -m pip install -e ".[qwen,gemini,train,dev]"
 | `models.qwen`, `models.bge`         | 로컬 checkpoint 디렉터리                                      |
 | `models.gemini`                       | Vertex project ID, location, model ID                         |
 | `extraction.visual_evidence`          | `scene_duration`: Scene 길이(초), `num_keyframes`: 완전한 Scene의 장수, `image_resolution`: 이미지 크기 |
+| `extraction.qwen`                     | vLLM GPU당 메모리·동시 요청·토큰·전처리 예산. [설정과 측정 방법](docs/qwen_vllm.md) |
 | `validation.cohort`                   | 전체 cardinality 100000/719405/19738, UTC·7일·최종일 제외 |
 
 `protocol.sampling: fixed_windows`는 `scene_duration / num_keyframes` 길이의 구간별 중앙점을 추출합니다. 기본값 `scene_duration: 30`, `num_keyframes: 6`은 Scene 시작 기준 `[2.5, 7.5, 12.5, 17.5, 22.5, 27.5]`초입니다. 마지막 짧은 Scene은 같은 구간 간격을 유지하고 마지막 구간만 실제 영상 끝에서 잘라 중앙점을 구합니다(방식 A). 예를 들어 12초가 남으면 `[2.5, 7.5, 11]`초를 사용합니다. 영상 길이를 정수 초로 올리지 않습니다.
 
-추출 시각은 영상 전체 기준이며 소수점 둘째 자리부터 버립니다(`1.666… → 1.6`). JSON과 추출 요청에 같은 시각을 사용하고, 이미지는 `data/fixed_{scene_duration}s/resized_keyframes/{content_id}/0002_5.png`, 정수 초는 `0005.png` 형식으로 저장합니다. Scene 정보는 `data/cohort/source_assets/{content_id}/assets/timestamp_fixed_{scene_duration}s.json`에 저장합니다. 두 설정은 양의 정수이며, 0.1초 정밀도에서 구분할 수 있도록 `num_keyframes <= scene_duration × 10`이어야 합니다. 마지막 짧은 구간에서 버림 후 같은 시각이 생기면 한 번만 추출합니다. Graph Qwen·Graph Gemini·Description은 같은 이미지 목록을 사용합니다.
+추출 시각은 영상 전체 기준이며 소수점 둘째 자리부터 버립니다(`1.666… → 1.6`). JSON과 추출 요청에 같은 시각을 사용하고, 이미지는 `data/resized_keyframes/{content_id}/0002_5.png`, 정수 초는 `0005.png` 형식으로 저장합니다. Scene 정보는 `data/cohort/source_assets/{content_id}/assets/timestamp_fixed_{scene_duration}s.json`에 저장합니다. 두 설정은 양의 정수이며, 0.1초 정밀도에서 구분할 수 있도록 `num_keyframes <= scene_duration × 10`이어야 합니다. 마지막 짧은 구간에서 버림 후 같은 시각이 생기면 한 번만 추출합니다. Graph Qwen·Graph Gemini·Description은 같은 이미지 목록을 사용합니다.
+
+기존 run의 이미지를 재사용하려면 실행을 멈춘 상태에서 `data/fixed_30s/resized_keyframes/`를 `data/resized_keyframes/`로 옮깁니다(새 경로가 없을 때). 다른 Scene 길이의 run은 해당 `fixed_*s` 폴더를 사용합니다. timestamp JSON은 그대로 둡니다. 새 코드에는 이전 이미지 경로를 자동 탐색하거나 이동하는 동작이 없으며, 같은 run에서 서로 다른 sampling 결과를 이 폴더에 합치지 않습니다.
 
 ## 실행 방법
 
@@ -84,7 +89,7 @@ v4의 `prepare-cohort`는 영상 존재·파일 크기·중복과 Title을 검�
 
 **2. Graph·Description 추출과 요약**
 
-Ubuntu/CUDA에서 Qwen branch를 실행합니다. `--gpus 1`은 사용할 visible GPU 개수입니다.
+Ubuntu/CUDA에서 Qwen branch를 실행합니다. `--gpus 1`은 사용할 visible GPU 개수이며, 생략해도 1개를 사용합니다. 각 GPU에 BF16 모델과 vLLM 엔진을 하나씩 올립니다. 여러 영상의 독립적인 장면·요약 요청을 continuous batching으로 처리하며, 장면별 keyframe을 다른 장면의 프롬프트와 합치지 않습니다. 선택한 GPU는 이 명령에 전용으로 할당합니다.
 
 ```bash
 python -m extraction extract-graph-scenes --model qwen --run-id "$RUN_ID" --gpus 1
@@ -106,6 +111,8 @@ Gemini Graph 산출물을 Ubuntu의 같은 run에서 사용할 수 있는지 확
 ```bash
 python -m extraction summarize-graph --source gemini --run-id "$RUN_ID" --gpus 1
 ```
+
+엔진 전환 후에도 같은 run ID로 기존 명령을 실행하면 정상 산출물을 재사용하고 실패·누락 작업을 이어서 처리합니다. 기존 검증에서 비호환으로 판단한 결과의 처리와 `--force` 의미는 유지합니다. `extraction/qwen_runtime.jsonl`에 GPU·라이브러리 버전·적용 설정과 새 저장 결과의 해시를 기록하고, 대응 이력이 없는 기존 결과는 시작 로그의 `legacy_unknown` 수에 포함합니다. 시작 시 재사용·신규 요청 수와 결정된 context 길이를, 처리 중에는 30초 간격으로 완료량·처리 중 요청·처리량을 출력합니다. 실패는 즉시 출력합니다. [재개 및 GPU 성능 확인](docs/qwen_vllm.md)을 참고하세요.
 
 **3. Embedding·추천·평가**
 

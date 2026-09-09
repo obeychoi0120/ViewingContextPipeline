@@ -65,75 +65,86 @@ def _report_scene(progress, name, record, failure, *, arm, source):
 
 
 def run_qwen_scenes(
-    pending,
-    *,
-    scene_dir,
-    failure_dir,
-    model_path,
-    gpus,
-    generator_factory,
-    names,
-    progress,
-    arm,
-    existing_records,
-    existing_failures,
-    source=None,
+    pending, *, scene_dir, failure_dir, model_path, gpus, generator_factory,
+    names, progress, arm, existing_records, existing_failures, source=None,
+    qwen_options=None, image_limit=6, runtime=None,
 ):
-    records_by_content = {}
-    failures_by_content = {}
-    write_progress(
-        progress, "[Qwen] starting GPU workers; each completed scene is checkpointed immediately"
-    )
-    with generator_factory(model_path=model_path, gpus=gpus) as generate:
-        for visual, scene_rows in pending:
-            content_id = str(visual["content_id"])
-            name = names.get(content_id, f"{content_id}.mp4")
-            path = scene_dir / f"{content_id}.jsonl"
-            failure_path = failure_dir / f"{content_id}.jsonl"
-            rows_by_task = {row["task"].task_id: row for row in scene_rows}
-            records = {}
-            failures = {}
-            handled_indices = set()
-            cached_records = existing_records.get(content_id, [])
-            cached_failures = existing_failures.get(content_id, [])
-            label = "graph" if arm == "graph" else "desc"
-            write_progress(progress, f"[Qwen_{label}] {name} | submitted {len(scene_rows)} scenes")
+    records_by_content, failures_by_content = {}, {}
+    rows_by_task, states = {}, {}
+    reused = sum(len(rows) for rows in existing_records.values())
+    unknown = sum(
+        runtime.classification(f"{content_id}:{row['scene_idx']}", row) == "legacy_unknown"
+        for content_id, rows in existing_records.items() for row in rows
+    ) if runtime else reused
+    for visual, scene_rows in pending:
+        content_id = str(visual["content_id"])
+        states[content_id] = {
+            "records": {}, "failures": {}, "handled": set(), "remaining": len(scene_rows),
+            "cached": existing_records.get(content_id, []),
+            "cached_failures": existing_failures.get(content_id, []),
+        }
+        for row in scene_rows:
+            task_id = row["task"].task_id
+            if task_id in rows_by_task:
+                raise ValueError(f"duplicate scene task: {task_id}")
+            rows_by_task[task_id] = (content_id, row)
+    write_progress(progress, f"[Qwen] reused={reused} legacy_unknown={unknown} "
+                             f"pending={len(rows_by_task)} contents={len(pending)}")
+    for content_id, state in states.items():
+        if state["remaining"] == 0:
+            write_scene_checkpoint(scene_dir / f"{content_id}.jsonl",
+                                   failure_dir / f"{content_id}.jsonl",
+                                   state["cached"], state["cached_failures"])
+            records_by_content[content_id] = state["cached"]
+            failures_by_content[content_id] = state["cached_failures"]
+            complete_content_progress(progress)
+    if not rows_by_task:
+        return records_by_content, failures_by_content
+    write_progress(progress, "[Qwen] starting vLLM GPU workers; each completed scene is checkpointed immediately")
 
-            def complete(task_id, text):
-                row = rows_by_task[task_id]
-                record, failure = (
-                    graph_scene_result(row, text)
-                    if arm == "graph"
-                    else description_scene_result(row, text, content_id=visual["content_id"])
-                )
-                if record is not None:
-                    records[task_id] = record
-                else:
-                    failures[task_id] = failure
-                handled_indices.add(int(row["scene_idx"]))
-                _report_scene(progress, name, record, failure, arm=arm, source=source)
-                completed = [*cached_records, *records.values()]
-                failed = [
-                    *[r for r in cached_failures if int(r["scene_idx"]) not in handled_indices],
-                    *failures.values(),
-                ]
-                write_scene_checkpoint(path, failure_path, completed, failed)
-                if len(records) + len(failures) == len(scene_rows):
-                    records_by_content[content_id] = completed
-                    failures_by_content[content_id] = failed
-                    complete_content_progress(progress)
+    def complete(task_id, text):
+        content_id, row = rows_by_task[task_id]
+        state = states[content_id]
+        if task_id in state["records"] or task_id in state["failures"]:
+            return
+        record, failure = (
+            graph_scene_result(row, text) if arm == "graph"
+            else description_scene_result(row, text, content_id=content_id)
+        )
+        if record is not None:
+            state["records"][task_id] = record
+        else:
+            state["failures"][task_id] = failure
+            _report_scene(progress, names.get(content_id, f"{content_id}.mp4"),
+                          record, failure, arm=arm, source=source)
+        state["handled"].add(int(row["scene_idx"]))
+        completed = [*state["cached"], *state["records"].values()]
+        failed = [
+            *[r for r in state["cached_failures"] if int(r["scene_idx"]) not in state["handled"]],
+            *state["failures"].values(),
+        ]
+        write_scene_checkpoint(scene_dir / f"{content_id}.jsonl",
+                               failure_dir / f"{content_id}.jsonl", completed, failed)
+        if runtime:
+            runtime.record(task_id, record if record is not None else failure,
+                           status="complete" if record is not None else "failed",
+                           artifact_id=f"{content_id}:{row['scene_idx']}")
+        state["remaining"] -= 1
+        if state["remaining"] == 0:
+            records_by_content[content_id] = completed
+            failures_by_content[content_id] = failed
+            progress.update(1)
 
-            returned = generate([row["task"] for row in scene_rows], complete)
-            for task_id, text in returned.items():
-                if task_id not in records and task_id not in failures:
-                    complete(task_id, text)
-            if not scene_rows:
-                write_scene_checkpoint(path, failure_path, [], [])
-                records_by_content[content_id] = []
-                failures_by_content[content_id] = []
-                if arm == "description":
-                    write_progress(progress, f"[SKIPPED] {name} | no scenes to extract")
-                complete_content_progress(progress)
+    from extraction.summary_executor import qwen_progress
+    with generator_factory(
+        model_path=model_path, gpus=gpus, settings=qwen_options,
+        image_limit=image_limit, runtime=runtime, log=lambda message: write_progress(progress, message),
+        on_progress=lambda stats: qwen_progress(progress, stats),
+    ) as generate:
+        # All videos share one admission stream; results remain independently keyed.
+        returned = generate([row["task"] for _, row in rows_by_task.values()], complete)
+        for task_id, text in returned.items():
+            complete(task_id, text)
     return records_by_content, failures_by_content
 
 

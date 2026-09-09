@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 import multiprocessing as mp
 import os
 import queue
 import signal
+import time
 import traceback
-from dataclasses import dataclass
-from typing import Any, Callable, Iterable
+from typing import Callable, Iterable
+
+from extraction.qwen_config import qwen_settings
 
 
 @dataclass(frozen=True)
@@ -23,258 +28,314 @@ class QwenGenerationTask:
     repetition_penalty: float = 1.0
 
 
-def assign_worker_indices(task_count: int, gpu_count: int) -> list[int]:
-    if gpu_count <= 0:
-        raise ValueError("--gpus must be a positive integer")
-    return [index % gpu_count for index in range(task_count)]
-
-
-def _start_worker(context, worker_index, gpu_id, model_path, result_queue):
-    """Create and start one process; the pool retains lifecycle ownership."""
-    task_queue = context.Queue()
+def _start_worker(context, worker_index, gpu_id, model_path, result_queue, settings, image_limit):
+    task_queue = context.Queue(maxsize=2 * settings["max_num_seqs"] + 1)
     process = context.Process(
         target=_worker_main,
-        args=(
-            worker_index,
-            gpu_id,
-            model_path,
-            task_queue,
-            result_queue,
-        ),
-        daemon=True,
+        args=(worker_index, gpu_id, model_path, task_queue, result_queue, settings, image_limit),
+        daemon=False,
     )
     process.start()
     return task_queue, process
 
 
 class QwenWorkerPool:
-    """One persistent Qwen process per requested CUDA device."""
+    """One vLLM engine per GPU, with bounded completion-driven admission."""
 
-    def __init__(self, gpu_count: int, model_path: str) -> None:
-        gpu_ids = _visible_gpu_ids(gpu_count)
+    def __init__(self, gpu_count, model_path, *, settings=None, image_limit=6,
+                 on_runtime=None, on_progress=None):
+        self.settings = qwen_settings(settings)
+        self.gpu_ids = _visible_gpu_ids(gpu_count)
         self.gpu_count = gpu_count
+        self.capacity = 2 * self.settings["max_num_seqs"]
+        self.on_runtime = on_runtime
+        self.on_progress = on_progress
+        self.last_result = None
         self._context = mp.get_context("spawn")
         self._result_queue = self._context.Queue()
-        self._task_queues: list[Any] = []
-        self._processes: list[Any] = []
+        self._task_queues = []
+        self._processes = []
+        self._group_leaders = set()
+        self._ready_workers = set()
         self._closed = False
-        for worker_index, gpu_id in enumerate(gpu_ids):
-            task_queue, process = _start_worker(
-                self._context,
-                worker_index,
-                gpu_id,
-                model_path,
-                self._result_queue,
-            )
-            self._task_queues.append(task_queue)
-            self._processes.append(process)
-
-    def generate(
-        self,
-        tasks: Iterable[QwenGenerationTask],
-        on_task_complete: Callable[[str, str], None] | None = None,
-    ) -> dict[str, str]:
-        if getattr(self, "_closed", False):
-            raise RuntimeError("Qwen worker pool is closed")
-        task_list = list(tasks)
-        task_ids = [task.task_id for task in task_list]
-        if len(set(task_ids)) != len(task_ids):
-            raise ValueError("Qwen generation task ids must be unique")
         try:
-            pending: dict[str, int] = {}
-            for task, worker_index in zip(
-                task_list,
-                assign_worker_indices(len(task_list), self.gpu_count),
-            ):
-                pending[task.task_id] = worker_index
-                self._task_queues[worker_index].put(task)
+            for index, gpu_id in enumerate(self.gpu_ids):
+                tasks, process = _start_worker(
+                    self._context, index, gpu_id, model_path, self._result_queue,
+                    self.settings, image_limit,
+                )
+                self._task_queues.append(tasks)
+                self._processes.append(process)
+        except BaseException:
+            self.abort()
+            raise
 
-            results: dict[str, str] = {}
+    def wait_ready(self):
+        """Separate cold engine startup from timed benchmark requests."""
+        try:
+            while len(self._ready_workers) < self.gpu_count:
+                try:
+                    event = self._result_queue.get(timeout=0.5)
+                except queue.Empty:
+                    if any(not process.is_alive() for process in self._processes):
+                        raise RuntimeError("Qwen worker exited during engine startup")
+                    continue
+                if not self._startup_event(event):
+                    raise RuntimeError("wait_ready must be called before submitting requests")
+        except BaseException:
+            self.abort()
+            raise
+
+    def _startup_event(self, event):
+        index = event["worker_index"]
+        if event.get("kind") == "started":
+            if event.get("process_group"):
+                self._group_leaders.add(event["process_group"])
+        elif not event.get("ok", False):
+            raise RuntimeError(f"Qwen worker {index} on GPU {event.get('gpu_id')} "
+                               f"failed: {event.get('error')}")
+        elif event.get("kind") == "ready":
+            self._ready_workers.add(index)
+            if self.on_runtime:
+                self.on_runtime(event)
+        else:
+            return False
+        return True
+
+    def generate(self, tasks: Iterable[QwenGenerationTask],
+                 on_task_complete: Callable[[str, str], None] | None = None) -> dict[str, str]:
+        if self._closed:
+            raise RuntimeError("Qwen worker pool is closed")
+        iterator = iter(tasks)
+        pending = {}
+        seen = set()
+        loads = [0] * self.gpu_count
+        exhausted = False
+        completed = 0
+        generated_tokens = 0
+        started = last_progress = time.monotonic()
+        results = {}
+
+        def admit(index):
+            nonlocal exhausted
+            if exhausted:
+                return
+            task = next(iterator, None)
+            if task is None:
+                exhausted = True
+                return
+            if task.task_id in seen:
+                raise ValueError("Qwen generation task ids must be unique")
+            seen.add(task.task_id)
+            pending[task.task_id] = index
+            loads[index] += 1
+            self._task_queues[index].put(task)
+
+        def report():
+            if self.on_progress:
+                elapsed = max(time.monotonic() - started, 0.001)
+                self.on_progress({
+                    "completed": completed, "inflight": len(pending),
+                    "requests_per_second": completed / elapsed,
+                    "output_tokens_per_second": generated_tokens / elapsed,
+                    "gpu_inflight": list(loads),
+                })
+
+        try:
+            for _ in range(self.capacity):
+                for index in range(self.gpu_count):
+                    admit(index)
             while pending:
                 try:
-                    result = self._result_queue.get(timeout=5)
+                    event = self._result_queue.get(timeout=0.5)
                 except queue.Empty:
-                    dead = {
-                        worker_index
-                        for worker_index in pending.values()
-                        if not self._processes[worker_index].is_alive()
-                    }
+                    dead = [i for i, process in enumerate(self._processes) if not process.is_alive()]
                     if dead:
-                        raise RuntimeError(
-                            f"Qwen GPU worker(s) exited before finishing tasks: {sorted(dead)}"
-                        )
-                    continue
-                task_id = str(result.get("task_id"))
-                if not result.get("ok"):
-                    worker_index = result.get("worker_index", "unknown")
-                    gpu_id = result.get("gpu_id", "unknown")
-                    error = result.get("error", "unknown error")
-                    raise RuntimeError(
-                        f"Qwen worker {worker_index} on GPU {gpu_id} failed:\n{error}"
-                    )
-                if task_id in pending:
-                    text = str(result["text"])
-                    del pending[task_id]
-                    if on_task_complete is not None:
-                        on_task_complete(task_id, text)
-                    else:
-                        results[task_id] = text
+                        raise RuntimeError(f"Qwen GPU worker(s) exited before finishing tasks: {dead}")
+                else:
+                    index = event["worker_index"]
+                    if not self._startup_event(event):
+                        task_id = event["task_id"]
+                        if task_id not in pending or pending[task_id] != index:
+                            raise RuntimeError(f"Unexpected Qwen completion: {task_id}")
+                        del pending[task_id]
+                        loads[index] -= 1
+                        completed += 1
+                        generated_tokens += event.get("output_tokens", 0)
+                        self.last_result = event
+                        # Refill before parsing/writing the completed request.
+                        admit(index)
+                        if on_task_complete:
+                            on_task_complete(task_id, event["text"])
+                        else:
+                            results[task_id] = event["text"]
+                if time.monotonic() - last_progress >= 30:
+                    report()
+                    last_progress = time.monotonic()
+            report()
             return results
         except BaseException:
             self.abort()
             raise
 
-    def close(self) -> None:
-        if getattr(self, "_closed", False):
+    def close(self):
+        if self._closed:
             return
-        self._closed = True
         try:
-            for task_queue in self._task_queues:
-                task_queue.put(None)
+            for tasks in self._task_queues:
+                tasks.put_nowait(None)
             for process in self._processes:
-                process.join(timeout=5)
-        except BaseException:
-            self._force_stop_alive_processes()
-            self._dispose_queues(cancel_join=True)
-            raise
-        else:
-            self._force_stop_alive_processes()
-            self._dispose_queues(cancel_join=False)
+                process.join(timeout=10)
+        finally:
+            self._closed = True
+            self._force_stop()
+            self._dispose_queues()
 
-    def abort(self) -> None:
-        """Immediately release workers and their CUDA allocations after interruption."""
-        if getattr(self, "_closed", False):
+    def abort(self):
+        if self._closed:
             return
         self._closed = True
-        self._dispose_queues(cancel_join=True)
-        self._force_stop_alive_processes()
+        self._force_stop()
+        self._dispose_queues()
 
-    def _force_stop_alive_processes(self) -> None:
-        alive = [process for process in self._processes if process.is_alive()]
-        for process in alive:
-            process.terminate()
-        for process in alive:
-            process.join(timeout=0.2)
+    def _signal_groups(self, sig):
+        if os.name != "posix":
+            return
+        # Each owned worker creates its own session before starting vLLM.
+        groups = set(self._group_leaders)
+        for process in self._processes:
+            try:
+                if os.getpgid(process.pid) == process.pid:
+                    groups.add(process.pid)
+            except ProcessLookupError:
+                pass
+        for group in groups:
+            try:
+                os.killpg(group, sig)
+            except ProcessLookupError:
+                pass
 
-        stubborn = [process for process in alive if process.is_alive()]
-        for process in stubborn:
-            kill = getattr(process, "kill", None)
-            if kill is not None:
-                kill()
-            else:
+    def _force_stop(self):
+        self._signal_groups(signal.SIGTERM)
+        for process in self._processes:
+            if process.is_alive():
                 process.terminate()
-        for process in stubborn:
-            process.join(timeout=0.2)
+        for process in self._processes:
+            process.join(timeout=0.5)
+        if os.name == "posix":
+            self._signal_groups(signal.SIGKILL)
+        for process in self._processes:
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=0.5)
 
-    def _dispose_queues(self, *, cancel_join: bool) -> None:
-        for process_queue in [*self._task_queues, self._result_queue]:
-            if cancel_join:
-                cancel_join_thread = getattr(process_queue, "cancel_join_thread", None)
-                if cancel_join_thread is not None:
-                    cancel_join_thread()
-            close = getattr(process_queue, "close", None)
-            if close is not None:
-                close()
+    def _dispose_queues(self):
+        for channel in [*self._task_queues, self._result_queue]:
+            channel.cancel_join_thread()
+            channel.close()
 
-    def __enter__(self) -> QwenWorkerPool:
+    def __enter__(self):
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        if exc_type is None:
-            self.close()
-        else:
-            self.abort()
+    def __exit__(self, exc_type, exc, tb):
+        self.close() if exc_type is None else self.abort()
 
 
-def _visible_gpu_ids(gpu_count: int) -> list[str]:
-    if gpu_count <= 0:
+def _visible_gpu_ids(gpu_count):
+    if type(gpu_count) is not int or gpu_count <= 0:
         raise ValueError("--gpus must be a positive integer")
     try:
         import torch
     except ImportError as exc:
-        raise RuntimeError("Qwen extraction requires the 'qwen' optional dependencies") from exc
+        raise RuntimeError("Qwen requires the 'qwen' optional dependencies") from exc
     available = int(torch.cuda.device_count())
     if available < gpu_count:
-        raise RuntimeError(
-            f"--gpus {gpu_count} requested, but only {available} CUDA device(s) are visible"
-        )
-    configured = [
-        value.strip()
-        for value in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
-        if value.strip()
-    ]
-    if configured:
-        return configured[:gpu_count]
-    return [str(index) for index in range(gpu_count)]
+        raise RuntimeError(f"--gpus {gpu_count} requested, but only {available} CUDA device(s) are visible")
+    configured = [v.strip() for v in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if v.strip()]
+    return configured[:gpu_count] if configured else [str(i) for i in range(gpu_count)]
 
 
-def _worker_main(
-    worker_index: int,
-    gpu_id: str,
-    model_path: str,
-    task_queue: Any,
-    result_queue: Any,
-) -> None:
-    # The parent owns Ctrl+C handling and can then terminate every GPU worker as
-    # one unit. Letting each spawned child handle SIGINT independently can leave
-    # the parent waiting on queues while CUDA memory remains allocated.
+def _receive(channel):
+    try:
+        return True, channel.get(timeout=0.25)
+    except queue.Empty:
+        return False, None
+
+
+async def _serve_worker(backend, task_queue, result_queue, worker_index, gpu_id, capacity):
+    active = set()
+    receiver_pool = ThreadPoolExecutor(max_workers=1)
+    receiver = None
+    stopping = False
+
+    async def generate(task):
+        output = await backend.generate(task)
+        result_queue.put({
+            "kind": "result", "ok": True, "worker_index": worker_index, "gpu_id": gpu_id,
+            "task_id": task.task_id, "text": output.text,
+            "prompt_tokens": output.prompt_tokens, "output_tokens": output.output_tokens,
+            "generation": {key: value for key, value in asdict(task).items()
+                           if key not in {"task_id", "image_paths", "prompt"}},
+        })
+
+    try:
+        while active or not stopping:
+            if not stopping and receiver is None and len(active) < capacity:
+                receiver = asyncio.get_running_loop().run_in_executor(receiver_pool, _receive, task_queue)
+            waiting = active | ({receiver} if receiver is not None else set())
+            done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+            for future in done:
+                if future is receiver:
+                    receiver = None
+                    received, task = future.result()
+                    if received:
+                        if task is None:
+                            stopping = True
+                        else:
+                            active.add(asyncio.create_task(generate(task)))
+                else:
+                    active.remove(future)
+                    future.result()
+    finally:
+        if receiver is not None:
+            receiver.cancel()
+        for future in active:
+            future.cancel()
+        await asyncio.gather(*active, return_exceptions=True)
+        receiver_pool.shutdown(wait=True, cancel_futures=True)
+
+
+def _worker_main(worker_index, gpu_id, model_path, task_queue, result_queue,
+                 settings=None, image_limit=6):
+    process_group = None
     if mp.parent_process() is not None:
-        try:
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-        except (AttributeError, OSError, ValueError):
-            pass
+        if os.name == "posix":
+            os.setsid()
+            process_group = os.getpid()
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    try:
+    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    result_queue.put({"kind": "started", "worker_index": worker_index, "process_group": process_group})
+
+    async def run():
         from extraction.backends.qwen import QwenBackend
 
-        backend = QwenBackend.from_pretrained(model_path, use_fc_patch=True)
-    except BaseException:
-        result_queue.put(
-            {
-                "ok": False,
-                "worker_index": worker_index,
-                "gpu_id": gpu_id,
-                "task_id": None,
-                "error": traceback.format_exc(),
-            }
-        )
-        return
-
-    while True:
-        task = task_queue.get()
-        if task is None:
-            return
+        backend = QwenBackend.from_pretrained(model_path, settings=settings, image_limit=image_limit)
         try:
-            from extraction.evidence import load_images
+            result_queue.put({
+                "kind": "ready", "ok": True, "worker_index": worker_index,
+                "gpu_id": gpu_id, "model_path": model_path, **backend.runtime_info,
+            })
+            await _serve_worker(backend, task_queue, result_queue, worker_index, gpu_id,
+                                2 * qwen_settings(settings)["max_num_seqs"])
+        finally:
+            backend.close()
 
-            text = backend.generate(
-                load_images(list(task.image_paths)),
-                task.prompt,
-                task.max_new_tokens,
-                do_sample=task.do_sample,
-                seed=task.seed,
-                temperature=task.temperature,
-                top_p=task.top_p,
-                top_k=task.top_k,
-                repetition_penalty=task.repetition_penalty,
-            )
-            result_queue.put(
-                {
-                    "ok": True,
-                    "worker_index": worker_index,
-                    "gpu_id": gpu_id,
-                    "task_id": task.task_id,
-                    "text": text,
-                }
-            )
-        except BaseException:
-            result_queue.put(
-                {
-                    "ok": False,
-                    "worker_index": worker_index,
-                    "gpu_id": gpu_id,
-                    "task_id": task.task_id,
-                    "error": traceback.format_exc(),
-                }
-            )
+    try:
+        asyncio.run(run())
+    except BaseException:
+        result_queue.put({
+            "ok": False, "worker_index": worker_index, "gpu_id": gpu_id,
+            "error": traceback.format_exc(),
+        })
