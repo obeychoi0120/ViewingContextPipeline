@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from tqdm import tqdm
 
 from .config import EncoderConfig
 
@@ -48,7 +49,8 @@ class BGETextEncoder:
     def encode(self, texts: list[str]) -> np.ndarray:
         batches: list[np.ndarray] = []
         with self._torch.no_grad():
-            for start in range(0, len(texts), self.settings.batch_size):
+            for start in tqdm(range(0, len(texts), self.settings.batch_size),
+                              desc="BGE embeddings", unit="batch"):
                 batches.append(
                     self._encode_batch(texts[start : start + self.settings.batch_size])
                 )

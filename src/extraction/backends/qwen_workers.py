@@ -12,6 +12,7 @@ import traceback
 from typing import Callable, Iterable
 
 from extraction.qwen_config import qwen_settings
+from extraction.progress import RecentThroughput
 
 
 @dataclass(frozen=True)
@@ -112,8 +113,12 @@ class QwenWorkerPool:
         loads = [0] * self.gpu_count
         exhausted = False
         completed = 0
-        generated_tokens = 0
         started = last_progress = time.monotonic()
+        initialization_seconds = None
+        throughput = RecentThroughput(clock=time.monotonic)
+        if len(self._ready_workers) == self.gpu_count:
+            throughput.start()
+            initialization_seconds = 0
         results = {}
 
         def admit(index):
@@ -133,18 +138,20 @@ class QwenWorkerPool:
 
         def report():
             if self.on_progress:
-                elapsed = max(time.monotonic() - started, 0.001)
                 self.on_progress({
+                    **throughput.snapshot(),
                     "completed": completed, "inflight": len(pending),
-                    "requests_per_second": completed / elapsed,
-                    "output_tokens_per_second": generated_tokens / elapsed,
                     "gpu_inflight": list(loads),
+                    "ready_workers": len(self._ready_workers), "gpu_count": self.gpu_count,
+                    "initialization_seconds": (time.monotonic() - started
+                                               if initialization_seconds is None else initialization_seconds),
                 })
 
         try:
             for _ in range(self.capacity):
                 for index in range(self.gpu_count):
                     admit(index)
+            report()
             while pending:
                 try:
                     event = self._result_queue.get(timeout=0.5)
@@ -154,14 +161,22 @@ class QwenWorkerPool:
                         raise RuntimeError(f"Qwen GPU worker(s) exited before finishing tasks: {dead}")
                 else:
                     index = event["worker_index"]
-                    if not self._startup_event(event):
+                    if self._startup_event(event):
+                        if throughput.started is None and len(self._ready_workers) == self.gpu_count:
+                            # Other GPUs may already be working: never block their admission.
+                            # Start a fresh measurement once the full requested capacity is ready.
+                            throughput.start()
+                            initialization_seconds = time.monotonic() - started
+                        report()
+                        last_progress = time.monotonic()
+                    else:
                         task_id = event["task_id"]
                         if task_id not in pending or pending[task_id] != index:
                             raise RuntimeError(f"Unexpected Qwen completion: {task_id}")
                         del pending[task_id]
                         loads[index] -= 1
                         completed += 1
-                        generated_tokens += event.get("output_tokens", 0)
+                        throughput.complete(event.get("output_tokens", 0))
                         self.last_result = event
                         # Refill before parsing/writing the completed request.
                         admit(index)

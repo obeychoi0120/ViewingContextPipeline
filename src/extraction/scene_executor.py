@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 
-from extraction.backends import GeminiGenerationOutcome
 from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.monitoring import graph_skip_message, scene_messages
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.step_support import (
-    complete_content_progress,
     write_progress,
     write_scene_checkpoint,
 )
@@ -97,7 +95,6 @@ def run_qwen_scenes(
                                    state["cached"], state["cached_failures"])
             records_by_content[content_id] = state["cached"]
             failures_by_content[content_id] = state["cached_failures"]
-            complete_content_progress(progress)
     if not rows_by_task:
         return records_by_content, failures_by_content
     write_progress(progress, "[Qwen] starting vLLM GPU workers; each completed scene is checkpointed immediately")
@@ -133,7 +130,7 @@ def run_qwen_scenes(
         if state["remaining"] == 0:
             records_by_content[content_id] = completed
             failures_by_content[content_id] = failed
-            progress.update(1)
+        progress.complete(failed=failure is not None)
 
     from extraction.summary_executor import qwen_progress
     with generator_factory(
@@ -166,13 +163,7 @@ def _complete_gemini_content(
     new_records = []
     failures = []
     for row in scene_rows:
-        outcome = generated[row["task"].task_id]
-        record, failure = graph_scene_result(
-            row,
-            outcome.text,
-            error=outcome.error,
-            diagnostics=outcome.response_diagnostics,
-        )
+        record, failure = generated[row["task"].task_id]
         (new_records if record is not None else failures).append(
             record if record is not None else failure
         )
@@ -187,7 +178,6 @@ def _complete_gemini_content(
         write_progress(progress, message)
     for failure in failures:
         write_progress(progress, graph_skip_message(name, failure, source="gemini"))
-    complete_content_progress(progress)
 
 
 def run_gemini_scenes(
@@ -203,7 +193,7 @@ def run_gemini_scenes(
     progress,
 ):
     task_context = {}
-    generated_by_content: dict[str, dict[str, GeminiGenerationOutcome]] = {}
+    generated_by_content = {}
     tasks = []
     for visual, scene_rows in pending:
         content_id = str(visual["content_id"])
@@ -211,12 +201,15 @@ def run_gemini_scenes(
         for row in scene_rows:
             task = row["task"]
             tasks.append(task)
-            task_context[task.task_id] = (content_id, visual, scene_rows)
+            task_context[task.task_id] = (content_id, visual, scene_rows, row)
 
     def complete(outcome):
-        content_id, visual, scene_rows = task_context[outcome.task_id]
+        content_id, visual, scene_rows, row = task_context[outcome.task_id]
         responses = generated_by_content[content_id]
-        responses[outcome.task_id] = outcome
+        record, failure = graph_scene_result(
+            row, outcome.text, error=outcome.error, diagnostics=outcome.response_diagnostics,
+        )
+        responses[outcome.task_id] = (record, failure)
         if len(responses) == len(scene_rows):
             _complete_gemini_content(
                 visual,
@@ -230,5 +223,6 @@ def run_gemini_scenes(
                 names=names,
                 progress=progress,
             )
+        progress.complete(failed=failure is not None)
 
-    pool.generate(tasks, complete)
+    pool.generate(tasks, complete, on_progress=progress.update_stats)

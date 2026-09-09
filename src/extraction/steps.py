@@ -15,6 +15,7 @@ from extraction.descriptions import (
 from extraction.errors import ExtractionStepError
 from extraction.preparation import prepare_input_data
 from extraction.qwen_runtime import QwenRuntimeLog
+from extraction.progress import InferenceProgress
 from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
 from extraction.semantic_graph import (
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
@@ -202,11 +203,11 @@ def extract_graph_scenes(
         model,
         force,
     )
-    with tqdm(
-        total=len(visual_rows),
-        initial=len(visual_rows) - len(pending),
+    with InferenceProgress(
+        total=sum(len(rows) for _, rows in pending),
+        reused=sum(len(rows) for rows in records_by_content.values()),
         desc=f"Graph scenes ({model})",
-        unit="content",
+        unit="scene", progress_factory=tqdm,
     ) as progress:
         if model == "gemini" and not force:
             _write_progress(
@@ -349,11 +350,11 @@ def extract_description_scenes(
         settings,
         force,
     )
-    with tqdm(
-        total=len(visual_rows),
-        initial=len(visual_rows) - len(pending),
+    with InferenceProgress(
+        total=sum(len(rows) for _, rows in pending),
+        reused=sum(len(rows) for rows in records_by_content.values()),
         desc="Description scenes",
-        unit="content",
+        unit="scene", progress_factory=tqdm,
     ) as progress:
         completed, failed = run_qwen_scenes(
             pending,

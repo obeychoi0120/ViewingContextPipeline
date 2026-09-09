@@ -478,7 +478,7 @@ def test_eleven_stage_cli_runs_on_selected_user_catalog(
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def generate(self, tasks, callback):
+        def generate(self, tasks, callback, *, on_progress=None):
             for task in reversed(tasks):
                 assert_task_images(task)
                 callback(extraction_steps.GeminiGenerationOutcome(task.task_id, "{}"))

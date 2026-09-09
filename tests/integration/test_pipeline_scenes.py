@@ -163,7 +163,7 @@ def gemini_retry_case(context, monkeypatch):
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def generate(self, tasks, callback):
+        def generate(self, tasks, callback, *, on_progress=None):
             calls.append([task.task_id for task in tasks])
             for task in reversed(tasks):
                 callback(outcomes[task.task_id])
@@ -263,7 +263,7 @@ def test_gemini_retry_interrupt_preserves_existing_checkpoint(
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def generate(self, *_args):
+        def generate(self, *_args, **_kwargs):
             raise KeyboardInterrupt
 
     monkeypatch.setattr(extraction_steps, "GeminiWorkerPool", InterruptedPool)
@@ -477,7 +477,7 @@ def test_gemini_scene_stage_aggregates_out_of_order_errors(
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def generate(self, tasks, callback):
+        def generate(self, tasks, callback, *, on_progress=None):
             outcomes = {
                 tasks[1].task_id: extraction_steps.GeminiGenerationOutcome(
                     tasks[1].task_id, "", "RuntimeError: quota"

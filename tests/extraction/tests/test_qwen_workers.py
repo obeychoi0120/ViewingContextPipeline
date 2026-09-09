@@ -128,6 +128,64 @@ def test_initial_admission_is_bounded_and_runtime_events_are_delivered(pool_fact
     pool.abort()
 
 
+def test_progress_starts_after_all_engines_ready_without_blocking_fast_gpu(pool_factory, monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(workers.time, "monotonic", lambda: now[0])
+    stats = []
+    def ready(index):
+        return {"kind": "ready", "ok": True, "worker_index": index}
+    pool = pool_factory(events=[ready(0), event("a", 0), ready(1), event("b", 1),
+                                event("c", 0), event("d", 1), event("e", 0), event("f", 1)],
+                        on_progress=stats.append)
+    times = iter([120, 150, 240, 300, 300, 300, 300, 300])
+    get = pool._result_queue.get
+
+    def timed_get(timeout):
+        now[0] = next(times)
+        return get(timeout)
+
+    pool._result_queue.get = timed_get
+
+    def complete(name, text):
+        if name == "a":
+            assert pool._ready_workers == {0}
+            assert pool._task_queues[0].values[-1].task_id == "e"
+
+    pool.generate([task(x) for x in "abcdef"], complete)
+    assert any(s["phase"] == "initializing" for s in stats)
+    assert stats[-1]["initialization_seconds"] == 240
+    assert stats[-1]["inference_elapsed"] == 60
+    # The early completion is counted as done, but excluded from full-capacity throughput.
+    assert stats[-1]["completed"] == 6
+    assert stats[-1]["requests_per_second"] == pytest.approx(5 / 60)
+    assert stats[-1]["output_tokens_per_second"] == pytest.approx(10 / 60)
+    pool.abort()
+
+
+def test_progress_refreshes_during_waits_without_completions(pool_factory, monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(workers.time, "monotonic", lambda: now[0])
+    stats = []
+    pool = pool_factory(count=1, on_progress=stats.append)
+    timeline = iter([
+        (0, {"kind": "ready", "ok": True, "worker_index": 0}),
+        (30, event("a")), (60, None), (90, None), (120, event("b")),
+    ])
+
+    def get(timeout):
+        now[0], value = next(timeline)
+        if value is None:
+            raise queue.Empty
+        return value
+
+    pool._result_queue.get = get
+    pool.generate([task("a"), task("b")])
+    waiting = [s for s in stats if s["completed"] == 1]
+    assert [s["inference_elapsed"] for s in waiting] == [30, 60, 90]
+    assert waiting[-1]["requests_per_second"] == pytest.approx(1 / 90)
+    pool.abort()
+
+
 @pytest.mark.parametrize("failure", [KeyboardInterrupt(), OSError("disk full")])
 def test_callback_failure_keeps_prior_saves_and_stops_all_workers(pool_factory, failure):
     pool = pool_factory(count=1, events=[event("a"), event("b")])

@@ -262,7 +262,7 @@ def test_repetition_penalty_reaches_only_its_generation_stage(
         def __init__(self, *_args, **kwargs):
             assert not any("penalty" in key for key in kwargs)
 
-        def generate(self, tasks, callback):
+        def generate(self, tasks, callback, *, on_progress=None):
             captured.extend(tasks)
             for task in tasks:
                 callback(extraction_steps.GeminiGenerationOutcome(task.task_id, response))

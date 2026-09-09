@@ -8,6 +8,7 @@ from time import perf_counter
 from typing import Any
 
 import numpy as np
+from tqdm import tqdm
 
 from .config import ValidationConfig
 from .io import atomic_write_jsonl, read_jsonl
@@ -443,8 +444,6 @@ def train_recommendation_arms(
     _persist_training_runs(training_runs_path, runs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     total = len(config.model.seeds) * len(RECOMMENDATION_ARMS)
-    completed = 0
-    started = perf_counter()
 
     selection_probabilities = popularity_probabilities(
         inputs.train_sequences,
@@ -457,79 +456,74 @@ def train_recommendation_arms(
         config.model.popularity_power,
     )
 
-    for seed in config.model.seeds:
-        for arm, branch in RECOMMENDATION_ARMS.items():
-            print(
-                f"[PHASE] run_recommendation select seed={seed} arm={arm}",
-                flush=True,
-            )
-            arm_started = perf_counter()
-            features = inputs.branch_features[branch]
-
-            best_epoch, best_ndcg, selection_history = _select_epoch(
-                config,
-                inputs,
-                seed,
-                arm,
-                branch,
-                features,
-                device,
-                selection_probabilities,
-            )
-
-            print(
-                f"[PHASE] run_recommendation refit seed={seed} arm={arm} epochs={best_epoch}",
-                flush=True,
-            )
-            model, optimizer, refit_history = _refit_model(
-                config,
-                inputs,
-                seed,
-                branch,
-                features,
-                device,
-                refit_probabilities,
-                best_epoch,
-            )
-
-            _evaluate_arm(config, inputs, model, seed, arm, branch, device, rows)
-
-            checkpoint = _save_refit_checkpoint(
-                output,
-                inputs,
-                model,
-                seed,
-                arm,
-                branch,
-                best_ndcg,
-                best_epoch,
-                refit_history,
-            )
-            runs.append(
-                _training_run_record(
-                    run_id=runtime["run_id"],
-                    seed=seed,
-                    arm=arm,
-                    branch=branch,
-                    selection_history=selection_history,
-                    best_ndcg=best_ndcg,
-                    best_epoch=best_epoch,
-                    refit_history=refit_history,
-                    checkpoint=checkpoint,
-                    candidate_count=len(inputs.item_index),
-                    elapsed_seconds=perf_counter() - arm_started,
-                    max_epochs=config.model.max_epochs,
+    with tqdm(total=total, desc="Recommendation", unit="run") as progress:
+        for seed in config.model.seeds:
+            for arm, branch in RECOMMENDATION_ARMS.items():
+                progress.set_postfix(seed=seed, arm=arm)
+                print(
+                    f"[PHASE] run_recommendation select seed={seed} arm={arm}",
+                    flush=True,
                 )
-            )
-            _persist_training_runs(training_runs_path, runs)
-            completed += 1
-            elapsed = perf_counter() - started
-            eta = elapsed / completed * (total - completed)
-            print(
-                f"[PROGRESS] run_recommendation {completed}/{total} "
-                f"elapsed={elapsed:.1f}s eta={eta:.1f}s arm={arm} seed={seed}",
-                flush=True,
-            )
+                arm_started = perf_counter()
+                features = inputs.branch_features[branch]
+
+                best_epoch, best_ndcg, selection_history = _select_epoch(
+                    config,
+                    inputs,
+                    seed,
+                    arm,
+                    branch,
+                    features,
+                    device,
+                    selection_probabilities,
+                )
+
+                print(
+                    f"[PHASE] run_recommendation refit seed={seed} arm={arm} epochs={best_epoch}",
+                    flush=True,
+                )
+                model, optimizer, refit_history = _refit_model(
+                    config,
+                    inputs,
+                    seed,
+                    branch,
+                    features,
+                    device,
+                    refit_probabilities,
+                    best_epoch,
+                )
+
+                _evaluate_arm(config, inputs, model, seed, arm, branch, device, rows)
+
+                checkpoint = _save_refit_checkpoint(
+                    output,
+                    inputs,
+                    model,
+                    seed,
+                    arm,
+                    branch,
+                    best_ndcg,
+                    best_epoch,
+                    refit_history,
+                )
+                runs.append(
+                    _training_run_record(
+                        run_id=runtime["run_id"],
+                        seed=seed,
+                        arm=arm,
+                        branch=branch,
+                        selection_history=selection_history,
+                        best_ndcg=best_ndcg,
+                        best_epoch=best_epoch,
+                        refit_history=refit_history,
+                        checkpoint=checkpoint,
+                        candidate_count=len(inputs.item_index),
+                        elapsed_seconds=perf_counter() - arm_started,
+                        max_epochs=config.model.max_epochs,
+                    )
+                )
+                _persist_training_runs(training_runs_path, runs)
+                progress.update(1)
 
     metrics_path = output / "per_user_metrics.jsonl"
     atomic_write_jsonl(metrics_path, rows)

@@ -126,6 +126,10 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 `embed-representations`는 Gemini Graph summary 파일이 없는 항목에 같은 항목의 Qwen Graph summary를 사용합니다. BGE 로딩 전에 대체 항목을 콘솔에 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini summary가 7개 필드 검증에 실패하면 실패 기록을 남기고 `[SUMMARY FALLBACK]`을 출력한 뒤 임베딩 단계로 진행할 수 있습니다. 존재하는 Gemini summary가 잘못됐거나 대체할 Qwen summary가 없으면 오류입니다. 모델 실행·파일 저장 오류는 fallback으로 숨기지 않습니다. Gemini branch의 대체 목록과 원본 scene coverage를 함께 해석합니다. 갱신된 요약을 반영하려면 임베딩과 추천을 `--force`로 재생성합니다.
 
+장면 추출·요약의 진행 바는 이번 실행의 미완료 장면·요약 요청 수를 기준으로 합니다. ETA는 초기화를 제외한 최근 3분의 처리량으로 계산하며, 성공·실패·재사용 수를 따로 표시합니다. 초기에는 추정 중으로 표시하고 변동 범위는 표시하지 않습니다. [ETA 계산과 표시 항목](docs/qwen_vllm.md#진행률과-eta)을 참고하세요.
+
+`embed-representations`는 BGE 배치별, `run-recommendation`은 학습 실행 조합별로 기본 tqdm 진행 바를 표시합니다. v4 학습은 날짜 × seed × 실험군 단위이며 재사용한 조합도 별도 집계합니다. 이 진행 바는 각 단계에 대한 것이며 전체 파이프라인 ETA는 계산하지 않습니다.
+
 ## 결과 확인 및 유의사항
 
 결과는 `artifacts/{run_id}/`에 저장됩니다.
