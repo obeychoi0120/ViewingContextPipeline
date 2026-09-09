@@ -242,7 +242,7 @@ def test_summary_resume_retries_only_unusable_or_missing_outputs(
         run()
     assert submitted == [["c2", "c3", "c4"]]
     assert bars[-1].initial == 0 and bars[-1].total == bars[-1].n == 3
-    assert "success=2 failed=1 reused=1" in bars[-1].postfix
+    assert "success=2 failed=1" in bars[-1].postfix
     assert invalid_path.read_bytes() == original_invalid
     assert successful_path.read_bytes() == original_success
     assert not (summary_dir / "failures/c3.jsonl").exists()
@@ -254,7 +254,7 @@ def test_summary_resume_retries_only_unusable_or_missing_outputs(
     assert run()["content_count"] == 4
     assert submitted[-1] == ["c2"]
     assert bars[-1].initial == 0 and bars[-1].total == bars[-1].n == 1
-    assert "success=1 failed=0 reused=3" in bars[-1].postfix
+    assert "success=1 failed=0" in bars[-1].postfix
     assert successful_path.read_bytes() == original_success
     assert not (summary_dir / "failures/c2.jsonl").exists()
     assert run()["content_count"] == 4

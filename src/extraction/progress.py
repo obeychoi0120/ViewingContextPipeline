@@ -49,8 +49,8 @@ class InferenceProgress:
 
     def __init__(self, *, total, desc, unit, reused=0, empty=0, progress_factory=tqdm):
         self.bar = progress_factory(
-            total=total, desc=desc, unit=unit, mininterval=1,
-            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed={elapsed}{postfix}]",
+            total=total, desc=desc, unit=unit, mininterval=1, dynamic_ncols=True,
+            bar_format="{l_bar}{bar:20}| {n_fmt}/{total_fmt} {unit} [{elapsed}{postfix}]",
         )
         self.fp = self.bar.fp
         self.total = total
@@ -96,18 +96,7 @@ class InferenceProgress:
             eta = tqdm.format_interval(remaining / rate)
         else:
             eta = "estimating"
-        fields = (
-            f"phase={phase} success={self.success} failed={self.failed} reused={self.reused}"
-            f" inflight={self.stats.get('inflight', 0)}"
-        )
-        if self.empty:
-            fields += f" empty={self.empty}"
-        if phase != "initializing":
-            fields += f" requests/s={rate:.2f}"
-            if "output_tokens_per_second" in self.stats:
-                fields += f" output_tokens/s={self.stats['output_tokens_per_second']:.1f}"
-        if "initialization_seconds" in self.stats:
-            fields += f" init={tqdm.format_interval(self.stats['initialization_seconds'])}"
-        if phase == "running":
-            fields += f" infer={tqdm.format_interval(self.stats.get('inference_elapsed', 0))}"
-        self.bar.set_postfix_str(f"{fields} ETA={eta}", refresh=refresh)
+        fields = f"ETA={eta} success={self.success} failed={self.failed}"
+        if phase != "initializing" and "output_tokens_per_second" in self.stats:
+            fields += f" tok/s={self.stats['output_tokens_per_second']:.1f}"
+        self.bar.set_postfix_str(fields, refresh=refresh)

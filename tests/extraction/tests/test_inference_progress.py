@@ -69,9 +69,17 @@ def test_progress_uses_only_pending_requests_and_separates_failures():
         progress.complete(failed=True)
         assert progress.bar.n == 2 and progress.bar.total == 100
         progress.update_stats({"phase": "running", "eta_ready": True,
-                               "requests_per_second": 2, "inflight": 64})
+                               "requests_per_second": 2, "inflight": 64,
+                               "output_tokens_per_second": 512,
+                               "initialization_seconds": 120, "inference_elapsed": 60})
         assert "ETA=00:49" in progress.bar.postfix
-        assert "success=1 failed=1 reused=999" in progress.bar.postfix
+        assert "success=1 failed=1" in progress.bar.postfix
+        assert "tok/s=512.0" in progress.bar.postfix
+        for field in ("phase=", "reused=", "inflight=", "requests/s=", "init=", "infer="):
+            assert field not in progress.bar.postfix
+        rendered = str(progress.bar)
+        assert "2/100 scene" in rendered
+        assert len(rendered.split("|")[1]) == 20
     # The standard tqdm instantaneous ETA/rate must not appear alongside ours.
     assert "scene/s" not in stream.getvalue()
     assert "remaining" not in progress.bar.bar_format
@@ -80,16 +88,15 @@ def test_progress_uses_only_pending_requests_and_separates_failures():
 def test_finished_cached_and_interrupted_progress():
     progress, _ = make_progress(total=0, reused=99)
     with progress:
-        assert "phase=finished" in progress.bar.postfix
         assert "ETA=00:00" in progress.bar.postfix
     progress, _ = make_progress(total=1)
     with progress:
         progress.complete(failed=True)
-    assert "phase=finished" in progress.bar.postfix
+    assert "ETA=00:00" in progress.bar.postfix
     assert "success=0 failed=1" in progress.bar.postfix
     progress, _ = make_progress(total=2)
     with pytest.raises(KeyboardInterrupt), progress:
         progress.complete()
         raise KeyboardInterrupt
-    assert "phase=interrupted" in progress.bar.postfix
+    assert progress.stats["phase"] == "interrupted"
     assert "ETA=--" in progress.bar.postfix
