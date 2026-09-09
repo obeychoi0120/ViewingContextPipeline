@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,3 +65,29 @@ def test_output_validation_uses_stage_contract():
     assert benchmark.check_output("description-summary", "not structured")
     assert benchmark.check_output("description-scenes", "")
     assert benchmark.check_output("description-scenes", "person running") is None
+
+
+def test_export_uses_first_penalty_and_the_graph_schema(tmp_path, monkeypatch):
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("Describe the scene.")
+    context = SimpleNamespace(
+        config={"extraction": {"graph": {"scene_max_new_tokens": 64},
+                               "graph_repetition_penalty": [1.05, 1.1],
+                               "visual_evidence": {"num_keyframes": 6}}},
+        config_path=lambda *_: prompt, path=lambda *_: tmp_path,
+    )
+    monkeypatch.setattr(benchmark, "visual_rows", lambda _: [{"content_id": "a"}])
+    def rows(visual, **kwargs):
+        return [{"task": QwenGenerationTask("a:0", (), kwargs["prompt"], kwargs["max_new_tokens"],
+                                            repetition_penalty=kwargs["repetition_penalty"])}]
+    monkeypatch.setattr(benchmark, "scene_generation_rows", rows)
+    task = benchmark.export_requests(context, "graph-scenes", 1)["requests"][0]
+    assert task["repetition_penalty"] == 1.05
+    assert task["structured_output"]["json"] == benchmark.GRAPH_JSON_SCHEMA
+
+
+def test_transformers_reference_rejects_constraints_before_loading_any_model(tmp_path):
+    manifest = {"requests": [asdict(QwenGenerationTask("a", (), "prompt", 32,
+                                  structured_output={"grammar": 'root ::= "test"'}))]}
+    with pytest.raises(ValueError, match="does not support structured outputs"):
+        benchmark.measure(manifest, "transformers", qwen_settings(), 1, tmp_path / "report.json")

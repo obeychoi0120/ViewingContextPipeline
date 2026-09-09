@@ -244,7 +244,8 @@ def _embedding_documents(context, catalog, sources, pending, fallback_ids):
                 label = f"graph_qwen fallback summary (Gemini summary missing: {summary_path})"
                 summary_path = context.graph_summary_dir("qwen") / f"{content_id}.json"
             document = read_json(_require_file(summary_path, label))
-            if context.config["schema_version"] == "viewing-context-config/v4":
+            if (context.config["schema_version"] == "viewing-context-config/v4"
+                    or document.get("schema_version") == "video-summary-raw/v1"):
                 from extraction.summary_executor import reuse_summary_document
                 actual_branch = "graph_qwen" if content_id in fallback_ids and branch == "graph_gemini" else branch
                 if actual_branch == "desc":
@@ -297,13 +298,18 @@ def _encode_representations(encoder, pending, documents_by_branch, catalog, conf
     return matrices
 
 
-def _persist_representations(context, matrices, catalog, gemini_fallbacks):
+def _persist_representations(context, matrices, catalog, gemini_fallbacks, signatures):
+    from validation.representation_provenance import begin_write, finish_write, matrix_hash
     fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
     item_index_path = context.representations_dir / "item_index.json"
     for branch, matrix in matrices.items():
+        path = _embedding_path(context, branch)
+        previous_hash = matrix_hash(path) if path.exists() else None
+        previous_hash = begin_write(context, branch, previous_hash)
         _write_embedding(_embedding_path(context, branch), matrix)
         if branch == "graph_gemini":
             write_json(fallback_path, {"fallbacks": gemini_fallbacks})
+        finish_write(context, branch, signatures[branch], previous_hash)
 
     write_json(
         item_index_path,
@@ -324,9 +330,30 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
         context,
         catalog,
         sources,
-        list(sources) if full else pending,
+        list(sources),
         {row["content_id"] for row in gemini_fallbacks},
     )
+    from extraction.input_tracking import clear_changed, input_state_path
+    from validation.representation_provenance import (
+        input_hash, pending_write, read_state, source_changed, summary_sources,
+    )
+    fallback_ids = {row["content_id"] for row in gemini_fallbacks}
+    used_paths = {branch: list(summary_sources(context, branch, docs, fallback_ids))
+                  for branch, docs in documents_by_branch.items()}
+    for paths in used_paths.values():
+        for path in paths:
+            if input_state_path(path).with_suffix(".dirty").exists():
+                raise ValidationStepError(f"scene inputs changed; regenerate summary first: {path}")
+    signatures = {branch: input_hash(docs, catalog, {
+        **config.encoder.model_dump(mode="json"), "model": str(context.path("models", "bge")),
+    }) for branch, docs in documents_by_branch.items()}
+    for branch in sources:
+        previous = read_state(context, branch)
+        if (pending_write(context, branch).exists()
+                or not previous and source_changed(used_paths[branch])
+                or previous and previous["input_hash"] != signatures[branch]):
+            if branch not in pending:
+                pending.append(branch)
     print(
         f"[Embedding_fallback] graph_gemini -> graph_qwen: {len(gemini_fallbacks)} items"
         + (" (cached embeddings)" if "graph_gemini" not in pending else ""),
@@ -339,6 +366,9 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             flush=True,
         )
     if not pending:
+        for paths in used_paths.values():
+            for path in paths:
+                clear_changed(path)
         if full:
             from validation.representation_checks import verify_representations
             verify_representations(context, cohort)
@@ -347,7 +377,10 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     context.representations_dir.mkdir(parents=True, exist_ok=True)
     encoder = BGETextEncoder(config.encoder)
     matrices = _encode_representations(encoder, pending, documents_by_branch, catalog, config)
-    _persist_representations(context, matrices, catalog, gemini_fallbacks)
+    _persist_representations(context, matrices, catalog, gemini_fallbacks, signatures)
+    for paths in used_paths.values():
+        for path in paths:
+            clear_changed(path)
     if full:
         from validation.representation_checks import verify_representations
         verify_representations(context, cohort)
@@ -368,12 +401,16 @@ def _training_runs_complete(
     *,
     run_id: str,
     seeds: list[int],
+    arms: set[str] | None = None,
 ) -> bool:
     if not path.is_file():
         return False
-    expected = {(seed, arm) for seed in seeds for arm in RECOMMENDATION_ARMS}
+    selected = set(RECOMMENDATION_ARMS) if arms is None else arms
+    expected = {(seed, arm) for seed in seeds for arm in selected}
     try:
         rows = read_jsonl(path)
+        if arms is not None:
+            rows = [row for row in rows if row["arm"] in arms]
         actual = {(int(row["seed"]), str(row["arm"])) for row in rows}
     except (OSError, KeyError, TypeError, ValueError):
         return False
@@ -402,8 +439,10 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_recommendation import run_rolling
         return run_rolling(context, force=force)
-    context.require_ready_cohort()
+    cohort = context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
+    from validation.representation_checks import verify_recorded_representations
+    verify_recorded_representations(context, cohort)
 
     config = validation_config(context)
     for branch in ("metadata", "graph_qwen", "graph_gemini", "desc"):
@@ -411,8 +450,16 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
     _require_file(context.representations_dir / "item_index.json", "item index")
     metrics_path = context.recommendations_dir / "per_user_metrics.jsonl"
     training_runs_path = context.recommendations_dir / TRAINING_RUNS_FILENAME
+    from validation.representation_provenance import recommendation_identity
+    input_path = context.recommendations_dir / "embedding_inputs.json"
+    previous_inputs = read_json(input_path) if input_path.exists() else {}
+    current_inputs = {branch: recommendation_identity(context, branch)
+                      for branch in RECOMMENDATION_ARMS.values()}
+    changed = {branch for branch, value in current_inputs.items()
+               if value and previous_inputs.get(branch) != value}
     if (
         not force
+        and not changed
         and metrics_path.is_file()
         and _training_runs_complete(
             training_runs_path,
@@ -422,7 +469,16 @@ def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str,
         and all(path.is_file() for path in _checkpoint_paths(context))
     ):
         return _result("run-recommendation")
-    train_recommendation_arms(config, _runtime(context))
+    retained = {arm for arm, branch in RECOMMENDATION_ARMS.items() if branch not in changed}
+    if (changed and not force and metrics_path.exists()
+            and _training_runs_complete(training_runs_path, run_id=context.run_id,
+                                        seeds=config.model.seeds, arms=retained)
+            and all(path.is_file() for path in _checkpoint_paths(context)
+                    if path.parent.name in {arm.lower() for arm in retained})):
+        train_recommendation_arms(config, _runtime(context), branches=changed)
+    else:
+        train_recommendation_arms(config, _runtime(context))
+    write_json(input_path, current_inputs)
     return _result("run-recommendation")
 
 
@@ -446,6 +502,25 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         decision_config,
         scene_duration=context.config["extraction"]["visual_evidence"]["scene_duration"],
     )
+    from extraction.recovery_report import recovery_report
+    document["generation_recovery"] = recovery_report(context.run_root)
+    from validation.representation_provenance import recommendation_identity
+    from validation.representation_checks import verify_recorded_representations
+    current_inputs = {branch: recommendation_identity(context, branch)
+                      for branch in RECOMMENDATION_ARMS.values()}
+    if any(current_inputs.values()):
+        try:
+            verify_recorded_representations(context, context.require_ready_cohort())
+            path = context.recommendations_dir / "embedding_inputs.json"
+            previous_inputs = read_json(path) if path.exists() else {}
+            if any(value and previous_inputs.get(branch) != value
+                   for branch, value in current_inputs.items()):
+                raise ValidationStepError("recommendations have stale embedding inputs")
+        except (OSError, ValueError, RuntimeError) as exc:
+            document["runtime_decision"]["status"] = "fail"
+            document["runtime_decision"]["errors"].append(
+                {"code": "stale_representation_dependencies", "message": str(exc)})
+            document["statistical_analysis"]["status"] = "not_computed"
     write_json(context.diagnosis_path, document)
     decision = document.get("runtime_decision", {})
     if decision.get("status") != "pass":

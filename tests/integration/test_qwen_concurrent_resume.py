@@ -41,8 +41,8 @@ def test_scene_progress_advances_before_video_finishes(context, monkeypatch, arm
         def generate(tasks, callback):
             assert bars[-1].bar.total == 3
             for index, task_id in enumerate(("a:0", "b:0", "a:1")):
-                good = "{}" if arm == "graph" else "A person indoors."
-                bad = "not json" if arm == "graph" else ""
+                good = json.dumps({"setting_context": "indoor", "entities": [], "events": [], "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}}) if arm == "graph" else "A person indoors."
+                bad = ""
                 callback(task_id, bad if index == 0 else good)
                 assert bars[-1].bar.n == index + 1
                 assert bars[-1].failed == 1
@@ -79,8 +79,8 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
                 for i in range(2 if visual["content_id"] == "a" else 1)]
 
     monkeypatch.setattr(steps, "_scene_generation_rows", rows)
-    graph = {"setting_context": "indoor", "entities": [], "events": [], "static_relations": [],
-             "semantic_topics": [], "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"}}
+    graph = {"setting_context": "indoor", "entities": [], "events": [],
+             "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}}
     text = json.dumps(graph) if arm == "graph" else "a person indoors"
     first_row = rows(visuals[0])[0]
     cached, _ = (scene_executor.graph_scene_result(first_row, text) if arm == "graph"

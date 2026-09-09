@@ -10,7 +10,8 @@ from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.errors import ExtractionStepError
 from extraction.evidence import build_scene_evidence
 from extraction.monitoring import video_names
-from pipeline_runtime import RunContext, read_jsonl, write_jsonl
+from extraction.raw_output import is_raw_graph, valid_raw_graph
+from pipeline_runtime import RunContext, read_json, read_jsonl, write_json, write_jsonl
 
 
 def write_progress(progress: tqdm, message: str) -> None:
@@ -38,8 +39,21 @@ def write_scene_checkpoint(
     """Atomically persist the completed subset of one content's scenes."""
     records.sort(key=lambda row: int(row["scene_idx"]))
     failures.sort(key=lambda row: int(row["scene_idx"]))
+    if not scene_path.exists() or read_jsonl(scene_path) != records:
+        from extraction.input_tracking import invalidate_inputs
+        invalidate_inputs(scene_path.parent.parent / "summaries" / f"{scene_path.stem}.json")
+    journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
+    write_json(journal, {"records": records, "failures": failures})
     write_jsonl(scene_path, records)
     write_failure_jsonl(failure_path, failures)
+    journal.unlink()
+
+
+def restore_scene_checkpoint(scene_path, failure_path):
+    journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
+    if journal.exists():
+        pending = read_json(journal)
+        write_scene_checkpoint(scene_path, failure_path, pending["records"], pending["failures"])
 
 
 def video_name_map(context: RunContext) -> dict[str, str]:
@@ -58,7 +72,6 @@ def scene_generation_rows(
     for scene in build_scene_evidence(
         scenes, visual["frames_dir"], visual["timestamp_json"]
     ):
-        fallback_idx = scene["fallback_idx"]
         scene_idx = scene["scene_idx"]
         keyframes = scene["keyframes"]
         image_paths = scene["image_paths"]
@@ -67,7 +80,7 @@ def scene_generation_rows(
                 f"{visual['content_id']} scene {scene_idx} has "
                 f"{len(image_paths)} of {len(keyframes)} keyframes"
             )
-        task_id = f"{visual['content_id']}:{fallback_idx}"
+        task_id = f"{visual['content_id']}:{scene_idx}"
         rows.append(
             {
                 "task": QwenGenerationTask(
@@ -119,7 +132,8 @@ def minimal_graph_records(
         "parse_mode",
         "semantic_warnings",
     }
-    invalid = [index for index, row in enumerate(records) if set(row) != required]
+    invalid = [index for index, row in enumerate(records)
+               if (not valid_raw_graph(row) if is_raw_graph(row) else set(row) != required)]
     if invalid:
         raise ExtractionStepError(
             f"incompatible graph scene output at rows {invalid[:10]}: {path}; "

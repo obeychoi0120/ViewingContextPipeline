@@ -253,14 +253,16 @@ def test_gemini_fallback_and_invalid_present_summary(full_context, monkeypatch):
     fallbacks = read_json(context.representations_dir / "graph_gemini_fallbacks.json")["fallbacks"]
     assert len(fallbacks) == 4
     verify_representations(context)
-    # A changed but structurally valid matrix is reused; only a missing branch is rebuilt.
+    # Tracked matrix edits cannot silently reuse recommendations with stale provenance.
     np.savez(context.representations_dir / "metadata_embeddings.npz", values=np.zeros((4, 1024)))
     (context.representations_dir / "graph_qwen_embeddings.npz").unlink()
-    embed_representations(context)
+    with pytest.raises(RuntimeError, match="embedding content changed without provenance"):
+        embed_representations(context)
     with np.load(context.representations_dir / "metadata_embeddings.npz") as data:
         assert np.all(data["values"] == 0)
-    verify_representations(context)
-    # Force rebuild still replaces valid cached values, without any dependency binding.
+    with pytest.raises(RuntimeError, match="embedding content changed without provenance"):
+        verify_representations(context)
+    # Force rebuild binds the restored matrix to its actual inputs.
     embed_representations(context, force=True)
     with np.load(context.representations_dir / "metadata_embeddings.npz") as data:
         assert np.all(data["values"] == 1)
@@ -306,6 +308,8 @@ def gemini_summary_recovery(full_context, monkeypatch):
     from extraction.summary_validation import SUMMARY_SECTIONS, serialize_summary_sections
 
     context = full_context
+    # These legacy resume cases use a single-attempt schedule.
+    context.config["extraction"]["summary_repetition_penalty"] = 1.05
     catalog = context.require_ready_cohort()["catalog"]
     monkeypatch.setattr("extraction.steps._visual_rows", lambda _: catalog)
     sections = dict.fromkeys(SUMMARY_SECTIONS, "Visible evidence.")
@@ -351,7 +355,7 @@ def test_gemini_recovered_scenes_refresh_only_stale_valid_summary(
         def generate(tasks, callback):
             calls.append([task.task_id for task in tasks])
             for task in tasks:
-                callback(task.task_id, text if valid_output else "not labeled text")
+                callback(task.task_id, text if valid_output else "")
             return {}
         yield generate
 
@@ -388,7 +392,7 @@ def test_missing_gemini_summary_failure_continues_to_fallback_then_recovers(
         def generate(tasks, callback):
             calls.append([task.task_id for task in tasks])
             for task in tasks:
-                callback(task.task_id, "not labeled text" if len(calls) == 1 and task.task_id == contents[0] else text)
+                callback(task.task_id, "" if len(calls) == 1 and task.task_id == contents[0] else text)
             return {}
         yield generate
 
@@ -600,6 +604,15 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     assert diagnosis["metadata_missing"]["missing_count"] == 2
     assert [row["item_id"] for row in diagnosis["metadata_missing"]["items"]] == ["2", "4"]
     assert diagnosis["scene_coverage"]["arms"]["graph_gemini"]["success_coverage"] == 1
+    # An embedding identity change invalidates only its 7 dates x 3 seeds.
+    protected_arms = {path: path.read_bytes() for path in completions
+                      if path.parent.name != "sasrec_graph_qwen"}
+    monkeypatch.setattr("validation.representation_provenance.recommendation_identity",
+                        lambda _, branch: {"embedding_hash": "changed-fixture"}
+                        if branch == "graph_qwen" else {})
+    assert run_rolling(context) == {"stage": "run-recommendation", "completed": 21, "skipped": 63}
+    assert all(path.read_bytes() == original for path, original in protected_arms.items())
+    assert collect_metrics(context, config, context.require_ready_cohort())[2]["combination_count"] == 84
     # Repeated events cannot pass content validation without checksums.
     path = completions[0].with_name("per_event_metrics.jsonl")
     with path.open("a") as handle:

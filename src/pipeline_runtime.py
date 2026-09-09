@@ -254,13 +254,11 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         raise ConfigError("extraction.greedy_decoding must be true or false")
     for stage in ("graph", "description", "summary"):
         key = f"{stage}_repetition_penalty"
-        repetition_penalty = extraction.get(key)
-        if (
-            not isinstance(repetition_penalty, (int, float))
-            or isinstance(repetition_penalty, bool)
-            or not 1 <= float(repetition_penalty) <= 2
-        ):
-            raise ConfigError(f"extraction.{key} must be in [1, 2]")
+        from extraction.recovery import penalty_schedule
+        try:
+            penalty_schedule(extraction.get(key))
+        except ValueError as exc:
+            raise ConfigError(f"extraction.{key}: {exc}") from exc
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution", "scene_duration", "num_keyframes"}:
         raise ConfigError(

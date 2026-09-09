@@ -140,6 +140,8 @@ def collect_metrics(context, config, cohort):
                     "seed": seed,
                     "arm": arm,
                 }
+                from validation.representation_provenance import recommendation_identity
+                identity.update(recommendation_identity(context, RECOMMENDATION_ARMS[arm]))
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
                 if not combination_complete(directory, identity, len(ids)):
                     raise ValueError(f"incomplete/corrupt combination: {directory}")
@@ -242,6 +244,8 @@ def diagnose(context):
             True,
         )
         document["scene_coverage"] = scene[0]
+        from extraction.recovery_report import recovery_report
+        document["generation_recovery"] = recovery_report(context.run_root)
         document["gemini_summary_fallbacks"] = read_json(
             context.representations_dir / "graph_gemini_fallbacks.json"
         )

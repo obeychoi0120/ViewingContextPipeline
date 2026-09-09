@@ -433,6 +433,7 @@ def _save_refit_checkpoint(
 def train_recommendation_arms(
     config: ValidationConfig,
     runtime: dict[str, Any],
+    *, branches: set[str] | None = None,
 ) -> dict[str, Any]:
     require_torch()
     inputs = _prepare_inputs(config, runtime)
@@ -441,6 +442,12 @@ def train_recommendation_arms(
     rows: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
     training_runs_path = output / TRAINING_RUNS_FILENAME
+    metrics_path = output / "per_user_metrics.jsonl"
+    if branches is not None:
+        from pipeline_runtime import read_jsonl
+        retained = {arm for arm, branch in RECOMMENDATION_ARMS.items() if branch not in branches}
+        rows = [row for row in read_jsonl(metrics_path) if row["arm"] in retained]
+        runs = [row for row in read_jsonl(training_runs_path) if row["arm"] in retained]
     _persist_training_runs(training_runs_path, runs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     total = len(config.model.seeds) * len(RECOMMENDATION_ARMS)
@@ -459,6 +466,9 @@ def train_recommendation_arms(
     with tqdm(total=total, desc="Recommendation", unit="run") as progress:
         for seed in config.model.seeds:
             for arm, branch in RECOMMENDATION_ARMS.items():
+                if branches is not None and branch not in branches:
+                    progress.update(1)
+                    continue
                 progress.set_postfix(seed=seed, arm=arm)
                 print(
                     f"[PHASE] run_recommendation select seed={seed} arm={arm}",

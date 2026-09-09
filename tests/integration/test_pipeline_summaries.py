@@ -232,7 +232,7 @@ def test_summary_resume_retries_only_unusable_or_missing_outputs(
                     == context.config["extraction"]["summary_repetition_penalty"]
                 )
                 fail = len(submitted) == 1 and task.task_id == "c2"
-                callback(task.task_id, "invalid response" if fail else _summary_lines(sections))
+                callback(task.task_id, "" if fail else _summary_lines(sections))
             return {}
 
         yield generate
@@ -278,7 +278,7 @@ def summary_failure_case(context, monkeypatch, request):
         summary_dir = context.graph_summary_dir("qwen")
         failure_dir = context.graph_summary_failure_dir("qwen")
         run = partial(extraction_steps.summarize_graph, context, source="qwen", gpus=1)
-        arm, schema, invalid = "graph_qwen", "graph-video-summary/v3", "not labeled text"
+        arm, schema, invalid = "graph_qwen", "graph-video-summary/v3", ""
     else:
         scene.update(
             schema_version="scene-description/v1",
@@ -289,7 +289,7 @@ def summary_failure_case(context, monkeypatch, request):
         summary_dir = context.description_summary_dir
         failure_dir = context.description_summary_failure_dir
         run = partial(extraction_steps.summarize_description, context)
-        arm, schema, invalid = "description", "description-video-summary/v3", "not json"
+        arm, schema, invalid = "description", "description-video-summary/v3", ""
     write_jsonl(scene_dir / "c1.jsonl", [scene])
     sections = {name: "" for name in SUMMARY_SECTIONS}
     sections.update(
@@ -330,7 +330,7 @@ def test_summary_failure_is_saved_once_and_manual_resume_removes_it(
     assert failures[0]["raw_response"] == invalid
     stderr = capsys.readouterr().err
     assert f"[Qwen_summary_{arm}_fail]" in stderr
-    assert f"Raw output:\n{invalid}" in stderr
+    assert "Raw output:" not in stderr  # Raw responses are persisted, not dumped to the console.
     assert "generation started" not in stderr
 
     @contextmanager

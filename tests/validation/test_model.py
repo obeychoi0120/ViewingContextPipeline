@@ -271,7 +271,7 @@ def training_case(tmp_path):
     return config, runtime
 
 
-def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(training_case) -> None:
+def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(training_case, monkeypatch) -> None:
     config, runtime = training_case
     recommendations = Path(runtime["paths"]["recommendations_dir"])
     result = train_recommendation_arms(config, runtime)
@@ -290,6 +290,25 @@ def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(training_case) ->
         assert row["selection"]["epochs_completed"] == 1
         assert row["refit"]["data"] == "train+valid_target"
         assert row["refit"]["epochs_completed"] == 1
+
+    # A refresh retains every unaffected arm's checkpoint, metrics and training record.
+    import validation.recommendation as recommendation
+    preserved = {path: path.read_bytes() for path in checkpoints
+                 if path.parent.name != "sasrec_graph_qwen"}
+    old_metrics = read_jsonl(recommendations / "per_user_metrics.jsonl")
+    selected = []
+    original = recommendation._select_epoch
+    def select(*args, **kwargs):
+        selected.append(args[4])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(recommendation, "_select_epoch", select)
+    result = train_recommendation_arms(config, runtime, branches={"graph_qwen"})
+    assert selected == ["graph_qwen"] * 3 and len(result["runs"]) == 12
+    assert all(path.read_bytes() == data for path, data in preserved.items())
+    def unchanged(rows):
+        return [row for row in rows if row["arm"] != "SASRec_GRAPH_QWEN"]
+    assert unchanged(read_jsonl(recommendations / "per_user_metrics.jsonl")) == unchanged(old_metrics)
+    assert unchanged(result["runs"]) == unchanged(training_runs)
 
 
 def test_selection_ties_keep_first_best_epoch_and_refit_only_selected_epochs(

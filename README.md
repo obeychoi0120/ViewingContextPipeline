@@ -124,7 +124,20 @@ python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
 
-`embed-representations`는 Gemini Graph summary 파일이 없는 항목에 같은 항목의 Qwen Graph summary를 사용합니다. BGE 로딩 전에 대체 항목을 콘솔에 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini summary가 7개 필드 검증에 실패하면 실패 기록을 남기고 `[SUMMARY FALLBACK]`을 출력한 뒤 임베딩 단계로 진행할 수 있습니다. 존재하는 Gemini summary가 잘못됐거나 대체할 Qwen summary가 없으면 오류입니다. 모델 실행·파일 저장 오류는 fallback으로 숨기지 않습니다. Gemini branch의 대체 목록과 원본 scene coverage를 함께 해석합니다. 갱신된 요약을 반영하려면 임베딩과 추천을 `--force`로 재생성합니다.
+`embed-representations`는 정상 Summary 또는 명시적으로 저장된 Raw Summary의 `text`를 읽습니다. Gemini Graph Summary 파일이 없을 때만 같은 항목의 Qwen Graph Summary를 사용합니다. Gemini의 정상·Raw 파일이 있으면 이를 우선하며, 잘못된 기존 파일을 Raw로 간주하지 않습니다. BGE 로딩 전에 대체 항목을 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini 소스 Summary가 모든 시도에서 비어 있으면 실패 기록과 `[SUMMARY FALLBACK]`을 남기고 기존 Qwen 대체 경로로 진행할 수 있습니다. 실행·저장 오류는 Step 실패입니다. 요약 갱신 후에는 위 임베딩·추천 명령을 그대로 실행하면 변경 영향을 받은 arm만 갱신합니다.
+
+추출·요약은 Step 안에서 **Structured Output → 검증·Repair → 다음 penalty로 재생성 → 최종 Raw** 순서로 처리합니다. vLLM 0.28.0의 `xgrammar`를 사용하며, 모든 재시도에서도 제약과 생성 토큰 전용 repetition penalty를 함께 적용합니다.
+
+| Step | 생성 제약과 최종 처리 |
+| --- | --- |
+| Qwen Graph 장면 | 필수 필드·타입·enum·nullable JSON Schema → 기존 Graph Repair → penalty 재시도 → Raw |
+| Graph Summary (Qwen/Gemini 소스), Description Summary | 기존 7개 라벨 순서의 Grammar → Summary Repair → penalty 재시도 → Raw |
+| Description 장면 | 자유 텍스트 유지, 빈 응답만 penalty 재시도; 전부 비면 실패 |
+| Gemini Graph 장면 | 기존 HTTP retry·Graph Repair 유지; 오류 없는 비어 있지 않은 응답만 최종 Raw 허용 |
+
+`graph_repetition_penalty`, `description_repetition_penalty`, `summary_repetition_penalty`는 단일 숫자 또는 유한한 `[1, 2]` 범위의 비어 있지 않은 목록을 받습니다. 현재 `[1.00, 1.05, 1.10, 1.15, 1.20]`은 최초 1회와 재시도 최대 4회입니다. 같은 모델 pool에서 실패 항목만 다음 penalty로 제출하며 입력·프롬프트·토큰 한도는 유지합니다. Summary Repair는 전체 코드 펜스 제거, canonical/display 라벨 표기 정규화, 7개 라벨이 모두 있고 중복이 없을 때의 순서 복구만 합니다. 필드·내용을 만들어 채우지 않습니다. Graph 개수·ID 참조는 기존 의미 경고로 유지하고, Summary 문장 품질·단어 수는 새 실패 기준으로 추가하지 않습니다.
+
+최종 Raw는 현재 재시도 묶음에서 마지막으로 받은 비어 있지 않은 **Repair 전 원문**입니다. 같은 출력 경로에 Graph는 `graph-scene-raw/v1`과 `raw_response`, Summary는 `video-summary-raw/v1`과 `text`를 저장하며 `status=raw_fallback`으로 구분합니다. 가짜 `graph`·`sections`는 만들지 않습니다. Graph 요약에는 정상·Raw 장면을 시간순으로 전달하고 Raw를 관찰 원문으로 표시합니다. `scene_count`는 두 종류를 합한 실제 입력 수입니다. 사용 가능한 장면이 없는 영상은 요약하지 않습니다.
 
 장면 추출·요약의 진행 바는 이번 실행의 미완료 장면·요약 요청 수를 기준으로 하며 `scene`/`summary` 단위를 표시합니다. ETA는 초기화를 제외한 최근 3분의 처리량으로 계산합니다. 막대에는 경과 시간·ETA·성공·실패와 Qwen의 출력 토큰 처리량만 표시하고, 재사용 수는 시작 로그에서 확인할 수 있습니다. 초기에는 추정 중으로 표시하고 변동 범위는 표시하지 않습니다. [ETA 계산과 표시 항목](docs/qwen_vllm.md#진행률과-eta)을 참고하세요.
 
@@ -137,6 +150,8 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 | 파일                                                  | 확인할 내용                               |
 | ----------------------------------------------------- | ----------------------------------------- |
 | `validation/diagnosis/diagnosis.json`               | 실행 완전성, Arm별 지표와 비교, 통계 경고 |
+| `extraction/**/scenes/.recovery/*.json`, `extraction/**/summaries/.recovery/*.json` | task·입력/정책 식별값, 묶음 ID, 시도별 원문·penalty·검증/Repair·토큰/종료 정보, 최종 상태 |
+| `extraction/**/summaries/.inputs/*.json` | 요약 입력 hash와 정상·Raw 장면 수 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/per_event_metrics.jsonl` | 사건·날짜·Arm·seed별 ranking 지표 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/training.json` | epoch 선택·refit·optimizer update·빈도 기록 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/sasrec.pt`, `complete.json` | checkpoint와 원자적 완료 기록 |
@@ -144,10 +159,12 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 먼저 `diagnosis.json`의 `runtime_decision.status`가 `pass`, `statistics.status`가 `computed`인지 확인합니다. `recommendations.daily`는 날짜·seed·Arm별 사건 평균, `recommendations.means`는 seed·날짜 균등 평균입니다. HR/NDCG@4·8·10·20·30과 NDCG@10 비교 CI를 제공합니다. 빈 날짜·잘못된 분모·불완전한 결과는 실패로 기록하며 가설 판정을 중단합니다.
 
 - **중단 후 재개:** 같은 조건이면 같은 명령을 재실행합니다. 추천은 완료 기록·필수 파일·결과 형식과 사건 수가 유효한 조합을 건너뛰고, 불완전한 조합만 처음부터 학습합니다. epoch 중간 재개는 지원하지 않습니다.
-- **실패 장면 재시도:** Qwen Graph·Description과 Gemini 모두 현재 추출 프로세스가 끝난 뒤 같은 명령을 다시 실행합니다. 별도 옵션 없이 성공 장면은 재사용하고, 실패 장면과 아직 결과가 없는 장면만 한 번씩 호출합니다. 재시도 성공 시 해당 실패 기록을 제거하며, 중간에 중단되어도 기존 성공과 미처리 실패 기록을 보존합니다. 실행 중 같은 실패를 반복 재시도하지는 않습니다. 모델·prompt·입력·생성 설정은 기존 run과 같아야 합니다. 장면 복구 후 요약 명령을 다시 실행하면 `scene_count`가 달라진 정상 요약만 갱신합니다. 임베딩·추천이 이미 있으면 해당 후속 단계도 재생성합니다.
+- **실패 장면·요약 재시도:** 정상과 최종 Raw는 재사용합니다. 중단된 묶음은 저장된 다음 시도부터 이어가고, 저장된 응답은 재호출 없이 복원합니다. 응답 저장 전 중단된 요청은 다시 호출될 수 있습니다. 최종 실패가 된 항목은 다음 명령 실행에서 새 묶음을 시작합니다. 이전 실패에 시도 이력이 없으면 첫 penalty부터 시작합니다. `run.sh`에는 별도 재시도 루프가 없습니다.
 - **Gemini 빈 응답 진단:** 콘솔과 `extraction/graph/gemini/scenes/failures/{content_id}.jsonl`의 `response_diagnostics`에 `candidates[].finish_reason`, `finish_message`, `prompt_feedback`, `usage_metadata`를 기록합니다. 과거 실패에는 이 정보가 없으며, 다음 빈 응답부터 기록됩니다. `MAX_TOKENS`는 출력 한도 도달, `SAFETY`나 `prompt_feedback.block_reason`은 차단 원인을 확인하는 단서입니다. 단순히 텍스트가 비었다는 이유만으로 차단으로 분류하지 않습니다.
-- **강제 재생성:** `--force`는 해당 단계를 재실행합니다. 입력·설정·코드 변경으로 cache를 자동 무효화하지 않으므로, 영향을 받는 후속 단계도 `--force`로 재실행합니다.
-- **조건 변경:** fingerprint 생성·비교와 파일 해시 검증은 사용하지 않습니다. 기존 run도 변경된 설정으로 실행할 수 있습니다. 조건을 구분해 보존하려면 새 run ID를 사용하고, 같은 run을 사용하면 변경된 단계와 후속 산출물을 직접 재생성합니다. `experiment.json`에는 최초 설정 snapshot만 보존합니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 섞지 않습니다.
+- **강제 재생성:** `--force`는 해당 Step 전체를 새 재시도 묶음으로 재생성합니다. 복구와 무관한 기존 정상 결과는 보존합니다. OOM·worker 종료·설정/문법 컴파일·파일 저장 오류는 penalty 재시도나 Raw 성공으로 처리하지 않습니다.
+- **후속 갱신:** 장면 변경은 해당 영상 요약을 갱신 대상으로 표시합니다. 장면 수가 같아도 내용 hash로 변경을 확인합니다. 요약을 다시 만든 뒤 임베딩 명령을 실행하면 입력이 변경된 arm을 갱신하고, 실제 임베딩이 달라지면 해당 arm의 날짜·seed별 추천을 갱신합니다. hash와 변경 표식을 함께 사용해 과거 캐시에도 복구의 영향을 전달합니다.
+- **조건 변경:** 재개 중 입력·생성 정책 식별값이 달라지면 새 묶음으로 시작합니다. 이 변경만으로 과거 정상 결과를 전부 재생성하지 않습니다. 실험 조건을 비교하려면 새 run ID를 사용하고, 같은 run에서 조건을 변경할 때는 해당 생성 Step에 `--force`를 명시합니다. `experiment.json`에는 최초 설정 snapshot만 보존합니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 섞지 않습니다.
+- **복구 진단:** `diagnosis.json`의 `generation_recovery`는 정상 생성·Repair·Raw·최종 실패·중단을 구분하고, `artifact_counts.legacy_unknown`은 대응 복구 이력이 없는 기존 결과입니다. `summary_inputs`는 정상/Raw 입력 장면 수를 구분합니다. Raw 장면은 `raw_fallback_scene_count`에 따로 세며 정상 Graph coverage에 포함하지 않습니다. 기존 coverage 기준은 유지합니다.
 - **검증 범위:** 테스트 통과와 실제 MicroLens 전체 실험 완료는 구분합니다. 모델의 일반적 우열이나 온라인 추천 효과는 이 PoC 결과만으로 주장할 수 없습니다.
 
 확정한 기준은 primary NDCG@10, 상대 비열등성 허용폭 5%, familywise α=0.05와 기존 Bonferroni 비교군입니다. Gemini 요약이 없을 때만 Qwen Graph 대체를 허용하고 원본 scene coverage(최소 0.95, Arm 간 gap 최대 0.05)를 별도로 보고합니다.

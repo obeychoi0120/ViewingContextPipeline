@@ -23,6 +23,7 @@ def fake_vllm(monkeypatch):
     module.SamplingParams = lambda **kw: SimpleNamespace(**kw)
     sampling = ModuleType("vllm.sampling_params")
     sampling.RequestOutputKind = SimpleNamespace(FINAL_ONLY="final")
+    sampling.StructuredOutputsParams = lambda **kw: SimpleNamespace(**kw)
     monkeypatch.setitem(sys.modules, "vllm", module)
     monkeypatch.setitem(sys.modules, "vllm.sampling_params", sampling)
     renderer = ModuleType("vllm.renderers.params")
@@ -55,7 +56,8 @@ class Engine:
 
     async def generate(self, prompt, params, request_id):
         self.calls.append((prompt, params, request_id))
-        yield SimpleNamespace(finished=True, outputs=[SimpleNamespace(text=" generated text ", token_ids=[1, 2])])
+        yield SimpleNamespace(finished=True, outputs=[SimpleNamespace(
+            text=" generated text ", token_ids=[1, 2], finish_reason="stop", stop_reason=7)])
 
     def shutdown(self, **_kwargs):
         self.closed = True
@@ -76,7 +78,8 @@ def test_native_images_order_and_greedy_settings(backend, tmp_path):
         paths.append(str(path))
     task = QwenGenerationTask("a:0", tuple(paths), "prompt", 32, repetition_penalty=1.05)
     output = asyncio.run(backend.generate(task))
-    assert (output.text, output.prompt_tokens, output.output_tokens) == ("generated text", 8, 2)
+    assert (output.text, output.prompt_tokens, output.output_tokens) == (" generated text ", 8, 2)
+    assert (output.finish_reason, output.stop_reason) == ("stop", 7)
     content = backend.processor.messages[0]["content"]
     assert [item["type"] for item in content] == ["image", "image", "text"]
     assert content[-1]["text"] == "prompt"
@@ -88,6 +91,28 @@ def test_native_images_order_and_greedy_settings(backend, tmp_path):
     assert params.extra_args[PENALTY_KEY] == 1.05
     assert params.stop_token_ids == [7, 9]
     assert params.output_kind == "final"
+
+
+@pytest.mark.parametrize("kind", ["json", "grammar"])
+def test_structured_output_and_generated_token_penalty_are_passed_together(backend, kind):
+    from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
+    constraint = {kind: GRAPH_JSON_SCHEMA if kind == "json" else SUMMARY_GRAMMAR}
+    task = QwenGenerationTask("structured", (), "prompt", 32,
+                              repetition_penalty=1.15, structured_output=constraint)
+    asyncio.run(backend.generate(task))
+    params = backend.engine.calls[0][1]
+    assert vars(params.structured_outputs) == constraint
+    assert params.repetition_penalty == 1.0 and params.extra_args[PENALTY_KEY] == 1.15
+
+
+def test_structured_output_compilation_error_never_generates_unconstrained(backend, monkeypatch):
+    def fail(**kwargs):
+        raise ValueError("grammar compilation failed")
+    monkeypatch.setattr(sys.modules["vllm.sampling_params"], "StructuredOutputsParams", fail)
+    with pytest.raises(RuntimeError, match="compilation"):
+        asyncio.run(backend.generate(QwenGenerationTask("a", (), "prompt", 32,
+                                                        structured_output={"grammar": "bad"})))
+    assert not backend.engine.calls
 
 
 @pytest.mark.parametrize("seed", [None, 43])
@@ -253,6 +278,7 @@ def test_engine_configuration_and_eos_are_explicit(fake_vllm, monkeypatch, tmp_p
         assert args["model_impl"] == "vllm" and args["tensor_parallel_size"] == 1
         assert args["generation_config"] == "vllm"
         assert args["limit_mm_per_prompt"] == {"image": 6, "video": 0}
+        assert args["structured_outputs_config"] == {"backend": "xgrammar"}
         assert backend.stop_token_ids == [11, 12]
         assert backend.runtime_info["settings"]["max_model_len"] == 1024
     finally:

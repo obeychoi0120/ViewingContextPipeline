@@ -69,9 +69,34 @@ class QwenRuntimeLog:
 
     def classification(self, task_id, value):
         previous = self.completed.get((self.stage, task_id))
-        if previous and previous["status"] == "complete" and previous["result_hash"] == result_hash(value):
+        if (previous and previous["status"] in {"complete", "raw_fallback"}
+                and previous["result_hash"] == result_hash(value)):
             return "vllm"
         return "legacy_unknown"
+
+    def checkpoint_origin(self):
+        if self.current_result is None:
+            return None
+        event = self.current_result
+        return {"execution_id": self.execution_id, "result": event,
+                "engine": self.engines[event["worker_index"]]}
+
+    def record_replayed(self, task_id, value, origin):
+        if not origin:
+            return
+        event = origin["result"]
+        if event["task_id"] != task_id:
+            raise RuntimeError(f"replayed Qwen result has wrong task: {task_id}")
+        artifact_id = (f"{task_id.rsplit(':', 1)[0]}:{value['scene_idx']}"
+                       if "scene_idx" in value else task_id)
+        self._append({
+            "event": "result", "task_id": task_id, "artifact_id": artifact_id,
+            "status": value.get("status", "complete"), "result_hash": result_hash(value),
+            "replayed_from_execution_id": origin["execution_id"],
+            "original_engine": origin["engine"],
+            **{key: event.get(key) for key in ("worker_index", "gpu_id", "prompt_tokens",
+               "output_tokens", "finish_reason", "stop_reason", "generation")},
+        })
 
     def record(self, task_id, value, *, status="complete", artifact_id=None):
         # Fake generators used by CPU tests never claim a real engine execution.
@@ -86,5 +111,7 @@ class QwenRuntimeLog:
             "result_hash": result_hash(value), "worker_index": event["worker_index"],
             "gpu_id": event["gpu_id"], "prompt_tokens": event["prompt_tokens"],
             "output_tokens": event["output_tokens"],
+            "finish_reason": event.get("finish_reason"),
+            "stop_reason": event.get("stop_reason"),
             "generation": event.get("generation"),
         })

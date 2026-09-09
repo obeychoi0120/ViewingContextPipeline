@@ -91,17 +91,34 @@ def test_pipeline_config_rejects_legacy_and_non_exact_v3_contract(
 def test_greedy_decoding_switches_summary_generation_mode(
     context: RunContext,
 ) -> None:
+    from extraction.structured_output import SUMMARY_GRAMMAR
     assert extraction_steps._summary_generation_settings(context) == {
         "repetition_penalty": 1.05,
+        "structured_output": {"grammar": SUMMARY_GRAMMAR},
     }
     context.config["extraction"]["greedy_decoding"] = False
     assert extraction_steps._summary_generation_settings(context) == {
         "repetition_penalty": 1.05,
+        "structured_output": {"grammar": SUMMARY_GRAMMAR},
         "do_sample": True,
         "temperature": 0.2,
         "top_p": 0.8,
         "top_k": 20,
     }
+
+
+@pytest.mark.parametrize("stage", ["graph", "description", "summary"])
+@pytest.mark.parametrize("value", [1.05, [1, 1.05, 1.1, 1.15, 1.2], [], [1, True], [float("inf")]])
+def test_recovery_schedule_config_validation(context, stage, value):
+    path = context.root / "config/pipeline.yaml"
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document["extraction"][f"{stage}_repetition_penalty"] = value
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    if value == 1.05 or value == [1, 1.05, 1.1, 1.15, 1.2]:
+        assert RunContext.load("recovery-config", root=context.root).config["extraction"][f"{stage}_repetition_penalty"] == value
+    else:
+        with pytest.raises(ConfigError, match=f"{stage}_repetition_penalty"):
+            RunContext.load("recovery-config", root=context.root)
 
 
 @pytest.mark.parametrize(
