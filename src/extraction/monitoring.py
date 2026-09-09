@@ -53,4 +53,7 @@ def graph_skip_message(
     scene_idx = int(record["scene_idx"])
     error = " ".join(str(record.get("error") or "JSON repair failed").splitlines())
     label = f"Graph_skip_{source}" if source else "Graph_skip"
-    return f"[{label}] {video_name} | scene #{scene_idx:03d}\n{error}"
+    message = f"[{label}] {video_name} | scene #{scene_idx:03d}\n{error}"
+    if record.get("failure_kind") == "json_repair":
+        message += f"\nRaw output:\n{record.get('raw_response') or '<empty>'}"
+    return message
