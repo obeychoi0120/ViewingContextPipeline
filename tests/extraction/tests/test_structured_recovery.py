@@ -180,6 +180,35 @@ def test_middle_penalty_succeeds_and_stops_retrying(tmp_path):
     assert outputs["a"]["status"] == "complete"
 
 
+def test_scene_pass_finishes_all_batches_before_increasing_penalty(tmp_path):
+    seen = []
+    def generate(batch, _):
+        seen.append([(t.task_id, t.repetition_penalty) for t in batch])
+        return {t.task_id: "valid" if t.task_id == "b" or t.repetition_penalty > 1 else "bad"
+                for t in batch}
+    outputs, failures = run(tmp_path, generate, [task(n) for n in "abcd"],
+                            batch_size=2, rounds_across_batches=True)
+    assert not failures and len(outputs) == 4
+    assert seen == [[("a", 1), ("b", 1)], [("c", 1), ("d", 1)],
+                    [("a", 1.05), ("c", 1.05)], [("d", 1.05)]]
+
+
+def test_scene_pass_resume_finishes_unstarted_scenes_before_retry(tmp_path):
+    def interrupted(batch, callback):
+        callback("a", "bad")
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, interrupted, [task("a"), task("b")],
+            batch_size=1, rounds_across_batches=True)
+    seen = []
+    def generate(batch, _):
+        seen.extend((t.task_id, t.repetition_penalty) for t in batch)
+        return {t.task_id: "valid" for t in batch}
+    run(tmp_path, generate, [task("a"), task("b")],
+        batch_size=1, rounds_across_batches=True)
+    assert seen == [("b", 1), ("a", 1.05)]
+
+
 def test_graph_repair_never_invents_required_fields():
     from extraction.scene_executor import graph_scene_result
     row = {"scene_idx": 0, "keyframes": [5]}

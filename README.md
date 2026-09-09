@@ -128,6 +128,8 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 추출·요약은 Step 안에서 **Structured Output → 검증·Repair → 다음 penalty로 재생성 → 최종 Raw** 순서로 처리합니다. vLLM 0.28.0의 `xgrammar`를 사용하며, 모든 재시도에서도 제약과 생성 토큰 전용 repetition penalty를 함께 적용합니다.
 
+Qwen Graph·Description 장면 추출은 전체 대기 Scene을 현재 penalty로 처리한 다음, 실패한 Scene만 다음 penalty로 다시 처리합니다. 입력 준비·제출은 작은 묶음을 유지하고, 성공 Scene은 즉시 저장합니다. Summary는 기존 묶음별 재시도 순서를 유지합니다.
+
 | Step | 생성 제약과 최종 처리 |
 | --- | --- |
 | Qwen Graph 장면 | 필수 필드·타입·enum·nullable JSON Schema → 기존 Graph Repair → penalty 재시도 → Raw |

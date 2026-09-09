@@ -57,7 +57,7 @@ def has_pending_recovery(directory, task_id, force_run_id=None):
 def generate_with_recovery(generate, tasks, *, penalties, directory, identity, validate,
                            complete, failed, raw_fallback=None, force=False,
                            runtime=None, attempt_metadata=None, log=lambda message: None,
-                           batch_size=256):
+                           batch_size=256, rounds_across_batches=False):
     """Bound input hashing/checkpoint IO before inference; keep one caller-owned model pool."""
     tasks = list(tasks)
     if len({task.task_id for task in tasks}) != len(tasks):
@@ -70,23 +70,32 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
         force_run_id = str(uuid4())
         # One intent marker covers tasks in later batches, including existing good outputs.
         _save(directory / ".force-run", {"force_run_id": force_run_id})
-    for offset in range(0, len(tasks), batch_size):
-        batch = tasks[offset:offset + batch_size]
-        log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
-            "(input hashes and checkpoints)")
-        _generate_recovery_batch(
-            generate, batch, penalties=penalties, directory=directory, identity=identity,
-            validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
-            force=force, force_run_id=force_run_id, runtime=runtime,
-            attempt_metadata=attempt_metadata, log=log,
-        )
+    for attempt_index in (range(len(penalties)) if rounds_across_batches else [None]):
+        remaining = []
+        if rounds_across_batches:
+            log(f"[RECOVERY] scene pass={attempt_index + 1}/{len(penalties)} "
+                f"repetition_penalty={penalties[attempt_index]}")
+        for offset in range(0, len(tasks), batch_size):
+            batch = tasks[offset:offset + batch_size]
+            log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
+                "(input hashes and checkpoints)")
+            remaining.extend(_generate_recovery_batch(
+                generate, batch, penalties=penalties, directory=directory, identity=identity,
+                validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
+                force=force and attempt_index in (None, 0), force_run_id=force_run_id,
+                runtime=runtime, attempt_metadata=attempt_metadata, log=log,
+                attempt_index=attempt_index,
+            ))
+        tasks = remaining
+        if not tasks:
+            break
     if force_run_id:
         (directory / ".force-run").unlink(missing_ok=True)
 
 
 def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity, validate,
                              complete, failed, raw_fallback, force, force_run_id,
-                             runtime, attempt_metadata, log):
+                             runtime, attempt_metadata, log, attempt_index):
     """Only validation failures retry. Callbacks and engine errors propagate unchanged."""
     penalties = penalty_schedule(penalties)
     states = {}
@@ -142,6 +151,8 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
         index = min(len(state[3]["attempts"]) for key, state in states.items() if key not in done)
         if index >= len(penalties):
             raise ValueError("recovery checkpoint exceeds configured generation budget")
+        if attempt_index is not None and index > attempt_index:
+            break  # Resume later attempts only after the rest of this scene pass finishes.
         batch = [replace(state[0], repetition_penalty=penalties[index])
                  for key, state in states.items()
                  if key not in done and len(state[3]["attempts"]) == index]
@@ -194,3 +205,4 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
                 if task.task_id not in returned:
                     raise RuntimeError(f"missing generation result: {task.task_id}")
                 handle(task.task_id, returned[task.task_id])
+    return [state[0] for key, state in states.items() if key not in done]

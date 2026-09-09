@@ -181,6 +181,7 @@ def run_qwen_scenes(
             if arm == "graph" else None,
             force=force, runtime=runtime, log=lambda message: write_progress(progress, message),
             batch_size=4 * (gpus or 1) * qwen_settings(qwen_options)["max_num_seqs"],
+            rounds_across_batches=True,
         )
     return records_by_content, failures_by_content
 
