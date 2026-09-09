@@ -37,18 +37,56 @@ def _save(path, document):
     atomic_write_json(path, document, durable=True)
 
 
-def has_pending_recovery(directory, task_id):
+def active_force_run(directory):
+    path = directory / ".force-run"
+    return json.loads(path.read_text(encoding="utf-8"))["force_run_id"] if path.exists() else None
+
+
+def has_pending_recovery(directory, task_id, force_run_id=None):
     path = directory / f"{fingerprint(task_id)}.json"
     if not path.exists():
-        return False
+        return force_run_id is not None
     document = json.loads(path.read_text(encoding="utf-8"))
+    if force_run_id and (not document["cycles"]
+                         or document["cycles"][-1].get("force_run_id") != force_run_id):
+        return True
     return bool(document["cycles"] and document["cycles"][-1]["status"]
                 not in {"complete", "raw_fallback"})
 
 
 def generate_with_recovery(generate, tasks, *, penalties, directory, identity, validate,
                            complete, failed, raw_fallback=None, force=False,
-                           runtime=None, attempt_metadata=None, log=lambda message: None):
+                           runtime=None, attempt_metadata=None, log=lambda message: None,
+                           batch_size=256):
+    """Bound input hashing/checkpoint IO before inference; keep one caller-owned model pool."""
+    tasks = list(tasks)
+    if len({task.task_id for task in tasks}) != len(tasks):
+        raise ValueError("duplicate recovery task")
+    if type(batch_size) is not int or batch_size <= 0:
+        raise ValueError("recovery batch size must be a positive integer")
+    penalties = penalty_schedule(penalties)
+    force_run_id = active_force_run(directory)
+    if force:
+        force_run_id = str(uuid4())
+        # One intent marker covers tasks in later batches, including existing good outputs.
+        _save(directory / ".force-run", {"force_run_id": force_run_id})
+    for offset in range(0, len(tasks), batch_size):
+        batch = tasks[offset:offset + batch_size]
+        log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
+            "(input hashes and checkpoints)")
+        _generate_recovery_batch(
+            generate, batch, penalties=penalties, directory=directory, identity=identity,
+            validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
+            force=force, force_run_id=force_run_id, runtime=runtime,
+            attempt_metadata=attempt_metadata, log=log,
+        )
+    if force_run_id:
+        (directory / ".force-run").unlink(missing_ok=True)
+
+
+def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity, validate,
+                             complete, failed, raw_fallback, force, force_run_id,
+                             runtime, attempt_metadata, log):
     """Only validation failures retry. Callbacks and engine errors propagate unchanged."""
     penalties = penalty_schedule(penalties)
     states = {}
@@ -67,16 +105,19 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
             raise ValueError(f"invalid recovery checkpoint: {path}")
         cycles = document["cycles"]
         if (force or not cycles or cycles[-1]["identity"] != key
+                or force_run_id and cycles[-1].get("force_run_id") != force_run_id
                 or cycles[-1]["status"] == "failed"):
             cycles.append({"cycle_id": str(uuid4()), "identity": key, "status": "running",
                            "attempts": []})
-            _save(path, document)
+            if force_run_id:
+                cycles[-1]["force_run_id"] = force_run_id
         states[task.task_id] = (task, path, document, cycles[-1])
 
     done = set()
 
     def commit(task_id, *, live=False):
         task, path, document, cycle = states[task_id]
+        previous_status = cycle["status"]
         if cycle["status"] in {"prepared", "complete", "raw_fallback"}:
             replay = not live or cycle.get("selected_attempt") != len(cycle["attempts"])
             if runtime and replay:
@@ -90,7 +131,8 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
             cycle["status"] = "failed"
         else:
             return
-        _save(path, document)
+        if cycle["status"] != previous_status:
+            _save(path, document)
         done.add(task_id)
 
     for task_id in states:

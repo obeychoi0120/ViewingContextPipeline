@@ -16,7 +16,7 @@ from extraction.descriptions import (
 from extraction.errors import ExtractionStepError
 from extraction.preparation import prepare_input_data
 from extraction.qwen_runtime import QwenRuntimeLog
-from extraction.recovery import has_pending_recovery, penalty_schedule
+from extraction.recovery import active_force_run, has_pending_recovery, penalty_schedule
 from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
 from extraction.progress import InferenceProgress
 from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
@@ -79,6 +79,7 @@ def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
 
 
 def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure_dir, model, force):
+    force_run_id = active_force_run(scene_dir / ".recovery")
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -120,8 +121,11 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
                     "resuming requires unchanged inputs and settings; "
                     "use --force or a new run_id for changed inputs"
                 )
+            cached_indices = {int(row["scene_idx"]) for row in existing}
             pending_indices = {int(row["scene_idx"]) for row in scene_rows
-                               if has_pending_recovery(scene_dir / ".recovery", row["task"].task_id)}
+                               if int(row["scene_idx"]) in cached_indices
+                               and has_pending_recovery(scene_dir / ".recovery", row["task"].task_id,
+                                                       force_run_id)}
             existing = [row for row in existing if int(row["scene_idx"]) not in pending_indices]
             content_id = str(visual["content_id"])
             records_by_content[content_id] = existing
@@ -141,6 +145,7 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
 
 
 def _description_scene_work(context, visual_rows, prompt, settings, force):
+    force_run_id = active_force_run(context.description_scene_dir / ".recovery")
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -168,9 +173,11 @@ def _description_scene_work(context, visual_rows, prompt, settings, force):
                 for row in cached
             ):
                 raise ExtractionStepError(f"incompatible cached scene indices/keyframes: {path}; use --force")
+            cached_indices = {int(row["scene_idx"]) for row in existing}
             pending_indices = {int(row["scene_idx"]) for row in scene_rows
-                               if has_pending_recovery(context.description_scene_dir / ".recovery",
-                                                       row["task"].task_id)}
+                               if int(row["scene_idx"]) in cached_indices
+                               and has_pending_recovery(context.description_scene_dir / ".recovery",
+                                                       row["task"].task_id, force_run_id)}
             existing = [row for row in existing if int(row["scene_idx"]) not in pending_indices]
             content_id = str(visual["content_id"])
             records_by_content[content_id] = existing

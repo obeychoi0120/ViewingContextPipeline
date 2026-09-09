@@ -8,6 +8,7 @@ from extraction.semantic_graph.json_repair import repair_graph_json_once
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.raw_output import raw_graph_record
 from extraction.recovery import generate_with_recovery
+from extraction.qwen_config import qwen_settings
 from extraction.step_support import (
     write_progress,
     write_scene_checkpoint,
@@ -113,7 +114,7 @@ def run_qwen_scenes(
             failures_by_content[content_id] = state["cached_failures"]
     if not rows_by_task:
         return records_by_content, failures_by_content
-    write_progress(progress, "[Qwen] starting vLLM GPU workers; each completed scene is checkpointed immediately")
+    write_progress(progress, "[Qwen] preparing bounded recovery batches; each completed scene is checkpointed immediately")
 
     def validate(task_id, text):
         content_id, row = rows_by_task[task_id]
@@ -179,6 +180,7 @@ def run_qwen_scenes(
             raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
             if arm == "graph" else None,
             force=force, runtime=runtime, log=lambda message: write_progress(progress, message),
+            batch_size=4 * (gpus or 1) * qwen_settings(qwen_options)["max_num_seqs"],
         )
     return records_by_content, failures_by_content
 

@@ -167,7 +167,7 @@ def test_engine_error_does_not_become_raw_or_consume_budget(tmp_path):
 
     with pytest.raises(RuntimeError, match="compilation"):
         run(tmp_path, crash)
-    assert cycles(tmp_path)[0]["attempts"] == []
+    assert not list(tmp_path.glob("*.json"))
 
 
 def test_middle_penalty_succeeds_and_stops_retrying(tmp_path):
@@ -205,3 +205,41 @@ def test_checkpoint_write_failure_preserves_last_durable_attempt(tmp_path, monke
     seen = []
     run(tmp_path, lambda tasks, _: (seen.append(tasks[0].repetition_penalty) or {"a": "valid replay"}))
     assert seen == [1.05]
+
+
+def test_first_inference_does_not_wait_for_all_input_hashes_or_checkpoints(tmp_path, monkeypatch):
+    import extraction.recovery as recovery
+    hashed = []
+    monkeypatch.setattr(recovery, "file_fingerprint", lambda path: (hashed.append(path) or "fixture"))
+    tasks = [replace(task(str(i)), image_paths=(f"image-{i}.png",)) for i in range(1000)]
+    def generate(batch, callback):
+        assert [t.task_id for t in batch] == ["0", "1"]
+        assert hashed == ["image-0.png", "image-1.png"]
+        assert not list(tmp_path.glob("*.json"))
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, generate, tasks, batch_size=2)
+
+
+def test_force_resume_includes_later_unprepared_batches_with_old_successes(tmp_path):
+    from extraction.recovery import active_force_run, has_pending_recovery
+    tasks = [task(name) for name in ("a", "b", "c")]
+    run(tmp_path, lambda batch, _: {t.task_id: "valid old" for t in batch}, tasks)
+    def interrupted(batch, _):
+        if batch[0].task_id == "b":
+            raise KeyboardInterrupt
+        return {batch[0].task_id: "valid forced"}
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, interrupted, tasks, batch_size=1, force=True)
+    force_id = active_force_run(tmp_path)
+    assert force_id and not has_pending_recovery(tmp_path, "a", force_id)
+    assert has_pending_recovery(tmp_path, "b", force_id)
+    assert has_pending_recovery(tmp_path, "c", force_id)
+    assert len(cycles(tmp_path, "c")) == 1  # Its old success must not hide unstarted forced work.
+    calls = []
+    def resume(batch, _):
+        calls.extend(t.task_id for t in batch)
+        return {t.task_id: "valid resumed" for t in batch}
+    run(tmp_path, resume, tasks[1:], batch_size=1)
+    assert calls == ["b", "c"] and active_force_run(tmp_path) is None
+    assert all(len(cycles(tmp_path, name)) == 2 for name in ("a", "b", "c"))
