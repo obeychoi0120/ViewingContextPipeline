@@ -25,7 +25,7 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
     monkeypatch.setattr(extraction_steps, "_visual_rows", lambda _context: [visual])
     scene_rows = [
         {
-            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "task": QwenGenerationTask(f"c1:{index}", (), "prompt", 10),
             "scene_idx": index,
             "scene_start_seconds": index * 30,
             "scene_end_seconds": (index + 1) * 30,
@@ -43,15 +43,14 @@ def test_graph_scene_failure_is_recorded_and_stage_continues(
         "setting_context": "indoor",
         "entities": [],
         "events": [],
-        "static_relations": [],
         "semantic_topics": [],
-        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+        "affect": {"valence": "neutral", "arousal": "medium"},
     }
 
     @contextmanager
     def fake_generator(**_kwargs):
         def generate(tasks, _callback=None):
-            return {tasks[0].task_id: json.dumps(graph), tasks[1].task_id: "not json"}
+            return {tasks[0].task_id: json.dumps(graph), tasks[1].task_id: ""}
 
         yield generate
 
@@ -125,9 +124,8 @@ def gemini_retry_case(context, monkeypatch):
         "setting_context": "indoor",
         "entities": [],
         "events": [],
-        "static_relations": [],
         "semantic_topics": [],
-        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+        "affect": {"valence": "neutral", "arousal": "medium"},
     }
     successful = {
         "scene_idx": 0,
@@ -283,7 +281,7 @@ def test_description_failure_force_retry_and_cache_reuse(
     visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
     scene_rows = [
         {
-            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "task": QwenGenerationTask(f"c1:{index}", (), "prompt", 10),
             "scene_idx": index,
             "scene_start_seconds": index * 30,
             "scene_end_seconds": (index + 1) * 30,
@@ -351,7 +349,7 @@ def test_qwen_graph_scene_is_checkpointed_before_content_finishes(
     visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
     scene_rows = [
         {
-            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "task": QwenGenerationTask(f"c1:{index}", (), "prompt", 10),
             "scene_idx": index,
             "keyframes": [index * 30 + 5],
         }
@@ -367,9 +365,8 @@ def test_qwen_graph_scene_is_checkpointed_before_content_finishes(
         "setting_context": "indoor",
         "entities": [],
         "events": [],
-        "static_relations": [],
         "semantic_topics": [],
-        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+        "affect": {"valence": "neutral", "arousal": "medium"},
     }
     scene_path = context.graph_scene_dir("qwen") / "c1.jsonl"
 
@@ -404,7 +401,7 @@ def test_qwen_description_scene_is_checkpointed_before_content_finishes(
     visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
     scene_rows = [
         {
-            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "task": QwenGenerationTask(f"c1:{index}", (), "prompt", 10),
             "scene_idx": index,
             "keyframes": [index * 30 + 5],
         }
@@ -449,7 +446,7 @@ def test_gemini_scene_stage_aggregates_out_of_order_errors(
     visual = {"content_id": "c1", "frames_dir": "unused", "timestamp_json": "unused"}
     scene_rows = [
         {
-            "task": QwenGenerationTask(f"c1:{index}", ("unused.png",), "prompt", 10),
+            "task": QwenGenerationTask(f"c1:{index}", (), "prompt", 10),
             "scene_idx": index,
             "scene_start_seconds": index * 30,
             "scene_end_seconds": (index + 1) * 30,
@@ -468,9 +465,8 @@ def test_gemini_scene_stage_aggregates_out_of_order_errors(
         "setting_context": "indoor",
         "entities": [],
         "events": [],
-        "static_relations": [],
         "semantic_topics": [],
-        "affect": {"subject_ids": [], "valence": "neutral", "arousal": "medium"},
+        "affect": {"valence": "neutral", "arousal": "medium"},
     }
 
     class Pool:

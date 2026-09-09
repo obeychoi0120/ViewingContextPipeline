@@ -120,6 +120,11 @@ def _success_scene_row_issues(
     if not _nonempty_timestamp_list(row.get("keyframes")):
         invalid.append("invalid_success_keyframes")
     if arm.startswith("graph_"):
+        from extraction.raw_output import is_raw_graph, valid_raw_graph
+        if is_raw_graph(row):
+            if not valid_raw_graph(row):
+                invalid.append("invalid_raw_graph_scene")
+            return invalid
         if set(row) != {
             "scene_idx",
             "keyframes",
@@ -166,6 +171,7 @@ def _scene_arm_contract(
     catalog_contents = set(content_ids)
     success: set[tuple[str, int]] = set()
     failures: set[tuple[str, int]] = set()
+    raw_scenes: set[tuple[str, int]] = set()
     parse_modes: dict[tuple[str, int], str] = {}
     semantic_warning_scenes: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
@@ -255,6 +261,9 @@ def _scene_arm_contract(
                             }
                         )
                         continue
+                if outcome == "success" and row.get("status") == "raw_fallback":
+                    raw_scenes.add(key)
+                    continue
                 destination.add(key)
                 if outcome == "success" and arm.startswith("graph_"):
                     parse_mode = row["parse_mode"]
@@ -263,8 +272,8 @@ def _scene_arm_contract(
                     if warnings:
                         semantic_warning_scenes.add(key)
 
-    overlap = success & failures
-    missing = expected - (success | failures)
+    overlap = (success & failures) | (raw_scenes & (success | failures))
+    missing = expected - (success | failures | raw_scenes)
     if overlap:
         issues["success_failure_overlap"] += len(overlap)
         examples.extend(
@@ -281,11 +290,12 @@ def _scene_arm_contract(
     denominator = len(expected)
     success_count = len(success)
     failure_count = len(failures)
-    outcome_count = len(success | failures)
+    outcome_count = len(success | failures | raw_scenes)
     document = {
         "expected_scene_count": denominator,
         "success_scene_count": success_count,
         "failure_scene_count": failure_count,
+        "raw_fallback_scene_count": len(raw_scenes),
         "accounted_scene_count": outcome_count,
         "success_coverage": success_count / denominator if denominator else 0.0,
         "failure_rate": failure_count / denominator if denominator else 0.0,

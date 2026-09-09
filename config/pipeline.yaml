@@ -42,9 +42,9 @@ extraction:
     scene_duration: 30
     num_keyframes: 6
   greedy_decoding: true
-  graph_repetition_penalty: 1.05
-  description_repetition_penalty: 1.00
-  summary_repetition_penalty: 1.05
+  graph_repetition_penalty: [1.00, 1.05, 1.10, 1.15, 1.20]
+  description_repetition_penalty: [1.00, 1.05, 1.10, 1.15, 1.20]
+  summary_repetition_penalty: [1.00, 1.05, 1.10, 1.15, 1.20]
   summary_sampling:
     temperature: 0.2
     top_p: 0.8
@@ -52,7 +52,7 @@ extraction:
   graph:
     scene_prompt: config/prompts/graph_scene_v2.md
     summary_prompt: config/prompts/graph_summary_v3.md
-    scene_max_new_tokens: 512
+    scene_max_new_tokens: 1024
     summary_max_new_tokens: 512
     gemini_concurrency: 8
   description:

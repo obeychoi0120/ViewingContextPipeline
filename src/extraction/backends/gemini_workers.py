@@ -153,7 +153,9 @@ class GeminiWorkerPool:
                     task.prompt,
                     self.max_output_tokens or task.max_new_tokens,
                 )
-                outcome = GeminiGenerationOutcome(task.task_id, text)
+                outcome = GeminiGenerationOutcome(
+                    task.task_id, text,
+                    response_diagnostics=getattr(backend, "last_response_diagnostics", None))
             except Exception as exc:  # SDK errors are persisted per scene by the caller.
                 outcome = GeminiGenerationOutcome(
                     task.task_id,

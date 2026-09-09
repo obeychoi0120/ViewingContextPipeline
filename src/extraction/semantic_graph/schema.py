@@ -344,7 +344,9 @@ def graph_summary_prompt(template: str, records: list[dict[str, Any]]) -> str:
             [
                 f"Scene {int(record['scene_idx'])} "
                 f"(keyframes: {', '.join(f'{value}s' for value in record['keyframes'])}):",
-                json.dumps(record["graph"], ensure_ascii=False, sort_keys=True),
+                ("Raw scene observation (unparsed model output):\n" + record["raw_response"]
+                 if record.get("status") == "raw_fallback"
+                 else json.dumps(record["graph"], ensure_ascii=False, sort_keys=True)),
             ]
         )
         for record in ordered

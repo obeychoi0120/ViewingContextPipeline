@@ -24,6 +24,7 @@ class GeminiBackend:
     temperature: float = 0.0
     thinking_level: str | None = None
     media_resolution: str | None = None
+    last_response_diagnostics: dict[str, Any] | None = None
 
     @classmethod
     def vertex(
@@ -87,28 +88,21 @@ class GeminiBackend:
             contents=contents,
             config=types.GenerateContentConfig(**config_kwargs),
         )
-        text = str(getattr(response, "text", "") or "").strip()
-        if not text:
-            candidates = getattr(response, "candidates", None) or []
-            feedback = getattr(response, "prompt_feedback", None)
-            usage = getattr(response, "usage_metadata", None)
-            raise GeminiEmptyResponseError({
-                "candidates": [
-                    {
-                        "finish_reason": getattr(candidate, "finish_reason", None),
-                        "finish_message": getattr(candidate, "finish_message", None),
-                    }
-                    for candidate in candidates
-                ],
-                "prompt_feedback": (
-                    feedback.model_dump(mode="json", exclude_none=True)
-                    if feedback is not None else None
-                ),
-                "usage_metadata": (
-                    usage.model_dump(mode="json", exclude_none=True)
-                    if usage is not None else None
-                ),
-            })
+        text = str(getattr(response, "text", "") or "")
+        candidates = getattr(response, "candidates", None) or []
+        feedback = getattr(response, "prompt_feedback", None)
+        usage = getattr(response, "usage_metadata", None)
+        self.last_response_diagnostics = {
+            "candidates": [{"finish_reason": getattr(candidate, "finish_reason", None),
+                            "finish_message": getattr(candidate, "finish_message", None)}
+                           for candidate in candidates],
+            "prompt_feedback": (feedback.model_dump(mode="json", exclude_none=True)
+                                if feedback is not None else None),
+            "usage_metadata": (usage.model_dump(mode="json", exclude_none=True)
+                               if usage is not None else None),
+        }
+        if not text.strip():
+            raise GeminiEmptyResponseError(self.last_response_diagnostics)
         return text
 
 

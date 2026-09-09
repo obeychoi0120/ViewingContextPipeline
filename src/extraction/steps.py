@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 from typing import Any, Callable
 
 from tqdm import tqdm
@@ -15,6 +16,8 @@ from extraction.descriptions import (
 from extraction.errors import ExtractionStepError
 from extraction.preparation import prepare_input_data
 from extraction.qwen_runtime import QwenRuntimeLog
+from extraction.recovery import has_pending_recovery, penalty_schedule
+from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
 from extraction.progress import InferenceProgress
 from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
 from extraction.semantic_graph import (
@@ -38,6 +41,7 @@ from extraction.step_support import (
     visual_rows as _visual_rows,
     write_progress as _write_progress,
     write_failure_jsonl,
+    restore_scene_checkpoint,
 )
 from pipeline_runtime import (
     RunContext,
@@ -57,7 +61,8 @@ def graph_stage_name(stage: str, source: str) -> str:
 def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     extraction = context.config["extraction"]
     settings: dict[str, Any] = {
-        "repetition_penalty": float(extraction["summary_repetition_penalty"]),
+        "repetition_penalty": penalty_schedule(extraction["summary_repetition_penalty"])[0],
+        "structured_output": {"grammar": SUMMARY_GRAMMAR},
     }
     if bool(extraction["greedy_decoding"]):
         return settings
@@ -85,12 +90,16 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
             prompt=prompt,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
             repetition_penalty=(
-                float(context.config["extraction"]["graph_repetition_penalty"])
+                penalty_schedule(context.config["extraction"]["graph_repetition_penalty"])[0]
                 if model == "qwen"
                 else 1.0
             ),
         )
+        if model == "qwen":
+            for row in scene_rows:
+                row["task"] = replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
         if not force:
+            restore_scene_checkpoint(path, failure_path)
             existing = _minimal_graph_records(read_jsonl(path), path) if path.is_file() else []
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
             if model == "qwen":
@@ -111,6 +120,9 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
                     "resuming requires unchanged inputs and settings; "
                     "use --force or a new run_id for changed inputs"
                 )
+            pending_indices = {int(row["scene_idx"]) for row in scene_rows
+                               if has_pending_recovery(scene_dir / ".recovery", row["task"].task_id)}
+            existing = [row for row in existing if int(row["scene_idx"]) not in pending_indices]
             content_id = str(visual["content_id"])
             records_by_content[content_id] = existing
             failures_by_content[content_id] = failures
@@ -139,11 +151,12 @@ def _description_scene_work(context, visual_rows, prompt, settings, force):
             visual,
             prompt=prompt,
             max_new_tokens=int(settings["scene_max_new_tokens"]),
-            repetition_penalty=float(
+            repetition_penalty=penalty_schedule(
                 context.config["extraction"]["description_repetition_penalty"]
-            ),
+            )[0],
         )
         if not force:
+            restore_scene_checkpoint(path, failure_path)
             existing = _minimal_description_records(read_jsonl(path), path) if path.is_file() else []
             failures = read_jsonl(failure_path) if failure_path.is_file() else []
             expected = {int(row["scene_idx"]): row["keyframes"] for row in scene_rows}
@@ -155,6 +168,10 @@ def _description_scene_work(context, visual_rows, prompt, settings, force):
                 for row in cached
             ):
                 raise ExtractionStepError(f"incompatible cached scene indices/keyframes: {path}; use --force")
+            pending_indices = {int(row["scene_idx"]) for row in scene_rows
+                               if has_pending_recovery(context.description_scene_dir / ".recovery",
+                                                       row["task"].task_id)}
+            existing = [row for row in existing if int(row["scene_idx"]) not in pending_indices]
             content_id = str(visual["content_id"])
             records_by_content[content_id] = existing
             failures_by_content[content_id] = failures
@@ -232,6 +249,8 @@ def extract_graph_scenes(
                 qwen_options=context.config["extraction"].get("qwen"),
                 image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
                 runtime=QwenRuntimeLog(context.run_root, stage),
+                penalties=context.config["extraction"]["graph_repetition_penalty"],
+                force=force,
             )
             records_by_content.update(completed)
             failures_by_content.update(failed)
@@ -257,6 +276,7 @@ def extract_graph_scenes(
                 force=force,
                 names=names,
                 progress=progress,
+                identity=gemini,
             )
     failures = [
         record
@@ -327,6 +347,7 @@ def summarize_graph(
         qwen_options=context.config["extraction"].get("qwen"),
         image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
         runtime=QwenRuntimeLog(context.run_root, stage),
+        penalties=context.config["extraction"]["summary_repetition_penalty"],
     )
 
 
@@ -371,6 +392,8 @@ def extract_description_scenes(
             qwen_options=context.config["extraction"].get("qwen"),
             image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
             runtime=QwenRuntimeLog(context.run_root, "extract-description-scenes"),
+            penalties=context.config["extraction"]["description_repetition_penalty"],
+            force=force,
         )
         records_by_content.update(completed)
         failures_by_content.update(failed)
@@ -439,6 +462,7 @@ def summarize_description(
         qwen_options=context.config["extraction"].get("qwen"),
         image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
         runtime=QwenRuntimeLog(context.run_root, "summarize-description"),
+        penalties=context.config["extraction"]["summary_repetition_penalty"],
     )
 
 

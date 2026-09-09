@@ -45,6 +45,8 @@ CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source qwen --ru
 
 Greedy는 `temperature=0`, 출력 상한은 `max_tokens`로 전달합니다. 샘플링 설정과 요청별 seed를 전달하고, 모델 generation config가 파이프라인의 생성 설정을 덮어쓰지 않도록 합니다. 기존 EOS 목록을 종료 토큰으로 사용하며 반복 패널티는 **생성된 토큰에만** 한 번 적용합니다. 엔진 차이 때문에 출력의 글자 단위 일치를 보장하지 않습니다.
 
+Graph 장면은 JSON Schema, 모든 Summary는 7줄 Grammar를 `SamplingParams.structured_outputs`로 전달합니다. 엔진의 구조 제약 backend는 `xgrammar`로 고정합니다. Graph Schema의 중첩 필드·enum·nullable은 검증하고, 개수·ID 참조는 의미 경고를 유지합니다. Summary는 빈 값이 가능하지만 모든 값이 비면 실패합니다. 구조 제약 초기화·컴파일 실패를 자유 생성으로 전환하지 않습니다. [vLLM 0.28 Structured Output API](https://docs.vllm.ai/en/v0.28.0/features/structured_outputs/)를 기준으로 합니다.
+
 ## 진행률과 ETA
 
 `extract-graph-scenes`(Qwen/Gemini), `extract-description-scenes`는 이번 실행의 미완료 장면 수를, `summarize-graph`/`summarize-description`은 미완료 요약 요청 수를 진행 바의 분모로 사용합니다. 분모는 실행 시작 시 고정되며, `scene`/`summary` 단위를 붙입니다. 분자는 이번 실행의 성공과 실패를 합한 처리 수입니다. 예를 들어 `382/47597 scene`은 이번 처리 대상 47,597개 장면 중 382개를 처리했다는 뜻이며, 영상 수가 아닙니다. 재사용 결과와 요약할 장면이 없는 영상은 시작 로그에서 확인할 수 있고 요청 수에서는 제외합니다. ETA는 이번 처리 시도가 끝나는 예상 시간이며, 실패가 모두 복구되는 시간은 아닙니다.
@@ -55,12 +57,14 @@ ETA는 최근 최대 180초의 완료 요청 수를 실제 경과 시간으로 �
 
 ## 재개와 실행 이력
 
-기존 성공 결과는 재사용합니다. 장면 추출은 성공한 scene index만 완료로 보고 실패·누락 장면을 다시 요청합니다. 요약은 기존 검증·재시도 규칙을 따릅니다. 엔진 변경만으로 기존 산출물을 무효화하지 않으며, `experiment.json`과 장면·요약 JSON 스키마도 유지합니다. `--force`는 해당 단계 전체를 의도적으로 다시 생성할 때만 사용합니다.
+기존 정상 결과와 명시적인 `raw_fallback`은 재사용하고 실패·누락 항목을 처리합니다. 정상 스키마는 유지하며 Raw는 별도 스키마입니다. `[1.00, 1.05, 1.10, 1.15, 1.20]` 순서로 생성하고 각 응답을 검증·Repair한 뒤 실패 task만 다음 penalty로 제출합니다. 모델 pool은 Step 안에서 계속 사용합니다. 전부 실패하면 마지막 비어 있지 않은 원문을 Raw로 저장하고, 모두 비면 최종 실패로 남깁니다. Description 장면은 자유 텍스트이며 빈 응답만 재시도합니다. [전체 처리 규칙](../README.md)을 참고하세요.
+
+각 출력 디렉터리의 `.recovery`에 입력·생성 정책 hash, task ID, 재시도 묶음과 시도 이력을 원자적으로 저장합니다. 시도에는 Repair 전 원문, penalty, 검증 오류와 Repair 모드, 출력 토큰 수, `finish_reason`·`stop_reason`을 기록합니다. 응답을 저장한 다음 정식 산출물을 게시하므로 게시 중 오류는 저장된 응답으로 재개합니다. 재시도 중 중단은 남은 시도부터, 최종 실패 후 재실행은 새 묶음의 첫 penalty부터 시작합니다. `--force`는 해당 Step 전체에 새 묶음을 시작합니다. 정상 산출물은 생성 방식 변경만으로 무효화하지 않습니다.
 
 `artifacts/$RUN_ID/extraction/qwen_runtime.jsonl`은 부모 프로세스만 추가 기록합니다.
 
 - `engine_ready`: 실행 ID, 단계, 모델 경로, GPU, 라이브러리 버전, 실제 적용 설정.
-- `result`: 저장 후 단계·작업 ID·실행 ID·상태·결과 해시와 토큰 수. `artifact_id`는 저장된 scene index를 기준으로 하며 제출 ID와 구분합니다.
+- `result`: 저장 후 단계·작업 ID·실행 ID·상태·결과 해시와 토큰/종료 정보. 저장된 응답으로 게시를 재개하면 `replayed_from_execution_id`와 `original_engine`으로 원래 실행을 구분합니다.
 - 정상 산출물의 현재 해시와 일치하는 성공 이력이 없으면 `legacy_unknown`으로 집계합니다. 옛 결과가 Transformers에서 실행됐다고 추정하지 않습니다.
 
 마지막 줄의 불완전한 append만 재실행 시 제거합니다. 중간 줄 손상 또는 구조가 잘못된 레코드는 오류입니다. 결과 저장 후 이력 저장 전에 중단됐다면 결과는 재사용되지만 이력은 `legacy_unknown`일 수 있습니다. Ctrl+C, 엔진 종료, OOM, 저장 오류 시 이미 저장한 결과를 보존하고 워커와 vLLM 하위 프로세스를 정리합니다. 엔진 오류는 숨기지 않고 중단하므로 원인을 해결한 뒤 같은 명령으로 재개합니다.
@@ -84,12 +88,21 @@ CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/q
 
 장면 JSON이 준비된 뒤 요약 요청을 export합니다. `description-scenes`, `description-summary`, `graph-summary-gemini`도 지원합니다. 실제 요청 수가 16개 이하라면 `--warmup 1` 등을 지정해 측정 요청을 남깁니다. 같은 요청 파일을 모든 비교에서 사용하고, 이미지가 바뀌면 해시 검사가 실패합니다. 샘플링 모드에서 운영처럼 seed가 `None`이면 확률적 결과 차이도 발생합니다. 출력 파일이 이미 있으면 덮어쓰지 않습니다.
 
-변경 전 Transformers 구현은 `benchmarks/qwen_transformers_reference.py`에 그대로 보존했습니다. 같은 checkpoint와 입력으로 기존 실행 경로를 측정할 때만 사용합니다. 기준 환경에 `accelerate`가 필요하며, 가능하면 이전 실행 환경을 유지하고 보고서의 라이브러리 버전도 함께 비교합니다.
+새로 export하는 요청은 현재 Structured Output 제약과 첫 penalty를 포함합니다. 이 도구는 고정 요청 1회 생성의 처리량을 측정하며 Step의 Repair/재시도/Raw 게시를 실행하지 않습니다. 실제 Linux/CUDA 검증에서는 Graph·Summary를 각각 여러 요청으로 export한 뒤 아래처럼 1보다 큰 penalty와 제약을 동시에 확인할 수 있습니다. Windows 테스트만으로 실제 컴파일·모델 출력이 검증된 것은 아닙니다.
+
+```bash
+python -c 'import json; from pathlib import Path; p=Path("/tmp/qwen-scenes.json"); d=json.loads(p.read_text()); [r.update(repetition_penalty=1.10) for r in d["requests"]]; p.with_name("qwen-scenes-structured-110.json").write_text(json.dumps(d))'
+python -c 'import json; from pathlib import Path; p=Path("/tmp/qwen-summaries.json"); d=json.loads(p.read_text()); [r.update(repetition_penalty=1.10) for r in d["requests"]]; p.with_name("qwen-summaries-structured-110.json").write_text(json.dumps(d))'
+CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/qwen-scenes-structured-110.json --backend vllm --output /tmp/scenes-structured-110-report.json
+CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/qwen-summaries-structured-110.json --backend vllm --output /tmp/summaries-structured-110-report.json
+```
+
+변경 전 Transformers 구현은 `benchmarks/qwen_transformers_reference.py`에 보존했습니다. 이 구현은 구조 제약을 지원하지 않으므로 **과거의 제약 없는 요청 파일**로만 실행합니다. 구조 제약이 있는 파일은 오류로 거부하며 제약을 제거해서 실행하지 않습니다. 기준 환경에 `accelerate`가 필요하며, 가능하면 이전 실행 환경을 유지하고 보고서의 라이브러리 버전도 함께 비교합니다. 아래 `legacy-*` 파일은 변경 전에 export해 둔 파일입니다.
 
 ```bash
 python -m pip install accelerate
-CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/qwen-scenes.json --backend transformers --output /tmp/scenes-transformers.json
-CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/qwen-summaries.json --backend transformers --output /tmp/summary-transformers.json
+CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/legacy-qwen-scenes.json --backend transformers --output /tmp/scenes-transformers.json
+CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/legacy-qwen-summaries.json --backend transformers --output /tmp/summary-transformers.json
 ```
 
 이후 `max_num_seqs`는 16/32/64, 토큰 예산은 8192/16384/32768을 비교합니다. 예를 들어 기본값 측정 뒤 아래처럼 한 축씩 바꿉니다. 매번 별도 프로세스를 실행해 모델 로딩·컴파일과 steady-state 시간을 분리합니다.

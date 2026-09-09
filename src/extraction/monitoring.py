@@ -32,11 +32,11 @@ def scene_messages(
         scene_idx = int(record["scene_idx"])
         if arm == "graph":
             label = f"Graph_{source}" if source else "Graph"
-            content = json.dumps(
-                record["graph"],
-                ensure_ascii=False,
-                indent=2,
-            )
+            if record.get("status") == "raw_fallback":
+                label += "_raw_fallback"
+                content = "Unparsed observation saved; see artifact for raw output."
+            else:
+                content = json.dumps(record["graph"], ensure_ascii=False, indent=2)
         else:
             label = "Desc"
             content = str(record["description"]).strip()

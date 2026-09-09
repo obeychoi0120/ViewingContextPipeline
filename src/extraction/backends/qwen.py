@@ -18,6 +18,8 @@ class QwenOutput:
     text: str
     prompt_tokens: int
     output_tokens: int
+    finish_reason: str | None = None
+    stop_reason: str | int | None = None
 
 
 @dataclass
@@ -62,6 +64,7 @@ class QwenBackend:
             "generation_config": "vllm",
             "limit_mm_per_prompt": {"image": image_limit, "video": 0},
             "logits_processors": ["extraction.backends.qwen_logits:GeneratedTokenLogitsProcessor"],
+            "structured_outputs_config": {"backend": "xgrammar"},
             "enable_log_requests": False,
             "disable_log_stats": True,
         }
@@ -81,6 +84,7 @@ class QwenBackend:
                 "model_impl": "vllm",
                 "generation_config": "vllm",
                 "logits_processors": arguments["logits_processors"],
+                "structured_outputs_config": arguments["structured_outputs_config"],
             }
             info = {
                 "backend": "vllm",
@@ -119,6 +123,10 @@ class QwenBackend:
 
         if task.do_sample and any(v is None for v in (task.temperature, task.top_p, task.top_k)):
             raise ValueError("sampled Qwen generation requires temperature, top_p, and top_k")
+        structured = None
+        if task.structured_output is not None:
+            from vllm.sampling_params import StructuredOutputsParams
+            structured = StructuredOutputsParams(**task.structured_output)
         return SamplingParams(
             n=1,
             temperature=task.temperature if task.do_sample else 0.0,
@@ -130,6 +138,7 @@ class QwenBackend:
             presence_penalty=0.0,
             frequency_penalty=0.0,
             extra_args={PENALTY_KEY: task.repetition_penalty},
+            structured_outputs=structured,
             stop_token_ids=self.stop_token_ids,
             ignore_eos=False,
             skip_special_tokens=True,
@@ -170,7 +179,10 @@ class QwenBackend:
                     final = output
             if final is None or len(final.outputs) != 1:
                 raise RuntimeError("vLLM did not return one completed output")
-            return QwenOutput(final.outputs[0].text.strip(), prompt_length, len(final.outputs[0].token_ids))
+            result = final.outputs[0]
+            return QwenOutput(result.text, prompt_length, len(result.token_ids),
+                              getattr(result, "finish_reason", None),
+                              getattr(result, "stop_reason", None))
         except Exception as exc:
             raise RuntimeError(f"Qwen task {task.task_id}: {exc}") from exc
         finally:

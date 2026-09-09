@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 SUMMARY_SECTIONS = (
     "setting_and_environments",
     "main_characters_and_objects",
@@ -70,3 +72,29 @@ def serialize_summary_sections(sections: dict[str, str]) -> str:
 
 def _with_terminal_punctuation(value: str) -> str:
     return value if value.endswith((".", "!", "?")) else f"{value}."
+
+
+def parse_or_repair_summary(text: str) -> tuple[dict[str, str], str]:
+    try:
+        return parse_summary_sections(text), "native"
+    except SummaryContractError:
+        pass
+    raw = str(text or "").strip()
+    fenced = re.fullmatch(r"```[A-Za-z0-9_+-]*[^\S\r\n]*\r?\n(.*?)\r?\n```", raw, re.DOTALL)
+    if fenced:
+        raw = fenced.group(1)
+    labels = {name.casefold(): name for name in SUMMARY_SECTIONS}
+    labels.update({label.casefold(): name for name, label in _SECTION_LABELS.items()})
+    sections = {}
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        label, separator, value = line.partition(":")
+        name = labels.get(label.strip().casefold())
+        if not separator or name is None or name in sections:
+            raise SummaryContractError("summary repair requires seven unique known labels")
+        sections[name] = value.strip()
+    if set(sections) != set(SUMMARY_SECTIONS):
+        raise SummaryContractError("summary repair cannot invent missing fields")
+    ordered = "\n".join(f"{name}: {sections[name]}" for name in SUMMARY_SECTIONS)
+    return parse_summary_sections(ordered), "repaired"

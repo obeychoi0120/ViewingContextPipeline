@@ -140,6 +140,7 @@ def combination_complete(directory, identity, expected_count):
 
 def run_rolling(context, *, force=False):
     from validation.steps import validation_config
+    from validation.representation_provenance import recommendation_identity
 
     require_torch()
     config = validation_config(context)
@@ -166,6 +167,7 @@ def run_rolling(context, *, force=False):
                         "evaluation_date": date,
                         "seed": seed,
                         "arm": arm,
+                        **recommendation_identity(context, branch),
                     }
                     directory = combination_dir(context, date, seed, arm)
                     if not force and combination_complete(directory, identity, len(ids["test"])):

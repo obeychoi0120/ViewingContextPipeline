@@ -216,7 +216,7 @@ def test_embedding_fallback_still_requires_qwen_summary_when_qwen_embeddings_are
     qwen_path.unlink()
     (context.representations_dir / "graph_gemini_embeddings.npz").unlink()
     with pytest.raises(
-        validation_steps.ValidationStepError, match="graph_qwen fallback summary"
+        validation_steps.ValidationStepError, match="graph_qwen (fallback )?summary"
     ) as err:
         validation_steps.embed_representations(context)
     assert str(qwen_path) in str(err.value)

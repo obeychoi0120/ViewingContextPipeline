@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +15,8 @@ from extraction.descriptions import description_summary_prompt, validate_summary
 from extraction.evidence import load_images
 from extraction.qwen_config import qwen_settings
 from extraction.qwen_runtime import result_hash
+from extraction.recovery import penalty_schedule
+from extraction.structured_output import GRAPH_JSON_SCHEMA, validate_graph_structure
 from extraction.semantic_graph import graph_summary_prompt, parse_or_repair_graph, validate_summary
 from extraction.step_support import (
     minimal_description_records, minimal_graph_records, scene_generation_rows, visual_rows,
@@ -48,9 +50,10 @@ def export_requests(context, stage, limit):
                                       int(settings["summary_max_new_tokens"]), **_summary_generation_settings(context))
             tasks.append(task)
         else:
-            tasks.extend(row["task"] for row in scene_generation_rows(
+            tasks.extend(replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
+                         if arm == "graph" else row["task"] for row in scene_generation_rows(
                 visual, prompt=template, max_new_tokens=int(settings["scene_max_new_tokens"]),
-                repetition_penalty=float(context.config["extraction"][f"{arm}_repetition_penalty"]),
+                repetition_penalty=penalty_schedule(context.config["extraction"][f"{arm}_repetition_penalty"])[0],
             ))
         if len(tasks) >= limit:
             break
@@ -111,6 +114,7 @@ def check_output(stage, text):
             parsed = parse_or_repair_graph(text)
             if parsed.graph is None:
                 raise ValueError(parsed.error)
+            validate_graph_structure(parsed.graph)
         elif not text.strip():
             raise ValueError("empty description")
     except Exception as exc:
@@ -121,8 +125,10 @@ def check_output(stage, text):
 def measure(manifest, backend, settings, warmup_count, output_path):
     import torch
 
-    gpu_ids = _visible_gpu_ids(1)
     tasks = [QwenGenerationTask(**{**row, "image_paths": tuple(row["image_paths"])}) for row in manifest["requests"]]
+    if backend == "transformers" and any(task.structured_output for task in tasks):
+        raise ValueError("Transformers reference does not support structured outputs; use a legacy unconstrained request manifest")
+    gpu_ids = _visible_gpu_ids(1)
     if not 0 < warmup_count < len(tasks):
         raise ValueError("warmup must leave at least one disjoint measurement request")
     for path, expected in manifest["image_hashes"].items():
@@ -176,7 +182,7 @@ def measure(manifest, backend, settings, warmup_count, output_path):
                         images = load_images(list(task.image_paths))
                         try:
                             values = asdict(task)
-                            for key in ("task_id", "image_paths"):
+                            for key in ("task_id", "image_paths", "structured_output"):
                                 del values[key]
                             text = model.generate(images, **values)
                             callback(task.task_id, text, counts["output"], counts["prompt"])

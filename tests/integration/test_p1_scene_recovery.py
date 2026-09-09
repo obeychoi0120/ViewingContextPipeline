@@ -26,8 +26,9 @@ def test_qwen_failed_and_missing_scenes_resume_without_losing_checkpoints(
         for index in range(3)
     ]
     monkeypatch.setattr(steps, "_scene_generation_rows", lambda *args, **kwargs: rows)
-    valid = json.dumps({"setting_context": "room"}) if arm == "graph" else "A person walks."
-    invalid = "not json" if arm == "graph" else ""
+    valid = json.dumps({"setting_context": "indoor", "entities": [], "events": [],
+                        "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}}) if arm == "graph" else "A person walks."
+    invalid = ""
     if arm == "graph":
         scene_path = context.graph_scene_dir("qwen") / "c1.jsonl"
         failure_path = context.graph_failure_dir("qwen") / "c1.jsonl"

@@ -43,6 +43,10 @@ def context(tmp_path: Path) -> RunContext:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True)
     config = yaml.safe_load((ROOT / "config/pipeline.yaml").read_text(encoding="utf-8"))
+    # Cache/legacy tests use a single attempt; recovery tests opt into a schedule explicitly.
+    config["extraction"].update(graph_repetition_penalty=1.05,
+                                description_repetition_penalty=1.0,
+                                summary_repetition_penalty=1.05)
     # These fixtures exercise the preserved v3 artifact contracts.
     config["schema_version"] = "viewing-context-config/v3"
     config["protocol"].update(cohort_sampling="user_first_nested_stratified",

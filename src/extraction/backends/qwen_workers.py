@@ -27,6 +27,7 @@ class QwenGenerationTask:
     top_p: float | None = None
     top_k: int | None = None
     repetition_penalty: float = 1.0
+    structured_output: dict | None = None
 
 
 def _start_worker(context, worker_index, gpu_id, model_path, result_queue, settings, image_limit):
@@ -289,6 +290,8 @@ async def _serve_worker(backend, task_queue, result_queue, worker_index, gpu_id,
             "kind": "result", "ok": True, "worker_index": worker_index, "gpu_id": gpu_id,
             "task_id": task.task_id, "text": output.text,
             "prompt_tokens": output.prompt_tokens, "output_tokens": output.output_tokens,
+            "finish_reason": getattr(output, "finish_reason", None),
+            "stop_reason": getattr(output, "stop_reason", None),
             "generation": {key: value for key, value in asdict(task).items()
                            if key not in {"task_id", "image_paths", "prompt"}},
         })

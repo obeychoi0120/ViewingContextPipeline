@@ -468,7 +468,9 @@ def test_eleven_stage_cli_runs_on_selected_user_catalog(
                     response = "\n".join(f"{field}: A person walks." for field in SUMMARY_SECTIONS)
                 else:
                     assert_task_images(task)
-                    response = "{}" if task.prompt.startswith(graph_prompt.strip()) else "A person walks."
+                    response = (json.dumps({"setting_context": "indoor", "entities": [], "events": [],
+                                            "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}})
+                                if task.prompt.startswith(graph_prompt.strip()) else "A person walks.")
                 callback(task.task_id, response)
             return {}
 

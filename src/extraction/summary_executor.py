@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -14,10 +14,15 @@ from extraction.summary_validation import (
     SUMMARY_SECTIONS,
     SummaryContractError,
     parse_summary_sections,
+    parse_or_repair_summary,
     serialize_summary_sections,
 )
 from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
 from extraction.step_support import result, write_progress
+from extraction.recovery import generate_with_recovery, has_pending_recovery
+from extraction.structured_output import OutputValidationError
+from extraction.raw_output import RAW_SUMMARY_SCHEMA, raw_summary_document
+from extraction.input_tracking import inputs_match, record_inputs, mark_changed, invalidate_inputs
 
 
 SUMMARY_FAILURE_SCHEMA_VERSION = "summary-generation-failure/v1"
@@ -62,6 +67,7 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
         failure_path = branch.failure_dir / f"{content_id}.jsonl"
         if not records:
             empty += 1
+            invalidate_inputs(branch.summary_dir / f"{content_id}.json")
             write_jsonl(
                 failure_path,
                 [
@@ -81,6 +87,10 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
         output_path = branch.summary_dir / f"{task_id}.json"
         if output_path.is_file() and not force:
             try:
+                if has_pending_recovery(branch.summary_dir / ".recovery", task_id):
+                    raise ExtractionStepError(f"summary has an unfinished recovery: {output_path}")
+                if not inputs_match(output_path, records):
+                    raise ExtractionStepError(f"summary scene input changed: {output_path}")
                 documents[task_id] = reuse_summary_document(
                     output_path,
                     schema_version=branch.schema_version,
@@ -93,6 +103,8 @@ def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation
             else:
                 failure_path.unlink(missing_ok=True)
                 continue
+        # Keep a failed regeneration pending even when a previous output is preserved.
+        invalidate_inputs(output_path)
         tasks.append(
             QwenGenerationTask(
                 task_id=task_id,
@@ -122,6 +134,7 @@ def run_summary_stage(
     qwen_options=None,
     image_limit=6,
     runtime=None,
+    penalties=None,
 ):
     documents, pending, tasks, incompatible, empty = _prepare_summaries(
         branch,
@@ -155,9 +168,12 @@ def run_summary_stage(
                           for task_id, document in documents.items())
             write_progress(progress, f"[Qwen] reused={len(documents)} legacy_unknown={unknown} pending={len(tasks)}")
 
-        def complete(task_id, text):
+        def validate(task_id, text):
             records, output_path = pending[task_id]
-            sections = branch.validate(text)
+            try:
+                sections, mode = parse_or_repair_summary(text)
+            except SummaryContractError as exc:
+                raise OutputValidationError(str(exc)) from exc
             document = {
                 "schema_version": branch.schema_version,
                 "content_id": task_id,
@@ -167,34 +183,39 @@ def run_summary_stage(
                 "text": serialize_summary_sections(sections),
                 "scene_count": len(records),
             }
+            return document, mode
+
+        def complete(task_id, document):
+            records, output_path = pending[task_id]
+            try:
+                changed = not output_path.exists() or read_json(output_path) != document
+            except ValueError:
+                changed = True
+            if changed:
+                mark_changed(output_path)
             write_json(output_path, document)
+            record_inputs(output_path, records)
             (branch.failure_dir / f"{task_id}.jsonl").unlink(missing_ok=True)
             documents[task_id] = document
             if runtime:
-                runtime.record(task_id, document)
+                runtime.record(task_id, document, status=document["status"])
             progress.complete()
 
-        def failed(task_id, attempt, seed, raw_response, error):
+        def failed(task_id, attempts):
             failures = failures_by_content[task_id]
-            failures.append(
-                _summary_failure_record(
-                    task_id,
-                    attempt=attempt,
-                    seed=seed,
-                    failure_kind="schema_validation",
-                    error=str(error),
-                    raw_response=raw_response,
-                )
-            )
+            failures.extend(_summary_failure_record(
+                task_id, attempt=row["attempt"], seed=row["seed"],
+                failure_kind="schema_validation", error=row["error"],
+                raw_response=row["raw_response"],
+            ) for row in attempts)
             write_jsonl(branch.failure_dir / f"{task_id}.jsonl", failures)
             if runtime:
                 runtime.record(task_id, failures[-1], status="failed")
-            message = " ".join(str(error).splitlines())
+            message = " ".join(str(attempts[-1]["error"]).splitlines())
             write_progress(
                 progress,
                 f"[Qwen_summary_{branch.arm}_fail] "
-                f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
-                f"Raw output:\n{raw_response or '<empty>'}",
+                f"{names.get(task_id, f'{task_id}.mp4')} | {message}",
             )
             progress.complete(failed=True)
 
@@ -209,9 +230,21 @@ def run_summary_stage(
                 log=lambda message: write_progress(progress, message),
                 on_progress=lambda stats: qwen_progress(progress, stats),
             ) as generate:
-                generate_summaries_once(
-                    generate, tasks, complete, failed, allowed_failures=allowed_failures,
+                generate_with_recovery(
+                    generate, tasks, complete=complete, failed=failed, validate=validate,
+                    penalties=penalties if penalties is not None else generation["repetition_penalty"],
+                    directory=branch.summary_dir / ".recovery",
+                    identity={"model": str(model_path), "settings": qwen_options,
+                              "backend": "vllm-0.28.0", "arm": branch.arm},
+                    raw_fallback=lambda task_id, raw: raw_summary_document(
+                        task_id, branch.arm, len(pending[task_id][0]), raw),
+                    force=force, runtime=runtime,
+                    log=lambda message: write_progress(progress, message),
                 )
+            failed_ids = [key for key, rows in failures_by_content.items()
+                          if rows and key not in allowed_failures]
+            if failed_ids:
+                raise ExtractionStepError(f"structured summary failed: task_ids={failed_ids}")
         failure_count = empty + sum(bool(rows) for rows in failures_by_content.values())
         if branch.allow_missing and failure_count:
             write_progress(
@@ -247,6 +280,15 @@ def reuse_summary_document(
         stored_count = existing.get("scene_count")
         if type(stored_count) is not int or stored_count <= 0:
             raise SummaryContractError("summary scene_count must be a positive integer")
+        if existing.get("schema_version") == RAW_SUMMARY_SCHEMA:
+            text = existing.get("text")
+            if not isinstance(text, str) or not text.strip():
+                raise SummaryContractError("raw summary text must not be empty")
+            expected = raw_summary_document(
+                content_id, arm, stored_count if scene_count is None else scene_count, text)
+            if expected != existing:
+                raise SummaryContractError("raw summary fields or identity do not match")
+            return expected
         raw_sections = existing.get("sections")
         if not isinstance(raw_sections, dict):
             raise SummaryContractError("summary sections must be an object")
@@ -336,11 +378,15 @@ def qwen_generator(
             log(f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | "
                 f"settings={event['settings']}")
 
-    with QwenWorkerPool(
-        1 if gpus is None else gpus, str(model_path), settings=settings,
-        image_limit=image_limit, on_runtime=ready, on_progress=on_progress,
-    ) as pool:
+    with ExitStack() as resources:
+        pool = None
         def generate(tasks, on_task_complete=None):
+            nonlocal pool
+            if pool is None:
+                pool = resources.enter_context(QwenWorkerPool(
+                    1 if gpus is None else gpus, str(model_path), settings=settings,
+                    image_limit=image_limit, on_runtime=ready, on_progress=on_progress,
+                ))
             def complete(task_id, text):
                 if runtime:
                     runtime.current_result = pool.last_result
