@@ -8,6 +8,7 @@ from typing import Any, Callable, Iterator
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import DescriptionError
 from extraction.errors import ExtractionStepError
+from extraction.progress import InferenceProgress
 from extraction.semantic_graph import SemanticGraphError
 from extraction.summary_validation import (
     SUMMARY_SECTIONS,
@@ -136,8 +137,9 @@ def run_summary_stage(
         else "Description summaries"
     )
     failures_by_content = {task.task_id: [] for task in tasks}
-    with progress_factory(
-        total=len(scene_paths), initial=len(documents) + empty, desc=description, unit="content"
+    with InferenceProgress(
+        total=len(tasks), reused=len(documents), empty=empty,
+        desc=description, unit="summary", progress_factory=progress_factory,
     ) as progress:
         write_progress(
             progress,
@@ -170,7 +172,7 @@ def run_summary_stage(
             documents[task_id] = document
             if runtime:
                 runtime.record(task_id, document)
-            progress.update(1)
+            progress.complete()
 
         def failed(task_id, attempt, seed, raw_response, error):
             failures = failures_by_content[task_id]
@@ -194,7 +196,7 @@ def run_summary_stage(
                 f"{names.get(task_id, f'{task_id}.mp4')} | {message}\n"
                 f"Raw output:\n{raw_response or '<empty>'}",
             )
-            progress.update(1)
+            progress.complete(failed=True)
 
         if tasks:
             allowed_failures = {
@@ -319,10 +321,7 @@ def generate_summaries_once(
 
 
 def qwen_progress(progress, stats):
-    write_progress(progress, f"[Qwen] completed={stats['completed']} inflight={stats['inflight']} "
-                             f"requests/s={stats['requests_per_second']:.2f} "
-                             f"output_tokens/s={stats['output_tokens_per_second']:.1f} "
-                             f"gpu_inflight={stats['gpu_inflight']}")
+    progress.update_stats(stats)
 
 
 @contextmanager

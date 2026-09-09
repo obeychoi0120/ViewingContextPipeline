@@ -9,6 +9,7 @@ import sys
 import time
 
 import numpy as np
+from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
 from validation.metrics import metrics_from_rank
@@ -147,153 +148,159 @@ def run_rolling(context, *, force=False):
     verify_representations(context, cohort)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     completed = skipped = 0
-    for split in cohort["plan"]["splits"]:
-        date = split["evaluation_date"]
-        ids = {phase: phase_ids(table, split, phase) for phase in split["phases"]}
-        probabilities = {}
-        for phase in ("selection", "refit"):
-            counts = np.bincount(table.targets[ids[phase]], minlength=len(table.items) + 1)
-            probabilities[phase] = counts / counts.sum()
-        raw_refit = table.select(end=split["phases"]["refit"]["end_ms"], eligible=False)
-        frequencies = np.bincount(table.targets[raw_refit], minlength=len(table.items) + 1)
-        for seed in config.model.seeds:
-            for arm, branch in RECOMMENDATION_ARMS.items():
-                identity = {
-                    "run_id": context.run_id,
-                    "evaluation_date": date,
-                    "seed": seed,
-                    "arm": arm,
-                }
-                directory = combination_dir(context, date, seed, arm)
-                if not force and combination_complete(directory, identity, len(ids["test"])):
-                    skipped += 1
-                    continue
-                directory.mkdir(parents=True, exist_ok=True)
-                (directory / "complete.json").unlink(missing_ok=True)
-                print(f"[Rolling] {date} seed={seed} {arm}: selection/refit/test", flush=True)
-                started = time.monotonic()
-                with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
-                    features = data["values"]
-                seed_everything(seed)
-                rng = np.random.default_rng(seed)
-                model = _new_model(
-                    config,
-                    item_count=len(table.items),
-                    branch=branch,
-                    features=features,
-                    device=device,
-                )
-                optimizer = _optimizer(model, config)
-                selection = []
-                best_epoch, best_score = 0, -math.inf
-                for epoch in range(1, config.model.max_epochs + 1):
-                    record = train_epoch(
-                        model,
-                        optimizer,
-                        table,
-                        ids["selection"],
-                        probabilities["selection"],
-                        rng,
+    total = len(cohort["plan"]["splits"]) * len(config.model.seeds) * len(RECOMMENDATION_ARMS)
+    with tqdm(total=total, desc="Rolling recommendation", unit="run") as progress:
+        for split in cohort["plan"]["splits"]:
+            date = split["evaluation_date"]
+            ids = {phase: phase_ids(table, split, phase) for phase in split["phases"]}
+            probabilities = {}
+            for phase in ("selection", "refit"):
+                counts = np.bincount(table.targets[ids[phase]], minlength=len(table.items) + 1)
+                probabilities[phase] = counts / counts.sum()
+            raw_refit = table.select(end=split["phases"]["refit"]["end_ms"], eligible=False)
+            frequencies = np.bincount(table.targets[raw_refit], minlength=len(table.items) + 1)
+            for seed in config.model.seeds:
+                for arm, branch in RECOMMENDATION_ARMS.items():
+                    identity = {
+                        "run_id": context.run_id,
+                        "evaluation_date": date,
+                        "seed": seed,
+                        "arm": arm,
+                    }
+                    directory = combination_dir(context, date, seed, arm)
+                    if not force and combination_complete(directory, identity, len(ids["test"])):
+                        skipped += 1
+                        progress.set_postfix(reused=skipped, refresh=False)
+                        progress.update(1)
+                        continue
+                    progress.set_postfix(date=date, seed=seed, arm=arm, reused=skipped)
+                    directory.mkdir(parents=True, exist_ok=True)
+                    (directory / "complete.json").unlink(missing_ok=True)
+                    print(f"[Rolling] {date} seed={seed} {arm}: selection/refit/test", flush=True)
+                    started = time.monotonic()
+                    with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
+                        features = data["values"]
+                    seed_everything(seed)
+                    rng = np.random.default_rng(seed)
+                    model = _new_model(
                         config,
-                        device,
+                        item_count=len(table.items),
+                        branch=branch,
+                        features=features,
+                        device=device,
                     )
-                    score = sum(
-                        r["NDCG@10"]
-                        for r in evaluate(model, table, ids["validation"], config, device)
-                    ) / len(ids["validation"])
-                    selection.append({"epoch": epoch, **record, "validation_ndcg10": score})
-                    print(
-                        f"[Rolling] {date} {arm} seed={seed} epoch={epoch} valid={score:.6f}",
-                        flush=True,
-                    )
-                    if score > best_score:
-                        best_epoch, best_score = epoch, score
-                    if epoch - best_epoch >= config.model.patience:
-                        break
-                del model, optimizer
-                seed_everything(seed)
-                rng = np.random.default_rng(seed)
-                model = _new_model(
-                    config,
-                    item_count=len(table.items),
-                    branch=branch,
-                    features=features,
-                    device=device,
-                )
-                optimizer = _optimizer(model, config)
-                refit = []
-                for epoch in range(1, best_epoch + 1):
-                    refit.append(
-                        {
-                            "epoch": epoch,
-                            **train_epoch(
-                                model,
-                                optimizer,
-                                table,
-                                ids["refit"],
-                                probabilities["refit"],
-                                rng,
-                                config,
-                                device,
-                            ),
-                        }
-                    )
-                temporary = directory / "per_event_metrics.jsonl.tmp"
-                count = 0
-                with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-                    for row in evaluate(model, table, ids["test"], config, device):
-                        row.update(identity)
-                        row["schema_version"] = "sasrec-per-event-metrics/v1"
-                        row["refit_item_frequency"] = int(
-                            frequencies[table.targets[row["event_id"]]]
+                    optimizer = _optimizer(model, config)
+                    selection = []
+                    best_epoch, best_score = 0, -math.inf
+                    for epoch in range(1, config.model.max_epochs + 1):
+                        record = train_epoch(
+                            model,
+                            optimizer,
+                            table,
+                            ids["selection"],
+                            probabilities["selection"],
+                            rng,
+                            config,
+                            device,
                         )
-                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-                        count += 1
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                if count != len(ids["test"]):
-                    raise RuntimeError("incomplete evaluation")
-                temporary.replace(directory / "per_event_metrics.jsonl")
-                metadata = {
-                    **identity,
-                    "architecture_version": ARCHITECTURE_VERSION,
-                    "best_epoch": best_epoch,
-                    "catalog_size": len(table.items),
-                }
-                save_checkpoint(directory / "sasrec.pt", model, metadata)
-                write_json(
-                    directory / "training.json",
-                    {
-                        "schema_version": SCHEMA,
-                        **metadata,
-                        "split": split,
-                        "selection": selection,
-                        "refit": refit,
-                        "untrained_test_target_fraction": float(
-                            np.mean(frequencies[table.targets[ids["test"]]] == 0)
-                        ),
-                        "refit_item_frequency": {
-                            item: int(frequencies[i + 1]) for i, item in enumerate(table.items)
+                        score = sum(
+                            r["NDCG@10"]
+                            for r in evaluate(model, table, ids["validation"], config, device)
+                        ) / len(ids["validation"])
+                        selection.append({"epoch": epoch, **record, "validation_ndcg10": score})
+                        print(
+                            f"[Rolling] {date} {arm} seed={seed} epoch={epoch} valid={score:.6f}",
+                            flush=True,
+                        )
+                        if score > best_score:
+                            best_epoch, best_score = epoch, score
+                        if epoch - best_epoch >= config.model.patience:
+                            break
+                    del model, optimizer
+                    seed_everything(seed)
+                    rng = np.random.default_rng(seed)
+                    model = _new_model(
+                        config,
+                        item_count=len(table.items),
+                        branch=branch,
+                        features=features,
+                        device=device,
+                    )
+                    optimizer = _optimizer(model, config)
+                    refit = []
+                    for epoch in range(1, best_epoch + 1):
+                        refit.append(
+                            {
+                                "epoch": epoch,
+                                **train_epoch(
+                                    model,
+                                    optimizer,
+                                    table,
+                                    ids["refit"],
+                                    probabilities["refit"],
+                                    rng,
+                                    config,
+                                    device,
+                                ),
+                            }
+                        )
+                    temporary = directory / "per_event_metrics.jsonl.tmp"
+                    count = 0
+                    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+                        for row in evaluate(model, table, ids["test"], config, device):
+                            row.update(identity)
+                            row["schema_version"] = "sasrec-per-event-metrics/v1"
+                            row["refit_item_frequency"] = int(
+                                frequencies[table.targets[row["event_id"]]]
+                            )
+                            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                            count += 1
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    if count != len(ids["test"]):
+                        raise RuntimeError("incomplete evaluation")
+                    temporary.replace(directory / "per_event_metrics.jsonl")
+                    metadata = {
+                        **identity,
+                        "architecture_version": ARCHITECTURE_VERSION,
+                        "best_epoch": best_epoch,
+                        "catalog_size": len(table.items),
+                    }
+                    save_checkpoint(directory / "sasrec.pt", model, metadata)
+                    write_json(
+                        directory / "training.json",
+                        {
+                            "schema_version": SCHEMA,
+                            **metadata,
+                            "split": split,
+                            "selection": selection,
+                            "refit": refit,
+                            "untrained_test_target_fraction": float(
+                                np.mean(frequencies[table.targets[ids["test"]]] == 0)
+                            ),
+                            "refit_item_frequency": {
+                                item: int(frequencies[i + 1]) for i, item in enumerate(table.items)
+                            },
+                            "elapsed_seconds": time.monotonic() - started,
+                            "device": str(device),
+                            "environment": {
+                                "python": sys.version,
+                                "torch": str(torch.__version__),
+                                "numpy": np.__version__,
+                                "cuda": torch.version.cuda,
+                            },
                         },
-                        "elapsed_seconds": time.monotonic() - started,
-                        "device": str(device),
-                        "environment": {
-                            "python": sys.version,
-                            "torch": str(torch.__version__),
-                            "numpy": np.__version__,
-                            "cuda": torch.version.cuda,
+                    )
+                    write_json(
+                        directory / "complete.json",
+                        {
+                            "schema_version": SCHEMA,
+                            "identity": identity,
+                            "event_count": count,
                         },
-                    },
-                )
-                write_json(
-                    directory / "complete.json",
-                    {
-                        "schema_version": SCHEMA,
-                        "identity": identity,
-                        "event_count": count,
-                    },
-                )
-                completed += 1
-                del model, optimizer, features
+                    )
+                    completed += 1
+                    progress.update(1)
+                    del model, optimizer, features
     print(f"[Rolling] completed={completed} skipped={skipped}", flush=True)
     return {"stage": "run-recommendation", "completed": completed, "skipped": skipped}

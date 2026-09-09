@@ -49,9 +49,11 @@ def test_gemini_pool_completes_out_of_order_and_captures_errors(tmp_path) -> Non
         for name in ("slow", "fast", "error")
     ]
     completion_order: list[str] = []
+    progress = []
     outcomes = pool.generate(
         tasks,
         lambda outcome: completion_order.append(outcome.task_id),
+        on_progress=progress.append,
     )
 
     assert completion_order.index("fast") < completion_order.index("slow")
@@ -60,6 +62,8 @@ def test_gemini_pool_completes_out_of_order_and_captures_errors(tmp_path) -> Non
     assert outcomes["error"].text == ""
     assert "RuntimeError: api unavailable" in str(outcomes["error"].error)
     assert len(factory_threads) >= 2
+    assert progress[0]["completed"] == 0
+    assert progress[-1]["completed"] == 3 and progress[-1]["inflight"] == 0
 
 
 def test_gemini_pool_rejects_duplicate_task_ids() -> None:

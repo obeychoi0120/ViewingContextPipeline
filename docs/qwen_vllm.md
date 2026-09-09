@@ -45,6 +45,14 @@ CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source qwen --ru
 
 Greedy는 `temperature=0`, 출력 상한은 `max_tokens`로 전달합니다. 샘플링 설정과 요청별 seed를 전달하고, 모델 generation config가 파이프라인의 생성 설정을 덮어쓰지 않도록 합니다. 기존 EOS 목록을 종료 토큰으로 사용하며 반복 패널티는 **생성된 토큰에만** 한 번 적용합니다. 엔진 차이 때문에 출력의 글자 단위 일치를 보장하지 않습니다.
 
+## 진행률과 ETA
+
+`extract-graph-scenes`(Qwen/Gemini), `extract-description-scenes`는 이번 실행의 미완료 장면 수를, `summarize-graph`/`summarize-description`은 미완료 요약 요청 수를 진행 바의 분모로 사용합니다. 재사용 결과는 `reused`, 성공과 실패는 `success`/`failed`로 따로 표시합니다. 요약할 장면이 없는 영상은 `empty`로 표시하고 요청 수에서는 제외합니다. ETA는 이번 처리 시도가 끝나는 예상 시간이며, 실패가 모두 복구되는 시간은 아닙니다.
+
+Qwen은 모든 GPU 엔진이 준비된 뒤부터 처리량을 측정합니다. 먼저 준비된 GPU는 계속 요청을 처리하며 다른 GPU를 기다리지 않습니다. `init`은 엔진 준비 대기 시간, `infer`는 전체 GPU 준비 후 측정 시간, `elapsed`는 진행 바 전체 경과 시간입니다. Gemini는 요청 공급 시점부터 측정합니다.
+
+ETA는 최근 최대 180초의 완료 요청 수를 실제 경과 시간으로 나눈 처리량으로 계산합니다. 측정 60초 경과 및 최근 구간의 완료 8개 이상일 때 표시하며, 이전에는 `ETA=initializing` 또는 `ETA=estimating`을 표시합니다. 처리량은 30초마다 갱신하고 완료가 없는 대기 구간도 포함합니다. 표본이 부족하거나 최근 구간에 완료가 없으면 다시 추정 중으로 표시합니다. 출력은 단일 ETA이며 변동 범위는 표시하지 않습니다. 정상 종료 시 `ETA=00:00`, 중단·오류 시 `ETA=--`와 상태를 표시합니다.
+
 ## 재개와 실행 이력
 
 기존 성공 결과는 재사용합니다. 장면 추출은 성공한 scene index만 완료로 보고 실패·누락 장면을 다시 요청합니다. 요약은 기존 검증·재시도 규칙을 따릅니다. 엔진 변경만으로 기존 산출물을 무효화하지 않으며, `experiment.json`과 장면·요약 JSON 스키마도 유지합니다. `--force`는 해당 단계 전체를 의도적으로 다시 생성할 때만 사용합니다.

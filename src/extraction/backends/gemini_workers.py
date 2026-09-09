@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import queue
 import threading
+import time
 from typing import Any, Callable, Iterable
 
 from extraction.backends.base import VLMBackend
 from extraction.backends.gemini import GeminiBackend, GeminiEmptyResponseError
 from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.evidence import load_images
+from extraction.progress import RecentThroughput
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,8 @@ class GeminiWorkerPool:
         self,
         tasks: Iterable[QwenGenerationTask],
         on_task_complete: Callable[[GeminiGenerationOutcome], None] | None = None,
+        *,
+        on_progress: Callable[[dict], None] | None = None,
     ) -> dict[str, GeminiGenerationOutcome]:
         task_list = list(tasks)
         task_ids = [task.task_id for task in task_list]
@@ -83,8 +87,20 @@ class GeminiWorkerPool:
             worker.start()
 
         outcomes: dict[str, GeminiGenerationOutcome] = {}
+        throughput = RecentThroughput()
+        throughput.start()
+        last_progress = time.monotonic()
+
+        def report():
+            if on_progress:
+                stats = throughput.snapshot()
+                stats.pop("output_tokens_per_second")
+                on_progress({**stats, "completed": len(outcomes),
+                             "inflight": min(len(workers), len(task_list) - len(outcomes))})
+
         interrupted = False
         try:
+            report()
             while len(outcomes) < len(task_list):
                 try:
                     outcome = result_queue.get(timeout=0.1)
@@ -94,10 +110,15 @@ class GeminiWorkerPool:
                         raise RuntimeError(
                             f"Gemini workers stopped before completing tasks: {missing}"
                         )
-                    continue
-                outcomes[outcome.task_id] = outcome
-                if on_task_complete is not None:
-                    on_task_complete(outcome)
+                else:
+                    outcomes[outcome.task_id] = outcome
+                    throughput.complete()
+                    if on_task_complete is not None:
+                        on_task_complete(outcome)
+                if time.monotonic() - last_progress >= 30:
+                    report()
+                    last_progress = time.monotonic()
+            report()
         except KeyboardInterrupt:
             interrupted = True
             stop.set()
