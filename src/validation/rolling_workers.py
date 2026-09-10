@@ -3,14 +3,46 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+from contextlib import redirect_stderr, redirect_stdout
+import io
 from queue import Empty
 import signal
+import time
 import traceback
+
+
+class WorkerOutput(io.TextIOBase):
+    """Send whole lines to the parent, which owns the terminal and progress bar."""
+
+    def __init__(self, results):
+        self.results = results
+        self.buffered = ""
+
+    def write(self, value):
+        self.buffered += value
+        while "\n" in self.buffered:
+            line, self.buffered = self.buffered.split("\n", 1)
+            self.results.put(("log", line))
+        return len(value)
+
+    def flush(self):
+        if self.buffered:
+            self.results.put(("log", self.buffered))
+            self.buffered = ""
 
 
 def combination_worker(context, device_name, jobs, results):
     # The parent owns Ctrl-C and terminates/joins all its children on interruption.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    output = WorkerOutput(results)
+    with redirect_stdout(output), redirect_stderr(output):
+        try:
+            _consume_combinations(context, device_name, jobs, results)
+        finally:
+            output.flush()
+
+
+def _consume_combinations(context, device_name, jobs, results):
     identity = None
     try:
         from validation.model import torch
@@ -42,6 +74,7 @@ def run_parallel(context, jobs, devices, progress):
     pending, results = runtime.Queue(), runtime.Queue()
     processes = []
     completed = 0
+    last_refresh = time.monotonic()
     try:
         for job in jobs:
             pending.put(job)
@@ -61,8 +94,18 @@ def run_parallel(context, jobs, devices, progress):
             else:
                 if status == "error":
                     raise RuntimeError(f"rolling worker failed: {payload}")
-                completed += 1
-                progress.update(1)
+                if status == "log":
+                    progress.write(payload, file=progress.fp)
+                    last_refresh = time.monotonic()
+                elif status == "complete":
+                    completed += 1
+                    progress.update(1)
+            # Keep elapsed time visible even before the first combination completes.
+            # Redirected logs get sparse heartbeats instead of one line per second.
+            interval = 1 if progress.fp.isatty() else 30
+            if time.monotonic() - last_refresh >= interval:
+                progress.refresh()
+                last_refresh = time.monotonic()
             for process in processes:
                 if process.exitcode not in (None, 0):
                     raise RuntimeError(

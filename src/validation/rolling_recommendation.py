@@ -333,7 +333,9 @@ def run_rolling(context, *, force=False, gpus=None, workers_per_gpu=1):
         f"workers={min(len(devices), len(jobs))} devices={','.join(dict.fromkeys(devices))}",
         flush=True,
     )
-    with tqdm(total=total, initial=skipped, desc="Rolling recommendation", unit="run") as progress:
+    with tqdm(
+        total=total, initial=skipped, desc="Rolling recommendation", unit="run", file=sys.stdout
+    ) as progress:
         progress.set_postfix(reused=skipped)
         if jobs and len(devices) > 1:
             from validation.rolling_workers import run_parallel
