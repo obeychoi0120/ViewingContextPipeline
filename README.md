@@ -124,6 +124,15 @@ python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
 
+GPU 4장에서는 추천 조합을 병렬 실행할 수 있습니다. 아래는 GPU당 2개, 총 8개 worker를 사용하는 예입니다.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
+  --run-id "$RUN_ID" --gpus 4 --workers-per-gpu 2
+```
+
+각 worker가 날짜·seed·Arm 조합 하나의 selection → refit → test를 수행하고, 끝나는 즉시 다음 조합을 가져갑니다. 기존 실행을 중단하고 같은 run ID로 재실행하면 완료 조합은 유지되고 미완료 조합만 처음부터 실행됩니다. 같은 run ID의 추천 명령을 동시에 실행하지 마세요. `--force`는 전체 재학습입니다. 두 옵션을 생략하면 기존 단일 GPU 실행(CUDA가 없으면 CPU)을 유지합니다. Batch·seed·epoch 선택·평가 조건은 바뀌지 않습니다. 실제 속도는 CPU·GPU 경합에 따라 달라지므로 GPU당 1개와 2개의 조합 완료 처리량으로 확인합니다. [병렬 실행·재개 규칙](docs/full_rolling.md)을 참고하세요.
+
 `embed-representations`는 정상 Summary 또는 명시적으로 저장된 Raw Summary의 `text`를 읽습니다. Gemini Graph Summary 파일이 없을 때만 같은 항목의 Qwen Graph Summary를 사용합니다. Gemini의 정상·Raw 파일이 있으면 이를 우선하며, 잘못된 기존 파일을 Raw로 간주하지 않습니다. BGE 로딩 전에 대체 항목을 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini 소스 Summary가 모든 시도에서 비어 있으면 실패 기록과 `[SUMMARY FALLBACK]`을 남기고 기존 Qwen 대체 경로로 진행할 수 있습니다. 실행·저장 오류는 Step 실패입니다. 요약 갱신 후에는 위 임베딩·추천 명령을 그대로 실행하면 변경 영향을 받은 arm만 갱신합니다.
 
 추출·요약은 Step 안에서 **Structured Output → 검증·Repair → 다음 penalty로 재생성 → 최종 Raw** 순서로 처리합니다. vLLM 0.28.0의 `xgrammar`를 사용하며, 모든 재시도에서도 제약과 생성 토큰 전용 repetition penalty를 함께 적용합니다.
@@ -152,7 +161,7 @@ Qwen Graph·Description 장면 추출은 전체 대기 Scene을 현재 penalty�
 | 파일                                                  | 확인할 내용                               |
 | ----------------------------------------------------- | ----------------------------------------- |
 | `validation/diagnosis/diagnosis.json`               | 실행 완전성, Arm별 지표와 비교, 통계 경고 |
-| `extraction/**/scenes/.recovery/*.json`, `extraction/**/summaries/.recovery/*.json` | task·입력/정책 식별값, 묶음 ID, 시도별 원문·penalty·검증/Repair·토큰/종료 정보, 최종 상태 |
+| `extraction/**/scenes/.recovery/*.json`, `extraction/**/summaries/.recovery/*.json` | 진행·실패 시 복구 이력. 각 Step이 실패 없이 완료되면 `.recovery` 폴더 삭제 |
 | `extraction/**/summaries/.inputs/*.json` | 요약 입력 hash와 정상·Raw 장면 수 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/per_event_metrics.jsonl` | 사건·날짜·Arm·seed별 ranking 지표 |
 | `validation/recommendations/{date}/seed_{seed}/{arm}/training.json` | epoch 선택·refit·optimizer update·빈도 기록 |

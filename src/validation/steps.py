@@ -434,11 +434,16 @@ def _training_runs_complete(
     )
 
 
-def run_recommendation(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def run_recommendation(
+    context: RunContext, *, force: bool = False, gpus: int | None = None,
+    workers_per_gpu: int = 1,
+) -> dict[str, Any]:
     context.initialize()
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_recommendation import run_rolling
-        return run_rolling(context, force=force)
+        return run_rolling(context, force=force, gpus=gpus, workers_per_gpu=workers_per_gpu)
+    if gpus is not None or workers_per_gpu != 1:
+        raise ValueError("parallel recommendation options require the v4 full rolling protocol")
     cohort = context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
     from validation.representation_checks import verify_recorded_representations

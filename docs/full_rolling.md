@@ -23,7 +23,24 @@
 
 v4의 `prepare-cohort`는 영상 파일 존재·크기·중복만 검사하고 길이는 조회하지 않습니다. `prepare-input-data`의 4개 worker가 영상별로 ffprobe → Scene 계산 → keyframe 추출을 수행하며 진행률을 표시합니다. 길이는 `data/cohort/source_assets/{content_id}/assets/video_duration.json`에 원본 경로·크기·수정 시각과 함께 저장되어 중단 후 재사용됩니다. 새 cohort의 catalog/inventory에서 `duration_seconds`는 `null`일 수 있습니다. 기존 run에 숫자 길이가 있으면 그대로 사용합니다. 전체 `media_preflight.json`은 입력 영상 추출·검증이 모두 끝난 뒤 작성하고, cohort 또는 입력 준비 재실행 시 이전 통계는 제거합니다. v3의 cohort 준비 계약은 유지합니다.
 
-README의 전체 단계 명령을 사용합니다. 현재 작업용 `run.sh`는 `--plan-only`와 title 보완을 실행하고 후속 단계는 주석으로 남겨 두었습니다. 기본 run ID는 `Full_v2_260908_zero_metadata`이며 `RUN_ID=새이름 bash run.sh`로 지정할 수 있습니다. GPU 배정과 후속 단계 실행 여부는 스크립트에서 설정합니다. SASRec은 현재 visible GPU 중 첫 장을 사용하며 조합은 순차 실행합니다.
+README의 전체 단계 명령을 사용합니다. 작업용 `run.sh`의 `RUN_ID`, `GPU`와 활성화된 단계를 확인한 뒤 실행합니다. 추천은 옵션을 생략하면 visible GPU 중 첫 장을 사용하며 조합을 순차 실행합니다. CUDA가 없으면 CPU를 사용합니다.
+
+### 추천 조합 병렬 실행
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
+  --run-id "$RUN_ID" --gpus 4 --workers-per-gpu 2
+```
+
+- `--gpus`는 visible CUDA 장치 개수입니다. `CUDA_VISIBLE_DEVICES=2,3`과 `--gpus 2`를 쓰면 물리 GPU 2·3에 배정되며 로그에는 논리 장치 `cuda:0`·`cuda:1`로 표시됩니다. 요청한 개수보다 visible GPU가 적으면 실패합니다.
+- `--workers-per-gpu` 기본값은 1입니다. 위 예는 GPU당 2개, 총 8개 독립 프로세스를 실행합니다. 각 프로세스가 한 조합의 selection → refit → test를 끝내고 공유 대기열에서 다음 조합을 가져갑니다. 모델을 GPU 간 분할하지 않습니다.
+- 프로세스는 `spawn`으로 시작하며 GPU를 지정하고 조합별 seed를 재설정합니다. CPU thread 과다 경합을 줄이기 위해 worker의 PyTorch 연산 thread는 1개입니다. 원본 사건 테이블은 worker마다 한 번 로딩하므로 worker 수에 비례해 호스트 RAM도 사용합니다.
+- Batch 256, 학습 순서, loss·마스킹, epoch 선택, refit 초기화 및 평가 조건은 유지합니다. `selection`, `refit epochs=...`, `test` 로그에 날짜·seed·Arm·device를 표시합니다. 전체 진행률은 완료·재사용 조합 수로 갱신됩니다.
+- 기존 추천 프로세스를 중단하고 종료를 확인한 다음 같은 run ID로 위 명령을 실행합니다. 완료 조합은 검증 후 재사용하고 미완료 조합만 처음부터 재학습합니다. epoch 중간부터 재개하지 않습니다. 같은 run ID의 추천 명령을 여러 개 동시에 실행하지 않습니다.
+- worker 오류나 Ctrl-C가 발생하면 부모가 worker들을 종료·회수합니다. 이미 저장된 정상 완료 조합은 다음 실행에서 재사용됩니다. `--force`는 모든 조합을 재생성합니다.
+- GPU당 2개는 초기 실행 예이며 최적값이나 배속을 보장하지 않습니다. CPU·메모리 대역폭 경합이 생길 수 있으므로 GPU당 1개와 2개의 조합 완료 처리량으로 비교합니다. CUDA 실제 속도와 수치 재현성은 Ubuntu 장비에서 검증해야 합니다.
+
+### 환경 간 전달
 
 1. Ubuntu: 전체 CSV 검사·title 보완·cohort·영상 준비, Qwen Graph와 Description 추출·요약.
 2. Windows: 같은 run의 `experiment.json`, `data/`, prepared keyframes를 전달하고 같은 코드 revision을 사용합니다. `artifacts_root`, 데이터/모델 경로만 해당 호스트에 맞춥니다. `conda activate llmjg` 후 README의 Gemini 명령을 실행합니다. Gemini는 원본 MP4 대신 준비된 이미지에 접근합니다.

@@ -19,7 +19,7 @@ from extraction.summary_validation import (
 )
 from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
 from extraction.step_support import result, write_progress
-from extraction.recovery import active_force_run, generate_with_recovery, has_pending_recovery
+from extraction.recovery import active_force_run, clear_recovery, generate_with_recovery, has_pending_recovery
 from extraction.qwen_config import qwen_settings
 from extraction.structured_output import OutputValidationError
 from extraction.raw_output import RAW_SUMMARY_SCHEMA, raw_summary_document
@@ -253,6 +253,8 @@ def run_summary_stage(
                 f"[SUMMARY FALLBACK] {branch.arm}: {failure_count} missing summaries; "
                 "embed-representations will use Qwen Graph summaries",
             )
+    if not failure_count:
+        clear_recovery(branch.summary_dir)
     return result(branch.stage, content_count=len(documents), failure_count=failure_count)
 
 

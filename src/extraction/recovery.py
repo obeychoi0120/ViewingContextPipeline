@@ -6,11 +6,22 @@ from itertools import chain
 import hashlib
 import json
 import math
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
 from artifact_io import atomic_write_json
 from extraction.structured_output import OutputValidationError
+
+
+def clear_recovery(output_dir):
+    """Remove a successful step's recovery journal within its output directory."""
+    output_dir = Path(output_dir).resolve()
+    directory = output_dir / ".recovery"
+    if directory.exists():
+        if directory.resolve().parent != output_dir:
+            raise ValueError(f"recovery directory escapes step output: {directory}")
+        shutil.rmtree(directory)
 
 
 def fingerprint(value):
