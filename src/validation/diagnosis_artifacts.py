@@ -292,6 +292,7 @@ def _representation_contract(
     item_ids: list[str],
     embedding_dim: int,
     errors: list[dict[str, Any]],
+    arms=None,
 ) -> tuple[dict[str, Any], bool]:
     directory = run_root / "validation" / "representations"
     expected_index = {item_id: index for index, item_id in enumerate(item_ids)}
@@ -305,7 +306,7 @@ def _representation_contract(
         examples.append({"reason": "item_index_mismatch"})
 
     branches: dict[str, Any] = {}
-    for branch in RECOMMENDATION_ARMS.values():
+    for branch in (RECOMMENDATION_ARMS if arms is None else arms).values():
         path = directory / f"{branch}_embeddings.npz"
         branch_document: dict[str, Any] = {"path": str(path)}
         try:

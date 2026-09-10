@@ -332,7 +332,11 @@ def _scene_coverage(
     settings,
     decision_config_valid,
     runtime_paths_valid,
+    *, branches=None,
 ):
+    selected = [arm for arm in SCENE_ARMS if branches is None or arm in branches]
+    if not selected:
+        return {"status": "not_applicable", "reason": "no visual source selected", "arms": {}}, True, True, True
     expected_scenes, scene_denominator_valid = _expected_scenes(
         run_root,
         content_ids,
@@ -342,7 +346,7 @@ def _scene_coverage(
     scene_documents: dict[str, Any] = {}
     successful_scenes: dict[str, set[tuple[str, int]]] = {}
     scene_arm_valid: dict[str, bool] = {}
-    for arm in SCENE_ARMS:
+    for arm in selected:
         document, success, valid = _scene_arm_contract(
             arm, run_root, content_ids, expected_scenes, errors
         )

@@ -8,7 +8,7 @@ from pipeline_runtime import read_json, write_json
 from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
-from validation.recommendation_contracts import RECOMMENDATION_ARMS
+from validation.recommendation_contracts import RECOMMENDATION_ARMS, resolve_target_arms, target_scope
 from validation.representation_checks import verify_representations
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_recommendation import (
@@ -68,47 +68,61 @@ def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIM
     )
 
 
-def comparisons(observed, draws, settings):
+def comparisons(observed, draws, settings, *, arms=None):
     alpha = settings.familywise_alpha
-    names = list(RECOMMENDATION_ARMS)
+    names = list(RECOMMENDATION_ARMS if arms is None else arms)
+    indices = {arm: index for index, arm in enumerate(names)}
     result = {}
-    for index in (1, 2, 3):
-        delta = draws[:, index] - draws[:, 0]
+    baseline = indices.get("SASRec_METADATA")
+    for arm in names:
+        if baseline is None or arm == "SASRec_METADATA":
+            continue
+        index = indices[arm]
+        delta = draws[:, index] - draws[:, baseline]
         lo, hi = np.quantile(delta, [alpha / 3 / 2, 1 - alpha / 3 / 2])
-        result[f"{names[index]}-{names[0]}"] = {
+        result[f"{arm}-SASRec_METADATA"] = {
             "family": "metadata_baseline_superiority",
-            "difference": float(observed[index] - observed[0]),
+            "difference": float(observed[index] - observed[baseline]),
             "ci_low": float(lo),
             "ci_high": float(hi),
             "superior": bool(lo > 0),
         }
-    if observed[3] <= 0 or np.any(draws[:, 3] <= 0):
-        raise ValueError("Description relative-effect denominator is zero; NI is undefined")
-    for index in (1, 2):
-        relative = (draws[:, index] - draws[:, 3]) / draws[:, 3]
+    desc = indices.get("SASRec_DESC")
+    for arm in ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI"):
+        if desc is None or arm not in indices:
+            continue
+        if observed[desc] <= 0 or np.any(draws[:, desc] <= 0):
+            raise ValueError("Description relative-effect denominator is zero; NI is undefined")
+        index = indices[arm]
+        relative = (draws[:, index] - draws[:, desc]) / draws[:, desc]
         lo = float(np.quantile(relative, alpha / 2))
-        result[f"{names[index]}-{names[3]}"] = {
+        result[f"{arm}-SASRec_DESC"] = {
             "family": "graph_vs_description_non_inferiority",
-            "relative_difference": float((observed[index] - observed[3]) / observed[3]),
+            "relative_difference": float((observed[index] - observed[desc]) / observed[desc]),
             "one_sided_relative_ci_low": lo,
             "margin": -settings.non_inferiority_margin,
             "non_inferior": lo > -settings.non_inferiority_margin,
         }
-    if observed[1] <= 0 or np.any(draws[:, 1] <= 0):
+    qwen = indices.get("SASRec_GRAPH_QWEN")
+    gemini = indices.get("SASRec_GRAPH_GEMINI")
+    if qwen is None or gemini is None:
+        return result
+    if observed[qwen] <= 0 or np.any(draws[:, qwen] <= 0):
         raise ValueError("Qwen relative-effect denominator is zero; exploratory CI is undefined")
-    relative = (draws[:, 2] - draws[:, 1]) / draws[:, 1]
+    relative = (draws[:, gemini] - draws[:, qwen]) / draws[:, qwen]
     lo, hi = np.quantile(relative, [alpha / 2, 1 - alpha / 2])
-    result[f"{names[2]}-{names[1]}"] = {
+    result["SASRec_GRAPH_GEMINI-SASRec_GRAPH_QWEN"] = {
         "family": "qwen_vs_gemini",
         "role": "exploratory",
-        "relative_difference": float((observed[2] - observed[1]) / observed[1]),
+        "relative_difference": float((observed[gemini] - observed[qwen]) / observed[qwen]),
         "relative_ci_low": float(lo),
         "relative_ci_high": float(hi),
     }
     return result
 
 
-def collect_metrics(context, config, cohort):
+def collect_metrics(context, config, cohort, *, arms=None):
+    selected = RECOMMENDATION_ARMS if arms is None else arms
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
     users = {user: i for i, user in enumerate(table.users)}
     splits = cohort["plan"]["splits"]
@@ -118,8 +132,8 @@ def collect_metrics(context, config, cohort):
         config.cohort.item_count,
     ) or splits != table.splits():
         raise ValueError("full source cardinality or rolling split manifest mismatch")
-    arms = list(RECOMMENDATION_ARMS)
-    verify_representations(context, cohort)
+    arms = list(selected)
+    verify_representations(context, cohort, arms=selected)
     sums = np.zeros((len(users), len(splits), len(arms)))
     counts = np.zeros((len(users), len(splits)))
     metrics = list(metrics_from_rank(1, config.evaluation.cutoffs))
@@ -218,22 +232,25 @@ def collect_metrics(context, config, cohort):
     )
 
 
-def diagnose(context):
+def diagnose(context, *, target=None):
     from validation.steps import validation_config
 
+    arms = resolve_target_arms(target)
     context.initialize()
     config = validation_config(context)
     errors = []
     document = {
         "schema_version": "rolling-diagnosis/v1",
         "run_id": context.run_id,
+        **target_scope(arms),
         "statistics": {"status": "not_computed"},
     }
     try:
         cohort = context.require_ready_cohort()
         document["cohort"] = cohort["plan"]
         from validation.metadata import verify_missing_metadata
-        document["metadata_missing"] = verify_missing_metadata(context, cohort)
+        if "metadata" in arms.values():
+            document["metadata_missing"] = verify_missing_metadata(context, cohort)
         scene = _scene_coverage(
             context.run_root,
             [r["content_id"] for r in cohort["catalog"]],
@@ -242,14 +259,18 @@ def diagnose(context):
             config.evaluation.model_dump(),
             True,
             True,
+            branches=set(arms.values()),
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
-        document["generation_recovery"] = recovery_report(context.run_root)
-        document["gemini_summary_fallbacks"] = read_json(
-            context.representations_dir / "graph_gemini_fallbacks.json"
+        document["generation_recovery"] = recovery_report(
+            context.run_root, branches=set(arms.values())
         )
-        sums, counts, report = collect_metrics(context, config, cohort)
+        if "graph_gemini" in arms.values():
+            document["gemini_summary_fallbacks"] = read_json(
+                context.representations_dir / "graph_gemini_fallbacks.json"
+            )
+        sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
         if not errors:
             observed, draws, bootstrap = cluster_bootstrap(
@@ -258,9 +279,9 @@ def diagnose(context):
             document["statistics"] = {
                 "status": "computed",
                 "bootstrap": bootstrap,
-                "comparisons": comparisons(observed, draws, config.evaluation),
+                "comparisons": comparisons(observed, draws, config.evaluation, arms=arms),
                 "policy": multiple_comparison_policy(
-                    config.evaluation.model_dump(), True, "NDCG@10"
+                    config.evaluation.model_dump(), True, "NDCG@10", arms=arms,
                 ),
             }
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
@@ -270,7 +291,7 @@ def diagnose(context):
         "metadata_hr10": 0.046,
         "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
     }
-    if "recommendations" in document:
+    if "recommendations" in document and "SASRec_METADATA" in arms:
         value = document["recommendations"]["means"]["SASRec_METADATA"]["HR@10"]
         document["paper_reference"]["hr10_difference"] = value - 0.046
     write_json(context.diagnosis_path, document)

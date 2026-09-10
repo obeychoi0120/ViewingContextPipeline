@@ -70,3 +70,25 @@ def test_gpu_options_are_scoped_and_positive(option):
     with pytest.raises(SystemExit) as raised:
         cli_module.main(["run-recommendation", "--run-id", "test", option, "0"])
     assert raised.value.code == 2
+
+
+@pytest.mark.parametrize("step", ["run-recommendation", "run-diagnosis"])
+def test_target_sources_are_forwarded(step, monkeypatch):
+    received = {}
+    monkeypatch.setattr(cli_module.RunContext, "load", lambda _: object())
+    monkeypatch.setitem(cli_module.STEP_HANDLERS, step,
+                        lambda context, **kwargs: received.update(kwargs))
+    assert cli_module.main([step, "--run-id", "test", "--target", "graph_qwen", "DESC_QWEN"]) == 0
+    assert received == {"force": False, "target": ["GRAPH_QWEN", "DESC_QWEN"]}
+
+
+@pytest.mark.parametrize("target", [[], ["unknown"]])
+def test_empty_or_unknown_target_is_rejected(target):
+    with pytest.raises(SystemExit) as raised:
+        cli_module.main(["run-recommendation", "--run-id", "test", "--target", *target])
+    assert raised.value.code == 2
+
+
+@pytest.mark.parametrize("step", ["prepare-cohort", "embed-representations"])
+def test_target_is_rejected_before_loading_unrelated_stages(step):
+    assert cli_module.main([step, "--run-id", "test", "--target", "METADATA"]) == 1

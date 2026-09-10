@@ -224,7 +224,9 @@ class _RecommendationInputs:
     buckets: list[str]
 
 
-def _prepare_inputs(config: ValidationConfig, runtime: dict[str, Any]) -> _RecommendationInputs:
+def _prepare_inputs(
+    config: ValidationConfig, runtime: dict[str, Any], *, branches=None,
+) -> _RecommendationInputs:
     root = Path(runtime["run_root"])
     representations_dir = Path(runtime["paths"]["representations_dir"])
     sequences = read_jsonl(root / "data" / "cohort" / "sequences.jsonl")
@@ -241,6 +243,8 @@ def _prepare_inputs(config: ValidationConfig, runtime: dict[str, Any]) -> _Recom
     branch_features: dict[str, np.ndarray] = {}
     expected_shape = (len(catalog), config.encoder.embedding_dim)
     for branch in RECOMMENDATION_ARMS.values():
+        if branches is not None and branch not in branches:
+            continue
         path = representations_dir / f"{branch}_embeddings.npz"
         try:
             with np.load(path, allow_pickle=False) as archive:
@@ -436,7 +440,7 @@ def train_recommendation_arms(
     *, branches: set[str] | None = None,
 ) -> dict[str, Any]:
     require_torch()
-    inputs = _prepare_inputs(config, runtime)
+    inputs = _prepare_inputs(config, runtime, branches=branches)
     output = Path(runtime["paths"]["recommendations_dir"])
     output.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -446,11 +450,15 @@ def train_recommendation_arms(
     if branches is not None:
         from pipeline_runtime import read_jsonl
         retained = {arm for arm, branch in RECOMMENDATION_ARMS.items() if branch not in branches}
-        rows = [row for row in read_jsonl(metrics_path) if row["arm"] in retained]
-        runs = [row for row in read_jsonl(training_runs_path) if row["arm"] in retained]
+        if metrics_path.exists():
+            rows = [row for row in read_jsonl(metrics_path) if row["arm"] in retained]
+        if training_runs_path.exists():
+            runs = [row for row in read_jsonl(training_runs_path) if row["arm"] in retained]
     _persist_training_runs(training_runs_path, runs)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    total = len(config.model.seeds) * len(RECOMMENDATION_ARMS)
+    selected = {arm: branch for arm, branch in RECOMMENDATION_ARMS.items()
+                if branches is None or branch in branches}
+    total = len(config.model.seeds) * len(selected)
 
     selection_probabilities = popularity_probabilities(
         inputs.train_sequences,
@@ -465,10 +473,7 @@ def train_recommendation_arms(
 
     with tqdm(total=total, desc="Recommendation", unit="run") as progress:
         for seed in config.model.seeds:
-            for arm, branch in RECOMMENDATION_ARMS.items():
-                if branches is not None and branch not in branches:
-                    progress.update(1)
-                    continue
+            for arm, branch in selected.items():
                 progress.set_postfix(seed=seed, arm=arm)
                 print(
                     f"[PHASE] run_recommendation select seed={seed} arm={arm}",

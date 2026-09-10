@@ -604,6 +604,23 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     assert diagnosis["metadata_missing"]["missing_count"] == 2
     assert [row["item_id"] for row in diagnosis["metadata_missing"]["items"]] == ["2", "4"]
     assert diagnosis["scene_coverage"]["arms"]["graph_gemini"]["success_coverage"] == 1
+    # Reuse real training evidence to validate all target grids through public diagnosis.
+    from itertools import combinations
+    from validation.recommendation_contracts import TARGET_SOURCES, resolve_target_arms
+    for size in range(1, 5):
+        for target in combinations(TARGET_SOURCES, size):
+            arms = resolve_target_arms(list(target))
+            assert diagnose(context, target=list(target))["status"] == "pass"
+            selected = read_json(context.diagnosis_path)
+            assert selected["recommendations"]["means"] == {
+                arm: diagnosis["recommendations"]["means"][arm] for arm in arms
+            }
+            assert selected["recommendations"]["actual_event_count"] == 42 * 3 * len(arms)
+            assert selected["statistics"]["comparisons"] == {
+                key: value for key, value in diagnosis["statistics"]["comparisons"].items()
+                if all(arm in arms for arm in key.split("-"))
+            }
+            assert ("hr10_difference" in selected["paper_reference"]) == ("SASRec_METADATA" in arms)
     # An embedding identity change invalidates only its 7 dates x 3 seeds.
     protected_arms = {path: path.read_bytes() for path in completions
                       if path.parent.name != "sasrec_graph_qwen"}

@@ -173,13 +173,15 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def _embedding_work(context, catalog, config, force):
+def _embedding_work(context, catalog, config, force, *, branches=None):
     sources = {
         "metadata": None,
         "graph_qwen": context.graph_summary_dir("qwen"),
         "graph_gemini": context.graph_summary_dir("gemini"),
         "desc": context.description_summary_dir,
     }
+    if branches is not None:
+        sources = {branch: path for branch, path in sources.items() if branch in branches}
     gemini_fallbacks = [
         {
             "item_id": str(row["item_id"]),
@@ -190,7 +192,8 @@ def _embedding_work(context, catalog, config, force):
             .as_posix(),
         }
         for row in catalog
-        if not (context.graph_summary_dir("gemini") / f"{row['content_id']}.json").is_file()
+        if "graph_gemini" in sources
+        and not (context.graph_summary_dir("gemini") / f"{row['content_id']}.json").is_file()
     ]
     fallback_path = context.representations_dir / "graph_gemini_fallbacks.json"
     item_index_path = context.representations_dir / "item_index.json"
@@ -387,12 +390,13 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
     return _result("embed-representations", content_count=len(catalog))
 
 
-def _checkpoint_paths(context: RunContext) -> list[Path]:
+def _checkpoint_paths(context: RunContext, arms=None) -> list[Path]:
     seeds = validation_config(context).model.seeds
+    arms = RECOMMENDATION_ARMS if arms is None else arms
     return [
         context.recommendations_dir / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
         for seed in seeds
-        for arm in RECOMMENDATION_ARMS
+        for arm in arms
     ]
 
 
@@ -436,21 +440,24 @@ def _training_runs_complete(
 
 def run_recommendation(
     context: RunContext, *, force: bool = False, gpus: int | None = None,
-    workers_per_gpu: int = 1,
+    workers_per_gpu: int = 1, target: list[str] | None = None,
 ) -> dict[str, Any]:
+    from validation.recommendation_contracts import resolve_target_arms
+    arms = resolve_target_arms(target)
     context.initialize()
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_recommendation import run_rolling
-        return run_rolling(context, force=force, gpus=gpus, workers_per_gpu=workers_per_gpu)
+        return run_rolling(context, force=force, gpus=gpus,
+                           workers_per_gpu=workers_per_gpu, target=target)
     if gpus is not None or workers_per_gpu != 1:
         raise ValueError("parallel recommendation options require the v4 full rolling protocol")
     cohort = context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
     from validation.representation_checks import verify_recorded_representations
-    verify_recorded_representations(context, cohort)
+    verify_recorded_representations(context, cohort, arms=arms)
 
     config = validation_config(context)
-    for branch in ("metadata", "graph_qwen", "graph_gemini", "desc"):
+    for branch in arms.values():
         _require_file(_embedding_path(context, branch), f"{branch} embeddings")
     _require_file(context.representations_dir / "item_index.json", "item index")
     metrics_path = context.recommendations_dir / "per_user_metrics.jsonl"
@@ -459,38 +466,35 @@ def run_recommendation(
     input_path = context.recommendations_dir / "embedding_inputs.json"
     previous_inputs = read_json(input_path) if input_path.exists() else {}
     current_inputs = {branch: recommendation_identity(context, branch)
-                      for branch in RECOMMENDATION_ARMS.values()}
+                      for branch in arms.values()}
     changed = {branch for branch, value in current_inputs.items()
                if value and previous_inputs.get(branch) != value}
-    if (
-        not force
-        and not changed
-        and metrics_path.is_file()
-        and _training_runs_complete(
-            training_runs_path,
-            run_id=context.run_id,
-            seeds=config.model.seeds,
+    pending = {
+        branch for arm, branch in arms.items()
+        if force or branch in changed or not metrics_path.is_file()
+        or not _training_runs_complete(
+            training_runs_path, run_id=context.run_id, seeds=config.model.seeds, arms={arm},
         )
-        and all(path.is_file() for path in _checkpoint_paths(context))
-    ):
+        or not all(path.is_file() for path in _checkpoint_paths(context, {arm}))
+    }
+    if not pending:
         return _result("run-recommendation")
-    retained = {arm for arm, branch in RECOMMENDATION_ARMS.items() if branch not in changed}
-    if (changed and not force and metrics_path.exists()
-            and _training_runs_complete(training_runs_path, run_id=context.run_id,
-                                        seeds=config.model.seeds, arms=retained)
-            and all(path.is_file() for path in _checkpoint_paths(context)
-                    if path.parent.name in {arm.lower() for arm in retained})):
-        train_recommendation_arms(config, _runtime(context), branches=changed)
-    else:
+    if pending == set(RECOMMENDATION_ARMS.values()):
         train_recommendation_arms(config, _runtime(context))
-    write_json(input_path, current_inputs)
+    else:
+        train_recommendation_arms(config, _runtime(context), branches=pending)
+    write_json(input_path, {**previous_inputs, **current_inputs})
     return _result("run-recommendation")
 
 
-def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+def run_diagnosis(
+    context: RunContext, *, force: bool = False, target: list[str] | None = None,
+) -> dict[str, Any]:
+    from validation.recommendation_contracts import resolve_target_arms
+    arms = resolve_target_arms(target)
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_diagnosis import diagnose
-        return diagnose(context)
+        return diagnose(context, target=target)
     from validation.diagnosis import diagnose_recommendations
 
     context.initialize()
@@ -506,16 +510,17 @@ def run_diagnosis(context: RunContext, *, force: bool = False) -> dict[str, Any]
         _runtime(context),
         decision_config,
         scene_duration=context.config["extraction"]["visual_evidence"]["scene_duration"],
+        arms=arms,
     )
     from extraction.recovery_report import recovery_report
-    document["generation_recovery"] = recovery_report(context.run_root)
+    document["generation_recovery"] = recovery_report(context.run_root, branches=set(arms.values()))
     from validation.representation_provenance import recommendation_identity
     from validation.representation_checks import verify_recorded_representations
     current_inputs = {branch: recommendation_identity(context, branch)
-                      for branch in RECOMMENDATION_ARMS.values()}
+                      for branch in arms.values()}
     if any(current_inputs.values()):
         try:
-            verify_recorded_representations(context, context.require_ready_cohort())
+            verify_recorded_representations(context, context.require_ready_cohort(), arms=arms)
             path = context.recommendations_dir / "embedding_inputs.json"
             previous_inputs = read_json(path) if path.exists() else {}
             if any(value and previous_inputs.get(branch) != value
