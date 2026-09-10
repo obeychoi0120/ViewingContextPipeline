@@ -52,3 +52,21 @@ def test_cohort_interrupt_returns_130(monkeypatch):
 
     monkeypatch.setitem(cli_module.STEP_HANDLERS, "prepare-cohort", interrupt)
     assert cli_module.main(["prepare-cohort", "--run-id", "test", "--plan-only"]) == 130
+
+
+def test_recommendation_gpu_options_are_forwarded(monkeypatch):
+    received = {}
+    monkeypatch.setattr(cli_module.RunContext, "load", lambda _: object())
+    monkeypatch.setitem(cli_module.STEP_HANDLERS, "run-recommendation",
+                        lambda context, **kwargs: received.update(kwargs))
+    assert cli_module.main(["run-recommendation", "--run-id", "test", "--gpus", "4",
+                            "--workers-per-gpu", "2"]) == 0
+    assert received == {"force": False, "gpus": 4, "workers_per_gpu": 2}
+
+
+@pytest.mark.parametrize("option", ["--gpus", "--workers-per-gpu"])
+def test_gpu_options_are_scoped_and_positive(option):
+    assert cli_module.main(["run-diagnosis", "--run-id", "test", option, "2"]) == 1
+    with pytest.raises(SystemExit) as raised:
+        cli_module.main(["run-recommendation", "--run-id", "test", option, "0"])
+    assert raised.value.code == 2

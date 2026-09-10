@@ -16,7 +16,7 @@ from extraction.descriptions import (
 from extraction.errors import ExtractionStepError
 from extraction.preparation import prepare_input_data
 from extraction.qwen_runtime import QwenRuntimeLog
-from extraction.recovery import active_force_run, has_pending_recovery, penalty_schedule
+from extraction.recovery import active_force_run, clear_recovery, has_pending_recovery, penalty_schedule
 from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
 from extraction.progress import InferenceProgress
 from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
@@ -290,6 +290,8 @@ def extract_graph_scenes(
         for visual in visual_rows
         for record in failures_by_content[str(visual["content_id"])]
     ]
+    if not failures:
+        clear_recovery(scene_dir)
     return _result(stage, content_count=len(visual_rows), failure_count=len(failures))
 
 
@@ -409,6 +411,8 @@ def extract_description_scenes(
         for visual in visual_rows
         for record in failures_by_content[str(visual["content_id"])]
     ]
+    if not failures:
+        clear_recovery(context.description_scene_dir)
     return _result(
         "extract-description-scenes", content_count=len(visual_rows), failure_count=len(failures)
     )

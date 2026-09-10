@@ -54,6 +54,7 @@ def test_qwen_graph_raw_then_grammar_summary_and_content_refresh(context, monkey
     raw = read_jsonl(scene_path)[0]
     assert raw["status"] == "raw_fallback" and "graph" not in raw
     assert calls == [1, 1.05]
+    assert not (scene_path.parent / ".recovery").exists()
     assert not (context.graph_failure_dir("qwen") / "c1.jsonl").exists()
     errors = []
     coverage, successes, valid = _scene_arm_contract(
@@ -79,7 +80,10 @@ def test_qwen_graph_raw_then_grammar_summary_and_content_refresh(context, monkey
     steps.summarize_graph(context, source="qwen")
     output = context.graph_summary_dir("qwen") / "c1.json"
     assert read_json(output)["status"] == "complete" and len(summary_calls) == 1
+    assert not (output.parent / ".recovery").exists()
+    write_json(output.parent / ".recovery" / "stale.json", {})
     steps.summarize_graph(context, source="qwen")
+    assert not (output.parent / ".recovery").exists()
     assert len(summary_calls) == 1
     raw["raw_response"] = "Changed visible observation"
     write_scene_checkpoint(scene_path, context.graph_failure_dir("qwen") / "c1.jsonl", [raw], [])
@@ -115,6 +119,7 @@ def test_raw_summary_is_explicit_and_empty_summary_stays_failed(context, monkeyp
         steps.summarize_graph(context, source="qwen", force=True)
     # Failed forced regeneration does not overwrite the previously usable result.
     assert read_json(output) == document
+    assert (output.parent / ".recovery").is_dir()
     # A failed forced refresh remains pending; a normal rerun starts a new cycle.
     with pytest.raises(steps.ExtractionStepError):
         steps.summarize_graph(context, source="qwen")
@@ -205,7 +210,8 @@ def test_mixed_scene_summary_and_recovery_diagnosis(context, monkeypatch):
     assert document["scene_count"] == 2
     from extraction.recovery_report import recovery_report
     report = recovery_report(context.run_root)
-    assert report["graph/qwen/summaries"]["counts"] == {"repaired": 1}
+    assert report["graph/qwen/summaries"]["counts"] == {}
+    assert report["graph/qwen/summaries"]["current_cycle_attempts"] == 0
     assert report["graph/qwen/summaries"]["summary_inputs"] == {
         "scene_count": 2, "normal_scene_count": 1, "raw_scene_count": 1, "summaries_with_raw_input": 1}
     assert report["graph/qwen/scenes"]["artifact_counts"] == {"raw_fallback": 1, "legacy_unknown": 1}
@@ -227,8 +233,7 @@ def test_gemini_raw_preserves_original_and_errors_never_become_raw(context, monk
     steps.extract_graph_scenes(context, model="gemini")
     output = context.graph_scene_dir("gemini") / "c1.jsonl"
     assert read_jsonl(output) == [raw_graph_record(row, "  raw observation \n")]
-    attempt = read_json(next(output.parent.joinpath(".recovery").glob("*.json")))["cycles"][0]["attempts"][0]
-    assert attempt["output_tokens"] == 8 and attempt["finish_reason"] == "MAX_TOKENS"
+    assert not (output.parent / ".recovery").exists()
     steps.extract_graph_scenes(context, model="gemini")
     assert calls == [["c1:0"]]
     def fail(self, tasks, callback, **_):
@@ -236,6 +241,7 @@ def test_gemini_raw_preserves_original_and_errors_never_become_raw(context, monk
     monkeypatch.setattr(Pool, "generate", fail)
     assert steps.extract_graph_scenes(context, model="gemini", force=True)["failure_count"] == 1
     assert read_jsonl(output) == []
+    assert (output.parent / ".recovery").is_dir()
 
 
 @pytest.mark.parametrize("source", ["qwen", "gemini", "description"])
@@ -273,10 +279,12 @@ def test_force_interrupted_before_first_response_resumes_instead_of_reusing_old_
     with pytest.raises(RuntimeError, match="worker failed"):
         run(force=True)
     assert output.read_bytes() == before
+    assert (output.parent / ".recovery" / ".force-run").is_file()
     interrupted = False
     run()
     assert len(calls) == 2
     assert "new observation" in str(read_jsonl(output))
+    assert not (output.parent / ".recovery").exists()
 
 
 def test_qwen_pool_is_loaded_only_if_checkpoint_replay_needs_generation(monkeypatch):
