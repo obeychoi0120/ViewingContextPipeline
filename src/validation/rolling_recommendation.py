@@ -16,7 +16,7 @@ from validation.metrics import metrics_from_rank
 from validation.model import pad_sequences, require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
-from validation.recommendation_contracts import ARCHITECTURE_VERSION, RECOMMENDATION_ARMS
+from validation.recommendation_contracts import ARCHITECTURE_VERSION, resolve_target_arms
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.scoring import mask_history, rank_of_target
 
@@ -297,22 +297,23 @@ def worker_devices(gpus, workers_per_gpu):
     return [f"cuda:{i}" for _ in range(workers_per_gpu) for i in range(count)]
 
 
-def run_rolling(context, *, force=False, gpus=None, workers_per_gpu=1):
+def run_rolling(context, *, force=False, gpus=None, workers_per_gpu=1, target=None):
     from validation.steps import validation_config
     from validation.representation_provenance import recommendation_identity
 
+    arms = resolve_target_arms(target)
     require_torch()
     devices = worker_devices(gpus, workers_per_gpu)
     config = validation_config(context)
     cohort = context.require_ready_cohort()
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
-    verify_representations(context, cohort)
+    verify_representations(context, cohort, arms=arms)
     completed = skipped = 0
     jobs = []
     for split in cohort["plan"]["splits"]:
         expected_count = len(phase_ids(table, split, "test"))
         for seed in config.model.seeds:
-            for arm, branch in RECOMMENDATION_ARMS.items():
+            for arm, branch in arms.items():
                 identity = {
                     "run_id": context.run_id,
                     "evaluation_date": split["evaluation_date"],

@@ -31,11 +31,12 @@ def multiple_comparison_policy(
     settings: dict[str, Any],
     valid: bool,
     primary_metric: str,
+    *, arms=None,
 ) -> dict[str, Any]:
     alpha = settings.get("familywise_alpha")
     metadata_alpha = bonferroni_alpha(alpha, 3) if valid else None
     ni_alpha = bonferroni_alpha(alpha, 2) if valid else None
-    return {
+    policy = {
         "primary_metric": primary_metric,
         "familywise_alpha": alpha,
         "correction": settings.get("multiple_comparison_correction"),
@@ -74,6 +75,15 @@ def multiple_comparison_policy(
             },
         },
     }
+    selected = RECOMMENDATION_ARMS if arms is None else arms
+    for family in policy["families"].values():
+        family["evaluated_comparisons"] = [
+            pair for pair in family["comparisons"] if all(arm in selected for arm in pair.split("-"))
+        ]
+        family["skipped_comparisons"] = [
+            pair for pair in family["comparisons"] if pair not in family["evaluated_comparisons"]
+        ]
+    return policy
 
 
 def _mean_by_user(
@@ -108,6 +118,7 @@ def statistics(
     seeds: list[int],
     config: ValidationConfig,
     policy: dict[str, Any],
+    arms=None,
 ) -> tuple[
     dict[str, Any],
     dict[str, Any],
@@ -115,7 +126,7 @@ def statistics(
     list[dict[str, Any]],
     list[dict[str, Any]],
 ]:
-    arms = list(RECOMMENDATION_ARMS)
+    arms = list(RECOMMENDATION_ARMS if arms is None else arms)
     metric_names = [
         f"{name}@{cutoff}" for cutoff in config.evaluation.cutoffs for name in ("HR", "NDCG")
     ]
@@ -165,9 +176,12 @@ def statistics(
     comparisons: dict[str, Any] = {}
     comparison_errors: list[dict[str, Any]] = []
     comparison_warnings: list[dict[str, Any]] = []
-    baseline = _mean_by_user(by_key, users, seeds, "SASRec_METADATA", primary_metric)
+    baseline = (_mean_by_user(by_key, users, seeds, "SASRec_METADATA", primary_metric)
+                if "SASRec_METADATA" in arms else None)
     metadata_alpha = float(family["metadata_baseline_superiority"]["per_comparison_alpha"])
     for arm in ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI", "SASRec_DESC"):
+        if baseline is None or arm not in arms:
+            continue
         key = f"{arm}-SASRec_METADATA"
         try:
             treatment = _mean_by_user(by_key, users, seeds, arm, primary_metric)
@@ -201,8 +215,11 @@ def statistics(
         comparisons[key] = result
 
     ni_alpha = float(family["graph_vs_description_non_inferiority"]["per_comparison_alpha"])
-    desc_values = _mean_by_user(by_key, users, seeds, "SASRec_DESC", primary_metric)
+    desc_values = (_mean_by_user(by_key, users, seeds, "SASRec_DESC", primary_metric)
+                   if "SASRec_DESC" in arms else None)
     for graph in ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI"):
+        if desc_values is None or graph not in arms:
+            continue
         key = f"{graph}-SASRec_DESC"
         try:
             result = paired_relative_bootstrap_ci(
@@ -249,6 +266,8 @@ def statistics(
         )
         comparisons[key] = result
 
+    if "SASRec_GRAPH_QWEN" not in arms or "SASRec_GRAPH_GEMINI" not in arms:
+        return summary, diagnostics, comparisons, comparison_errors, comparison_warnings
     exploratory_alpha = float(family["qwen_vs_gemini"]["per_comparison_alpha"])
     exploratory_key = "SASRec_GRAPH_GEMINI-SASRec_GRAPH_QWEN"
     try:

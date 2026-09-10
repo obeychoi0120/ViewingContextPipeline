@@ -11,6 +11,7 @@ from .cohort_selection import (
 from .diagnosis_statistics import multiple_comparison_policy, statistics
 from .recommendation_contracts import (
     RECOMMENDATION_ARMS,
+    target_scope,
 )
 
 
@@ -154,7 +155,8 @@ def _runtime_locations(
     )
 
 
-def _statistical_analysis(statistics_inputs_valid, by_key, sequences, config, policy):
+def _statistical_analysis(statistics_inputs_valid, by_key, sequences, config, policy, arms=None):
+    expected_count = sum(len(family["evaluated_comparisons"]) for family in policy["families"].values())
     summary: dict[str, Any] = {}
     diagnostics: dict[str, Any] = {}
     comparisons: dict[str, Any] = {}
@@ -174,6 +176,7 @@ def _statistical_analysis(statistics_inputs_valid, by_key, sequences, config, po
                 seeds=list(config.model.seeds),
                 config=config,
                 policy=policy,
+                arms=arms,
             )
             analysis_errors.extend(comparison_errors)
             analysis_warnings.extend(comparison_warnings)
@@ -185,7 +188,7 @@ def _statistical_analysis(statistics_inputs_valid, by_key, sequences, config, po
                 error=str(exc),
             )
 
-    if not comparisons:
+    if not summary or (expected_count and not comparisons):
         statistical_status = "not_computed"
     elif analysis_errors:
         statistical_status = "computed_with_errors"
@@ -200,7 +203,7 @@ def _statistical_analysis(statistics_inputs_valid, by_key, sequences, config, po
         comparisons,
         {
             "status": statistical_status,
-            "expected_comparison_count": 6,
+            "expected_comparison_count": expected_count,
             "computed_comparison_count": len(comparisons),
             "errors": analysis_errors,
             "warnings": analysis_warnings,
@@ -214,11 +217,13 @@ def diagnose_recommendations(
     decision_config: dict[str, Any],
     *,
     scene_duration: int = 30,
+    arms=None,
 ) -> dict[str, Any]:
+    arms = RECOMMENDATION_ARMS if arms is None else arms
     errors: list[dict[str, Any]] = []
     settings, decision_config_valid = _validate_decision_config(decision_config, errors)
     primary_metric = f"NDCG@{config.evaluation.primary_cutoff}"
-    policy = multiple_comparison_policy(settings, decision_config_valid, primary_metric)
+    policy = multiple_comparison_policy(settings, decision_config_valid, primary_metric, arms=arms)
 
     (
         runtime_object,
@@ -269,6 +274,7 @@ def diagnose_recommendations(
         item_ids=list(item_content),
         embedding_dim=config.encoder.embedding_dim,
         errors=errors,
+        arms=arms,
     )
     configured_user_count_matches = len(sequences) == config.cohort.user_count
     if not configured_user_count_matches:
@@ -293,9 +299,10 @@ def diagnose_recommendations(
         item_content=item_content,
         cutoffs=list(config.evaluation.cutoffs),
         errors=errors,
+        arms=arms,
     )
     checkpoint_summary, checkpoints_complete = _checkpoint_contract(
-        recommendations_dir, list(config.model.seeds), errors
+        recommendations_dir, list(config.model.seeds), errors, arms=arms,
     )
     training_run_summary, training_runs_complete = _training_run_contract(
         recommendations_dir,
@@ -303,6 +310,7 @@ def diagnose_recommendations(
         seeds=list(config.model.seeds),
         catalog_size=len(item_content),
         errors=errors,
+        arms=arms,
     )
 
     (
@@ -318,6 +326,7 @@ def diagnose_recommendations(
         settings,
         decision_config_valid,
         runtime_paths_valid,
+        branches=set(arms.values()),
     )
 
     statistics_inputs_valid = (
@@ -335,6 +344,7 @@ def diagnose_recommendations(
         sequences,
         config,
         policy,
+        arms,
     )
 
     checks = {
@@ -359,6 +369,7 @@ def diagnose_recommendations(
     return {
         "schema_version": "diagnosis/v4",
         "run_id": runtime_object.get("run_id"),
+        **target_scope(arms),
         "modality": runtime_object.get("modality"),
         "runtime_decision": {
             "status": status,
@@ -375,7 +386,7 @@ def diagnose_recommendations(
             "metadata_titles": metadata_title_summary,
             "representations": representation_summary,
             "seed_count": len(config.model.seeds),
-            "arm_count": len(RECOMMENDATION_ARMS),
+            "arm_count": len(arms),
             "recommendation_grid": grid,
             "training_runs": training_run_summary,
             "checkpoints": checkpoint_summary,

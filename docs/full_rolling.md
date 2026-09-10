@@ -53,6 +53,27 @@ Gemini summary가 없는 경우에만 Qwen Graph summary가 대체됩니다. 존
 
 Qwen Graph·Description과 Gemini 추출은 기본 재실행에서 성공 장면을 보존하고 실패·미완료 장면만 재시도합니다. 장면 복구로 성공 장면 수가 바뀌면 요약 명령을 다시 실행하여 해당 정상 요약만 갱신합니다. Gemini 요약의 형식·ID·Arm 오류는 자동으로 무시하지 않습니다. 새 Gemini 요약이 7개 필드 검증에 실패하고 기존 요약 파일이 없으면 실패 기록을 남기고 임베딩 단계의 Qwen fallback으로 이어집니다. 기존 요약의 갱신 실패, 모델 실행 오류, 파일 저장 오류는 계속 단계 실패로 처리합니다. 성공한 요약은 재사용하므로 같은 명령으로 미해결 요약만 다시 시도할 수 있습니다.
 
+### 모드 선택
+
+`run-recommendation`과 후속 `run-diagnosis`는 `--target`으로 실행할 모드를 선택합니다. `METADATA`, `GRAPH_QWEN`, `GRAPH_GEMINI`, `DESC_QWEN` 중 원하는 값만 공백으로 구분해 나열합니다. 대괄호나 쉼표는 넣지 않습니다. `DESC_QWEN`의 기존 저장 이름은 `SASRec_DESC` / `desc`입니다.
+
+```bash
+# 예: Graph Qwen, Description Qwen, Metadata만 실행 (7일 × 3개 모드 × 3 seeds = 63조합)
+python -m validation run-recommendation --run-id "$RUN_ID" --gpus 4 --workers-per-gpu 3 --target GRAPH_QWEN DESC_QWEN METADATA
+python -m validation run-diagnosis --run-id "$RUN_ID" --target GRAPH_QWEN DESC_QWEN METADATA
+
+# 예: Metadata 없이 두 Graph 모드만 선택
+python -m validation run-recommendation --run-id "$RUN_ID" --target GRAPH_QWEN GRAPH_GEMINI
+python -m validation run-diagnosis --run-id "$RUN_ID" --target GRAPH_QWEN GRAPH_GEMINI
+```
+
+- v3와 v4 모두 적용됩니다. `--target`을 생략하면 전체 4개 모드를 대상으로 합니다. 앞 명령의 선택을 자동으로 상속하지 않으므로 진단 명령에도 지정합니다.
+- 준비된 공통 cohort와 item index, 선택한 모드의 임베딩이 필요합니다. 제외한 모드의 임베딩·추천 checkpoint·장면 결과는 요구하지 않습니다. 공통 cohort의 title 목록은 그대로 보존합니다. 선택한 Gemini 임베딩이 Qwen summary를 대체 입력으로 사용했다면 그 Qwen summary 의존성은 계속 검증합니다. `embed-representations`의 실행 범위는 기존과 같습니다.
+- 제외한 모드의 기존 추천 결과는 보존합니다. 같은 run에서 대상을 추가하면 정상 완료 결과를 재사용하고 추가·미완료 대상을 학습합니다. `--force`도 선택한 모드에만 적용됩니다.
+- 진단의 기대 조합·결과 행 수와 장면 coverage 검사는 선택 범위에 맞춥니다. Metadata만 선택하면 장면 검사는 `not_applicable`입니다. 한 모드만 선택하면 해당 모드의 지표를 보고하고 모드 간 비교는 빈 목록으로 남깁니다.
+- 비교 양쪽 모드가 모두 선택된 경우에만 기존 비교를 수행합니다. Metadata 우월성의 보정 분모 3과 Graph–Description 비열등성의 보정 분모 2는 그대로 유지합니다. 정책의 `evaluated_comparisons`와 `skipped_comparisons`에 수행·제외한 비교를 구분합니다. Metadata가 제외되면 논문 Metadata HR@10과의 차이도 계산하지 않습니다.
+- 결과는 기존 `diagnosis.json`에 저장되며 `target_sources`, `selected_arms`, `excluded_arms`로 범위를 표시합니다. 부분 선택의 `pass`는 그 선택 범위에 대한 검증 통과이며, 아래의 전체 84조합 실험 완료를 뜻하지 않습니다.
+
 ## 저장과 재개
 
 ### 공백 Metadata의 영벡터 정책

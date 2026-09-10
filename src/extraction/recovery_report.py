@@ -6,10 +6,12 @@ from extraction.recovery import fingerprint
 from pipeline_runtime import read_jsonl
 
 
-def recovery_report(run_root):
+def recovery_report(run_root, *, branches=None):
     report = {}
     root = run_root / "extraction"
-    directories = [root / branch / step for branch in ("graph/qwen", "graph/gemini", "description")
+    sources = {"graph_qwen": "graph/qwen", "graph_gemini": "graph/gemini", "desc": "description"}
+    selected = [path for branch, path in sources.items() if branches is None or branch in branches]
+    directories = [root / branch / step for branch in selected
                    for step in ("scenes", "summaries") if (root / branch / step).is_dir()]
     for output_dir in directories:
         directory = output_dir / ".recovery"

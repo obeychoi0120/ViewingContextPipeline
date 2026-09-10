@@ -4,14 +4,15 @@ from validation.metadata import verify_missing_metadata
 from validation.recommendation_contracts import RECOMMENDATION_ARMS
 
 
-def verify_representations(context, cohort=None):
+def verify_representations(context, cohort=None, *, arms=None):
     from validation.steps import _representations_match_catalog
 
     if cohort is None:
         cohort = context.require_ready_cohort()
+    arms = RECOMMENDATION_ARMS if arms is None else arms
     outputs = [
         context.representations_dir / f"{branch}_embeddings.npz"
-        for branch in RECOMMENDATION_ARMS.values()
+        for branch in arms.values()
     ]
     if not _representations_match_catalog(
         context.representations_dir / "item_index.json",
@@ -20,15 +21,17 @@ def verify_representations(context, cohort=None):
         context.config["validation"]["encoder"]["embedding_dim"],
     ):
         raise RuntimeError("invalid full catalog embedding mapping or values")
-    verify_missing_metadata(context, cohort)
-    verify_recorded_representations(context, cohort)
+    if "metadata" in arms.values():
+        verify_missing_metadata(context, cohort)
+    verify_recorded_representations(context, cohort, arms=arms)
 
 
-def verify_recorded_representations(context, cohort):
+def verify_recorded_representations(context, cohort, *, arms=None):
     """Check tracked dependencies without imposing v4 metadata rules on legacy runs."""
     from validation.representation_provenance import matrix_hash, pending_write, read_state
+    arms = RECOMMENDATION_ARMS if arms is None else arms
     tracked = False
-    for branch in RECOMMENDATION_ARMS.values():
+    for branch in arms.values():
         state = read_state(context, branch)
         tracked = tracked or bool(state)
         if pending_write(context, branch).exists():
@@ -42,7 +45,9 @@ def verify_recorded_representations(context, cohort):
         from validation.steps import _embedding_documents, _embedding_work, validation_config
         from validation.representation_provenance import input_hash, source_changed, summary_sources
         config = validation_config(context)
-        sources, fallbacks, _ = _embedding_work(context, cohort["catalog"], config, False)
+        sources, fallbacks, _ = _embedding_work(
+            context, cohort["catalog"], config, False, branches=set(arms.values())
+        )
         fallback_ids = {row["content_id"] for row in fallbacks}
         documents = _embedding_documents(context, cohort["catalog"], sources, list(sources), fallback_ids)
         for branch, docs in documents.items():

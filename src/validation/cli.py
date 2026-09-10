@@ -5,6 +5,7 @@ import sys
 
 from validation.steps import STEP_HANDLERS
 from pipeline_runtime import RunContext
+from validation.recommendation_contracts import TARGET_SOURCES
 
 
 def _positive_int(value: str) -> int:
@@ -20,6 +21,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
+        "--target", nargs="+", type=str.upper, choices=tuple(TARGET_SOURCES),
+        help="Sources to include (run-recommendation/run-diagnosis only; default: all).",
+    )
+    parser.add_argument(
         "--gpus", type=_positive_int,
         help="Number of visible CUDA devices (v4 run-recommendation only; default: one).",
     )
@@ -33,12 +38,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
+        if args.target is not None and args.step not in {"run-recommendation", "run-diagnosis"}:
+            raise ValueError("--target is only supported by run-recommendation/run-diagnosis")
         if args.plan_only and args.step != "prepare-cohort":
             raise ValueError("--plan-only is only supported by prepare-cohort")
         if (args.gpus is not None or args.workers_per_gpu is not None) and args.step != "run-recommendation":
             raise ValueError("--gpus/--workers-per-gpu are only supported by run-recommendation")
         context = RunContext.load(args.run_id)
         kwargs = {"force": args.force}
+        if args.target is not None:
+            kwargs["target"] = args.target
         if args.step == "prepare-cohort":
             kwargs["plan_only"] = args.plan_only
         if args.gpus is not None:

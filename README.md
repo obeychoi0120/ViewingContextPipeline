@@ -131,7 +131,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
   --run-id "$RUN_ID" --gpus 4 --workers-per-gpu 2
 ```
 
-각 worker가 날짜·seed·Arm 조합 하나의 selection → refit → test를 수행하고, 끝나는 즉시 다음 조합을 가져갑니다. 기존 실행을 중단하고 같은 run ID로 재실행하면 완료 조합은 유지되고 미완료 조합만 처음부터 실행됩니다. 같은 run ID의 추천 명령을 동시에 실행하지 마세요. `--force`는 전체 재학습입니다. 두 옵션을 생략하면 기존 단일 GPU 실행(CUDA가 없으면 CPU)을 유지합니다. Batch·seed·epoch 선택·평가 조건은 바뀌지 않습니다. 실제 속도는 CPU·GPU 경합에 따라 달라지므로 GPU당 1개와 2개의 조합 완료 처리량으로 확인합니다. [병렬 실행·재개 규칙](docs/full_rolling.md)을 참고하세요.
+각 worker가 날짜·seed·Arm 조합 하나의 selection → refit → test를 수행하고, 끝나는 즉시 다음 조합을 가져갑니다. 기존 실행을 중단하고 같은 run ID로 재실행하면 완료 조합은 유지되고 미완료 조합만 처음부터 실행됩니다. 같은 run ID의 추천 명령을 동시에 실행하지 마세요. `--force`는 선택한 모드의 전체 재학습입니다. 두 GPU 옵션을 생략하면 기존 단일 GPU 실행(CUDA가 없으면 CPU)을 유지합니다. Batch·seed·epoch 선택·평가 조건은 바뀌지 않습니다. 실제 속도는 CPU·GPU 경합에 따라 달라지므로 GPU당 1개와 2개의 조합 완료 처리량으로 확인합니다. [병렬 실행·재개 규칙](docs/full_rolling.md)을 참고하세요.
+
+추천·진단 명령에 `--target GRAPH_QWEN DESC_QWEN METADATA`처럼 실행할 모드만 나열하면 나머지는 제외합니다. 선택 가능한 값은 `METADATA`, `GRAPH_QWEN`, `GRAPH_GEMINI`, `DESC_QWEN`이며, 어떤 조합이든 한 개 이상 지정할 수 있습니다. **`run-recommendation`과 `run-diagnosis` 각각에 같은 `--target`을 지정**하세요. 생략하면 전체 4개 모드입니다. 진단은 선택한 모드의 입력·결과만 검사하고 양쪽 모두 선택된 비교만 계산합니다. 기존 통계 보정 기준을 유지하며, `diagnosis.json`에 선택·제외한 모드를 기록합니다. [모드 선택 실행 예시와 결과 해석](docs/full_rolling.md#모드-선택)을 참고하세요.
 
 `embed-representations`는 정상 Summary 또는 명시적으로 저장된 Raw Summary의 `text`를 읽습니다. Gemini Graph Summary 파일이 없을 때만 같은 항목의 Qwen Graph Summary를 사용합니다. Gemini의 정상·Raw 파일이 있으면 이를 우선하며, 잘못된 기존 파일을 Raw로 간주하지 않습니다. BGE 로딩 전에 대체 항목을 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini 소스 Summary가 모든 시도에서 비어 있으면 실패 기록과 `[SUMMARY FALLBACK]`을 남기고 기존 Qwen 대체 경로로 진행할 수 있습니다. 실행·저장 오류는 Step 실패입니다. 요약 갱신 후에는 위 임베딩·추천 명령을 그대로 실행하면 변경 영향을 받은 arm만 갱신합니다.
 

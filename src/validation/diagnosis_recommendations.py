@@ -208,8 +208,10 @@ def _recommendation_contract(
     item_content: dict[str, str],
     cutoffs: list[int],
     errors: list[dict[str, Any]],
+    arms=None,
 ) -> tuple[dict[tuple[int, str, str], dict[str, Any]], dict[str, Any], bool, bool]:
-    arms = list(RECOMMENDATION_ARMS)
+    arms = list(RECOMMENDATION_ARMS if arms is None else arms)
+    rows = _selected_rows(rows, arms)
     expected = set(product(seeds, sorted(users), arms))
     cell_counts: Counter[tuple[int, str, str]] = Counter()
     malformed_cell_rows = 0
@@ -348,15 +350,25 @@ def _recommendation_contract(
     return canonical, grid, grid_complete, rows_valid
 
 
+def _selected_rows(rows, arms):
+    # Keep malformed/unknown rows visible to validation; ignore only known excluded arms.
+    excluded = set(RECOMMENDATION_ARMS) - set(arms)
+    return [row for row in rows if not (
+        isinstance(row, dict) and isinstance(row.get("arm"), str) and row["arm"] in excluded
+    )]
+
+
 def _checkpoint_contract(
     recommendations_dir: Path,
     seeds: list[int],
     errors: list[dict[str, Any]],
+    arms=None,
 ) -> tuple[dict[str, Any], bool]:
+    arms = RECOMMENDATION_ARMS if arms is None else arms
     paths = [
         recommendations_dir / "checkpoints" / f"seed_{seed}" / arm.lower() / "sasrec.pt"
         for seed in seeds
-        for arm in RECOMMENDATION_ARMS
+        for arm in arms
     ]
     missing = [str(path) for path in paths if not path.is_file()]
     empty: list[str] = []
@@ -481,10 +493,13 @@ def _training_run_contract(
     seeds: list[int],
     catalog_size: int,
     errors: list[dict[str, Any]],
+    arms=None,
 ) -> tuple[dict[str, Any], bool]:
     path = recommendations_dir / TRAINING_RUNS_FILENAME
     rows, loaded = _read_jsonl(path, "recommendation training runs", errors)
-    expected = set(product(seeds, RECOMMENDATION_ARMS))
+    arms = RECOMMENDATION_ARMS if arms is None else arms
+    rows = _selected_rows(rows, arms)
+    expected = set(product(seeds, arms))
     cell_counts: Counter[tuple[int, str]] = Counter()
     malformed = 0
     issues: Counter[str] = Counter()
