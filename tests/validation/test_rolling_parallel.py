@@ -1,8 +1,10 @@
 from dataclasses import replace
+import io
 import multiprocessing as mp
 
 import numpy as np
 import pytest
+from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
 from test_rolling import full_context as full_context
@@ -18,9 +20,16 @@ from validation.steps import validation_config
 class Progress:
     def __init__(self):
         self.completed = 0
+        self.fp = io.StringIO()
 
     def update(self, count):
         self.completed += count
+
+    def write(self, value, *, file):
+        file.write(value + "\n")
+
+    def refresh(self):
+        pass
 
 
 def prepare_embeddings(context):
@@ -47,10 +56,23 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
     context = full_context
     prepare_embeddings(context)
     jobs = two_jobs(context)
-    progress = Progress()
+    stream = io.StringIO()
+    before_completion = []
     children_before = {child.pid for child in mp.active_children()}
-    assert run_parallel(context, jobs, ["cpu", "cpu"], progress) == 2
-    assert progress.completed == 2
+    with tqdm(total=2, desc="Rolling recommendation", file=stream) as progress:
+        original_write = progress.write
+
+        def observe_write(message, **kwargs):
+            original_write(message, **kwargs)
+            if "epoch=" in message and progress.n == 0:
+                before_completion.append(stream.getvalue().rsplit(message, 1)[-1])
+
+        progress.write = observe_write
+        assert run_parallel(context, jobs, ["cpu", "cpu"], progress) == 2
+        assert progress.n == 2
+    assert before_completion
+    assert all("Rolling recommendation:" in tail and "0/2" in tail for tail in before_completion)
+    assert "refit epochs=" in stream.getvalue() and "test device=" in stream.getvalue()
     assert {child.pid for child in mp.active_children()} == children_before
 
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
@@ -95,7 +117,7 @@ def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, mon
     context = full_context
     prepare_embeddings(context)
 
-    class InterruptProgress:
+    class InterruptProgress(Progress):
         def update(self, count):
             raise KeyboardInterrupt
 

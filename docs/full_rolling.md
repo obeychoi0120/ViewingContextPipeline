@@ -36,6 +36,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
 - `--workers-per-gpu` 기본값은 1입니다. 위 예는 GPU당 2개, 총 8개 독립 프로세스를 실행합니다. 각 프로세스가 한 조합의 selection → refit → test를 끝내고 공유 대기열에서 다음 조합을 가져갑니다. 모델을 GPU 간 분할하지 않습니다.
 - 프로세스는 `spawn`으로 시작하며 GPU를 지정하고 조합별 seed를 재설정합니다. CPU thread 과다 경합을 줄이기 위해 worker의 PyTorch 연산 thread는 1개입니다. 원본 사건 테이블은 worker마다 한 번 로딩하므로 worker 수에 비례해 호스트 RAM도 사용합니다.
 - Batch 256, 학습 순서, loss·마스킹, epoch 선택, refit 초기화 및 평가 조건은 유지합니다. `selection`, `refit epochs=...`, `test` 로그에 날짜·seed·Arm·device를 표시합니다. 전체 진행률은 완료·재사용 조합 수로 갱신됩니다.
+- 병렬 worker의 로그·경고는 부모가 모아서 stdout으로 출력하고, 로그 아래에 전체 progress bar를 다시 표시합니다. 아직 완료 조합이 없어도 터미널에서는 약 1초마다 경과 시간을 갱신합니다. 파일로 출력하면 로그 발생 시와 약 30초 간격으로 표시하며, 완료 수는 조합의 test·저장이 끝난 뒤 증가합니다.
 - 기존 추천 프로세스를 중단하고 종료를 확인한 다음 같은 run ID로 위 명령을 실행합니다. 완료 조합은 검증 후 재사용하고 미완료 조합만 처음부터 재학습합니다. epoch 중간부터 재개하지 않습니다. 같은 run ID의 추천 명령을 여러 개 동시에 실행하지 않습니다.
 - worker 오류나 Ctrl-C가 발생하면 부모가 worker들을 종료·회수합니다. 이미 저장된 정상 완료 조합은 다음 실행에서 재사용됩니다. `--force`는 모든 조합을 재생성합니다.
 - GPU당 2개는 초기 실행 예이며 최적값이나 배속을 보장하지 않습니다. CPU·메모리 대역폭 경합이 생길 수 있으므로 GPU당 1개와 2개의 조합 완료 처리량으로 비교합니다. CUDA 실제 속도와 수치 재현성은 Ubuntu 장비에서 검증해야 합니다.
