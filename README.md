@@ -1,75 +1,113 @@
 # ViewingContextPipeline
 
-영상에서 추출한 시각 정보가 추천에 얼마나 유용한지 평가하는 연구용 PoC입니다. MicroLens-100K의 사용자 행동 이력을 바탕으로, **Title·Graph·Description 기반 item representation**을 SASRec에서 비교합니다.
+영상에서 추출한 정보를 **item representation으로 사용했을 때의 순차 추천 성능**을 비교하는 연구용 PoC입니다. MicroLens-100K에서 영문 title, Graph 기반 요약, Description 기반 요약을 BGE로 임베딩하고 동일한 SASRec 구조로 평가합니다.
 
-## 파이프라인
+이 실험은 title 표현을 시각 기반 표현으로 교체했을 때의 효과를 측정합니다. Title과 시각 정보의 결합 효과, 온라인 추천 효과, 모델의 일반적인 우열은 검증 범위에 포함하지 않습니다.
 
-![Viewing Context Validation PoC Pipeline](docs/design/ViewingContextPipeline_260907.png)
+## 연구 질문과 파이프라인
 
-| Arm                  | BGE 입력                       | Scene extractor  |
-| -------------------- | ------------------------------ | ---------------- |
-| Metadata · Baseline | Creator-written English title  | 없음             |
-| Graph Qwen           | Graph 기반 video summary       | Qwen3-VL-2B      |
-| Graph Gemini         | Graph 기반 video summary       | Gemini 3.7 Flash |
-| Description          | Description 기반 video summary | Qwen3-VL-2B      |
+| 연구 질문 | 비교 | 판정 |
+| --- | --- | --- |
+| 시각 기반 표현이 title 표현보다 추천에 유용한가? | 각 시각 표현 Arm vs Metadata | NDCG@10 우월성 |
+| Graph 기반 표현이 Description의 추천 성능을 유지하는가? | 각 Graph Arm vs Description | 상대 비열등성 허용폭 5% |
+| Graph 추출 모델을 바꾸면 결과가 달라지는가? | Graph Gemini vs Graph Qwen | 탐색적 비교 |
 
-영상은 기본 30초 구간마다 최대 6장의 keyframe으로 처리하고, Graph/Description을 Qwen으로 요약합니다. 모든 Arm은 frozen BGE embedding을 사용하며, 같은 사용자·item ID sequence·split·catalog와 동일한 SASRec 구조로 각각 학습합니다. **비교 대상은 각 ID에 연결되는 item representation**이며, 별도 ID embedding을 더하지 않습니다.
+![ViewingContextPipeline v4: representation generation, recommendation, and rolling evaluation](docs/design/Diagram.png)
 
-기본 v4 실험은 **사용자 100,000명·719,405개 interaction·19,738개 아이템 전체**를 보존합니다. 마지막 UTC 관측일을 제외한 직전 7일을 rolling 평가합니다. 공식 데이터에서는 2022-09-05~11이며, 7일 × 4 Arm × 3 seed = **84개 조합**을 독립적으로 epoch 선택·refit·평가합니다. 기존 v3 leave-two-out 결과는 별도 run에 보존됩니다. [전체 데이터 실행·검증 규칙](docs/full_rolling.md)을 참고하세요.
+[편집용 PPTX](docs/design/Diagram.pptx)
+
+| Arm | 추천·진단의 `--target` 이름 | BGE 입력 | 장면 추출 → 영상 요약 |
+| --- | --- | --- | --- |
+| Metadata · Baseline | `METADATA` | 영문 title | 없음 |
+| Graph Qwen | `GRAPH_QWEN` | Graph 기반 요약 텍스트 | Qwen3-VL-2B → Qwen3-VL-2B |
+| Graph Gemini | `GRAPH_GEMINI` | Graph 기반 요약 텍스트 | Gemini 3.7 Flash → Qwen3-VL-2B |
+| Description | `DESC_QWEN` | Description 기반 요약 텍스트 | Qwen3-VL-2B → Qwen3-VL-2B |
+
+Graph는 영상의 개체·행동·상황 등을 구조화한 중간 표현이며, 이를 요약한 **텍스트를 BGE-large-en-v1.5로 인코딩**합니다. 모든 Arm은 같은 사용자·item ID 이력·분할·catalog를 사용하고 각각 독립적으로 학습합니다. BGE 특징은 고정하지만 이후 projection과 SASRec은 학습하며, 별도 학습 가능한 item ID embedding을 더하지 않습니다.
+
+Scene은 기본 **30초의 고정 구간**입니다. 각 구간을 나누어 중앙 시각에서 최대 6장의 keyframe을 추출하고, 세 시각 경로에 동일한 이미지를 제공합니다. Graph와 Description은 프롬프트·출력 형식·토큰 예산도 다르므로 결과는 현재 구성한 표현 생성 방식의 비교로 해석합니다.
+
+## 실험 조건
+
+기본 v4 실험은 **100,000명·719,405개 사건·19,738개 아이템**을 보존합니다. 여기서 사건은 timestamp가 있는 사용자–아이템 interaction입니다.
+
+| 항목 | 기본 조건 |
+| --- | --- |
+| 평가 기간 | 마지막 UTC 관측일을 제외한 직전 7일. 공식 데이터는 2022-09-05~11 |
+| 학습·평가 대상 | 이전 이력이 있는 사건. 무이력 사건도 원본과 이후 이력에는 보존 |
+| 입력 이력 | 정답보다 엄격히 앞선 시각의 최근 10개 아이템 |
+| epoch 선택 | 평가 전날 이전 사건으로 학습하고, 전날 validation으로 epoch 선택 |
+| refit·test | 같은 seed의 새 모델을 평가일 이전 사건으로 refit한 뒤 당일 test |
+| 평가 중 이력 | 모델 파라미터는 고정하며, 당일 정답보다 앞선 사건도 이력에 반영 |
+| 후보군 | 전체 19,738개를 점수화. 이전 관측 아이템은 정답을 제외하고 마스킹 |
+| 반복 | 7일 × 4 Arm × seed 42·43·44 = **84개 독립 조합** |
+| 집계 | 날짜·seed별 적격 사건 평균을 구한 뒤 seed·날짜에 동일 가중치 적용 |
+| 통계 | 주 지표 NDCG@10, 사용자 단위 paired bootstrap 10,000회 |
+
+각 조합은 selection → refit → test를 수행합니다. 날짜 간 checkpoint를 이어서 학습하지 않습니다. Metadata 대비 우월성 3개와 Graph–Description 비열등성 2개는 **각 비교군에 α=0.05와 Bonferroni 보정**을 적용합니다. Gemini–Qwen 비교는 보정 없는 탐색적 비교입니다. 시간 경계·학습 설정·통계의 세부 규칙은 [전체 실험 가이드](docs/full_rolling.md)에 있습니다.
 
 ## 실행 준비
 
-저장소를 내려받은 뒤 루트 디렉터리에서 실행합니다. Python 3.11+, `ffmpeg`·`ffprobe`, 로컬 Qwen/BGE checkpoint가 필요합니다. Qwen·BGE·SASRec은 Ubuntu/CUDA에서, Gemini API 호출은 Vertex ADC와 project 권한을 설정한 Windows VM에서 실행합니다.
+명령은 **Ubuntu/Bash와 저장소 루트** 기준입니다. Python 3.11+를 사용하며, GPU 장비와 Gemini API VM을 나누거나 한 장비에서 실행할 수 있습니다.
+
+| 실행 환경 | 담당 단계 | 필요한 자원 |
+| --- | --- | --- |
+| GPU 실행 환경 | 데이터 준비, Qwen 추출·모든 요약, BGE 임베딩, SASRec | CUDA GPU, 로컬 Qwen/BGE checkpoint. 원본 영상 준비에는 ffmpeg·ffprobe |
+| Gemini API 실행 환경 | 준비된 keyframe의 Gemini Graph 추출 | Gemini SDK, Vertex ADC와 프로젝트 호출 권한, cohort·timestamp·keyframe |
+
+환경이 이미 있으면 재사용합니다. GPU 환경을 새로 만드는 예입니다.
 
 ```bash
-conda create -n llmjg python=3.11 -y  # 새 환경이 필요한 경우
-conda activate llmjg
-python -m pip install -e ".[qwen,gemini,train,dev]"
+conda create -n vc_gpu python=3.11 -y
+conda activate vc_gpu
+python -m pip install -e ".[qwen,train,dev]"
+python -m pip check
 ```
 
-Ubuntu의 Qwen 추론 의존성은 **`vllm==0.28.0`**입니다. 기존 vLLM 환경에서도 위 설치 후 `python -m pip check`로 의존성을 확인합니다. Windows VM에서 Gemini만 실행할 때는 `python -m pip install -e ".[gemini,dev]"`를 사용합니다. Windows에는 vLLM을 설치하거나 GPU 추론을 실행하지 않습니다.
+Qwen은 `vllm==0.28.0`을 사용합니다. GPU당 메모리·동시 요청 설정은 [Qwen 실행 가이드](docs/qwen_vllm.md)를 참고하세요.
 
-데이터는 [공식 MicroLens portal](https://recsys.westlake.edu.cn/)에서 준비합니다.
-
-- 사용자 사건: `MicroLens-100k_pairs.csv` (`user,item,timestamp`, timestamp는 정수 밀리초). TSV는 정합성 확인용입니다.
-- 영상: item ID를 파일명으로 사용하는 `{item_id}.mp4`
-- Title: `MicroLens-100k_title_en.csv`, 결측 보완용 `MicroLens-50k_titles.csv`
-
-[config/pipeline.yaml](config/pipeline.yaml)의 다음 항목을 실행 환경에 맞게 수정합니다. 데이터와 모델은 자동 다운로드되지 않습니다.
-
-| 설정                                    | 수정할 내용                                                   |
-| --------------------------------------- | ------------------------------------------------------------- |
-| `data.pairs_csv`, `data.pairs_tsv`, `data.videos_dir` | 원본 timestamp CSV, 정합성 확인 TSV, 영상 경로 |
-| `data.titles_csv`                     | 아래에서 생성할`MicroLens-100k_title_en_completed.csv` 경로 |
-| `models.qwen`, `models.bge`         | 로컬 checkpoint 디렉터리                                      |
-| `models.gemini`                       | Vertex project ID, location, model ID                         |
-| `extraction.visual_evidence`          | `scene_duration`: Scene 길이(초), `num_keyframes`: 완전한 Scene의 장수, `image_resolution`: 이미지 크기 |
-| `extraction.qwen`                     | vLLM GPU당 메모리·동시 요청·토큰·전처리 예산. [설정과 측정 방법](docs/qwen_vllm.md) |
-| `validation.cohort`                   | 전체 cardinality 100000/719405/19738, UTC·7일·최종일 제외 |
-
-`protocol.sampling: fixed_windows`는 `scene_duration / num_keyframes` 길이의 구간별 중앙점을 추출합니다. 기본값 `scene_duration: 30`, `num_keyframes: 6`은 Scene 시작 기준 `[2.5, 7.5, 12.5, 17.5, 22.5, 27.5]`초입니다. 마지막 짧은 Scene은 같은 구간 간격을 유지하고 마지막 구간만 실제 영상 끝에서 잘라 중앙점을 구합니다(방식 A). 예를 들어 12초가 남으면 `[2.5, 7.5, 11]`초를 사용합니다. 영상 길이를 정수 초로 올리지 않습니다.
-
-추출 시각은 영상 전체 기준이며 소수점 둘째 자리부터 버립니다(`1.666… → 1.6`). JSON과 추출 요청에 같은 시각을 사용하고, 이미지는 `data/resized_keyframes/{content_id}/0002_5.png`, 정수 초는 `0005.png` 형식으로 저장합니다. Scene 정보는 `data/cohort/source_assets/{content_id}/assets/timestamp_fixed_{scene_duration}s.json`에 저장합니다. 두 설정은 양의 정수이며, 0.1초 정밀도에서 구분할 수 있도록 `num_keyframes <= scene_duration × 10`이어야 합니다. 마지막 짧은 구간에서 버림 후 같은 시각이 생기면 한 번만 추출합니다. Graph Qwen·Graph Gemini·Description은 같은 이미지 목록을 사용합니다.
-
-기존 run의 이미지를 재사용하려면 실행을 멈춘 상태에서 `data/fixed_30s/resized_keyframes/`를 `data/resized_keyframes/`로 옮깁니다(새 경로가 없을 때). 다른 Scene 길이의 run은 해당 `fixed_*s` 폴더를 사용합니다. timestamp JSON은 그대로 둡니다. 새 코드에는 이전 이미지 경로를 자동 탐색하거나 이동하는 동작이 없으며, 같은 run에서 서로 다른 sampling 결과를 이 폴더에 합치지 않습니다.
-
-## 실행 방법
-
-아래 Bash 명령은 Ubuntu 기준입니다. Windows에서 실행하는 Gemini 단계는 별도로 표시했습니다. 두 환경에서 **같은 run ID와 해당 run의 artifact·keyframe에 접근**할 수 있도록 경로를 준비합니다.
-
-**1. 전체 입력 검사와 데이터 준비**
-
-먼저 CSV 전체 사용자·사건·아이템 수와 rolling 분할을 검사하고 전체 item 목록을 만듭니다. 이 단계에서는 영상 처리나 모델 추론을 실행하지 않습니다.
+Gemini 전용 VM은 다음처럼 준비합니다. 준비된 이미지를 사용할 때 GPU·Qwen/BGE checkpoint·원본 영상·ffmpeg는 필요하지 않습니다.
 
 ```bash
-export RUN_ID=microlens100k_rolling7_YYYYMMDD  # 새 실험을 구분할 고유 이름
+conda create -n vc_cloud python=3.11 -y
+conda activate vc_cloud
+python -m pip install -e ".[gemini,dev]"
+python -m pip check
+```
+
+Vertex 인증은 VM 서비스 계정 또는 사용자 ADC를 사용합니다. 선택한 프로젝트·모델을 호출할 권한이 필요합니다. 같은 환경에서 GPU 단계와 Gemini를 모두 실행하려면 설치 extras에 `gemini`도 포함합니다.
+
+데이터는 [공식 MicroLens portal](https://recsys.westlake.edu.cn/)에서 준비합니다. 데이터와 모델은 자동 다운로드되지 않습니다.
+
+| 입력·설정 | 준비할 내용 |
+| --- | --- |
+| `data.pairs_csv` | `MicroLens-100k_pairs.csv`: `user,item,timestamp`, 정수 밀리초 |
+| `data.pairs_tsv` | 사용자별 interaction 정합성 확인용 TSV. 파일이 있으면 검사 |
+| `data.videos_dir` | item ID를 파일명으로 사용하는 `{item_id}.mp4` 디렉터리 |
+| `data.titles_csv` | 아래에서 생성할 `MicroLens-100k_title_en_completed.csv` |
+| `models.qwen`, `models.bge` | Qwen3-VL-2B-Instruct, BGE-large-en-v1.5의 로컬 checkpoint |
+| `models.gemini` | Vertex project ID, location, model ID |
+| `artifacts_root` | 산출물 상위 디렉터리. 기본값 `artifacts` |
+
+[pipeline.yaml](config/pipeline.yaml)을 실제 경로에 맞춥니다. 아래 예시는 `artifacts_root: artifacts` 기준이며, 변경했다면 명령의 산출물 경로도 맞춰야 합니다.
+
+두 장비를 사용하는 경우 **같은 run ID·코드·생성 조건**을 사용합니다. GPU 장비에서 준비한 `experiment.json`, `data/cohort/`, `data/resized_keyframes/`를 Gemini VM의 같은 run 아래에 전달합니다. Gemini 결과는 GPU 장비로 돌려보냅니다. `artifacts/`는 Git에 포함되지 않습니다. [환경 간 전달 규칙](docs/full_rolling.md#환경-간-전달)을 참고하세요.
+
+## 실행 순서
+
+### 1. 입력 검사와 데이터 준비
+
+GPU 실행 환경에서 새 실험의 고유 run ID를 지정하고 전체 입력 목록·rolling 분할을 검사합니다. `--plan-only`는 영상 처리와 모델 추론을 실행하지 않습니다.
+
+```bash
+export RUN_ID=microlens100k_rolling7_YYYYMMDD
 python -m validation prepare-cohort --run-id "$RUN_ID" --plan-only
 ```
 
-`artifacts/$RUN_ID/data/cohort/`의 `cohort_plan.json`과 `required_items.jsonl`을 확인합니다. 아래 도구는 원본 title을 보존하고, 필요한 item의 빈 title만 공식 50K 파일에서 보완합니다. `--output`은 앞서 설정한 `data.titles_csv`와 같아야 합니다.
+`artifacts/$RUN_ID/data/cohort/cohort_plan.json`을 확인한 뒤, 영문 title의 결측을 공식 보완 파일로 채웁니다. `--output`은 설정의 `data.titles_csv`와 같아야 합니다.
 
 ```bash
-ANNOTATIONS=/path/to/Annotations  # 다운로드한 title 파일 위치
+ANNOTATIONS=/path/to/Annotations
 python -m validation.complete_titles \
   --primary "$ANNOTATIONS/MicroLens-100k_title_en.csv" \
   --supplement "$ANNOTATIONS/MicroLens-50k_titles.csv" \
@@ -81,15 +119,13 @@ python -m validation prepare-cohort --run-id "$RUN_ID"
 python -m extraction prepare-input-data --run-id "$RUN_ID"
 ```
 
-보완 후에도 없는 title은 `--unresolved-policy zero-vector`로 빈 필드를 유지하고 별도 기록합니다. v4의 `validation.cohort.metadata_missing_policy: zero_vector`에 따라 해당 아이템의 Metadata 입력은 1024차원 영벡터가 됩니다. 빈 문자열을 BGE에 보내지 않으며 아이템·interaction을 제거하지 않습니다. 정상 title과 Graph/Description 처리는 그대로입니다. 결측 목록은 `data/cohort/metadata_missing.json` 및 diagnosis의 `metadata_missing`에 기록됩니다.
+보완 후에도 빈 title은 **해당 Metadata 입력만 1024차원 영벡터**로 처리합니다. 아이템·사건은 보존하며 Graph/Description에는 이 정책을 적용하지 않습니다. CSV 자체나 필수 아이템 행이 없는 경우는 오류입니다.
 
-v4의 `prepare-cohort`는 영상 존재·파일 크기·중복과 Title을 검사하며, ffprobe를 실행하지 않습니다. 영상이나 title CSV 자체·필수 아이템 행이 없으면 준비가 중단됩니다. `prepare-input-data`는 영상 4개를 병렬로 처리하면서 각 영상의 길이 조회 → Scene 계산 → resized keyframe 추출을 이어서 수행하고, 영상 단위 progress bar를 표시합니다.
+`prepare-cohort`는 영상 존재·크기·중복과 title을 검사하고, `prepare-input-data`가 영상 길이 조회·timestamp 계산·keyframe 추출을 수행합니다. 완료 후 `data/cohort/media_preflight.json`에서 장면·이미지 수와 저장공간 추정치를 확인합니다.
 
-조회한 길이는 `data/cohort/source_assets/{content_id}/assets/video_duration.json`에 바로 저장합니다. 같은 원본 경로·파일 크기·수정 시각이면 재실행 시 길이를 재사용하며, 기존 run의 inventory에 저장된 길이도 사용할 수 있습니다. 추출 실패 시 `preparation_failures.jsonl`을 확인한 뒤 같은 명령으로 재개하면 정상 keyframe과 저장된 길이는 재사용합니다. 원본 영상을 교체했다면 `prepare-cohort`로 파일 정보를 갱신해야 합니다. `prepare-input-data`가 완료되면 `data/cohort/media_preflight.json`에 전체 영상 길이·Scene·keyframe 수·저장공간 추정치를 저장합니다. v4 cohort의 `duration_seconds`는 `null`일 수 있으며, 이후 조회 결과는 catalog/inventory를 덮어쓰지 않고 별도 duration 파일에 저장됩니다.
+### 2. 장면 추출과 영상 요약
 
-**2. Graph·Description 추출과 요약**
-
-Ubuntu/CUDA에서 Qwen branch를 실행합니다. `--gpus 1`은 사용할 visible GPU 개수이며, 생략해도 1개를 사용합니다. 각 GPU에 BF16 모델과 vLLM 엔진을 하나씩 올립니다. 여러 영상의 독립적인 장면·요약 요청을 continuous batching으로 처리하며, 장면별 keyframe을 다른 장면의 프롬프트와 합치지 않습니다. 선택한 GPU는 이 명령에 전용으로 할당합니다.
+GPU 환경에서 Qwen 경로를 실행합니다. `--gpus`는 사용할 visible GPU 개수이며 기본값은 1입니다. 각 GPU에 독립 vLLM 엔진을 올리므로 선택한 GPU를 해당 명령에 할당합니다.
 
 ```bash
 python -m extraction extract-graph-scenes --model qwen --run-id "$RUN_ID" --gpus 1
@@ -98,25 +134,26 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --gpus 1
 python -m extraction summarize-description --run-id "$RUN_ID" --gpus 1
 ```
 
-Gemini Graph 추출은 Windows/PowerShell에서 같은 run ID로 실행합니다.
-
-```powershell
-conda activate llmjg
-$RUN_ID = "microlens100k_rolling7_YYYYMMDD"  # Ubuntu에서 사용한 값과 동일하게 지정
-python -m extraction extract-graph-scenes --model gemini --run-id $RUN_ID
-```
-
-Gemini Graph 산출물을 Ubuntu의 같은 run에서 사용할 수 있는지 확인한 뒤, Qwen으로 요약합니다.
+Gemini VM에서 동일 run의 준비된 입력에 접근한 뒤 실행합니다.
 
 ```bash
+conda activate vc_cloud
+export RUN_ID=microlens100k_rolling7_YYYYMMDD  # GPU 환경과 같은 값
+python -m extraction extract-graph-scenes --model gemini --run-id "$RUN_ID"
+```
+
+현재 추출 CLI는 **cohort 전체의 keyframe을 요구**하며 일부 영상만 고르는 옵션은 없습니다. 샘플 이미지만 옮긴 상태에서는 전체 실행이 중단됩니다.
+
+`extraction/graph/gemini/` 결과를 GPU 환경의 같은 run으로 전달한 뒤 **Qwen으로 Gemini Graph를 요약**합니다.
+
+```bash
+conda activate llmjg
 python -m extraction summarize-graph --source gemini --run-id "$RUN_ID" --gpus 1
 ```
 
-엔진 전환 후에도 같은 run ID로 기존 명령을 실행하면 정상 산출물을 재사용하고 실패·누락 작업을 이어서 처리합니다. 기존 검증에서 비호환으로 판단한 결과의 처리와 `--force` 의미는 유지합니다. `extraction/qwen_runtime.jsonl`에 GPU·라이브러리 버전·적용 설정과 새 저장 결과의 해시를 기록하고, 대응 이력이 없는 기존 결과는 시작 로그의 `legacy_unknown` 수에 포함합니다. 시작 시 재사용·신규 요청 수와 결정된 context 길이를, 처리 중에는 30초 간격으로 완료량·처리 중 요청·처리량을 출력합니다. 실패는 즉시 출력합니다. [재개 및 GPU 성능 확인](docs/qwen_vllm.md)을 참고하세요.
+### 3. 임베딩·추천·진단
 
-**3. Embedding·추천·평가**
-
-세 branch의 summary가 준비되면 Ubuntu/CUDA에서 실행합니다. 영상 표현은 전체 아이템에 대해 한 번 생성합니다. 추천은 7일 × 4개 Arm × 3개 seed로 학습하며, 전날 validation으로 epoch를 선택한 뒤 평가일 이전 전체 사건으로 새 모델을 refit합니다.
+GPU 환경에서 각 영상의 표현을 생성하고 추천 실험을 실행합니다. Gemini summary가 없는 아이템은 아래의 Qwen 대체 정책을 적용합니다.
 
 ```bash
 python -m validation embed-representations --run-id "$RUN_ID"
@@ -124,62 +161,45 @@ python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
 
-GPU 4장에서는 추천 조합을 병렬 실행할 수 있습니다. 아래는 GPU당 2개, 총 8개 worker를 사용하는 예입니다.
+기본 추천은 단일 GPU에서 실행합니다. GPU 4장에 조합을 병렬 배분하려면 위 추천 명령 대신 다음을 사용합니다. GPU당 worker 2개는 시작 예시이며 실제 처리량은 측정해야 합니다.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
   --run-id "$RUN_ID" --gpus 4 --workers-per-gpu 2
 ```
 
-각 worker가 날짜·seed·Arm 조합 하나의 selection → refit → test를 수행하고, 끝나는 즉시 다음 조합을 가져갑니다. 기존 실행을 중단하고 같은 run ID로 재실행하면 완료 조합은 유지되고 미완료 조합만 처음부터 실행됩니다. 같은 run ID의 추천 명령을 동시에 실행하지 마세요. `--force`는 선택한 모드의 전체 재학습입니다. 두 GPU 옵션을 생략하면 기존 단일 GPU 실행(CUDA가 없으면 CPU)을 유지합니다. Batch·seed·epoch 선택·평가 조건은 바뀌지 않습니다. 실제 속도는 CPU·GPU 경합에 따라 달라지므로 GPU당 1개와 2개의 조합 완료 처리량으로 확인합니다. [병렬 실행·재개 규칙](docs/full_rolling.md)을 참고하세요.
+일부 Arm만 학습하려면 **추천과 진단 양쪽에** `--target GRAPH_QWEN DESC_QWEN METADATA`처럼 지정합니다. 이 예는 63개 조합이며, 생략하면 전체 84개입니다. `--target`은 추출·요약·임베딩 범위를 바꾸지 않습니다. [모드 선택과 재개](docs/full_rolling.md#모드-선택)에 자세한 예시가 있습니다.
 
-추천·진단 명령에 `--target GRAPH_QWEN DESC_QWEN METADATA`처럼 실행할 모드만 나열하면 나머지는 제외합니다. 선택 가능한 값은 `METADATA`, `GRAPH_QWEN`, `GRAPH_GEMINI`, `DESC_QWEN`이며, 어떤 조합이든 한 개 이상 지정할 수 있습니다. **`run-recommendation`과 `run-diagnosis` 각각에 같은 `--target`을 지정**하세요. 생략하면 전체 4개 모드입니다. 진단은 선택한 모드의 입력·결과만 검사하고 양쪽 모두 선택된 비교만 계산합니다. 기존 통계 보정 기준을 유지하며, `diagnosis.json`에 선택·제외한 모드를 기록합니다. [모드 선택 실행 예시와 결과 해석](docs/full_rolling.md#모드-선택)을 참고하세요.
+## 결과 해석
 
-`embed-representations`는 정상 Summary 또는 명시적으로 저장된 Raw Summary의 `text`를 읽습니다. Gemini Graph Summary 파일이 없을 때만 같은 항목의 Qwen Graph Summary를 사용합니다. Gemini의 정상·Raw 파일이 있으면 이를 우선하며, 잘못된 기존 파일을 Raw로 간주하지 않습니다. BGE 로딩 전에 대체 항목을 출력하고, 목록은 `validation/representations/graph_gemini_fallbacks.json`에 저장합니다. v4에서 새 Gemini 소스 Summary가 모든 시도에서 비어 있으면 실패 기록과 `[SUMMARY FALLBACK]`을 남기고 기존 Qwen 대체 경로로 진행할 수 있습니다. 실행·저장 오류는 Step 실패입니다. 요약 갱신 후에는 위 임베딩·추천 명령을 그대로 실행하면 변경 영향을 받은 arm만 갱신합니다.
+결과는 `artifacts/{run_id}/` 아래에 저장됩니다.
 
-추출·요약은 Step 안에서 **Structured Output → 검증·Repair → 다음 penalty로 재생성 → 최종 Raw** 순서로 처리합니다. vLLM 0.28.0의 `xgrammar`를 사용하며, 모든 재시도에서도 제약과 생성 토큰 전용 repetition penalty를 함께 적용합니다.
-
-Qwen Graph·Description 장면 추출은 전체 대기 Scene을 현재 penalty로 처리한 다음, 실패한 Scene만 다음 penalty로 다시 처리합니다. Worker가 가져가는 Scene부터 입력을 준비하며, 완료될 때마다 다음 Scene을 연속 공급합니다. 384개 단위의 완료 대기는 없고, 성공 Scene은 즉시 저장합니다. Summary는 기존 묶음별 재시도 순서를 유지합니다.
-
-| Step | 생성 제약과 최종 처리 |
+| 확인할 파일·필드 | 의미 |
 | --- | --- |
-| Qwen Graph 장면 | 필수 필드·타입·enum·nullable JSON Schema → 기존 Graph Repair → penalty 재시도 → Raw |
-| Graph Summary (Qwen/Gemini 소스), Description Summary | 기존 7개 라벨 순서의 Grammar → Summary Repair → penalty 재시도 → Raw |
-| Description 장면 | 자유 텍스트 유지, 빈 응답만 penalty 재시도; 전부 비면 실패 |
-| Gemini Graph 장면 | 기존 HTTP retry·Graph Repair 유지; 오류 없는 비어 있지 않은 응답만 최종 Raw 허용 |
+| `validation/diagnosis/diagnosis.json` | 선택한 Arm의 실행 유효성·추천 지표·통계 비교 |
+| `recommendations.daily`, `recommendations.means` | 날짜·seed별 사건 평균과 seed·날짜 균등 평균. HR/NDCG@4·8·10·20·30 |
+| `statistics.comparisons` | 효과 크기·신뢰구간·우월성 또는 비열등성 판정 |
+| `scene_coverage`, `generation_recovery`, `gemini_summary_fallbacks` | 장면 coverage, Raw 사용·복구 정보, Gemini의 Qwen 대체 목록 |
+| `validation/recommendations/{date}/seed_{seed}/{arm}/` | 조합별 `training.json`, `per_event_metrics.jsonl`, `sasrec.pt`, `complete.json` |
 
-`graph_repetition_penalty`, `description_repetition_penalty`, `summary_repetition_penalty`는 단일 숫자 또는 유한한 `[1, 2]` 범위의 비어 있지 않은 목록을 받습니다. 현재 `[1.00, 1.05, 1.10, 1.15, 1.20]`은 최초 1회와 재시도 최대 4회입니다. 같은 모델 pool에서 실패 항목만 다음 penalty로 제출하며 입력·프롬프트·토큰 한도는 유지합니다. Summary Repair는 전체 코드 펜스 제거, canonical/display 라벨 표기 정규화, 7개 라벨이 모두 있고 중복이 없을 때의 순서 복구만 합니다. 필드·내용을 만들어 채우지 않습니다. Graph 개수·ID 참조는 기존 의미 경고로 유지하고, Summary 문장 품질·단어 수는 새 실패 기준으로 추가하지 않습니다.
+`runtime_decision.status=pass`와 `statistics.status=computed`는 **선택 범위의 실행·통계 계산이 유효함**을 뜻합니다. 연구 가설 성립은 각 비교의 판정을 따로 확인합니다. 비열등성은 평균 점수만 비교하지 않고, 상대 차이의 보정 신뢰구간 하한이 −5%보다 큰지 판단합니다.
 
-최종 Raw는 현재 재시도 묶음에서 마지막으로 받은 비어 있지 않은 **Repair 전 원문**입니다. 같은 출력 경로에 Graph는 `graph-scene-raw/v1`과 `raw_response`, Summary는 `video-summary-raw/v1`과 `text`를 저장하며 `status=raw_fallback`으로 구분합니다. 가짜 `graph`·`sections`는 만들지 않습니다. Graph 요약에는 정상·Raw 장면을 시간순으로 전달하고 Raw를 관찰 원문으로 표시합니다. `scene_count`는 두 종류를 합한 실제 입력 수입니다. 사용 가능한 장면이 없는 영상은 요약하지 않습니다.
+결과를 해석할 때 다음 처리 비율도 함께 봅니다.
 
-장면 추출·요약의 진행 바는 이번 실행의 미완료 장면·요약 요청 수를 기준으로 하며 `scene`/`summary` 단위를 표시합니다. ETA는 초기화를 제외한 최근 3분의 처리량으로 계산합니다. 막대에는 경과 시간·ETA·성공·실패와 Qwen의 출력 토큰 처리량만 표시하고, 재사용 수는 시작 로그에서 확인할 수 있습니다. 초기에는 추정 중으로 표시하고 변동 범위는 표시하지 않습니다. [ETA 계산과 표시 항목](docs/qwen_vllm.md#진행률과-eta)을 참고하세요.
+- **Gemini 대체:** Gemini summary 파일이 없을 때만 같은 영상의 Qwen Graph summary를 사용합니다. 따라서 Graph Gemini Arm에는 Qwen 표현이 섞일 수 있습니다. 정상·Raw Gemini summary가 있으면 이를 우선하고, 잘못된 파일은 오류로 처리합니다.
+- **Raw 사용:** 구조 검증·Repair 후에도 실패한 비어 있지 않은 생성 원문을 명시적인 Raw 산출물로 보존할 수 있습니다. Raw Graph도 요약 입력에 들어가므로 모든 입력이 정상 구조화 Graph인 것은 아닙니다. Qwen Graph·Description summary 누락을 영벡터로 대체하지 않습니다.
+- **Coverage:** 정상 장면 coverage 최소 0.95와 Arm 간 gap 최대 0.05를 검사하며, Raw Graph는 정상 coverage에 포함하지 않습니다. 이 기준은 산출물의 완전성을 보는 것으로 영상 이해 정확도와 같지 않습니다.
 
-`embed-representations`는 BGE 배치별, `run-recommendation`은 학습 실행 조합별로 기본 tqdm 진행 바를 표시합니다. v4 학습은 날짜 × seed × 실험군 단위이며 재사용한 조합도 별도 집계합니다. 이 진행 바는 각 단계에 대한 것이며 전체 파이프라인 ETA는 계산하지 않습니다.
+빈 날짜·잘못된 분모·불완전한 결과·coverage 미달은 통계 판정을 중단시킵니다. 단위 테스트 통과, 실제 API·GPU 단계 성공, 전체 실험 완료는 구분합니다.
 
-## 결과 확인 및 유의사항
+## 재개와 상세 문서
 
-결과는 `artifacts/{run_id}/`에 저장됩니다.
+같은 입력·설정에서 중단됐다면 **같은 run ID와 명령으로 재실행**합니다. 추출·요약은 정상·Raw 결과를 재사용하고 실패·미완료 작업을 처리합니다. 추천은 유효한 완료 조합을 재사용하며, 미완료 조합은 selection부터 다시 학습합니다. epoch 중간 재개는 지원하지 않습니다.
 
-| 파일                                                  | 확인할 내용                               |
-| ----------------------------------------------------- | ----------------------------------------- |
-| `validation/diagnosis/diagnosis.json`               | 실행 완전성, Arm별 지표와 비교, 통계 경고 |
-| `extraction/**/scenes/.recovery/*.json`, `extraction/**/summaries/.recovery/*.json` | 진행·실패 시 복구 이력. 각 Step이 실패 없이 완료되면 `.recovery` 폴더 삭제 |
-| `extraction/**/summaries/.inputs/*.json` | 요약 입력 hash와 정상·Raw 장면 수 |
-| `validation/recommendations/{date}/seed_{seed}/{arm}/per_event_metrics.jsonl` | 사건·날짜·Arm·seed별 ranking 지표 |
-| `validation/recommendations/{date}/seed_{seed}/{arm}/training.json` | epoch 선택·refit·optimizer update·빈도 기록 |
-| `validation/recommendations/{date}/seed_{seed}/{arm}/sasrec.pt`, `complete.json` | checkpoint와 원자적 완료 기록 |
+`--force`는 지정한 추출·요약 Step의 기존 완료 결과도 재생성하며 다른 Step을 자동 실행하지 않습니다. 추천에서는 선택한 Arm의 모든 날짜·seed 조합을 재학습합니다. 장면을 갱신했다면 요약 → 임베딩 → 추천 → 진단을 차례로 실행해 변경을 반영합니다. 같은 run의 추천 명령을 동시에 실행하지 마세요.
 
-먼저 `diagnosis.json`의 `runtime_decision.status`가 `pass`, `statistics.status`가 `computed`인지 확인합니다. `recommendations.daily`는 날짜·seed·Arm별 사건 평균, `recommendations.means`는 seed·날짜 균등 평균입니다. HR/NDCG@4·8·10·20·30과 NDCG@10 비교 CI를 제공합니다. 빈 날짜·잘못된 분모·불완전한 결과는 실패로 기록하며 가설 판정을 중단합니다.
+실험 조건을 비교할 때는 새 run ID를 사용합니다. `experiment.json`은 최초 설정 snapshot이며 모든 후속 변경을 기록하지 않습니다. 서로 다른 sampling 조건의 산출물을 한 run에 섞지 않습니다.
 
-- **중단 후 재개:** 같은 조건이면 같은 명령을 재실행합니다. 추천은 완료 기록·필수 파일·결과 형식과 사건 수가 유효한 조합을 건너뛰고, 불완전한 조합만 처음부터 학습합니다. epoch 중간 재개는 지원하지 않습니다.
-- **실패 장면·요약 재시도:** 정상과 최종 Raw는 재사용합니다. 중단된 묶음은 저장된 다음 시도부터 이어가고, 저장된 응답은 재호출 없이 복원합니다. 응답 저장 전 중단된 요청은 다시 호출될 수 있습니다. 최종 실패가 된 항목은 다음 명령 실행에서 새 묶음을 시작합니다. 이전 실패에 시도 이력이 없으면 첫 penalty부터 시작합니다. `run.sh`에는 별도 재시도 루프가 없습니다.
-- **Gemini 빈 응답 진단:** 콘솔과 `extraction/graph/gemini/scenes/failures/{content_id}.jsonl`의 `response_diagnostics`에 `candidates[].finish_reason`, `finish_message`, `prompt_feedback`, `usage_metadata`를 기록합니다. 과거 실패에는 이 정보가 없으며, 다음 빈 응답부터 기록됩니다. `MAX_TOKENS`는 출력 한도 도달, `SAFETY`나 `prompt_feedback.block_reason`은 차단 원인을 확인하는 단서입니다. 단순히 텍스트가 비었다는 이유만으로 차단으로 분류하지 않습니다.
-- **강제 재생성:** `--force`는 해당 Step 전체를 새 재시도 묶음으로 재생성합니다. 복구와 무관한 기존 정상 결과는 보존합니다. OOM·worker 종료·설정/문법 컴파일·파일 저장 오류는 penalty 재시도나 Raw 성공으로 처리하지 않습니다.
-- **후속 갱신:** 장면 변경은 해당 영상 요약을 갱신 대상으로 표시합니다. 장면 수가 같아도 내용 hash로 변경을 확인합니다. 요약을 다시 만든 뒤 임베딩 명령을 실행하면 입력이 변경된 arm을 갱신하고, 실제 임베딩이 달라지면 해당 arm의 날짜·seed별 추천을 갱신합니다. hash와 변경 표식을 함께 사용해 과거 캐시에도 복구의 영향을 전달합니다.
-- **조건 변경:** 재개 중 입력·생성 정책 식별값이 달라지면 새 묶음으로 시작합니다. 이 변경만으로 과거 정상 결과를 전부 재생성하지 않습니다. 실험 조건을 비교하려면 새 run ID를 사용하고, 같은 run에서 조건을 변경할 때는 해당 생성 Step에 `--force`를 명시합니다. `experiment.json`에는 최초 설정 snapshot만 보존합니다. 이전 3장 조건의 결과와 새 6장 조건의 결과를 섞지 않습니다.
-- **복구 진단:** `diagnosis.json`의 `generation_recovery`는 정상 생성·Repair·Raw·최종 실패·중단을 구분하고, `artifact_counts.legacy_unknown`은 대응 복구 이력이 없는 기존 결과입니다. `summary_inputs`는 정상/Raw 입력 장면 수를 구분합니다. Raw 장면은 `raw_fallback_scene_count`에 따로 세며 정상 Graph coverage에 포함하지 않습니다. 기존 coverage 기준은 유지합니다.
-- **검증 범위:** 테스트 통과와 실제 MicroLens 전체 실험 완료는 구분합니다. 모델의 일반적 우열이나 온라인 추천 효과는 이 PoC 결과만으로 주장할 수 없습니다.
-
-확정한 기준은 primary NDCG@10, 상대 비열등성 허용폭 5%, familywise α=0.05와 기존 Bonferroni 비교군입니다. Gemini 요약이 없을 때만 Qwen Graph 대체를 허용하고 원본 scene coverage(최소 0.95, Arm 간 gap 최대 0.05)를 별도로 보고합니다.
-
-상세 설정은 [pipeline config](config/pipeline.yaml), [추출·요약 prompt](config/prompts/), [평가·비교 구현](src/validation/diagnosis_statistics.py)을 참고하세요.
+- [전체 실험·입력 준비·환경 간 전달·복구 규칙](docs/full_rolling.md)
+- [Qwen vLLM 설정·진행률·GPU 성능 측정](docs/qwen_vllm.md)
+- [파이프라인 설정](config/pipeline.yaml) · [추출·요약 프롬프트](config/prompts/)
