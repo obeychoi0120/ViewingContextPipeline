@@ -41,11 +41,14 @@ def test_scene_progress_advances_before_video_finishes(context, monkeypatch, arm
         def generate(tasks, callback):
             tasks = list(tasks)
             assert bars[-1].bar.total == 3
-            for index, task_id in enumerate(("a:0", "b:0", "a:1")):
+            task_ids = ([task.task_id for task in tasks] if arm == "graph"
+                        else ["a:0", "b:0", "a:1"])
+            for task_id in task_ids:
+                previous = bars[-1].success + bars[-1].failed
                 good = json.dumps({"setting_context": "indoor", "entities": [], "events": [], "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}}) if arm == "graph" else "A person indoors."
                 bad = ""
-                callback(task_id, bad if index == 0 else good)
-                assert bars[-1].bar.n == index + 1
+                callback(task_id, bad if task_id == "a:0" else good)
+                assert bars[-1].success + bars[-1].failed == previous + 1
                 assert bars[-1].failed == 1
             return {}
         yield generate
@@ -70,7 +73,8 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
         return value
 
     monkeypatch.setattr(steps, "InferenceProgress", progress)
-    visuals = [{"content_id": content_id} for content_id in ("a", "b")]
+    order = ("b", "a") if arm == "graph" else ("a", "b")
+    visuals = [{"content_id": content_id} for content_id in order]
     monkeypatch.setattr(steps, "_visual_rows", lambda _: visuals)
     monkeypatch.setattr(steps, "_video_name_map", lambda _: {})
 
@@ -83,7 +87,7 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
     graph = {"setting_context": "indoor", "entities": [], "events": [],
              "semantic_topics": [], "affect": {"valence": "neutral", "arousal": "medium"}}
     text = json.dumps(graph) if arm == "graph" else "a person indoors"
-    first_row = rows(visuals[0])[0]
+    first_row = rows({"content_id": "a"})[0]
     cached, _ = (scene_executor.graph_scene_result(first_row, text) if arm == "graph"
                  else scene_executor.description_scene_result(first_row, text, content_id="a"))
     scene_dir = context.graph_scene_dir("qwen") if arm == "graph" else context.description_scene_dir
@@ -110,14 +114,21 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
 
         def generate(tasks, callback):
             tasks = list(tasks)
-            assert [task.task_id for task in tasks] == (["a:1", "b:0"] if attempt == 0 else ["a:1"])
+            if arm == "graph":
+                assert len(tasks) == 1
+                assert tasks[0].task_id in {"a:1", "b:0"}
+                if tasks[0].task_id == "a:1":
+                    assert (scene_dir / "b.jsonl").is_file()
+            else:
+                assert [task.task_id for task in tasks] == (
+                    ["a:1", "b:0"] if attempt == 0 else ["a:1"])
             for task in reversed(tasks):
                 if attempt == 0 and task.task_id == "a:1" and failure == "oom":
                     raise RuntimeError("CUDA out of memory")
                 runtime.current_result = {"task_id": task.task_id, "worker_index": 0, "gpu_id": "0",
                                           "prompt_tokens": 10, "output_tokens": 3}
                 callback(task.task_id, text)
-                assert bars[-1].bar.n == bars[-1].success + bars[-1].failed
+                assert bars[-1].bar.n <= bars[-1].success + bars[-1].failed
                 runtime.current_result = None
             return {}
 

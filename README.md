@@ -91,7 +91,7 @@ Vertex 인증은 VM 서비스 계정 또는 사용자 ADC를 사용합니다. �
 
 [pipeline.yaml](config/pipeline.yaml)을 실제 경로에 맞춥니다. 아래 예시는 `artifacts_root: artifacts` 기준이며, 변경했다면 명령의 산출물 경로도 맞춰야 합니다.
 
-두 장비를 사용하는 경우 **같은 run ID·코드·생성 조건**을 사용합니다. GPU 장비에서 준비한 `experiment.json`, `data/cohort/`, `data/resized_keyframes/`를 Gemini VM의 같은 run 아래에 전달합니다. Gemini 결과는 GPU 장비로 돌려보냅니다. `artifacts/`는 Git에 포함되지 않습니다. [환경 간 전달 규칙](docs/full_rolling.md#환경-간-전달)을 참고하세요.
+두 장비를 사용하는 경우 **같은 run ID·코드·생성 조건**을 사용합니다. GPU 장비에서 준비한 `data/cohort/`, `data/resized_keyframes/`를 Gemini VM의 같은 run 아래에 전달합니다. Gemini 결과는 GPU 장비로 돌려보냅니다. `artifacts/`는 Git에 포함되지 않습니다. [환경 간 전달 규칙](docs/full_rolling.md#환경-간-전달)을 참고하세요.
 
 ## 실행 순서
 
@@ -143,6 +143,16 @@ python -m extraction extract-graph-scenes --model gemini --run-id "$RUN_ID"
 ```
 
 현재 추출 CLI는 **cohort 전체의 keyframe을 요구**하며 일부 영상만 고르는 옵션은 없습니다. 샘플 이미지만 옮긴 상태에서는 전체 실행이 중단됩니다.
+
+Gemini Scene 병렬 처리 수는 `config/pipeline.yaml`의 `extraction.gemini.threads`로 설정합니다. 현재 설정은 16이며 양의 정수를 사용할 수 있습니다. 콘텐츠는 순차 처리하고, 한 콘텐츠 안에서 최대 `threads`개 Scene을 병렬 처리합니다. 워커는 Scene 하나를 마치면 다른 워커를 기다리지 않고 다음 Scene을 가져옵니다. 기존 `extraction.graph.gemini_concurrency` 설정은 아래 위치로 옮깁니다.
+
+```yaml
+extraction:
+  gemini:
+    threads: 16
+```
+
+Gemini Scene 응답은 콘텐츠가 끝날 때까지 메모리에 보관하고, 성공·실패 결과를 콘텐츠별로 한 번 저장합니다. Scene별 `.recovery`는 만들지 않습니다. 중단된 콘텐츠는 완료했던 Scene까지 전체 재실행하며, 저장이 끝난 콘텐츠는 재사용합니다. 재개를 위해 `.pending-contents.json`에는 콘텐츠 ID 목록만, `.completed-contents.json`에는 완료 위치만 기록하며 전체 처리 후 제거합니다. 실패 Scene은 완료 즉시 콘솔에 표시합니다.
 
 `extraction/graph/gemini/` 결과를 GPU 환경의 같은 run으로 전달한 뒤 **Qwen으로 Gemini Graph를 요약**합니다.
 
@@ -198,7 +208,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
 
 `--force`는 지정한 추출·요약 Step의 기존 완료 결과도 재생성하며 다른 Step을 자동 실행하지 않습니다. 추천에서는 선택한 Arm의 모든 날짜·seed 조합을 재학습합니다. 장면을 갱신했다면 요약 → 임베딩 → 추천 → 진단을 차례로 실행해 변경을 반영합니다. 같은 run의 추천 명령을 동시에 실행하지 마세요.
 
-실험 조건을 비교할 때는 새 run ID를 사용합니다. `experiment.json`은 최초 설정 snapshot이며 모든 후속 변경을 기록하지 않습니다. 서로 다른 sampling 조건의 산출물을 한 run에 섞지 않습니다.
+실험 조건을 비교할 때는 새 run ID를 사용합니다. 서로 다른 sampling 조건의 산출물을 한 run에 섞지 않습니다.
 
 - [전체 실험·입력 준비·환경 간 전달·복구 규칙](docs/full_rolling.md)
 - [Qwen vLLM 설정·진행률·GPU 성능 측정](docs/qwen_vllm.md)

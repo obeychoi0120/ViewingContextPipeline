@@ -21,12 +21,14 @@ models:
   gemini:
     project_id: insight-dev-490002
     location: global
-    model_id: gemini-3.7-flash
+    model_id: gemini-3.8-flash
     temperature: 0.0
     max_output_tokens: 1024
     thinking_level: low
     media_resolution: MEDIA_RESOLUTION_MEDIUM
 extraction:
+  gemini:
+    threads: 16
   qwen:
     gpu_memory_utilization: 0.90
     max_num_seqs: 32
@@ -54,7 +56,6 @@ extraction:
     summary_prompt: config/prompts/graph_summary_v3.md
     scene_max_new_tokens: 1024
     summary_max_new_tokens: 512
-    gemini_concurrency: 8
   description:
     scene_prompt: config/prompts/description_scene_v1.md
     summary_prompt: config/prompts/description_summary_v3.md

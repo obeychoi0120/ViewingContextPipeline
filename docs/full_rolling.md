@@ -62,12 +62,12 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -m validation run-recommendation \
 ### 환경 간 전달
 
 1. **Ubuntu GPU 환경:** 전체 CSV 검사·title 보완·cohort·영상 준비, Qwen Graph와 Description 추출·요약.
-2. **Ubuntu Gemini API 환경:** 같은 run의 `experiment.json`, `data/cohort/`, `data/resized_keyframes/`를 전달하고 같은 코드 revision을 사용합니다. `conda activate vc_cloud` 후 README의 Gemini 명령을 실행합니다. 원본 MP4·로컬 모델·GPU는 사용하지 않습니다.
+2. **Ubuntu Gemini API 환경:** 같은 run의 `data/cohort/`, `data/resized_keyframes/`를 전달하고 같은 코드 revision을 사용합니다. `conda activate vc_cloud` 후 README의 Gemini 명령을 실행합니다. 원본 MP4·로컬 모델·GPU는 사용하지 않습니다.
 3. **Ubuntu GPU 환경:** Gemini 환경의 `extraction/graph/gemini/`를 같은 run으로 전달합니다. Gemini Graph 요약 → BGE → 추천 → 진단을 실행합니다.
 
 두 역할은 같은 장비에서 실행해도 됩니다. 별도 장비라면 `artifacts_root`를 각 호스트에 맞추고 run ID·sampling·prompt·생성 조건을 유지합니다. Gemini 추출은 run 내부 경로에서 timestamp와 이미지를 찾으며, cohort에 남은 원본 영상 절대경로는 출처 기록으로 보존합니다. Gemini VM에서 cohort를 다시 만들 필요는 없습니다.
 
-전달할 `data/cohort/`에는 `eligibility.json`, `cohort_plan.json`, `catalog.jsonl`, `item_inventory.jsonl`, `required_items.jsonl`, `metadata_titles.jsonl`, `events.jsonl`과 `source_assets/`가 포함됩니다. 실행 재개 시에는 해당 환경의 기존 Gemini 산출물과 남아 있는 `.recovery`도 보존합니다. 양쪽에서 동일 파일을 동시에 쓰지 않습니다. `artifacts/`는 Git에서 제외되므로 별도 전달이 필요합니다.
+전달할 `data/cohort/`에는 `eligibility.json`, `cohort_plan.json`, `catalog.jsonl`, `item_inventory.jsonl`, `required_items.jsonl`, `metadata_titles.jsonl`, `events.jsonl`과 `source_assets/`가 포함됩니다. 실행 재개 시에는 해당 환경의 기존 Gemini 산출물과 `.pending-contents.json`, `.completed-contents.json`을 보존합니다. Gemini Scene 응답은 콘텐츠 완료 때만 저장하므로 중단된 콘텐츠는 전체 재실행합니다. Qwen 요약의 `.recovery`도 보존합니다. 양쪽에서 동일 파일을 동시에 쓰지 않습니다. `artifacts/`는 Git에서 제외되므로 별도 전달이 필요합니다.
 
 현재 추출 CLI는 전체 catalog의 시각 입력을 검사하며 샘플 선택 옵션은 없습니다. 일부 keyframe만 전달한 상태에서 전체 명령을 실행하면 누락 입력 오류로 중단됩니다. 샘플 검증 결과는 전체 추출 완료로 간주하지 않습니다. v3 leave-two-out run과 v4 full rolling run, 서로 다른 sampling 조건의 산출물을 섞지 않습니다.
 
@@ -121,9 +121,11 @@ Gemini 빈 응답은 콘솔과 `extraction/graph/gemini/scenes/failures/{content
 
 ### 재시도와 복구 이력
 
-정상·Raw 산출물은 재사용합니다. 중단된 재시도 묶음은 저장된 다음 시도부터 이어가고, 저장된 응답은 재호출 없이 게시합니다. 응답 저장 전 중단된 요청은 다시 호출될 수 있습니다. 최종 실패 항목은 다음 명령 실행에서 첫 penalty부터 새 묶음을 시작합니다. Qwen의 OOM·worker 종료·설정/문법 컴파일·저장 오류는 penalty 재시도나 Raw 성공으로 바꾸지 않습니다.
+Gemini 장면 추출은 같은 콘텐츠 안에서 워커가 다음 Scene을 연속 처리하고, 응답은 메모리에 모아 콘텐츠 완료 시 한 번 저장합니다. Scene별 `.recovery`는 만들지 않습니다. 중단된 콘텐츠는 전체 재실행하고 저장 완료 콘텐츠는 재사용합니다. 콘텐츠 ID 목록과 완료 위치만 `.pending-contents.json`, `.completed-contents.json`에 기록합니다.
 
-출력 디렉터리의 `.recovery`에 입력·생성 정책 식별값과 시도 이력을 저장합니다. 각 장면 추출·요약 Step이 실패 없이 완료되면 이 폴더를 삭제하고, 예외·중단·부분 실패(허용된 Gemini Summary 누락 포함)에서는 보존합니다. 정상·Raw 산출물과 요약의 `.inputs`는 삭제하지 않습니다. `--force`는 지정 Step의 기존 완료 결과까지 새로 생성하며, 중단 후에는 같은 명령으로 재개합니다. 세부 실행 이력과 진행률은 [Qwen 실행 가이드](qwen_vllm.md)에 있습니다.
+정상·Raw 산출물은 재사용합니다. Qwen의 중단된 재시도 묶음은 저장된 다음 시도부터 이어가고, 저장된 응답은 재호출 없이 게시합니다. 응답 저장 전 중단된 요청은 다시 호출될 수 있습니다. 최종 실패 항목은 다음 명령 실행에서 첫 penalty부터 새 묶음을 시작합니다. Qwen의 OOM·worker 종료·설정/문법 컴파일·저장 오류는 penalty 재시도나 Raw 성공으로 바꾸지 않습니다.
+
+Qwen 장면 추출과 모든 요약은 출력 디렉터리의 `.recovery`에 입력·생성 정책 식별값과 시도 이력을 저장합니다. 각 장면 추출·요약 Step이 실패 없이 완료되면 이 폴더를 삭제하고, 예외·중단·부분 실패(허용된 Gemini Summary 누락 포함)에서는 보존합니다. 정상·Raw 산출물과 요약의 `.inputs`는 삭제하지 않습니다. `--force`는 지정 Step의 기존 완료 결과까지 새로 생성하며, 중단 후에는 같은 명령으로 재개합니다. 세부 실행 이력과 진행률은 [Qwen 실행 가이드](qwen_vllm.md)에 있습니다.
 
 `diagnosis.json`의 `generation_recovery`는 남아 있는 이력으로 정상 생성·Repair·Raw·최종 실패·중단을 집계합니다. `artifact_counts.legacy_unknown`은 대응 복구 이력이 없는 정상 결과이며, 정상 완료 후 `.recovery`가 삭제된 새 결과도 포함합니다. 따라서 이 값만으로 과거 실행 여부나 Repair 비율을 판단할 수 없습니다. Raw 상태는 정식 산출물로 확인하고, `summary_inputs`의 정상·Raw 입력 장면 수는 `.inputs`에서 읽습니다. Raw Graph는 정상 장면 coverage에 포함하지 않습니다.
 
@@ -139,7 +141,6 @@ v4 설정의 `validation.cohort.metadata_missing_policy: zero_vector`는 원본 
 
 ### 산출물과 후속 단계 갱신
 
-- `experiment.json`: 최초 설정 snapshot. 재실행 시 비교하거나 덮어쓰지 않습니다.
 - `data/cohort/events.jsonl`: 전체 사건 한 벌. `cohort_plan.json`에 7개 split 경계·원본/적격/무이력 수·범위 밖 사건 수를 저장합니다.
 - `media_preflight.json`: 영상 길이 합계·원본 byte·scene·keyframe 수·RGB payload 추정. PNG 압축률 및 모델 출력 크기는 별도이며 정확한 총 디스크 사용량 보장은 아닙니다.
 - `validation/recommendations/{date}/seed_{seed}/{arm}/`: `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`.

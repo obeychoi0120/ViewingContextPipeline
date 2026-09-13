@@ -182,7 +182,7 @@ def test_gemini_default_resumes_failed_and_missing_scenes_preserving_successes(
     c2_bytes = c2.read_bytes()
     result = extraction_steps.extract_graph_scenes(context, model="gemini")
     assert result["failure_count"] == 1
-    assert calls == [["c1:1", "c1:2", "c1:3", "c3:0"]]
+    assert calls == [["c1:1", "c1:2", "c1:3"], ["c3:0"]]
     rows = read_jsonl(context.graph_scene_dir("gemini") / "c1.jsonl")
     assert [row["scene_idx"] for row in rows] == [0, 1, 3]
     assert rows[0] == successful
@@ -191,7 +191,10 @@ def test_gemini_default_resumes_failed_and_missing_scenes_preserving_successes(
     remaining = read_jsonl(failure_path)
     assert len(remaining) == 1 and remaining[0]["scene_idx"] == 2
     assert remaining[0]["response_diagnostics"] == diagnostics
-    assert "SAFETY" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    assert "SAFETY" in stderr
+    assert "[Graph_gemini]" not in stderr
+    assert "setting_context" not in stderr
     # Normal cache normalization must retain the new diagnostic fields.
     assert extraction_steps._minimal_graph_failures(remaining) == remaining
 
@@ -203,7 +206,7 @@ def test_gemini_default_resumes_failed_and_missing_scenes_preserving_successes(
     rows = read_jsonl(context.graph_scene_dir("gemini") / "c1.jsonl")
     assert [row["scene_idx"] for row in rows] == [0, 1, 2, 3]
     extraction_steps.extract_graph_scenes(context, model="gemini")
-    assert len(calls) == 2  # No failures left: no additional API calls.
+    assert len(calls) == 3  # No failures left: no additional API calls.
 
 
 @pytest.mark.parametrize("mismatch", ["keyframes", "unknown_index", "overlap"])
@@ -239,14 +242,14 @@ def test_gemini_force_regenerates_all_and_default_retries_persistent_failure(
     for task_id in ("c1:0", "c1:3", "c2:0", "c3:0"):
         outcomes[task_id] = GeminiGenerationOutcome(task_id, json.dumps(successful["graph"]))
     result = extraction_steps.extract_graph_scenes(context, model="gemini", force=True)
-    assert calls == [["c1:0", "c1:1", "c1:2", "c1:3", "c2:0", "c3:0"]]
+    assert calls == [["c1:0", "c1:1", "c1:2", "c1:3"], ["c2:0"], ["c3:0"]]
     assert result["failure_count"] == 1
     assert read_jsonl(failure_path)[0]["response_diagnostics"] == diagnostics
     before = failure_path.read_bytes()
     result = extraction_steps.extract_graph_scenes(context, model="gemini")
     assert result["failure_count"] == 1
     assert failure_path.read_bytes() == before
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert calls[-1] == ["c1:2"]
 
 
@@ -300,6 +303,7 @@ def test_description_failure_force_retry_and_cache_reuse(
     @contextmanager
     def failing_generator(**_kwargs):
         def generate(tasks, _callback=None):
+            tasks = list(tasks)
             return {tasks[0].task_id: "visible action", tasks[1].task_id: ""}
 
         yield generate
@@ -419,6 +423,7 @@ def test_qwen_description_scene_is_checkpointed_before_content_finishes(
     @contextmanager
     def streaming_generator(**_kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             callback(tasks[1].task_id, "visible action")
             assert [row["scene_idx"] for row in read_jsonl(scene_path)] == [1]
             callback(tasks[0].task_id, "")

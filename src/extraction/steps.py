@@ -45,6 +45,7 @@ from extraction.step_support import (
 )
 from pipeline_runtime import (
     RunContext,
+    read_json,
     read_jsonl,
 )
 
@@ -80,6 +81,12 @@ def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
 
 def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure_dir, model, force):
     force_run_id = active_force_run(scene_dir / ".recovery")
+    pending_path = scene_dir / ".pending-contents.json"
+    interrupted_contents = set()
+    if model == "gemini" and pending_path.is_file():
+        cursor = scene_dir / ".completed-contents.json"
+        completed = read_json(cursor)["count"] if cursor.is_file() else 0
+        interrupted_contents = set(read_json(pending_path)["content_ids"][completed:])
     records_by_content: dict[str, list[dict[str, Any]]] = {}
     failures_by_content: dict[str, list[dict[str, Any]]] = {}
     pending: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
@@ -124,8 +131,11 @@ def _graph_scene_work(context, visual_rows, prompt, settings, scene_dir, failure
             cached_indices = {int(row["scene_idx"]) for row in existing}
             pending_indices = {int(row["scene_idx"]) for row in scene_rows
                                if int(row["scene_idx"]) in cached_indices
-                               and has_pending_recovery(scene_dir / ".recovery", row["task"].task_id,
-                                                       force_run_id)}
+                               and (str(visual["content_id"]) in interrupted_contents
+                                    or model == "gemini" and force_run_id is not None
+                                    or model == "qwen" and has_pending_recovery(
+                                        scene_dir / ".recovery", row["task"].task_id,
+                                        force_run_id))}
             existing = [row for row in existing if int(row["scene_idx"]) not in pending_indices]
             content_id = str(visual["content_id"])
             records_by_content[content_id] = existing
@@ -263,8 +273,9 @@ def extract_graph_scenes(
             failures_by_content.update(failed)
         elif pending:
             gemini = context.config["models"]["gemini"]
+            threads = context.config["extraction"]["gemini"]["threads"]
             pool = GeminiWorkerPool(
-                int(settings["gemini_concurrency"]),
+                threads,
                 project_id=str(gemini["project_id"]),
                 location=str(gemini["location"]),
                 model_id=str(gemini["model_id"]),
@@ -283,14 +294,13 @@ def extract_graph_scenes(
                 force=force,
                 names=names,
                 progress=progress,
-                identity=gemini,
             )
     failures = [
         record
         for visual in visual_rows
         for record in failures_by_content[str(visual["content_id"])]
     ]
-    if not failures:
+    if model == "gemini" or not failures:
         clear_recovery(scene_dir)
     return _result(stage, content_count=len(visual_rows), failure_count=len(failures))
 
