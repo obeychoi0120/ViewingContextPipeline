@@ -83,6 +83,27 @@ def test_gemini_pool_rejects_duplicate_task_ids() -> None:
         raise AssertionError("duplicate task ids must fail")
 
 
+def test_gemini_pool_supports_sixteen_simultaneous_scenes() -> None:
+    barrier = threading.Barrier(16, timeout=5)
+
+    class Backend:
+        def generate(self, images, prompt, max_new_tokens):
+            # All 16 calls must start before any of them can finish.
+            barrier.wait()
+            return prompt
+
+    pool = GeminiWorkerPool(
+        16, project_id="project", location="global", model_id="gemini",
+        backend_factory=Backend,
+    )
+    outcomes = pool.generate([
+        QwenGenerationTask(f"content:{i}", (), str(i), 32) for i in range(16)
+    ])
+    assert len(outcomes) == 16
+    assert all(outcome.error is None for outcome in outcomes.values())
+    assert {outcome.text for outcome in outcomes.values()} == {str(i) for i in range(16)}
+
+
 def test_gemini_pool_propagates_empty_response_diagnostics() -> None:
     diagnostics = {"candidates": [{"finish_reason": "SAFETY"}]}
 

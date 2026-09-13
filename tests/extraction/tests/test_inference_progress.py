@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import queue
 
 import pytest
 from tqdm import tqdm
@@ -58,31 +59,97 @@ def make_progress(**kwargs):
     return progress, stream
 
 
-def test_progress_uses_only_pending_requests_and_separates_failures():
-    progress, stream = make_progress(total=100, reused=999)
+def test_progress_uses_only_pending_scenes_and_separates_failures():
+    now = [0.0]
+    progress, stream = make_progress(total=100, reused=999, clock=lambda: now[0])
     with progress:
-        assert "ETA=initializing" in progress.bar.postfix
-        progress.update_stats({"phase": "running", "eta_ready": False,
-                               "requests_per_second": 10, "inflight": 64})
-        assert "ETA=estimating" in progress.bar.postfix
+        initial = stream.getvalue()
+        assert "scene/s=--" in progress.bar.postfix
+        progress.update_stats({"phase": "running", "requests_per_second": 1000,
+                               "completed": 500, "output_tokens_per_second": 512})
         progress.complete()
         progress.complete(failed=True)
+        # Model retries and cache hits do not count as completed Scenes.
+        assert progress.success == progress.failed == 1
+        assert progress.bar.n == 0
+        assert stream.getvalue() == initial
+        now[0] = 10
+        progress._render(refresh=True)
         assert progress.bar.n == 2 and progress.bar.total == 100
-        progress.update_stats({"phase": "running", "eta_ready": True,
-                               "requests_per_second": 2, "inflight": 64,
-                               "output_tokens_per_second": 512,
-                               "initialization_seconds": 120, "inference_elapsed": 60})
-        assert "ETA=00:49" in progress.bar.postfix
+        assert "ETA=08:10" in progress.bar.postfix
         assert "success=1 failed=1" in progress.bar.postfix
-        assert "tok/s=512.0" in progress.bar.postfix
-        for field in ("phase=", "reused=", "inflight=", "requests/s=", "init=", "infer="):
+        assert "scene/s=0.20" in progress.bar.postfix
+        for field in ("tok/s=", "phase=", "reused=", "inflight=", "requests/s=", "init=", "infer="):
             assert field not in progress.bar.postfix
         rendered = str(progress.bar)
         assert "2/100 scene" in rendered
         assert len(rendered.split("|")[1]) == 20
-    # The standard tqdm instantaneous ETA/rate must not appear alongside ours.
-    assert "scene/s" not in stream.getvalue()
+    assert "scene/s=0.20" in stream.getvalue()
+    assert "rate_fmt" not in progress.bar.bar_format
     assert "remaining" not in progress.bar.bar_format
+    assert not progress._ticker.is_alive()
+
+
+def test_scene_rate_does_not_reset_when_gemini_starts_next_content():
+    now = [0.0]
+    progress, _ = make_progress(total=115947, clock=lambda: now[0])
+    with progress:
+        for _ in range(82):
+            progress.complete()
+        now[0] = 91
+        progress.update_stats({"phase": "running", "requests_per_second": 0,
+                               "completed": 0, "inference_elapsed": 0, "eta_ready": False})
+        progress._render(refresh=True)
+        assert progress.bar.n == 82
+        assert "scene/s=0.90" in progress.bar.postfix
+        eta = tqdm.format_interval((115947 - 82) / (82 / 91))
+        assert f"ETA={eta}" in progress.bar.postfix
+        assert "estimating" not in progress.bar.postfix
+
+
+def test_timer_recalculates_every_five_seconds_even_without_completions():
+    now = [0.0]
+    progress, stream = make_progress(total=10, clock=lambda: now[0])
+
+    class TickControl:
+        def __init__(self):
+            self.commands = queue.Queue()
+            self.waits = queue.Queue()
+
+        def wait(self, timeout):
+            self.waits.put(timeout)
+            if self.commands.get(timeout=2) == "stop":
+                return True
+            now[0] += timeout
+            return False
+
+        def set(self):
+            self.commands.put("stop")
+
+    ticks = TickControl()
+    progress._stop = ticks
+    with progress:
+        assert ticks.waits.get(timeout=2) == 5
+        initial = stream.getvalue()
+        progress.complete()
+        progress.complete(failed=True)
+        progress.update_stats({"phase": "running", "requests_per_second": 999})
+        assert stream.getvalue() == initial
+        ticks.commands.put("tick")
+        assert ticks.waits.get(timeout=2) == 5
+        assert progress.bar.n == 2
+        assert "success=1 failed=1" in progress.bar.postfix
+        assert "scene/s=0.40" in progress.bar.postfix
+        assert "ETA=00:20" in progress.bar.postfix
+        # No new requests or callbacks: time alone must update rate and ETA.
+        ticks.commands.put("tick")
+        assert ticks.waits.get(timeout=2) == 5
+        assert progress.bar.n == 2
+        assert "scene/s=0.20" in progress.bar.postfix
+        assert "ETA=00:40" in progress.bar.postfix
+        progress.complete()
+    assert progress.bar.n == 3  # Flush the final partial interval immediately.
+    assert not progress._ticker.is_alive()
 
 
 def test_finished_cached_and_interrupted_progress():
@@ -100,3 +167,4 @@ def test_finished_cached_and_interrupted_progress():
         raise KeyboardInterrupt
     assert progress.stats["phase"] == "interrupted"
     assert "ETA=--" in progress.bar.postfix
+    assert not progress._ticker.is_alive()

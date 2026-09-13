@@ -135,12 +135,11 @@ def test_full_preparation_allows_changed_settings_without_binding(full_context):
     assert all(row["duration_seconds"] is None for row in cohort["catalog"])
     assert all(row["duration_seconds"] is None for row in cohort["inventory"])
     assert not (context.cohort_dir / "media_preflight.json").exists()
-    before = read_json(context.run_root / "experiment.json")
-    assert set(before) == {"schema_version", "config_snapshot"}
+    assert not (context.run_root / "experiment.json").exists()
     assert not (context.run_root / "fingerprints").exists()
     context.config["data"]["videos_dir"] = "D:/host-specific/videos"
     context.initialize()
-    assert read_json(context.run_root / "experiment.json") == before
+    assert not (context.run_root / "experiment.json").exists()
     context.config["extraction"]["visual_evidence"]["num_keyframes"] = 3
     context.initialize()
     # Legacy identity files are neither interpreted nor rewritten.

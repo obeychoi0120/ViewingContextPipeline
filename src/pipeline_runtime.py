@@ -105,13 +105,6 @@ class RunContext:
 
     def initialize(self) -> None:
         self.run_root.mkdir(parents=True, exist_ok=True)
-        if self.config["schema_version"] == "viewing-context-config/v4":
-            snapshot = self.run_root / "experiment.json"
-            if not snapshot.exists():
-                write_json(snapshot, {
-                    "schema_version": "rolling-experiment/v2",
-                    "config_snapshot": self.config,
-                })
 
     def require_ready_cohort(self) -> dict[str, Any]:
         if self.config["schema_version"] == "viewing-context-config/v4":
@@ -244,11 +237,12 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         "summary_sampling",
         "graph",
         "description",
+        "gemini",
     }:
         raise ConfigError(
             "extraction must contain greedy_decoding, visual_evidence, "
             "graph_repetition_penalty, description_repetition_penalty, "
-            "summary_repetition_penalty, summary_sampling, graph, and description"
+            "summary_repetition_penalty, summary_sampling, graph, description, and gemini"
         )
     if not isinstance(extraction.get("greedy_decoding"), bool):
         raise ConfigError("extraction.greedy_decoding must be true or false")
@@ -311,11 +305,9 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         "scene_max_new_tokens",
         "summary_max_new_tokens",
     }
-    graph_keys = generation_keys | {"gemini_concurrency"}
-    description_keys = generation_keys
     for arm in ("graph", "description"):
         settings = _require_mapping(extraction, arm)
-        expected = graph_keys if arm == "graph" else description_keys
+        expected = generation_keys
         if set(settings) != expected:
             raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected)}")
         for key in ("scene_max_new_tokens", "summary_max_new_tokens"):
@@ -327,9 +319,11 @@ def _validate_extraction(value: dict[str, Any]) -> None:
                 not isinstance(settings.get(key), str) or not settings[key].strip()
             ):
                 raise ConfigError(f"extraction.{arm}.{key} must be a non-empty path")
-    concurrency = extraction["graph"].get("gemini_concurrency")
-    if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency <= 0:
-        raise ConfigError("extraction.graph.gemini_concurrency must be a positive integer")
+    gemini = _require_mapping(extraction, "gemini")
+    if set(gemini) != {"threads"}:
+        raise ConfigError("extraction.gemini must contain exactly threads")
+    if type(gemini["threads"]) is not int or gemini["threads"] <= 0:
+        raise ConfigError("extraction.gemini.threads must be a positive integer")
     _require_mapping(value, "validation")
 
 

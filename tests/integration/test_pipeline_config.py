@@ -16,6 +16,10 @@ from pipeline_fixtures import ROOT, context as context, _ready_cohort, _summary_
 
 
 def test_config_contract_remains_fixed(context: RunContext) -> None:
+    assert set(context.config["extraction"]["gemini"]) == {"threads"}
+    assert type(context.config["extraction"]["gemini"]["threads"]) is int
+    assert context.config["extraction"]["gemini"]["threads"] > 0
+    assert "gemini_concurrency" not in context.config["extraction"]["graph"]
     assert context.config["protocol"]["sampling"] == "fixed_windows"
     assert context.config["extraction"]["visual_evidence"]["scene_duration"] == 30
     assert context.config["extraction"]["visual_evidence"]["num_keyframes"] == 6
@@ -86,6 +90,20 @@ def test_pipeline_config_rejects_legacy_and_non_exact_v3_contract(
 
     with pytest.raises(ConfigError, match=message):
         RunContext.load("legacy", root=context.root)
+
+
+@pytest.mark.parametrize("threads", [1, 8, 16, 32, 0, -1, True, False, 8.0, "16", None])
+def test_gemini_threads_config_validation(context, threads):
+    path = context.root / "config/pipeline.yaml"
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["extraction"]["gemini"]["threads"] = threads
+    path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+    if type(threads) is int and threads > 0:
+        loaded = RunContext.load("threads-config", root=context.root)
+        assert loaded.config["extraction"]["gemini"]["threads"] == threads
+    else:
+        with pytest.raises(ConfigError, match="extraction.gemini.threads"):
+            RunContext.load("threads-config", root=context.root)
 
 
 def test_greedy_decoding_switches_summary_generation_mode(
@@ -266,6 +284,7 @@ def test_repetition_penalty_reaches_only_its_generation_stage(
     captured = []
 
     def generate(tasks, callback):
+        tasks = list(tasks)
         captured.extend(tasks)
         for task in tasks:
             callback(task.task_id, response)

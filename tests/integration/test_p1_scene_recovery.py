@@ -48,6 +48,7 @@ def test_qwen_failed_and_missing_scenes_resume_without_losing_checkpoints(
     @contextmanager
     def generator(**kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             calls.append([task.task_id for task in tasks])
             for task in tasks:
                 text = valid if phase != "initial" or initial_success and task.task_id == "c1:0" else invalid

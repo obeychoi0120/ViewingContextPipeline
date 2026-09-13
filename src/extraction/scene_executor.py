@@ -8,10 +8,14 @@ from extraction.semantic_graph.json_repair import repair_graph_json_once
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.raw_output import raw_graph_record
 from extraction.recovery import generate_with_recovery
+from pipeline_runtime import write_json
 from extraction.step_support import (
     write_progress,
     write_scene_checkpoint,
 )
+
+
+QWEN_GRAPH_SCENE_CONCURRENCY = 8
 
 
 def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=False):
@@ -113,7 +117,12 @@ def run_qwen_scenes(
             failures_by_content[content_id] = state["cached_failures"]
     if not rows_by_task:
         return records_by_content, failures_by_content
-    write_progress(progress, "[Qwen] streaming scenes continuously; each completed scene is checkpointed immediately")
+    write_progress(progress, (
+        "[Qwen] processing contents sequentially with up to 8 concurrent scenes; "
+        "each completed scene is checkpointed immediately"
+        if arm == "graph" else
+        "[Qwen] streaming scenes continuously; each completed scene is checkpointed immediately"
+    ))
 
     def validate(task_id, text):
         content_id, row = rows_by_task[task_id]
@@ -178,8 +187,11 @@ def run_qwen_scenes(
             failed=failed,
             raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
             if arm == "graph" else None,
-            force=force, runtime=runtime, log=lambda message: write_progress(progress, message),
-            rounds_across_batches=True,
+            force=force, runtime=runtime,
+            log=lambda message: write_progress(progress, message) if arm != "graph" else None,
+            rounds_across_batches=arm != "graph",
+            batch_size=QWEN_GRAPH_SCENE_CONCURRENCY if arm == "graph" else 256,
+            batch_key=(lambda task: rows_by_task[task.task_id][0]) if arm == "graph" else None,
         )
     return records_by_content, failures_by_content
 
@@ -194,8 +206,6 @@ def _complete_gemini_content(
     scene_dir,
     failure_dir,
     force,
-    names,
-    progress,
 ):
     content_id = str(visual["content_id"])
     records = list(records_by_content.get(content_id, [])) if not force else []
@@ -217,11 +227,6 @@ def _complete_gemini_content(
     )
     records_by_content[content_id] = records
     failures_by_content[content_id] = failures
-    name = names.get(content_id, f"{content_id}.mp4")
-    for message in scene_messages(name, new_records, arm="graph", source="gemini"):
-        write_progress(progress, message)
-    for failure in new_failures:
-        write_progress(progress, graph_skip_message(name, failure, source="gemini"))
 
 
 def run_gemini_scenes(
@@ -235,75 +240,53 @@ def run_gemini_scenes(
     force,
     names,
     progress,
-    identity=None,
 ):
-    task_context = {}
-    generated_by_content = {}
-    tasks = []
-    for visual, scene_rows in pending:
+    # This marker contains only content IDs, never generated Scene responses.
+    # It distinguishes an interrupted refresh from an older completed output.
+    marker = scene_dir / ".pending-contents.json"
+    cursor = scene_dir / ".completed-contents.json"
+    unfinished = [str(visual["content_id"]) for visual, _ in pending]
+    if not unfinished:
+        return
+    write_json(cursor, {"count": 0})
+    write_json(marker, {"content_ids": unfinished})
+    for content_index, (visual, scene_rows) in enumerate(pending):
         content_id = str(visual["content_id"])
-        generated_by_content[content_id] = {}
-        for row in scene_rows:
-            task = row["task"]
-            tasks.append(task)
-            task_context[task.task_id] = (content_id, visual, scene_rows, row)
+        rows_by_task = {row["task"].task_id: row for row in scene_rows}
+        if len(rows_by_task) != len(scene_rows):
+            raise ValueError(f"duplicate scene task in content: {content_id}")
+        generated = {}
 
-    outcomes = {}
-
-    def validate(task_id, text):
-        row = task_context[task_id][3]
-        outcome = outcomes[task_id]
-        record, failure = graph_scene_result(row, text, error=outcome.error,
-                                             diagnostics=outcome.response_diagnostics)
-        if failure is not None:
-            raise OutputValidationError(failure["error"])
-        return record, record["parse_mode"]
-
-    def publish(task_id, record, failure):
-        content_id, visual, scene_rows, row = task_context[task_id]
-        responses = generated_by_content[content_id]
-        responses[task_id] = (record, failure)
-        _complete_gemini_content(
-            visual, [row], responses,
-            records_by_content=records_by_content,
-            failures_by_content=failures_by_content,
-            scene_dir=scene_dir, failure_dir=failure_dir,
-            force=force and len(responses) == 1,
-            names=names, progress=progress,
-        )
-        progress.complete(failed=failure is not None)
-
-    def generate(batch, callback):
         def receive(outcome):
-            outcomes[outcome.task_id] = outcome
-            callback(outcome.task_id, outcome.text)
-        pool.generate(batch, receive, on_progress=progress.update_stats)
-        return {}
+            if outcome.task_id not in rows_by_task:
+                raise RuntimeError(f"unexpected Gemini result: {outcome.task_id}")
+            if outcome.task_id in generated:
+                return
+            row = rows_by_task[outcome.task_id]
+            record, failure = graph_scene_result(
+                row, outcome.text, error=outcome.error,
+                diagnostics=outcome.response_diagnostics,
+            )
+            if failure is not None and outcome.error is None and outcome.text.strip():
+                record, failure = raw_graph_record(row, outcome.text), None
+            generated[outcome.task_id] = (record, failure)
+            if failure is not None:
+                write_progress(progress, graph_skip_message(
+                    names.get(content_id, f"{content_id}.mp4"), failure, source="gemini"))
+            progress.complete(failed=failure is not None)
 
-    def failed(task_id, attempts):
-        last = attempts[-1]
-        _, failure = graph_scene_result(
-            task_context[task_id][3], last["raw_response"],
-            error=last.get("generation_error"), diagnostics=last.get("response_diagnostics"))
-        publish(task_id, None, failure)
-
-    generate_with_recovery(
-        generate, tasks, penalties=1.0, directory=scene_dir / ".recovery",
-        identity={"backend": "gemini", "settings": identity}, force=force,
-        validate=validate, complete=lambda task_id, record: publish(task_id, record, None),
-        failed=failed, raw_fallback=lambda task_id, raw: (
-            raw_graph_record(task_context[task_id][3], raw)
-            if outcomes[task_id].error is None else None),
-        attempt_metadata=lambda task_id: _gemini_attempt_metadata(outcomes[task_id]),
-    )
-
-
-def _gemini_attempt_metadata(outcome):
-    diagnostics = outcome.response_diagnostics or {}
-    candidates = diagnostics.get("candidates") or []
-    return {
-        "penalty": None, "generation_error": outcome.error,
-        "response_diagnostics": outcome.response_diagnostics,
-        "output_tokens": (diagnostics.get("usage_metadata") or {}).get("candidates_token_count"),
-        "finish_reason": candidates[0].get("finish_reason") if candidates else None,
-    }
+        # The pool bounds concurrency and each worker immediately takes the next
+        # Scene from this content's queue, even while other workers are still busy.
+        pool.generate([row["task"] for row in scene_rows], receive,
+                      on_progress=progress.update_stats)
+        missing = rows_by_task.keys() - generated.keys()
+        if missing:
+            raise RuntimeError(f"missing Gemini results: {sorted(missing)}")
+        _complete_gemini_content(
+            visual, scene_rows, generated,
+            records_by_content=records_by_content, failures_by_content=failures_by_content,
+            scene_dir=scene_dir, failure_dir=failure_dir, force=force,
+        )
+        write_json(cursor, {"count": content_index + 1})
+    marker.unlink()
+    cursor.unlink()

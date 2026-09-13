@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 import time
+import threading
 
 from tqdm import tqdm
 
@@ -45,58 +46,90 @@ class RecentThroughput:
 
 
 class InferenceProgress:
-    """Keep cached work out of the bar and expose only the recent-window ETA."""
+    """Refresh a consistent step-wide completion/rate/ETA snapshot every five seconds."""
 
-    def __init__(self, *, total, desc, unit, reused=0, empty=0, progress_factory=tqdm):
+    REFRESH_SECONDS = 5.0
+
+    def __init__(self, *, total, desc, unit, reused=0, empty=0, progress_factory=tqdm,
+                 clock=None):
         self.bar = progress_factory(
-            total=total, desc=desc, unit=unit, mininterval=1, dynamic_ncols=True,
+            total=total, desc=desc, unit=unit, mininterval=self.REFRESH_SECONDS,
+            dynamic_ncols=True,
             bar_format="{l_bar}{bar:20}| {n_fmt}/{total_fmt} {unit} [{elapsed}{postfix}]",
         )
         self.fp = self.bar.fp
         self.total = total
+        self.unit = unit
         self.reused = reused
         self.empty = empty
         self.success = self.failed = 0
         self.stats = {"phase": "initializing", "inflight": 0}
+        self._clock = clock or time.monotonic
+        self._started = None
+        self._lock = threading.RLock()
+        self._stop = threading.Event()
+        self._ticker = None
 
     def __enter__(self):
         self.bar.__enter__()
+        self._started = self._clock()
         self._render(refresh=True)
+        self._ticker = threading.Thread(
+            target=self._refresh_loop, name="inference-progress", daemon=True,
+        )
+        self._ticker.start()
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        self._stop.set()
+        if self._ticker is not None:
+            self._ticker.join()
         if exc_type is not None:
             self.stats["phase"] = "interrupted" if issubclass(exc_type, KeyboardInterrupt) else "error"
         self._render(refresh=True)
         return self.bar.__exit__(exc_type, exc, tb)
 
+    def _refresh_loop(self):
+        deadline = self._started + self.REFRESH_SECONDS
+        while not self._stop.wait(max(0, deadline - self._clock())):
+            self._render(refresh=True)
+            # Keep the cadence anchored to the step start; skip missed ticks if
+            # writing to the terminal itself took longer than one interval.
+            elapsed = max(0, self._clock() - self._started)
+            deadline = self._started + (int(elapsed / self.REFRESH_SECONDS) + 1) * self.REFRESH_SECONDS
+
     def complete(self, *, failed=False):
-        if failed:
-            self.failed += 1
-        else:
-            self.success += 1
-        self._render(refresh=False)
-        self.bar.update(1)
+        with self._lock:
+            if failed:
+                self.failed += 1
+            else:
+                self.success += 1
+        # Counts are collected immediately; only the timer paints them.
 
     def update_stats(self, stats):
-        self.stats = dict(stats)
-        self._render(refresh=True)
+        with self._lock:
+            # Backend request statistics may reset for each content or retry
+            # batch. They must not reset the step's displayed rate or ETA.
+            self.stats = dict(stats)
 
     def _render(self, *, refresh):
-        remaining = self.total - self.success - self.failed
-        phase = self.stats.get("phase", "initializing")
-        rate = self.stats.get("requests_per_second", 0)
-        if phase in {"error", "interrupted"}:
-            eta = "--"
-        elif remaining == 0:
-            phase, eta = "finished", "00:00"
-        elif phase == "initializing":
-            eta = "initializing"
-        elif self.stats.get("eta_ready") and rate > 0:
-            eta = tqdm.format_interval(remaining / rate)
-        else:
-            eta = "estimating"
-        fields = f"ETA={eta} success={self.success} failed={self.failed}"
-        if phase != "initializing" and "output_tokens_per_second" in self.stats:
-            fields += f" tok/s={self.stats['output_tokens_per_second']:.1f}"
-        self.bar.set_postfix_str(fields, refresh=refresh)
+        with self._lock, tqdm.get_lock():
+            completed = self.success + self.failed
+            remaining = max(0, self.total - completed)
+            elapsed = max(0, self._clock() - self._started) if self._started is not None else 0
+            rate = completed / elapsed if elapsed > 0 else 0
+            phase = self.stats.get("phase")
+            if phase in {"error", "interrupted"}:
+                eta = "--"
+            elif remaining == 0:
+                eta = "00:00"
+            elif rate > 0:
+                eta = tqdm.format_interval(remaining / rate)
+            else:
+                eta = "estimating"
+            fields = f"ETA={eta} success={self.success} failed={self.failed}"
+            if self.unit == "scene":
+                scene_rate = f"{rate:.2f}" if elapsed > 0 else "--"
+                fields += f" scene/s={scene_rate}"
+            self.bar.n = completed
+            self.bar.set_postfix_str(fields, refresh=refresh)

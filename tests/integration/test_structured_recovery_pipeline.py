@@ -241,7 +241,7 @@ def test_gemini_raw_preserves_original_and_errors_never_become_raw(context, monk
     monkeypatch.setattr(Pool, "generate", fail)
     assert steps.extract_graph_scenes(context, model="gemini", force=True)["failure_count"] == 1
     assert read_jsonl(output) == []
-    assert (output.parent / ".recovery").is_dir()
+    assert not (output.parent / ".recovery").exists()
 
 
 @pytest.mark.parametrize("source", ["qwen", "gemini", "description"])
@@ -279,7 +279,9 @@ def test_force_interrupted_before_first_response_resumes_instead_of_reusing_old_
     with pytest.raises(RuntimeError, match="worker failed"):
         run(force=True)
     assert output.read_bytes() == before
-    assert (output.parent / ".recovery" / ".force-run").is_file()
+    marker = (output.parent / ".pending-contents.json" if source == "gemini"
+              else output.parent / ".recovery" / ".force-run")
+    assert marker.is_file()
     interrupted = False
     run()
     assert len(calls) == 2
