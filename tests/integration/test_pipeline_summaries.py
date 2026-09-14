@@ -17,6 +17,90 @@ from pipeline_runtime import RunContext, read_jsonl, write_json, write_jsonl
 from pipeline_fixtures import context as context, _summary_lines
 
 
+@pytest.mark.parametrize("source", ["qwen", "gemini"])
+@pytest.mark.parametrize("schema_version", ["v3", "v4"])
+def test_graph_summary_processes_available_scenes_and_resumes(
+    context, monkeypatch, capsys, source, schema_version,
+):
+    context.config["schema_version"] = f"viewing-context-config/{schema_version}"
+    content_ids = ["c1", "c2", "c3", "c4"]
+    monkeypatch.setattr(
+        extraction_steps, "_visual_rows", lambda _: [{"content_id": cid} for cid in content_ids]
+    )
+    monkeypatch.setattr(extraction_steps, "_video_name_map", lambda _: {})
+    scene_dir = context.graph_scene_dir(source)
+    summary_dir = context.graph_summary_dir(source)
+    record = {
+        "scene_idx": 0, "keyframes": [5], "graph": {"setting_context": "indoor"},
+        "parse_mode": "native", "semantic_warnings": [],
+    }
+    for cid in ("c1", "c2", "outside_cohort"):
+        write_jsonl(scene_dir / f"{cid}.jsonl", [record])
+    write_jsonl(scene_dir / "c4.jsonl", [])
+    sections = dict.fromkeys(SUMMARY_SECTIONS, "")
+    sections["setting_and_environments"] = "An indoor room."
+    submitted = []
+
+    @contextmanager
+    def generator(**_kwargs):
+        def generate(tasks, callback):
+            submitted.append([task.task_id for task in tasks])
+            for task in tasks:
+                callback(task.task_id, _summary_lines(sections))
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", generator)
+    run = partial(extraction_steps.summarize_graph, context, source=source)
+
+    result = run()
+    assert result["content_count"] == 2 and result["failure_count"] == 1
+    assert submitted == [["c1", "c2"]]
+    assert not (summary_dir / "c3.json").exists()
+    assert not (summary_dir / "outside_cohort.json").exists()
+    assert capsys.readouterr().err.rstrip().endswith("2/4 Done")
+    original = (summary_dir / "c2.json").read_bytes()
+
+    assert run()["content_count"] == 2
+    assert submitted == [["c1", "c2"]]
+    assert capsys.readouterr().err.rstrip().endswith("2/4 Done")
+
+    write_jsonl(scene_dir / "c1.jsonl", [record, {**record, "scene_idx": 1, "keyframes": [35]}])
+    write_jsonl(scene_dir / "c3.jsonl", [record])
+    assert run()["content_count"] == 3
+    assert submitted[-1] == ["c1", "c3"]
+    assert json.loads((summary_dir / "c1.json").read_text())["scene_count"] == 2
+    assert (summary_dir / "c2.json").read_bytes() == original
+    assert capsys.readouterr().err.rstrip().endswith("3/4 Done")
+
+    write_jsonl(scene_dir / "c4.jsonl", [record])
+    assert run()["content_count"] == 4
+    assert submitted[-1] == ["c4"]
+    assert capsys.readouterr().err.rstrip().endswith("4/4 Done")
+
+
+@pytest.mark.parametrize("source", ["qwen", "gemini"])
+@pytest.mark.parametrize("directory_exists", [False, True])
+def test_graph_summary_without_scene_files_reports_zero_without_loading_model(
+    context, monkeypatch, capsys, source, directory_exists,
+):
+    monkeypatch.setattr(
+        extraction_steps, "_visual_rows", lambda _: [{"content_id": "c1"}, {"content_id": "c2"}]
+    )
+    monkeypatch.setattr(extraction_steps, "_video_name_map", lambda _: {})
+    if directory_exists:
+        context.graph_scene_dir(source).mkdir(parents=True)
+
+    def unexpected_generator(**_kwargs):
+        pytest.fail("no available scenes should not load the model")
+
+    monkeypatch.setattr(extraction_steps, "qwen_generator", unexpected_generator)
+    result = extraction_steps.summarize_graph(context, source=source)
+    assert result["content_count"] == result["failure_count"] == 0
+    assert capsys.readouterr().err.rstrip().endswith("0/2 Done")
+
+
 def test_summary_batch_saves_valid_callbacks_and_reports_failure_once() -> None:
     sections = {
         "setting_and_environments": "An indoor room",

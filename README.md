@@ -163,6 +163,8 @@ conda activate llmjg
 python -m extraction summarize-graph --source gemini --run-id "$RUN_ID" --gpus 1
 ```
 
+`summarize-graph`는 Qwen/Gemini 모두 현재 존재하는 Scene 파일만 요약하며, 아직 없는 영상의 파일은 건너뜁니다. 마지막에는 `1234/5678 Done`처럼 **요약 완료 영상 수/전체 cohort 영상 수**를 표시합니다. 완료 수에는 재사용한 요약도 포함하고, Scene이 없거나 요약에 실패한 영상은 포함하지 않습니다. Scene 파일이 하나도 없으면 모델을 로드하지 않고 `0/전체 수 Done`으로 종료합니다. 이후 Scene이 추가되면 같은 명령을 다시 실행하여 새 영상과 Scene 입력이 변경된 영상의 요약을 생성할 수 있습니다.
+
 ### 3. 임베딩·추천·진단
 
 GPU 환경에서 각 영상의 표현을 생성하고 추천 실험을 실행합니다. Gemini summary가 없는 아이템은 아래의 Qwen 대체 정책을 적용합니다.

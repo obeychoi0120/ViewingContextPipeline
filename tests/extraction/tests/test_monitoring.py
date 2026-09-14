@@ -68,9 +68,9 @@ def test_generator_defaults_to_one_gpu_and_passes_completed_request_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    from extraction.qwen_runtime import QwenRuntimeLog
+    from extraction.qwen_runtime import QwenRuntime
 
-    runtime = QwenRuntimeLog(tmp_path, "summary")
+    runtime = QwenRuntime()
 
     class Pool:
         def __init__(self, count, model_path, **kwargs):

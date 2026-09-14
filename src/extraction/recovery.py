@@ -164,8 +164,6 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             if runtime and replay:
                 runtime.current_result = None
             complete(task_id, cycle["output"])
-            if runtime and replay:
-                runtime.record_replayed(task_id, cycle["output"], cycle.get("origin"))
             cycle["status"] = cycle["output"].get("status", "complete")
         elif cycle["status"] == "prepared_failure":
             failed(task_id, cycle["attempts"])

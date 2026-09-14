@@ -90,10 +90,6 @@ def run_qwen_scenes(
     records_by_content, failures_by_content = {}, {}
     rows_by_task, states = {}, {}
     reused = sum(len(rows) for rows in existing_records.values())
-    unknown = sum(
-        runtime.classification(f"{content_id}:{row['scene_idx']}", row) == "legacy_unknown"
-        for content_id, rows in existing_records.items() for row in rows
-    ) if runtime else reused
     for visual, scene_rows in pending:
         content_id = str(visual["content_id"])
         states[content_id] = {
@@ -106,7 +102,7 @@ def run_qwen_scenes(
             if task_id in rows_by_task:
                 raise ValueError(f"duplicate scene task: {task_id}")
             rows_by_task[task_id] = (content_id, row)
-    write_progress(progress, f"[Qwen] reused={reused} legacy_unknown={unknown} "
+    write_progress(progress, f"[Qwen] reused={reused} "
                              f"pending={len(rows_by_task)} contents={len(pending)}")
     for content_id, state in states.items():
         if state["remaining"] == 0:
@@ -153,10 +149,6 @@ def run_qwen_scenes(
         ]
         write_scene_checkpoint(scene_dir / f"{content_id}.jsonl",
                                failure_dir / f"{content_id}.jsonl", completed, failed)
-        if runtime:
-            runtime.record(task_id, record if record is not None else failure,
-                           status=record.get("status", "complete") if record else "failed",
-                           artifact_id=f"{content_id}:{row['scene_idx']}")
         state["remaining"] -= 1
         if state["remaining"] == 0:
             records_by_content[content_id] = completed

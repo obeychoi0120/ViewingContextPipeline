@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from dataclasses import replace
 from typing import Any, Callable
@@ -15,7 +16,7 @@ from extraction.descriptions import (
 )
 from extraction.errors import ExtractionStepError
 from extraction.preparation import prepare_input_data
-from extraction.qwen_runtime import QwenRuntimeLog
+from extraction.qwen_runtime import QwenRuntime
 from extraction.recovery import active_force_run, clear_recovery, has_pending_recovery, penalty_schedule
 from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
 from extraction.progress import InferenceProgress
@@ -275,7 +276,7 @@ def extract_graph_scenes(
                 existing_failures=failures_by_content,
                 qwen_options=context.config["extraction"].get("qwen"),
                 image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
-                runtime=QwenRuntimeLog(context.run_root, stage),
+                runtime=QwenRuntime(),
                 penalties=context.config["extraction"]["graph_repetition_penalty"],
                 force=force,
             )
@@ -334,12 +335,8 @@ def summarize_graph(
     visuals = _visual_rows(context)
     names = _video_name_map(context)
     scene_dir = context.graph_scene_dir(source)
-    if not scene_dir.is_dir():
-        raise ExtractionStepError(f"missing graph scene directory: {scene_dir}")
     paths = [scene_dir / f"{row['content_id']}.jsonl" for row in visuals]
-    if not all(path.is_file() for path in paths):
-        missing = next(path for path in paths if not path.is_file())
-        raise ExtractionStepError(f"missing graph scene output: {missing}")
+    paths = [path for path in paths if path.is_file()]
     if source == "gemini" and not force and context.config["schema_version"] == "viewing-context-config/v4":
         from extraction.summary_executor import reuse_summary_document
         for path in paths:
@@ -350,7 +347,7 @@ def summarize_graph(
                     content_id=path.stem, arm="graph_gemini",
                     scene_count=None if read_jsonl(path) else 0,
                 )
-    return run_summary_stage(
+    summary_result = run_summary_stage(
         SummaryBranch(
             stage=stage,
             arm=f"graph_{source}",
@@ -376,9 +373,14 @@ def summarize_graph(
         progress_factory=tqdm,
         qwen_options=context.config["extraction"].get("qwen"),
         image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
-        runtime=QwenRuntimeLog(context.run_root, stage),
+        runtime=QwenRuntime(),
         penalties=context.config["extraction"]["summary_repetition_penalty"],
     )
+    print(
+        f"[SUMMARY] {stage} | {summary_result['content_count']}/{len(visuals)} Done",
+        file=sys.stderr,
+    )
+    return summary_result
 
 
 def extract_description_scenes(
@@ -422,7 +424,7 @@ def extract_description_scenes(
             existing_failures=failures_by_content,
             qwen_options=context.config["extraction"].get("qwen"),
             image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
-            runtime=QwenRuntimeLog(context.run_root, "extract-description-scenes"),
+            runtime=QwenRuntime(),
             penalties=context.config["extraction"]["description_repetition_penalty"],
             force=force,
         )
@@ -495,7 +497,7 @@ def summarize_description(
         progress_factory=tqdm,
         qwen_options=context.config["extraction"].get("qwen"),
         image_limit=context.config["extraction"]["visual_evidence"]["num_keyframes"],
-        runtime=QwenRuntimeLog(context.run_root, "summarize-description"),
+        runtime=QwenRuntime(),
         penalties=context.config["extraction"]["summary_repetition_penalty"],
     )
 

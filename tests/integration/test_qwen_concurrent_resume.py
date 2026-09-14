@@ -8,8 +8,7 @@ import pytest
 import extraction.scene_executor as scene_executor
 import extraction.steps as steps
 from extraction.backends.qwen_workers import QwenGenerationTask
-from extraction.qwen_runtime import QwenRuntimeLog
-from pipeline_runtime import read_json, read_jsonl, write_jsonl
+from pipeline_runtime import read_jsonl, write_jsonl
 from pipeline_fixtures import context as context
 
 
@@ -92,7 +91,6 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
                  else scene_executor.description_scene_result(first_row, text, content_id="a"))
     scene_dir = context.graph_scene_dir("qwen") if arm == "graph" else context.description_scene_dir
     failure_dir = context.graph_failure_dir("qwen") if arm == "graph" else context.description_failure_dir
-    stage = "extract-graph-scenes-qwen" if arm == "graph" else "extract-description-scenes"
     write_jsonl(scene_dir / "a.jsonl", [cached])
     write_jsonl(failure_dir / "a.jsonl", [{"scene_idx": 11, "keyframes": [35],
                                         "failure_kind": "generation", "error": "old failure", "raw_response": ""}])
@@ -145,10 +143,8 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
         run()
     assert bars[-1].total == 2 and bars[-1].reused == 1 and bars[-1].bar.n == 1
     assert (scene_dir / "a.jsonl").read_bytes() == original
-    completed_b = read_jsonl(scene_dir / "b.jsonl")[0]
-    runtime = QwenRuntimeLog(context.run_root, stage)
-    assert runtime.classification("b:10", completed_b) == "vllm"
-    assert runtime.classification("a:10", cached) == "legacy_unknown"
+    assert read_jsonl(scene_dir / "b.jsonl")[0]["scene_idx"] == 10
+    assert not (context.run_root / "extraction" / "qwen_runtime.jsonl").exists()
     attempt = 1
     assert run()["failure_count"] == 0
     assert bars[-1].total == bars[-1].bar.n == 1 and bars[-1].reused == 2
@@ -156,21 +152,27 @@ def test_cross_video_completion_checkpoint_and_resume(context, monkeypatch, arm,
     records = read_jsonl(scene_dir / "a.jsonl")
     assert records[0] == cached
     assert [row["scene_idx"] for row in records] == [10, 11]
-    assert QwenRuntimeLog(context.run_root, stage).classification("a:11", records[1]) == "vllm"
+    assert not (context.run_root / "extraction" / "qwen_runtime.jsonl").exists()
     # A completely cached run must not construct any engine.
     monkeypatch.setattr(steps, "qwen_generator", lambda **kwargs: pytest.fail("unexpected inference"))
     assert run()["failure_count"] == 0
 
 
 @pytest.mark.parametrize("source", ["qwen", "gemini", "description"])
-def test_summary_provenance_and_resume_after_interruption(context, monkeypatch, source):
+@pytest.mark.parametrize("existing_log", [False, True])
+def test_summary_resume_after_interruption_without_runtime_log(
+    context, monkeypatch, source, existing_log,
+):
     from extraction.summary_validation import SUMMARY_SECTIONS
 
     context.initialize()
+    runtime_path = context.run_root / "extraction" / "qwen_runtime.jsonl"
+    if existing_log:
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_bytes(b"corrupt legacy runtime log\n")
     description = source == "description"
     scene_dir = context.description_scene_dir if description else context.graph_scene_dir(source)
     summary_dir = context.description_summary_dir if description else context.graph_summary_dir(source)
-    stage = "summarize-description" if description else f"summarize-graph-{source}"
     monkeypatch.setattr(steps, "_visual_rows", lambda _: [{"content_id": cid} for cid in ("a", "b")])
     monkeypatch.setattr(steps, "_video_name_map", lambda _: {})
     for cid in ("a", "b"):
@@ -212,9 +214,12 @@ def test_summary_provenance_and_resume_after_interruption(context, monkeypatch, 
         run()
     saved = (summary_dir / "b.json").read_bytes()
     assert not (summary_dir / "a.json").exists()
-    assert QwenRuntimeLog(context.run_root, stage).classification("b", read_json(summary_dir / "b.json")) == "vllm"
     assert run()["content_count"] == 2
     assert submissions == [["a", "b"], ["a"]]
     assert (summary_dir / "b.json").read_bytes() == saved
     monkeypatch.setattr(steps, "qwen_generator", lambda **kwargs: pytest.fail("unexpected inference"))
     assert run()["content_count"] == 2
+    if existing_log:
+        assert runtime_path.read_bytes() == b"corrupt legacy runtime log\n"
+    else:
+        assert not runtime_path.exists()

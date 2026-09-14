@@ -163,10 +163,6 @@ def run_summary_stage(
         )
         for reason in incompatible.values():
             write_progress(progress, f"[SUMMARY RETRY] {reason}")
-        if runtime:
-            unknown = sum(runtime.classification(task_id, document) == "legacy_unknown"
-                          for task_id, document in documents.items())
-            write_progress(progress, f"[Qwen] reused={len(documents)} legacy_unknown={unknown} pending={len(tasks)}")
 
         def validate(task_id, text):
             records, output_path = pending[task_id]
@@ -197,8 +193,6 @@ def run_summary_stage(
             record_inputs(output_path, records)
             (branch.failure_dir / f"{task_id}.jsonl").unlink(missing_ok=True)
             documents[task_id] = document
-            if runtime:
-                runtime.record(task_id, document, status=document["status"])
             progress.complete()
 
         def failed(task_id, attempts):
@@ -209,8 +203,6 @@ def run_summary_stage(
                 raw_response=row["raw_response"],
             ) for row in attempts)
             write_jsonl(branch.failure_dir / f"{task_id}.jsonl", failures)
-            if runtime:
-                runtime.record(task_id, failures[-1], status="failed")
             message = " ".join(str(attempts[-1]["error"]).splitlines())
             write_progress(
                 progress,
