@@ -95,6 +95,8 @@ Vertex 인증은 VM 서비스 계정 또는 사용자 ADC를 사용합니다. �
 
 ## 실행 순서
 
+각 Step은 시작할 때 `[STEP]` 블록으로 현재 `pipeline.yaml`에서 읽은 관련 설정과 실행 옵션을 한 번 출력합니다. 설정은 `extraction.gemini.threads`처럼 YAML 경로를 유지하며, `run_id`, `force`, 선택 모델·source·target, GPU 옵션과 실제 출력 디렉터리를 함께 표시합니다. Qwen 설정을 생략하면 적용되는 기본값을 출력하고, 요약 샘플링 값은 `greedy_decoding=false`일 때만 표시합니다. 이 로그는 콘솔에만 출력하며 설정 artifact를 만들지 않습니다.
+
 ### 1. 입력 검사와 데이터 준비
 
 GPU 실행 환경에서 새 실험의 고유 run ID를 지정하고 전체 입력 목록·rolling 분할을 검사합니다. `--plan-only`는 영상 처리와 모델 추론을 실행하지 않습니다.

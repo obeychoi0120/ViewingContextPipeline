@@ -15,6 +15,7 @@ from validation.recommendation_contracts import (
     TRAINING_RUNS_FILENAME,
     TRAINING_RUN_SCHEMA_VERSION,
 )
+from pipeline_logging import log_step_start
 from pipeline_runtime import RunContext, read_json, read_jsonl, write_json
 
 
@@ -64,6 +65,7 @@ def _require_file(path: Path, label: str) -> Path:
 def prepare_cohort_step(
     context: RunContext, *, force: bool = False, plan_only: bool = False
 ) -> dict[str, Any]:
+    log_step_start(context, "prepare-cohort", force=force, plan_only=plan_only)
     context.initialize()
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_data import prepare_full_cohort
@@ -321,6 +323,7 @@ def _persist_representations(context, matrices, catalog, gemini_fallbacks, signa
 
 
 def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
+    log_step_start(context, "embed-representations", force=force)
     context.initialize()
     cohort = context.require_ready_cohort()
     from validation.features import BGETextEncoder
@@ -444,6 +447,8 @@ def run_recommendation(
 ) -> dict[str, Any]:
     from validation.recommendation_contracts import resolve_target_arms
     arms = resolve_target_arms(target)
+    log_step_start(context, "run-recommendation", force=force, gpus=gpus,
+                   workers_per_gpu=workers_per_gpu, target=target)
     context.initialize()
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_recommendation import run_rolling
@@ -492,6 +497,7 @@ def run_diagnosis(
 ) -> dict[str, Any]:
     from validation.recommendation_contracts import resolve_target_arms
     arms = resolve_target_arms(target)
+    log_step_start(context, "run-diagnosis", force=force, target=target)
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_diagnosis import diagnose
         return diagnose(context, target=target)

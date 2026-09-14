@@ -19,7 +19,11 @@ from extraction.qwen_runtime import QwenRuntimeLog
 from extraction.recovery import active_force_run, clear_recovery, has_pending_recovery, penalty_schedule
 from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
 from extraction.progress import InferenceProgress
-from extraction.scene_executor import run_qwen_scenes, run_gemini_scenes
+from extraction.scene_executor import (
+    QWEN_GRAPH_SCENE_CONCURRENCY,
+    run_qwen_scenes,
+    run_gemini_scenes,
+)
 from extraction.semantic_graph import (
     SUMMARY_SCHEMA_VERSION as GRAPH_SUMMARY_SCHEMA_VERSION,
     graph_summary_prompt,
@@ -43,6 +47,7 @@ from extraction.step_support import (
     write_failure_jsonl,
     restore_scene_checkpoint,
 )
+from pipeline_logging import log_step_start
 from pipeline_runtime import (
     RunContext,
     read_json,
@@ -216,6 +221,11 @@ def extract_graph_scenes(
     if model == "gemini" and gpus is not None:
         raise ValueError("--gpus cannot be used with --model gemini")
     stage = graph_stage_name("extract-graph-scenes", model)
+    log_step_start(
+        context, "extract-graph-scenes", model=model, force=force, gpus=gpus,
+        scene_concurrency=(QWEN_GRAPH_SCENE_CONCURRENCY if model == "qwen"
+                           else context.config["extraction"]["gemini"]["threads"]),
+    )
     context.initialize()
     settings = context.config["extraction"]["graph"]
     prompt_path = context.config_path("extraction", "graph", "scene_prompt")
@@ -313,6 +323,7 @@ def summarize_graph(
     gpus: int | None = None,
 ) -> dict[str, Any]:
     stage = graph_stage_name("summarize-graph", source)
+    log_step_start(context, "summarize-graph", source=source, force=force, gpus=gpus)
     context.initialize()
     settings = context.config["extraction"]["graph"]
     generation = _summary_generation_settings(context)
@@ -376,6 +387,7 @@ def extract_description_scenes(
     force: bool = False,
     gpus: int | None = None,
 ) -> dict[str, Any]:
+    log_step_start(context, "extract-description-scenes", force=force, gpus=gpus)
     context.initialize()
     settings = context.config["extraction"]["description"]
     prompt_path = context.config_path("extraction", "description", "scene_prompt")
@@ -441,6 +453,7 @@ def summarize_description(
     force: bool = False,
     gpus: int | None = None,
 ) -> dict[str, Any]:
+    log_step_start(context, "summarize-description", force=force, gpus=gpus)
     context.initialize()
     settings = context.config["extraction"]["description"]
     generation = _summary_generation_settings(context)
