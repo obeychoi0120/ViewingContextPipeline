@@ -15,6 +15,7 @@ from extraction.evidence_reuse import (
 )
 from extraction.errors import ExtractionStepError
 from extraction.step_support import result, visual_rows
+from pipeline_logging import log_step_start
 from pipeline_runtime import RunContext, write_json
 from visual_sampling import build_fixed_windows
 
@@ -25,6 +26,7 @@ def prepare_input_data(
     force: bool = False,
     reuse_run_id: str | None = None,
 ) -> dict[str, Any]:
+    log_step_start(context, "prepare-input-data", force=force, reuse_run_id=reuse_run_id)
     donor = None
     if reuse_run_id is not None:
         if force:
