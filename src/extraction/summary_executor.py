@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -232,6 +233,7 @@ def run_summary_stage(
                         task_id, branch.arm, len(pending[task_id][0]), raw),
                     force=force, runtime=runtime,
                     batch_size=4 * (gpus or 1) * qwen_settings(qwen_options)["max_num_seqs"],
+                    rounds_across_batches=branch.arm == "graph_gemini",
                     log=lambda message: write_progress(progress, message),
                 )
             failed_ids = [key for key, rows in failures_by_content.items()
@@ -256,7 +258,7 @@ ValidationFailureCallback = Callable[
     None,
 ]
 GenerationFunction = Callable[
-    [list[QwenGenerationTask], GenerationCallback | None],
+    [Iterable[QwenGenerationTask], GenerationCallback | None],
     dict[str, str],
 ]
 

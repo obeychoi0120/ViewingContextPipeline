@@ -74,6 +74,8 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
 
     With batch_key, contiguous task groups are completed sequentially, including retries.
     Batches never cross a group boundary and contain at most batch_size tasks.
+    With rounds_across_batches, stream the entire pass with lazy preparation and
+    retry only after all requests at the current penalty have finished.
     """
     tasks = list(tasks)
     if len({task.task_id for task in tasks}) != len(tasks):
@@ -91,8 +93,8 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
     for attempt_index in (range(len(penalties)) if rounds_across_batches else [None]):
         remaining = []
         if rounds_across_batches:
-            log(f"[RECOVERY] scene pass={attempt_index + 1}/{len(penalties)} "
-                f"repetition_penalty={penalties[attempt_index]}")
+            log(f"[RECOVERY] pass={attempt_index + 1}/{len(penalties)} "
+                f"repetition_penalty={penalties[attempt_index]} pending={len(tasks)}")
         submission_size = (len(tasks) or 1) if rounds_across_batches else batch_size
         groups = (group for _, group in groupby(tasks, key=batch_key)) if batch_key else [tasks]
         offset = 0

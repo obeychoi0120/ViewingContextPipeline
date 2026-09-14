@@ -67,9 +67,9 @@ Qwen 장면 추출과 모든 Summary는 각 출력 디렉터리의 `.recovery`�
 
 Qwen 장면 추출·Summary Step이 실패 없이 완료되면 해당 출력 디렉터리의 `.recovery` 폴더를 삭제합니다. 정상 산출물 재사용만으로 완료된 경우와 `raw_fallback` 산출물도 포함합니다. 예외·중단·부분 실패(허용된 Gemini Summary 누락 포함)에서는 복구 이력을 유지합니다. 삭제 후 recovery 진단의 시도 수·Repair 이력은 남지 않으며, 정식 산출물과 `.inputs`는 유지됩니다.
 
-Qwen 장면의 입력 hash·복구 상태는 worker에 공급할 때 준비합니다. Summary는 작은 묶음 단위로 준비합니다. 응답 전에는 task별 빈 `.recovery` 파일을 만들지 않으며, 실제 응답을 받은 뒤부터 기록합니다. 기존 `attempts: []` 파일도 그대로 읽을 수 있습니다. `--force` 중단 후 아직 시작하지 않은 작업까지 재개하기 위해 Step당 `.recovery/.force-run` 표식 하나를 사용하고, 전체 처리 후 제거합니다. Summary 입력 무효화 표식은 기존 Summary가 있을 때만 만들고, 같은 변경 표식을 반복 저장하지 않습니다.
+Qwen 장면과 Gemini Graph 요약의 입력 hash·복구 상태는 worker에 공급할 때 준비합니다. Qwen Graph/Description 요약은 작은 묶음 단위로 준비합니다. 응답 전에는 task별 빈 `.recovery` 파일을 만들지 않으며, 실제 응답을 받은 뒤부터 기록합니다. 기존 `attempts: []` 파일도 그대로 읽을 수 있습니다. `--force` 중단 후 아직 시작하지 않은 작업까지 재개하기 위해 Step당 `.recovery/.force-run` 표식 하나를 사용하고, 전체 처리 후 제거합니다. Summary 입력 무효화 표식은 기존 Summary가 있을 때만 만들고, 같은 변경 표식을 반복 저장하지 않습니다.
 
-Qwen Graph 장면 추출은 콘텐츠별 최대 8개 Scene 묶음 안에서 실패한 Scene만 다음 penalty로 재시도합니다. 해당 묶음의 처리가 모두 끝나야 다음 묶음으로 넘어갑니다. Qwen Description 장면 추출은 전체 대기 Scene의 현재 penalty 처리를 끝낸 다음, 실패한 Scene만 다음 penalty로 연속 공급합니다. 중단 후에는 저장된 시도를 건너뜁니다. Summary는 묶음별 재시도 순서를 유지합니다.
+Qwen Graph 장면 추출은 콘텐츠별 최대 8개 Scene 묶음 안에서 실패한 Scene만 다음 penalty로 재시도합니다. 해당 묶음의 처리가 모두 끝나야 다음 묶음으로 넘어갑니다. Qwen Description 장면 추출과 `summarize-graph --source gemini`는 전체 대기 요청을 연속 공급하며, 현재 penalty 처리를 끝낸 다음 실패한 요청만 다음 penalty로 재시도합니다. Gemini Graph 요약에는 512개 등의 구간 경계가 없으며, `[RECOVERY] pass=2/5 repetition_penalty=1.05 pending=3`처럼 회차별 로그만 표시합니다. 중단 후에는 저장된 시도를 건너뛰며, 기존 묶음 방식의 복구 기록도 그대로 재사용합니다. Qwen Graph/Description 요약은 묶음별 재시도 순서를 유지합니다.
 
 `extraction/qwen_runtime.jsonl` 실행 이력 파일은 생성하거나 읽지 않습니다. 기존 파일은 삭제해도 결과 재사용과 중단 후 재개에 영향을 주지 않습니다. 실행 중 엔진 정보는 메모리에 보관하고, 복구에 필요한 실행·토큰·종료 정보는 `.recovery`에 기록합니다. 캐시 재사용 여부는 실제 산출물과 복구 상태로 판단하며, 실행 이력에 따른 `legacy_unknown` 통계는 표시하지 않습니다.
 

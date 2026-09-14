@@ -213,6 +213,36 @@ def test_scene_pass_resume_finishes_unstarted_scenes_before_retry(tmp_path):
     assert seen == [("b", 1), ("a", 1.05)]
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_streaming_resume_reuses_checkpoints_from_batched_recovery(tmp_path, force):
+    tasks = [task(name) for name in "abc"]
+    if force:
+        run(tmp_path, lambda batch, _: {t.task_id: "valid old" for t in batch}, tasks)
+
+    def interrupted(batch, callback):
+        for item in batch:
+            if item.repetition_penalty > 1:
+                raise KeyboardInterrupt
+            callback(item.task_id, "bad" if item.task_id == "a" else "valid saved")
+        return {}
+
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, interrupted, tasks, batch_size=2, force=force)
+    seen = []
+
+    def resume(stream, callback):
+        for item in stream:
+            seen.append((item.task_id, item.repetition_penalty))
+            callback(item.task_id, "valid resumed")
+        return {}
+
+    outputs, failures = run(tmp_path, resume, tasks, rounds_across_batches=True)
+    assert seen == [("c", 1), ("a", 1.05)]
+    assert not failures and len(outputs) == 3
+    assert outputs["b"]["text"] == "valid saved"
+    assert not (tmp_path / ".force-run").exists()
+
+
 def test_scene_stream_prepares_only_admitted_tasks_and_refills_before_completion(tmp_path, monkeypatch):
     import extraction.recovery as recovery
     hashed = []

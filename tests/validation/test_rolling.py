@@ -352,6 +352,7 @@ def test_gemini_recovered_scenes_refresh_only_stale_valid_summary(
     @contextmanager
     def generator(**kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             calls.append([task.task_id for task in tasks])
             for task in tasks:
                 callback(task.task_id, text if valid_output else "")
@@ -389,6 +390,7 @@ def test_missing_gemini_summary_failure_continues_to_fallback_then_recovers(
     @contextmanager
     def generator(**kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             calls.append([task.task_id for task in tasks])
             for task in tasks:
                 callback(task.task_id, "" if len(calls) == 1 and task.task_id == contents[0] else text)
@@ -436,7 +438,7 @@ def test_gemini_runtime_errors_are_not_hidden_by_missing_summary_fallback(
         def generate(tasks, callback):
             if failure == "generation":
                 raise RuntimeError("worker failed")
-            callback(tasks[0].task_id, text)
+            callback(next(iter(tasks)).task_id, text)
             return {}
         yield generate
 

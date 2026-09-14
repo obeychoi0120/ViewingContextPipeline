@@ -44,6 +44,7 @@ def test_graph_summary_processes_available_scenes_and_resumes(
     @contextmanager
     def generator(**_kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             submitted.append([task.task_id for task in tasks])
             for task in tasks:
                 callback(task.task_id, _summary_lines(sections))
@@ -309,6 +310,7 @@ def test_summary_resume_retries_only_unusable_or_missing_outputs(
     @contextmanager
     def generator(**_kwargs):
         def generate(tasks, callback):
+            tasks = list(tasks)
             submitted.append([task.task_id for task in tasks])
             for task in tasks:
                 assert (

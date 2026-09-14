@@ -12,6 +12,59 @@ from pipeline_runtime import read_jsonl, write_jsonl
 from pipeline_fixtures import context as context
 
 
+def test_gemini_graph_summary_streams_past_512_before_retrying(context, monkeypatch, capsys):
+    from extraction.summary_validation import SUMMARY_SECTIONS
+
+    context.config["schema_version"] = "viewing-context-config/v4"
+    context.config["extraction"]["summary_repetition_penalty"] = [1, 1.05, 1.1]
+    context.config["extraction"]["qwen"]["max_num_seqs"] = 128
+    content_ids = [f"c{i}" for i in range(1025)]
+    monkeypatch.setattr(steps, "_visual_rows", lambda _: [{"content_id": cid} for cid in content_ids])
+    monkeypatch.setattr(steps, "_video_name_map", lambda _: {})
+    scene_dir = context.graph_scene_dir("gemini")
+    summary_dir = context.graph_summary_dir("gemini")
+    for cid in content_ids:
+        write_jsonl(scene_dir / f"{cid}.jsonl", [{
+            "scene_idx": 0, "keyframes": [5], "graph": {"setting_context": "indoor"},
+            "parse_mode": "native", "semantic_warnings": [],
+        }])
+    text = "\n".join(f"{name}: A room." for name in SUMMARY_SECTIONS)
+    submissions = []
+    pools = []
+
+    @contextmanager
+    def generator(**kwargs):
+        pools.append(True)
+
+        def generate(tasks, callback):
+            iterator = iter(tasks)
+            first = next(iterator)
+            submissions.append([(first.task_id, first.repetition_penalty)])
+            # Hold the first request while others complete, crossing the old 512 boundary.
+            for task in iterator:
+                submissions[-1].append((task.task_id, task.repetition_penalty))
+                callback(task.task_id, text)
+                assert (summary_dir / f"{task.task_id}.json").is_file()
+                assert not (summary_dir / "c0.json").exists()
+            if first.repetition_penalty > 1:
+                assert len(submissions[0]) == len(content_ids)
+            callback(first.task_id, text if first.repetition_penalty == 1.1 else "")
+            return {}
+
+        yield generate
+
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    result = steps.summarize_graph(context, source="gemini", gpus=1)
+    assert result["content_count"] == len(content_ids) and result["failure_count"] == 0
+    assert submissions == [[(cid, 1) for cid in content_ids], [("c0", 1.05)], [("c0", 1.1)]]
+    assert pools == [True]
+    assert not (summary_dir / ".recovery").exists()
+    stderr = capsys.readouterr().err
+    assert "preparing tasks" not in stderr and "[RETRY]" not in stderr
+    assert "[RECOVERY] pass=2/3 repetition_penalty=1.05 pending=1" in stderr
+    assert stderr.rstrip().endswith("1025/1025 Done")
+
+
 @pytest.mark.parametrize("arm", ["graph", "description"])
 def test_scene_progress_advances_before_video_finishes(context, monkeypatch, arm):
     context.initialize()
