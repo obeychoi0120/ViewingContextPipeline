@@ -7,7 +7,6 @@ import json
 import numpy as np
 
 from artifact_io import atomic_write_json
-from extraction.input_tracking import marker
 from extraction.recovery import fingerprint
 
 
@@ -50,36 +49,18 @@ def begin_write(context, branch, previous_hash):
     return previous_hash
 
 
-def finish_write(context, branch, signature, previous_hash):
+def finish_write(context, branch, signature, previous_hash, *, sources=None, truncation=None):
     current = matrix_hash(context.representations_dir / f"{branch}_embeddings.npz")
-    old = read_state(context, branch)
-    generation = old.get("recommendation_hash")
-    if previous_hash != current:
-        generation = current
     atomic_write_json(state_path(context, branch), {
         "input_hash": signature, "embedding_hash": current,
-        "recommendation_hash": generation,
+        "recommendation_hash": fingerprint({"input_hash": signature, "embedding_hash": current}),
+        "sources": sources or [], "truncation": truncation,
     }, durable=True)
     pending_write(context, branch).unlink(missing_ok=True)
 
 
 def recommendation_identity(context, branch):
     value = read_state(context, branch).get("recommendation_hash")
-    return {"embedding_hash": value} if value is not None else {}
-
-
-def summary_sources(context, branch, documents, fallback_ids):
-    for row in documents:
-        content = row["content_id"]
-        if branch == "metadata":
-            continue
-        if branch == "desc":
-            directory = context.description_summary_dir
-        else:
-            source = "qwen" if branch == "graph_qwen" or content in fallback_ids else "gemini"
-            directory = context.graph_summary_dir(source)
-        yield directory / f"{content}.json"
-
-
-def source_changed(paths):
-    return any(marker(path).exists() for path in paths)
+    if value is None:
+        raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
+    return {"embedding_hash": value}

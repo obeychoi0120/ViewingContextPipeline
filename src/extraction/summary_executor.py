@@ -1,362 +1,286 @@
+"""Durable summary drafts, one format correction, and final embedded provenance."""
+
 from __future__ import annotations
 
-from collections.abc import Iterable
 from contextlib import contextmanager, ExitStack
-from dataclasses import dataclass
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Iterator
-
-from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
-from extraction.descriptions import DescriptionError
-from extraction.errors import ExtractionStepError
+from typing import Callable, Iterator
+from uuid import uuid4
+from tqdm import tqdm
 from extraction.progress import InferenceProgress
-from extraction.semantic_graph import SemanticGraphError
-from extraction.summary_validation import (
-    SUMMARY_SECTIONS,
-    SummaryContractError,
-    parse_summary_sections,
-    parse_or_repair_summary,
-    serialize_summary_sections,
+from extraction.qwen_runtime import QwenRuntime
+
+from artifact_io import atomic_write_json
+from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
+from extraction.descriptions import description_summary_prompt
+from extraction.errors import ExtractionStepError
+from extraction.input_tracking import clear_dirty, input_state_path
+from extraction.recovery import (
+    active_force_run,
+    clear_recovery,
+    fingerprint,
+    generate_with_recovery,
 )
-from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
-from extraction.step_support import result, write_progress
-from extraction.recovery import active_force_run, clear_recovery, generate_with_recovery, has_pending_recovery
-from extraction.qwen_config import qwen_settings
+from extraction.semantic_graph import graph_summary_prompt
+from extraction.step_support import minimal_description_records, minimal_graph_records, result
 from extraction.structured_output import OutputValidationError
-from extraction.raw_output import RAW_SUMMARY_SCHEMA, raw_summary_document
-from extraction.input_tracking import inputs_match, record_inputs, mark_changed, invalidate_inputs
+from extraction.summary_validation import SUMMARY_SCHEMA_VERSION, inspect_summary
+from pipeline_runtime import read_json, read_jsonl
 
-
-SUMMARY_FAILURE_SCHEMA_VERSION = "summary-generation-failure/v1"
-
-
-@dataclass(frozen=True)
-class SummaryBranch:
-    stage: str
-    arm: str
-    label: str
-    schema_version: str
-    summary_dir: Path
-    failure_dir: Path
-    normalize_records: Callable
-    content_id: Callable
-    build_prompt: Callable
-    validate: Callable
-    allow_missing: bool = False
-
-
-def _summary_failure_record(content_id, *, attempt, seed, failure_kind, error, raw_response):
-    return {
-        "schema_version": SUMMARY_FAILURE_SCHEMA_VERSION,
-        "content_id": content_id,
-        "attempt": attempt,
-        "seed": seed,
-        "failure_kind": failure_kind,
-        "error": error,
-        "raw_response": raw_response,
-    }
-
-
-def _prepare_summaries(branch, scene_paths, template, max_new_tokens, generation, force):
-    force_run_id = active_force_run(branch.summary_dir / ".recovery")
-    documents = {}
-    pending = {}
-    tasks = []
-    incompatible = {}
-    empty = 0
-    for scene_path in scene_paths:
-        records = read_jsonl(scene_path)
-        content_id = scene_path.stem
-        failure_path = branch.failure_dir / f"{content_id}.jsonl"
-        if not records:
-            empty += 1
-            invalidate_inputs(branch.summary_dir / f"{content_id}.json")
-            write_jsonl(
-                failure_path,
-                [
-                    _summary_failure_record(
-                        content_id,
-                        attempt=None,
-                        seed=None,
-                        failure_kind="empty_scene_records",
-                        error=f"{branch.label} summary requires at least one successful scene",
-                        raw_response="",
-                    )
-                ],
-            )
-            continue
-        records = branch.normalize_records(records, scene_path)
-        task_id = branch.content_id(records, scene_path)
-        output_path = branch.summary_dir / f"{task_id}.json"
-        if output_path.is_file() and not force:
-            try:
-                if has_pending_recovery(branch.summary_dir / ".recovery", task_id, force_run_id):
-                    raise ExtractionStepError(f"summary has an unfinished recovery: {output_path}")
-                if not inputs_match(output_path, records):
-                    raise ExtractionStepError(f"summary scene input changed: {output_path}")
-                documents[task_id] = reuse_summary_document(
-                    output_path,
-                    schema_version=branch.schema_version,
-                    content_id=task_id,
-                    arm=branch.arm,
-                    scene_count=len(records),
-                )
-            except ExtractionStepError as exc:
-                incompatible[task_id] = str(exc)
-            else:
-                failure_path.unlink(missing_ok=True)
-                continue
-        tasks.append(
-            QwenGenerationTask(
-                task_id=task_id,
-                image_paths=(),
-                prompt=branch.build_prompt(template, records),
-                max_new_tokens=max_new_tokens,
-                **generation,
-            )
-        )
-        pending[task_id] = (records, output_path)
-    return documents, pending, tasks, incompatible, empty
-
-
-def run_summary_stage(
-    branch: SummaryBranch,
-    *,
-    scene_paths,
-    template,
-    max_new_tokens,
-    generation,
-    model_path,
-    gpus,
-    force,
-    names,
-    generator_factory,
-    progress_factory,
-    qwen_options=None,
-    image_limit=6,
-    runtime=None,
-    penalties=None,
-):
-    documents, pending, tasks, incompatible, empty = _prepare_summaries(
-        branch,
-        scene_paths,
-        template,
-        max_new_tokens,
-        generation,
-        force,
-    )
-    description = (
-        f"Graph summaries ({branch.arm.removeprefix('graph_')})"
-        if branch.label == "graph"
-        else "Description summaries"
-    )
-    failures_by_content = {task.task_id: [] for task in tasks}
-    with InferenceProgress(
-        total=len(tasks), reused=len(documents), empty=empty,
-        desc=description, unit="summary", progress_factory=progress_factory,
-    ) as progress:
-        write_progress(
-            progress,
-            f"[SUMMARY] {branch.stage} | reused={len(documents)} "
-            f"pending={len(tasks)} incompatible={len(incompatible)} "
-            f"empty_scenes={empty} force={force} "
-            f"repetition_penalty={generation['repetition_penalty']} output={branch.summary_dir}",
-        )
-        for reason in incompatible.values():
-            write_progress(progress, f"[SUMMARY RETRY] {reason}")
-
-        def validate(task_id, text):
-            records, output_path = pending[task_id]
-            try:
-                sections, mode = parse_or_repair_summary(text)
-            except SummaryContractError as exc:
-                raise OutputValidationError(str(exc)) from exc
-            document = {
-                "schema_version": branch.schema_version,
-                "content_id": task_id,
-                "arm": branch.arm,
-                "status": "complete",
-                "sections": sections,
-                "text": serialize_summary_sections(sections),
-                "scene_count": len(records),
-            }
-            return document, mode
-
-        def complete(task_id, document):
-            records, output_path = pending[task_id]
-            try:
-                changed = not output_path.exists() or read_json(output_path) != document
-            except ValueError:
-                changed = True
-            if changed:
-                mark_changed(output_path)
-            write_json(output_path, document)
-            record_inputs(output_path, records)
-            (branch.failure_dir / f"{task_id}.jsonl").unlink(missing_ok=True)
-            documents[task_id] = document
-            progress.complete()
-
-        def failed(task_id, attempts):
-            failures = failures_by_content[task_id]
-            failures.extend(_summary_failure_record(
-                task_id, attempt=row["attempt"], seed=row["seed"],
-                failure_kind="schema_validation", error=row["error"],
-                raw_response=row["raw_response"],
-            ) for row in attempts)
-            write_jsonl(branch.failure_dir / f"{task_id}.jsonl", failures)
-            message = " ".join(str(attempts[-1]["error"]).splitlines())
-            write_progress(
-                progress,
-                f"[Qwen_summary_{branch.arm}_fail] "
-                f"{names.get(task_id, f'{task_id}.mp4')} | {message}",
-            )
-            progress.complete(failed=True)
-
-        if tasks:
-            allowed_failures = {
-                task.task_id for task in tasks
-                if branch.allow_missing and not pending[task.task_id][1].exists()
-            }
-            with generator_factory(
-                model_path=model_path, gpus=gpus, settings=qwen_options,
-                image_limit=image_limit, runtime=runtime,
-                log=lambda message: write_progress(progress, message),
-                on_progress=lambda stats: qwen_progress(progress, stats),
-            ) as generate:
-                generate_with_recovery(
-                    generate, tasks, complete=complete, failed=failed, validate=validate,
-                    penalties=penalties if penalties is not None else generation["repetition_penalty"],
-                    directory=branch.summary_dir / ".recovery",
-                    identity={"model": str(model_path), "settings": qwen_options,
-                              "backend": "vllm-0.28.0", "arm": branch.arm},
-                    raw_fallback=lambda task_id, raw: raw_summary_document(
-                        task_id, branch.arm, len(pending[task_id][0]), raw),
-                    force=force, runtime=runtime,
-                    batch_size=4 * (gpus or 1) * qwen_settings(qwen_options)["max_num_seqs"],
-                    rounds_across_batches=branch.arm == "graph_gemini",
-                    log=lambda message: write_progress(progress, message),
-                )
-            failed_ids = [key for key, rows in failures_by_content.items()
-                          if rows and key not in allowed_failures]
-            if failed_ids:
-                raise ExtractionStepError(f"structured summary failed: task_ids={failed_ids}")
-        failure_count = empty + sum(bool(rows) for rows in failures_by_content.values())
-        if branch.allow_missing and failure_count:
-            write_progress(
-                progress,
-                f"[SUMMARY FALLBACK] {branch.arm}: {failure_count} missing summaries; "
-                "embed-representations will use Qwen Graph summaries",
-            )
-    if not failure_count:
-        clear_recovery(branch.summary_dir)
-    return result(branch.stage, content_count=len(documents), failure_count=failure_count)
-
-
-GenerationCallback = Callable[[str, str], None]
-ValidationFailureCallback = Callable[
-    [str, int, int | None, str, Exception],
-    None,
-]
-GenerationFunction = Callable[
-    [Iterable[QwenGenerationTask], GenerationCallback | None],
-    dict[str, str],
-]
+GenerationFunction = Callable
 
 
 def reuse_summary_document(
-    output_path: Path,
-    *,
-    schema_version: str,
-    content_id: str,
-    arm: str,
-    scene_count: int | None,
-) -> dict[str, Any]:
-    """Validate the document; None checks its stored count before a refresh decision."""
+    output_path, *, schema_version=SUMMARY_SCHEMA_VERSION, content_id, arm, scene_count=None
+):
     try:
-        existing = read_json(output_path)
-        stored_count = existing.get("scene_count")
-        if type(stored_count) is not int or stored_count <= 0:
-            raise SummaryContractError("summary scene_count must be a positive integer")
-        if existing.get("schema_version") == RAW_SUMMARY_SCHEMA:
-            text = existing.get("text")
-            if not isinstance(text, str) or not text.strip():
-                raise SummaryContractError("raw summary text must not be empty")
-            expected = raw_summary_document(
-                content_id, arm, stored_count if scene_count is None else scene_count, text)
-            if expected != existing:
-                raise SummaryContractError("raw summary fields or identity do not match")
-            return expected
-        raw_sections = existing.get("sections")
-        if not isinstance(raw_sections, dict):
-            raise SummaryContractError("summary sections must be an object")
-        sections = parse_summary_sections(
-            "\n".join(f"{name}: {raw_sections[name]}" for name in SUMMARY_SECTIONS)
-        )
-        text = serialize_summary_sections(sections)
-    except (AttributeError, KeyError, ValueError, TypeError) as exc:
-        raise ExtractionStepError(
-            f"incompatible structured summary output: {output_path}; {exc}"
-        ) from exc
-    expected = {
-        "schema_version": schema_version,
-        "content_id": content_id,
-        "arm": arm,
-        "status": "complete",
-        "sections": sections,
-        "text": text,
-        "scene_count": stored_count if scene_count is None else scene_count,
-    }
-    if existing != expected:
-        mismatched = sorted(
-            key
-            for key in existing.keys() | expected.keys()
-            if key not in existing or key not in expected or existing[key] != expected[key]
-        )
-        raise ExtractionStepError(
-            f"incompatible structured summary output: {output_path}; "
-            f"mismatched fields: {', '.join(mismatched)}"
-        )
-    return expected
+        doc = read_json(output_path)
+        if (
+            doc.get("schema_version") != schema_version
+            or doc.get("content_id") != content_id
+            or doc.get("arm") != arm
+            or type(doc.get("scene_count")) is not int
+            or doc["scene_count"] <= 0
+            or scene_count is not None
+            and doc["scene_count"] != scene_count
+            or doc.get("status") not in {"complete", "raw_fallback"}
+            or not isinstance(doc.get("provenance"), dict)
+        ):
+            raise ValueError("summary identity, provenance, status, or scene count mismatch")
+        text, violations = inspect_summary(doc.get("text"))
+        if not text or doc.get("word_count") != len(text.split()):
+            raise ValueError("empty summary or incorrect word count")
+        if doc["status"] == "complete" and (violations or doc.get("violations") != []):
+            raise ValueError("normal summary violates the paragraph contract")
+        if doc["status"] == "raw_fallback" and not isinstance(doc.get("violations"), list):
+            raise ValueError("raw summary requires recorded violations")
+        return doc
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ExtractionStepError(f"invalid summary {output_path}: {exc}") from exc
 
 
-def generate_summaries_once(
-    generate: GenerationFunction,
-    tasks: list[QwenGenerationTask],
-    complete: GenerationCallback,
-    on_validation_failure: ValidationFailureCallback | None = None,
+def run_summary_stage(
+    context,
     *,
-    allowed_failures: set[str] | None = None,
-) -> None:
-    last_errors: dict[str, Exception] = {}
-    tasks_by_id = {task.task_id: task for task in tasks}
-    handled: set[str] = set()
+    arm,
+    schema,
+    catalog,
+    provenance,
+    generation,
+    force=False,
+    gpus=None,
+    generator_factory,
+):
+    output_dir = context.extraction_dir(arm.representation, arm.model, "summaries")
+    scene_dir = context.extraction_dir(arm.representation, arm.model, "scenes")
+    recovery_dir = output_dir / ".recovery"
+    if force:
+        atomic_write_json(recovery_dir / ".force-run", {"force_run_id": str(uuid4())}, durable=True)
+    force_run = active_force_run(recovery_dir)
+    template = schema.read_text(encoding="utf-8")
+    graph = arm.representation == "graph"
+    normalize = minimal_graph_records if graph else minimal_description_records
+    build_prompt = graph_summary_prompt if graph else description_summary_prompt
+    settings = context.config["extraction"]
+    max_tokens = settings["graph" if graph else "description"]["summary_max_new_tokens"]
+    tasks, pending, drafts, documents, failures = [], {}, {}, {}, {}
 
-    def handle_result(task_id: str, text: str) -> None:
-        if task_id in handled:
-            return
-        task = tasks_by_id[task_id]
-        handled.add(task_id)
-        try:
-            complete(task_id, text)
-        except (DescriptionError, SemanticGraphError, SummaryContractError) as exc:
-            last_errors[task_id] = exc
-            if on_validation_failure is not None:
-                on_validation_failure(task_id, 1, task.seed, text, exc)
+    def save_final(cid, document):
+        output = output_dir / f"{cid}.json"
+        atomic_write_json(output, document, durable=True)
+        clear_dirty(output)
+        (output_dir / "failures" / f"{cid}.jsonl").unlink(missing_ok=True)
+        (output_dir / ".pending" / f"{cid}.json").unlink(missing_ok=True)
+        documents[cid] = document
+        progress.complete()
 
-    results = generate(tasks, handle_result)
-    # Local test generators may return a mapping without invoking the callback.
-    for task in tasks:
-        if task.task_id not in handled:
-            handle_result(task.task_id, results[task.task_id])
+    for item in catalog:
+        cid = str(item["content_id"])
+        source = scene_dir / f"{cid}.jsonl"
+        if not source.is_file():
+            if arm.model == "gemini" and not (output_dir / f"{cid}.json").exists():
+                failures[cid] = "missing Gemini scenes"
+                continue
+            raise ExtractionStepError(f"missing scene input: {source}")
+        records = normalize(read_jsonl(source), source)
+        if not records:
+            failures[cid] = "empty scene input"
+            continue
+        if any(
+            record.get("provenance", {}).get("arm") != arm.name
+            or record.get("provenance", {}).get("representation") != arm.representation
+            for record in records
+        ):
+            raise ExtractionStepError(
+                f"scene source provenance mismatch: {source}; rerun extraction"
+            )
+        raw_count = sum(r.get("status") == "raw_fallback" for r in records)
+        prov = {
+            **provenance,
+            "scene_input_hash": fingerprint(records),
+            "scene_path": str(source),
+            "normal_scene_count": len(records) - raw_count,
+            "raw_scene_count": raw_count,
+        }
+        prov["input_hash"] = fingerprint(prov)
+        task = QwenGenerationTask(
+            task_id=cid,
+            image_paths=(),
+            prompt=build_prompt(template, records),
+            max_new_tokens=max_tokens,
+            **generation,
+        )
+        pending[cid] = (records, prov, task)
+        output = output_dir / f"{cid}.json"
+        if output.is_file() and not force and not input_state_path(output).exists():
+            try:
+                existing = reuse_summary_document(
+                    output, content_id=cid, arm=arm.name, scene_count=len(records)
+                )
+            except ExtractionStepError:
+                pass
+            else:
+                if existing["provenance"] == prov and (
+                    not force_run or existing.get("generation", {}).get("force_run_id") == force_run
+                ):
+                    documents[cid] = existing
+                    (output_dir / "failures" / f"{cid}.jsonl").unlink(missing_ok=True)
+                    continue
+        draft_path = output_dir / ".pending" / f"{cid}.json"
+        if draft_path.is_file() and not force:
+            draft = read_json(draft_path)
+            if draft.get("provenance") == prov and (
+                not force_run or draft.get("generation", {}).get("force_run_id") == force_run
+            ):
+                drafts[cid] = draft
+                continue
+        tasks.append(task)
 
-    permitted = allowed_failures or set()
-    task_ids = [
-        task.task_id for task in tasks
-        if task.task_id in last_errors and task.task_id not in permitted
+    def document(cid, text, *, corrected=False):
+        normalized, violations = inspect_summary(text)
+        if not normalized:
+            raise OutputValidationError("empty summary")
+        records, prov, _ = pending[cid]
+        return {
+            "schema_version": SUMMARY_SCHEMA_VERSION,
+            "content_id": cid,
+            "arm": arm.name,
+            "status": "raw_fallback" if violations else "complete",
+            "text": text.strip() if violations else normalized,
+            "scene_count": len(records),
+            "word_count": len(normalized.split()),
+            "violations": violations,
+            "correction_count": int(corrected),
+            "provenance": prov,
+        }
+
+    def draft_complete(cid, doc):
+        if doc["violations"]:
+            # Persist the first response before scheduling the separate correction pass.
+            atomic_write_json(output_dir / ".pending" / f"{cid}.json", doc, durable=True)
+            drafts[cid] = doc
+        else:
+            save_final(cid, doc)
+
+    def failed(cid, attempts):
+        from pipeline_runtime import write_jsonl
+
+        failures[cid] = attempts[-1]["error"]
+        progress.complete(failed=True)
+        write_jsonl(output_dir / "failures" / f"{cid}.jsonl", attempts)
+
+    runtime = QwenRuntime()
+    with ExitStack() as resources:
+        progress = resources.enter_context(
+            InferenceProgress(
+                total=len(tasks) + len(drafts),
+                reused=len(documents),
+                empty=len(failures),
+                desc=f"Summary {arm.name}",
+                unit="summary",
+                progress_factory=tqdm,
+            )
+        )
+        generate = resources.enter_context(
+            generator_factory(
+                model_path=context.path("models", "qwen"),
+                gpus=gpus,
+                settings=settings.get("qwen"),
+                image_limit=settings["visual_evidence"]["num_keyframes"],
+                runtime=runtime,
+                on_progress=progress.update_stats,
+                log=lambda message: print(message, flush=True),
+            )
+        )
+        if tasks:
+            generate_with_recovery(
+                generate,
+                tasks,
+                penalties=settings["summary_repetition_penalty"],
+                directory=recovery_dir,
+                identity=provenance,
+                validate=lambda cid, text: (document(cid, text), "native"),
+                complete=draft_complete,
+                failed=failed,
+                runtime=runtime,
+                rounds_across_batches=arm.model == "gemini",
+            )
+        correction_tasks = [
+            replace(
+                pending[cid][2],
+                prompt=(
+                    pending[cid][2].prompt
+                    + "\n\nDraft to correct:\n"
+                    + doc["text"]
+                    + "\n\nRewrite once into one natural paragraph of at most 200 words, retaining only "
+                    "important information supported by the original observations. Return only the paragraph."
+                ),
+            )
+            for cid, doc in drafts.items()
+        ]
+
+        def correction_validate(cid, text):
+            if not isinstance(text, str) or not text.strip():
+                raw = {**drafts[cid], "status": "raw_fallback", "correction_count": 1}
+                raw["violations"] = [*raw["violations"], "empty_correction"]
+                return raw, "raw_fallback"
+            return document(cid, text, corrected=True), "corrected"
+
+        def correction_complete(cid, doc):
+            doc["generation"] = {
+                **doc.get("generation", {}),
+                "force_run_id": force_run,
+                "draft": drafts[cid].get("generation"),
+            }
+            save_final(cid, doc)
+
+        if correction_tasks:
+            generate_with_recovery(
+                generate,
+                correction_tasks,
+                penalties=[generation["repetition_penalty"]],
+                directory=recovery_dir / "correction",
+                identity=provenance,
+                validate=correction_validate,
+                complete=correction_complete,
+                failed=failed,
+                runtime=runtime,
+            )
+    if not failures:
+        clear_recovery(output_dir)
+    temporary = output_dir / ".pending"
+    if temporary.exists() and not any(temporary.iterdir()):
+        temporary.rmdir()
+    blocking = [
+        cid for cid in failures if arm.model != "gemini" or (output_dir / f"{cid}.json").exists()
     ]
-    if task_ids:
-        cause = last_errors[task_ids[0]]
-        raise ExtractionStepError(f"structured summary failed: task_ids={task_ids}") from cause
+    if blocking:
+        raise ExtractionStepError(f"summary failed: {blocking[:10]}")
+    print(f"[SUMMARY] {arm.name}: complete={len(documents)} missing={len(failures)}", flush=True)
+    return result(
+        f"summarize-{arm.name}", content_count=len(documents), failure_count=len(failures)
+    )
 
 
 def qwen_progress(progress, stats):
@@ -365,27 +289,43 @@ def qwen_progress(progress, stats):
 
 @contextmanager
 def qwen_generator(
-    *, model_path: Path, gpus: int | None, settings=None, image_limit=6,
-    runtime=None, log=None, on_progress=None,
+    *,
+    model_path: Path,
+    gpus: int | None,
+    settings=None,
+    image_limit=6,
+    runtime=None,
+    log=None,
+    on_progress=None,
 ) -> Iterator[GenerationFunction]:
     def ready(event):
         if runtime:
             runtime.engine_ready(event)
         if log:
-            log(f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | "
-                f"settings={event['settings']}")
+            log(
+                f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | "
+                f"settings={event['settings']}"
+            )
 
     with ExitStack() as resources:
         pool = None
+
         def generate(tasks, on_task_complete=None):
             nonlocal pool
             if pool is None:
                 if log:
                     log("[Qwen] starting vLLM GPU workers")
-                pool = resources.enter_context(QwenWorkerPool(
-                    1 if gpus is None else gpus, str(model_path), settings=settings,
-                    image_limit=image_limit, on_runtime=ready, on_progress=on_progress,
-                ))
+                pool = resources.enter_context(
+                    QwenWorkerPool(
+                        1 if gpus is None else gpus,
+                        str(model_path),
+                        settings=settings,
+                        image_limit=image_limit,
+                        on_runtime=ready,
+                        on_progress=on_progress,
+                    )
+                )
+
             def complete(task_id, text):
                 if runtime:
                     runtime.current_result = pool.last_result
@@ -394,5 +334,7 @@ def qwen_generator(
                 finally:
                     if runtime:
                         runtime.current_result = None
+
             return pool.generate(tasks, complete if on_task_complete else None)
+
         yield generate

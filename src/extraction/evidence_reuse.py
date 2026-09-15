@@ -1,18 +1,5 @@
-from __future__ import annotations
-
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Any
-
-from extraction.data_preparation.fixed30 import (
-    selected_keyframe_timestamps,
-    visual_evidence_matches,
-)
-from extraction.errors import ExtractionStepError
-from pipeline_runtime import read_jsonl
-from visual_sampling import timestamp_stem
-
 
 SOURCE_IDENTITY_KEYS = (
     "item_id",
@@ -22,16 +9,6 @@ SOURCE_IDENTITY_KEYS = (
     "source_mtime_ns",
 )
 SOURCE_KEYS = (*SOURCE_IDENTITY_KEYS, "duration_seconds")
-
-
-def evidence_paths(
-    run_root: Path, content_id: str, scene_duration: int = 30,
-) -> tuple[Path, Path]:
-    return (
-        run_root / "data/cohort/source_assets" / content_id
-        / f"assets/timestamp_fixed_{scene_duration}s.json",
-        run_root / "data" / "resized_keyframes" / content_id,
-    )
 
 
 def source_matches_inventory(row: dict[str, Any]) -> bool:
@@ -45,79 +22,3 @@ def source_matches_inventory(row: dict[str, Any]) -> bool:
         )
     except (OSError, TypeError, KeyError):
         return False
-
-
-def donor_inventory(run_root: Path) -> dict[str, dict[str, Any]]:
-    try:
-        rows = read_jsonl(run_root / "data/cohort/item_inventory.jsonl")
-        by_item = {str(row["item_id"]): row for row in rows}
-        return by_item if len(by_item) == len(rows) else {}
-    except (OSError, TypeError, KeyError, ValueError):
-        return {}
-
-
-def copy_matching_evidence(
-    *,
-    target_root: Path,
-    donor_root: Path,
-    current: dict[str, Any],
-    donor: dict[str, Any] | None,
-    image_size: tuple[int, int],
-    scene_duration: int = 30,
-    num_keyframes: int = 6,
-) -> bool:
-    if (
-        donor is None
-        or donor.get("eligible") is not True
-        or any(key not in donor or donor[key] != current[key] for key in SOURCE_KEYS)
-        or not source_matches_inventory(current)
-    ):
-        return False
-    source_timestamp, source_frames = evidence_paths(
-        donor_root, current["content_id"], scene_duration,
-    )
-    if not visual_evidence_matches(
-        source_timestamp, source_frames, image_size, current["duration_seconds"],
-        scene_duration=scene_duration, num_keyframes=num_keyframes,
-    ):
-        return False
-    timestamp, frames = evidence_paths(target_root, current["content_id"], scene_duration)
-    root = target_root.resolve()
-    if any(not path.resolve().is_relative_to(root) for path in (timestamp, frames)):
-        raise ExtractionStepError("evidence destination must remain inside the target run")
-    if timestamp.is_symlink() or frames.is_symlink():
-        raise ExtractionStepError("cannot replace a symlinked evidence destination")
-    frames.parent.mkdir(parents=True, exist_ok=True)
-    timestamp.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=f".{frames.name}.reuse-", dir=frames.parent) as temp:
-        staging = Path(temp)
-        staged_frames = staging / "frames"
-        staged_timestamp = staging / "timestamp.json"
-        backup = staging / "previous_frames"
-        installed = False
-        try:
-            staged_frames.mkdir()
-            shutil.copy2(source_timestamp, staged_timestamp)
-            for value in selected_keyframe_timestamps(staged_timestamp):
-                name = f"{timestamp_stem(value)}.png"
-                shutil.copy2(source_frames / name, staged_frames / name)
-            if not visual_evidence_matches(
-                staged_timestamp, staged_frames, image_size, current["duration_seconds"],
-                scene_duration=scene_duration, num_keyframes=num_keyframes,
-            ) or not source_matches_inventory(current):
-                return False
-            if frames.exists():
-                frames.replace(backup)
-            staged_frames.replace(frames)
-            installed = True
-            # Timestamp is the final completion marker; no donor paths are embedded.
-            staged_timestamp.replace(timestamp)
-        except BaseException as exc:
-            if installed:
-                frames.replace(staged_frames)
-            if backup.exists():
-                backup.replace(frames)
-            if isinstance(exc, (OSError, ValueError)):
-                return False
-            raise
-    return True

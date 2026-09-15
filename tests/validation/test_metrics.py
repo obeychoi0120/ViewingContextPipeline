@@ -7,7 +7,6 @@ from validation.metrics import (
     paired_bootstrap_ci,
     paired_relative_bootstrap_ci,
 )
-from validation.recommendation import _metric
 from validation.scoring import mask_history, rank_of_target, top_k_rows
 
 
@@ -23,7 +22,7 @@ def test_metrics_and_repeated_target_history_mask() -> None:
 def test_recommendation_metric_passes_target_row_to_ranker() -> None:
     scores = np.array([0.9, 0.8, 0.7, 0.6])
 
-    metrics = _metric(scores, history=[0, 2], target=2, cutoffs=[10])
+    metrics = metrics_from_rank(rank_of_target(mask_history(scores, [0, 2], 2), 2), [10])
 
     assert metrics["NDCG@10"] == metrics_from_rank(2, [10])["NDCG@10"]
 
@@ -55,7 +54,7 @@ def test_bonferroni_alpha_and_invalid_alpha() -> None:
         bonferroni_alpha(0.05, 0)
 
 
-def test_relative_noninferiority_boundary() -> None:
+def test_relative_effect_boundary() -> None:
     desc = np.full(20, 0.5)
     exactly_margin = paired_relative_bootstrap_ci(np.full(20, 0.475), desc, samples=200)
     above_margin = paired_relative_bootstrap_ci(

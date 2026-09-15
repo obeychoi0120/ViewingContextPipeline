@@ -15,10 +15,7 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="Regenerate all outputs for this step, including completed summaries.",
     )
-    parser.add_argument(
-        "--reuse-run-id",
-        help="Validate and copy matching PNG/timestamps from a donor run (prepare-input-data only).",
-    )
+    parser.add_argument("--schema", help="Path to one Markdown prompt (required for generation).")
     parser.add_argument("--model", choices=GRAPH_SOURCES)
     parser.add_argument("--source", choices=GRAPH_SOURCES)
     parser.add_argument(
@@ -28,40 +25,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        if args.reuse_run_id is not None:
-            if args.step != "prepare-input-data":
-                raise ValueError("--reuse-run-id is only supported by prepare-input-data")
-            if args.force:
-                raise ValueError("--reuse-run-id cannot be combined with --force")
-        if args.step == "extract-graph-scenes":
-            if args.model is None:
-                raise ValueError("extract-graph-scenes requires --model qwen|gemini")
-            if args.source is not None:
-                raise ValueError("--source is only supported by summarize-graph")
-        elif args.step == "summarize-graph":
-            if args.source is None:
-                raise ValueError("summarize-graph requires --source qwen|gemini")
-            if args.model is not None:
-                raise ValueError("--model is only supported by extract-graph-scenes")
-        else:
-            if args.model is not None or args.source is not None:
-                raise ValueError("--model/--source are only supported by Graph steps")
-        if args.step == "extract-graph-scenes" and args.model == "gemini" and args.gpus:
-            raise ValueError("--gpus cannot be used with --model gemini")
-        gpu_enabled = (
-            args.step in {"summarize-graph", "extract-description-scenes", "summarize-description"}
-            or args.step == "extract-graph-scenes" and args.model == "qwen"
-        )
+        extract = args.step.startswith("extract-")
+        summary = args.step.startswith("summarize-")
+        if extract or summary:
+            if args.schema is None:
+                raise ValueError(f"{args.step} requires --schema PATH.md")
+            if extract and (args.model is None or args.source is not None):
+                raise ValueError("extraction requires --model qwen|gemini and does not accept --source")
+            if summary and (args.source is None or args.model is not None):
+                raise ValueError("summary requires --source qwen|gemini and does not accept --model")
+        elif args.schema is not None or args.model is not None or args.source is not None:
+            raise ValueError("--schema/--model/--source are only supported for generation")
+        gpu_enabled = summary or extract and args.model == "qwen"
         if args.gpus is not None and not gpu_enabled:
-            raise ValueError("--gpus is not supported for this step")
+            raise ValueError("--gpus is not supported for this step/model")
         context = RunContext.load(args.run_id)
         kwargs = {"force": args.force}
-        if args.reuse_run_id is not None:
-            kwargs["reuse_run_id"] = args.reuse_run_id
-        if args.step == "extract-graph-scenes":
-            kwargs["model"] = args.model
-        elif args.step == "summarize-graph":
-            kwargs["source"] = args.source
+        if extract or summary:
+            kwargs["schema"] = context.prompt_path(args.schema)
+            kwargs["model" if extract else "source"] = args.model if extract else args.source
         if gpu_enabled:
             kwargs["gpus"] = args.gpus
         STEP_HANDLERS[args.step](context, **kwargs)

@@ -54,16 +54,32 @@ def active_force_run(directory):
     return json.loads(path.read_text(encoding="utf-8"))["force_run_id"] if path.exists() else None
 
 
-def has_pending_recovery(directory, task_id, force_run_id=None):
+def compact_origin(origin):
+    """Keep execution identity and hardware/backend evidence, never another copy of text."""
+    if not origin:
+        return None
+    result = origin.get("result", {})
+    engine = origin.get("engine", {})
+    return {"execution_id": origin.get("execution_id"),
+            **{key: result.get(key, engine.get(key)) for key in ("worker_index", "gpu_id")},
+            **{key: engine.get(key) for key in ("backend", "gpu_name", "versions")}}
+
+
+def has_pending_recovery(directory, task_id, force_run_id=None, generation=None):
     path = directory / f"{fingerprint(task_id)}.json"
     if not path.exists():
-        return force_run_id is not None
+        return bool(force_run_id and (generation or {}).get("force_run_id") != force_run_id)
     document = json.loads(path.read_text(encoding="utf-8"))
-    if force_run_id and (not document["cycles"]
-                         or document["cycles"][-1].get("force_run_id") != force_run_id):
-        return True
-    return bool(document["cycles"] and document["cycles"][-1]["status"]
-                not in {"complete", "raw_fallback"})
+    cycles = document["cycles"]
+    return bool(not cycles or cycles[-1]["status"] not in {"complete", "raw_fallback"}
+                or force_run_id and cycles[-1].get("force_run_id") != force_run_id)
+
+
+def generation_key(task, identity, penalties):
+    return fingerprint({"task": asdict(task),
+                        "images": [file_fingerprint(p) for p in task.image_paths],
+                        "identity": identity, "penalties": penalty_schedule(penalties),
+                        "recovery_version": 2})
 
 
 def generate_with_recovery(generate, tasks, *, penalties, directory, identity, validate,
@@ -116,8 +132,6 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
         tasks = remaining
         if not tasks:
             break
-    if force_run_id:
-        (directory / ".force-run").unlink(missing_ok=True)
 
 
 def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity, validate,
@@ -132,9 +146,7 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
     def prepare(task):
         if task.task_id in states:
             raise ValueError(f"duplicate recovery task: {task.task_id}")
-        images = [file_fingerprint(path) for path in task.image_paths]
-        key = fingerprint({"task": asdict(task), "images": images, "identity": identity,
-                           "penalties": penalties, "recovery_version": 1})
+        key = generation_key(task, identity, penalties)
         path = directory / f"{fingerprint(task.task_id)}.json"
         document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {
             "schema_version": "generation-recovery/v1", "task_id": task.task_id, "cycles": [],
@@ -165,6 +177,15 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             replay = not live or cycle.get("selected_attempt") != len(cycle["attempts"])
             if runtime and replay:
                 runtime.current_result = None
+            cycle["output"]["generation"] = {
+                "input_key": cycle["identity"], "force_run_id": cycle.get("force_run_id"),
+                "attempt_count": len(cycle["attempts"]),
+                "selected_attempt": cycle.get("selected_attempt"),
+                "origin": compact_origin(cycle.get("origin")),
+                **{key: cycle["attempts"][cycle.get("selected_attempt", 1) - 1].get(key)
+                   for key in ("output_tokens", "finish_reason", "stop_reason")},
+                "repair_mode": cycle["attempts"][cycle.get("selected_attempt", 1) - 1]["repair_mode"],
+            }
             complete(task_id, cycle["output"])
             cycle["status"] = cycle["output"].get("status", "complete")
         elif cycle["status"] == "prepared_failure":
@@ -174,6 +195,8 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             return
         if cycle["status"] != previous_status:
             _save(path, document)
+        if cycle["status"] in {"complete", "raw_fallback"}:
+            path.unlink(missing_ok=True)
         done.add(task_id)
 
     for task_id in states:

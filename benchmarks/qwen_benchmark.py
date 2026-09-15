@@ -30,16 +30,16 @@ def file_hash(path):
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
-def export_requests(context, stage, limit):
+def export_requests(context, stage, limit, schema):
     arm = "description" if stage.startswith("description") else "graph"
     summary = "summary" in stage
     settings = context.config["extraction"][arm]
-    template = context.config_path("extraction", arm, "summary_prompt" if summary else "scene_prompt").read_text(encoding="utf-8")
+    template = context.prompt_path(schema).read_text(encoding="utf-8")
     tasks = []
     for visual in visual_rows(context):
         if summary:
             source = "gemini" if stage.endswith("gemini") else "qwen"
-            scene_dir = context.description_scene_dir if arm == "description" else context.graph_scene_dir(source)
+            scene_dir = context.description_scene_dir(source) if arm == "description" else context.graph_scene_dir(source)
             path = scene_dir / f"{visual['content_id']}.jsonl"
             records = read_jsonl(path)
             if not records:
@@ -235,6 +235,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     export = commands.add_parser("export")
     export.add_argument("--run-id", required=True)
+    export.add_argument("--schema", required=True)
     export.add_argument("--stage", required=True, choices=["graph-scenes", "description-scenes", "graph-summary-qwen", "graph-summary-gemini", "description-summary"])
     export.add_argument("--limit", type=int, default=144)
     export.add_argument("--output", type=Path, required=True)
@@ -251,7 +252,7 @@ def main():
     if args.command == "export":
         if args.limit < 2:
             parser.error("--limit must be at least 2")
-        write_json(args.output, export_requests(RunContext.load(args.run_id), args.stage, args.limit))
+        write_json(args.output, export_requests(RunContext.load(args.run_id), args.stage, args.limit, args.schema))
     else:
         manifest = read_json(args.requests)
         settings = dict(manifest["qwen"])

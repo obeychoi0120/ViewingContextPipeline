@@ -31,9 +31,13 @@ class BGETextEncoder:
 
     def __init__(self, settings: EncoderConfig):
         self.settings = settings
+        self.last_truncation = {"text_count": 0, "truncated_count": 0}
         self._torch, self.tokenizer, self.model, self.device = _load_bge_runtime(settings)
 
     def _encode_batch(self, texts: list[str]) -> np.ndarray:
+        lengths = self.tokenizer(texts, truncation=False, padding=False)["input_ids"]
+        self.last_truncation["text_count"] += len(texts)
+        self.last_truncation["truncated_count"] += sum(len(ids) > self.settings.max_length for ids in lengths)
         encoded = self.tokenizer(
             texts,
             padding=True,
@@ -47,6 +51,7 @@ class BGETextEncoder:
         return hidden.cpu().numpy().astype(np.float32)
 
     def encode(self, texts: list[str]) -> np.ndarray:
+        self.last_truncation = {"text_count": 0, "truncated_count": 0}
         batches: list[np.ndarray] = []
         with self._torch.no_grad():
             for start in tqdm(range(0, len(texts), self.settings.batch_size),

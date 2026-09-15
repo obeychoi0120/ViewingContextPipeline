@@ -5,10 +5,12 @@ from __future__ import annotations
 import numpy as np
 
 from pipeline_runtime import read_json, write_json
+from extraction.recovery import fingerprint
 from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
-from validation.recommendation_contracts import RECOMMENDATION_ARMS, resolve_target_arms, target_scope
+from validation.recommendation_contracts import resolve_target_arms, target_scope
+from arm_registry import registry
 from validation.representation_checks import verify_representations
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_recommendation import (
@@ -68,62 +70,53 @@ def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIM
     )
 
 
-def comparisons(observed, draws, settings, *, arms=None):
-    alpha = settings.familywise_alpha
-    names = list(RECOMMENDATION_ARMS if arms is None else arms)
-    indices = {arm: index for index, arm in enumerate(names)}
+def comparisons(observed, draws, settings, *, arms=None, config=None):
+    from validation.diagnosis_statistics import comparison_families
+    from validation.recommendation_contracts import DEFAULT_PROTOCOL
+    configured = registry(config or DEFAULT_PROTOCOL)
+    names = list(resolve_target_arms(config=config) if arms is None else arms)
+    indices = {name: index for index, name in enumerate(names)}
+    if len(observed) != len(names) or draws.shape[1] != len(names):
+        raise ValueError("arm/metric dimension mismatch")
     result = {}
-    baseline = indices.get("SASRec_METADATA")
-    for arm in names:
-        if baseline is None or arm == "SASRec_METADATA":
+    for family, pairs in comparison_families(config).items():
+        alpha = settings.familywise_alpha / len(pairs)
+        for left, right in pairs:
+            if left not in indices or right not in indices:
+                continue
+            a, b = indices[left], indices[right]
+            delta = draws[:, a] - draws[:, b]
+            lo, hi = np.quantile(delta, [alpha / 2, 1 - alpha / 2])
+            result[f"{left}-{right}"] = {
+                "family": family, "role": "confirmatory", "family_size": len(pairs),
+                "difference": float(observed[a] - observed[b]),
+                "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 1 - alpha,
+                "superior": bool(lo > 0), "inferior": bool(hi < 0),
+                "relative_difference": (float((observed[a] - observed[b]) / observed[b])
+                                        if observed[b] > 0 else None),
+            }
+    by_kind = {(arm.representation, arm.model): name for name, arm in configured.items()}
+    for control in ("description",):
+        terms = [by_kind["graph", "gemini"], by_kind[control, "gemini"],
+                 by_kind["graph", "qwen"], by_kind[control, "qwen"]]
+        if not set(terms) <= indices.keys():
             continue
-        index = indices[arm]
-        delta = draws[:, index] - draws[:, baseline]
-        lo, hi = np.quantile(delta, [alpha / 3 / 2, 1 - alpha / 3 / 2])
-        result[f"{arm}-SASRec_METADATA"] = {
-            "family": "metadata_baseline_superiority",
-            "difference": float(observed[index] - observed[baseline]),
-            "ci_low": float(lo),
-            "ci_high": float(hi),
-            "superior": bool(lo > 0),
+        a, b, c, d = [indices[name] for name in terms]
+        delta = draws[:, a] - draws[:, b] - draws[:, c] + draws[:, d]
+        lo, hi = np.quantile(delta, [0.025, 0.975])
+        result[f"interaction_graph_vs_{control}"] = {
+            "family": "interaction", "role": "exploratory", "arms": terms,
+            "difference": float(observed[a] - observed[b] - observed[c] + observed[d]),
+            "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
         }
-    desc = indices.get("SASRec_DESC")
-    for arm in ("SASRec_GRAPH_QWEN", "SASRec_GRAPH_GEMINI"):
-        if desc is None or arm not in indices:
-            continue
-        if observed[desc] <= 0 or np.any(draws[:, desc] <= 0):
-            raise ValueError("Description relative-effect denominator is zero; NI is undefined")
-        index = indices[arm]
-        relative = (draws[:, index] - draws[:, desc]) / draws[:, desc]
-        lo = float(np.quantile(relative, alpha / 2))
-        result[f"{arm}-SASRec_DESC"] = {
-            "family": "graph_vs_description_non_inferiority",
-            "relative_difference": float((observed[index] - observed[desc]) / observed[desc]),
-            "one_sided_relative_ci_low": lo,
-            "margin": -settings.non_inferiority_margin,
-            "non_inferior": lo > -settings.non_inferiority_margin,
-        }
-    qwen = indices.get("SASRec_GRAPH_QWEN")
-    gemini = indices.get("SASRec_GRAPH_GEMINI")
-    if qwen is None or gemini is None:
-        return result
-    if observed[qwen] <= 0 or np.any(draws[:, qwen] <= 0):
-        raise ValueError("Qwen relative-effect denominator is zero; exploratory CI is undefined")
-    relative = (draws[:, gemini] - draws[:, qwen]) / draws[:, qwen]
-    lo, hi = np.quantile(relative, [alpha / 2, 1 - alpha / 2])
-    result["SASRec_GRAPH_GEMINI-SASRec_GRAPH_QWEN"] = {
-        "family": "qwen_vs_gemini",
-        "role": "exploratory",
-        "relative_difference": float((observed[gemini] - observed[qwen]) / observed[qwen]),
-        "relative_ci_low": float(lo),
-        "relative_ci_high": float(hi),
-    }
     return result
 
 
 def collect_metrics(context, config, cohort, *, arms=None):
-    selected = RECOMMENDATION_ARMS if arms is None else arms
+    selected = resolve_target_arms(config=context.config) if arms is None else arms
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
+    training_input_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
+                                       "cutoffs": config.evaluation.cutoffs})
     users = {user: i for i, user in enumerate(table.users)}
     splits = cohort["plan"]["splits"]
     if (len(table.users), len(table.rows), len(table.items)) != (
@@ -153,9 +146,10 @@ def collect_metrics(context, config, cohort, *, arms=None):
                     "evaluation_date": split["evaluation_date"],
                     "seed": seed,
                     "arm": arm,
+                    "training_input_hash": training_input_hash,
                 }
                 from validation.representation_provenance import recommendation_identity
-                identity.update(recommendation_identity(context, RECOMMENDATION_ARMS[arm]))
+                identity.update(recommendation_identity(context, selected[arm]))
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
                 if not combination_complete(directory, identity, len(ids)):
                     raise ValueError(f"incomplete/corrupt combination: {directory}")
@@ -232,17 +226,17 @@ def collect_metrics(context, config, cohort, *, arms=None):
     )
 
 
-def diagnose(context, *, target=None):
+def diagnose(context, *, target=None, compare_run_id=None):
     from validation.steps import validation_config
 
-    arms = resolve_target_arms(target)
+    arms = resolve_target_arms(target, config=context.config)
     context.initialize()
     config = validation_config(context)
     errors = []
     document = {
-        "schema_version": "rolling-diagnosis/v1",
+        "schema_version": "rolling-diagnosis/v2",
         "run_id": context.run_id,
-        **target_scope(arms),
+        **target_scope(arms, config=context.config),
         "statistics": {"status": "not_computed"},
     }
     try:
@@ -259,17 +253,20 @@ def diagnose(context, *, target=None):
             config.evaluation.model_dump(),
             True,
             True,
-            branches=set(arms.values()),
+            branches=set(arms.values()), config=context.config,
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
-        document["generation_recovery"] = recovery_report(
-            context.run_root, branches=set(arms.values())
-        )
-        if "graph_gemini" in arms.values():
-            document["gemini_summary_fallbacks"] = read_json(
-                context.representations_dir / "graph_gemini_fallbacks.json"
-            )
+        document["generation_recovery"] = recovery_report(context, branches=arms)
+        from validation.representation_provenance import read_state
+        registered = registry(context.config)
+        evidence = {name: read_state(context, name) for name in arms}
+        document["representations"] = evidence
+        document["gemini_summary_fallbacks"] = {
+            name: [row for row in evidence[name].get("sources", [])
+                   if row.get("actual_arm") and row["actual_arm"] != name]
+            for name in arms if registered[name].model == "gemini"
+        }
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
         if not errors:
@@ -279,11 +276,14 @@ def diagnose(context, *, target=None):
             document["statistics"] = {
                 "status": "computed",
                 "bootstrap": bootstrap,
-                "comparisons": comparisons(observed, draws, config.evaluation, arms=arms),
+                "comparisons": comparisons(observed, draws, config.evaluation, arms=arms, config=context.config),
                 "policy": multiple_comparison_policy(
-                    config.evaluation.model_dump(), True, "NDCG@10", arms=arms,
+                    config.evaluation.model_dump(), True, "NDCG@10", arms=arms, config=context.config,
                 ),
             }
+            if compare_run_id is not None:
+                from validation.run_comparison import compare_graph_runs
+                document["run_comparison"] = compare_graph_runs(context, compare_run_id, target=arms)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_rolling_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
@@ -291,8 +291,8 @@ def diagnose(context, *, target=None):
         "metadata_hr10": 0.046,
         "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
     }
-    if "recommendations" in document and "SASRec_METADATA" in arms:
-        value = document["recommendations"]["means"]["SASRec_METADATA"]["HR@10"]
+    if "recommendations" in document and "metadata" in arms:
+        value = document["recommendations"]["means"]["metadata"]["HR@10"]
         document["paper_reference"]["hr10_difference"] = value - 0.046
     write_json(context.diagnosis_path, document)
     if errors or document["statistics"]["status"] != "computed":

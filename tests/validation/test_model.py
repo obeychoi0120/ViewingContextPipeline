@@ -1,29 +1,14 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from validation.config import ValidationConfig  # noqa: E402
-from validation.cohort import prepare_cohort  # noqa: E402
 from validation.model import SASRec, in_batch_loss, pad_sequences  # noqa: E402
-from validation.recommendation import (  # noqa: E402
-    popularity_probabilities,
-    train_recommendation_arms,
-)
-from validation.recommendation_contracts import (  # noqa: E402
-    ARCHITECTURE_VERSION,
-    RECOMMENDATION_ARMS,
-    TRAINING_RUN_SCHEMA_VERSION,
-)
-from pipeline_runtime import read_jsonl, write_json  # noqa: E402
-
-from conftest import config_data  # noqa: E402
-
+from validation.recommendation import popularity_probabilities  # noqa: E402
 
 pytestmark = pytest.mark.torch
 
@@ -224,135 +209,3 @@ def test_popularity_distribution_and_non_finite_guards() -> None:
             arm="metadata",
             item_features=np.asarray([[math.nan], [1.0]], dtype=np.float32),
         )
-
-
-@pytest.fixture
-def training_case(tmp_path):
-    run_root = tmp_path / "run"
-    cohort = run_root / "data" / "cohort"
-    representations = run_root / "validation" / "representations"
-    recommendations = run_root / "validation" / "recommendations"
-    data = config_data(tmp_path)
-    data["run_id"] = "train-smoke"
-    data["output_dir"] = run_root
-    data["model"].update(max_epochs=1, patience=1, seeds=[42, 43, 44])
-    config = ValidationConfig.model_validate(data)
-    config.dataset.videos_dir.mkdir()
-    for item in range(1, 9):
-        (config.dataset.videos_dir / f"{item}.mp4").write_bytes(b"video")
-    config.dataset.pairs_tsv.write_text("u1\t1 2 3 4 5 6\nu2\t2 3 4 5 6 7\n", encoding="utf-8")
-    config.dataset.titles_csv.write_text(
-        "".join(f"{item},Title {item}\n" for item in range(1, 9)), encoding="utf-8"
-    )
-    prepare_cohort(config, plan_only=True)
-    prepare_cohort(config, probe=lambda _: 30.0)
-    catalog = read_jsonl(cohort / "catalog.jsonl")
-    assert [row["item_id"] for row in catalog] == [str(item) for item in range(1, 8)]
-    write_json(
-        representations / "item_index.json",
-        {row["item_id"]: index for index, row in enumerate(catalog)},
-    )
-    representations.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(42)
-    for branch in RECOMMENDATION_ARMS.values():
-        np.savez_compressed(
-            representations / f"{branch}_embeddings.npz",
-            values=rng.normal(size=(len(catalog), 1024)).astype(np.float32),
-        )
-
-    runtime = {
-        "run_id": "train-smoke",
-        "run_root": str(run_root),
-        "paths": {
-            "representations_dir": str(representations),
-            "recommendations_dir": str(recommendations),
-        },
-    }
-    return config, runtime
-
-
-def test_four_arms_three_seeds_one_epoch_selection_refit_smoke(training_case, monkeypatch) -> None:
-    config, runtime = training_case
-    recommendations = Path(runtime["paths"]["recommendations_dir"])
-    result = train_recommendation_arms(config, runtime)
-
-    training_runs = read_jsonl(recommendations / "training_runs.jsonl")
-    checkpoints = list((recommendations / "checkpoints").glob("**/sasrec.pt"))
-    assert len(result["runs"]) == len(training_runs) == len(checkpoints) == 12
-    assert len(read_jsonl(recommendations / "per_user_metrics.jsonl")) == 24
-    assert {(row["seed"], row["arm"]) for row in training_runs} == {
-        (seed, arm) for seed in (42, 43, 44) for arm in RECOMMENDATION_ARMS
-    }
-    for row in training_runs:
-        assert row["schema_version"] == TRAINING_RUN_SCHEMA_VERSION
-        assert row["architecture_version"] == ARCHITECTURE_VERSION
-        assert row["selection"]["best_validation"]["epoch"] == 1
-        assert row["selection"]["epochs_completed"] == 1
-        assert row["refit"]["data"] == "train+valid_target"
-        assert row["refit"]["epochs_completed"] == 1
-
-    # A refresh retains every unaffected arm's checkpoint, metrics and training record.
-    import validation.recommendation as recommendation
-    preserved = {path: path.read_bytes() for path in checkpoints
-                 if path.parent.name != "sasrec_graph_qwen"}
-    old_metrics = read_jsonl(recommendations / "per_user_metrics.jsonl")
-    selected = []
-    original = recommendation._select_epoch
-    def select(*args, **kwargs):
-        selected.append(args[4])
-        return original(*args, **kwargs)
-    monkeypatch.setattr(recommendation, "_select_epoch", select)
-    result = train_recommendation_arms(config, runtime, branches={"graph_qwen"})
-    assert selected == ["graph_qwen"] * 3 and len(result["runs"]) == 12
-    assert all(path.read_bytes() == data for path, data in preserved.items())
-    def unchanged(rows):
-        return [row for row in rows if row["arm"] != "SASRec_GRAPH_QWEN"]
-    assert unchanged(read_jsonl(recommendations / "per_user_metrics.jsonl")) == unchanged(old_metrics)
-    assert unchanged(result["runs"]) == unchanged(training_runs)
-
-
-def test_selection_ties_keep_first_best_epoch_and_refit_only_selected_epochs(
-    training_case,
-    monkeypatch,
-) -> None:
-    import validation.recommendation as recommendation
-
-    config, runtime = training_case
-    config.model.max_epochs = 8
-    config.model.patience = 2
-    config.model.seeds = [42]
-    scores = iter([0.1, 0.3, 0.3, 0.2] * len(RECOMMENDATION_ARMS))
-    monkeypatch.setattr(recommendation, "_validation_ndcg", lambda *args: next(scores))
-    epoch_calls = []
-    original_train_epoch = recommendation._train_epoch
-
-    def record_epoch(model, optimizer, sequences, order, *args):
-        epoch_calls.append((model, optimizer, [list(items) for items in sequences]))
-        return original_train_epoch(model, optimizer, sequences, order, *args)
-
-    monkeypatch.setattr(recommendation, "_train_epoch", record_epoch)
-    result = train_recommendation_arms(config, runtime)
-
-    assert len(epoch_calls) == 6 * len(RECOMMENDATION_ARMS)
-    for arm_index, run in enumerate(result["runs"]):
-        assert run["selection"]["best_validation"] == {
-            "metric": "NDCG@10",
-            "value": 0.3,
-            "epoch": 2,
-        }
-        assert run["selection"]["epochs_completed"] == 4
-        assert run["selection"]["early_stopped"] is True
-        assert [row["NDCG@10"] for row in run["selection"]["epochs"]] == [0.1, 0.3, 0.3, 0.2]
-        assert run["refit"]["epochs_completed"] == 2
-        calls = epoch_calls[arm_index * 6 : (arm_index + 1) * 6]
-        assert all(call[0] is calls[0][0] for call in calls[:4])
-        assert all(call[0] is calls[4][0] for call in calls[4:])
-        assert calls[0][0] is not calls[4][0]
-        assert calls[0][1] is not calls[4][1]
-        assert all(
-            len(refit) == len(train) + 1
-            for train, refit in zip(calls[0][2], calls[4][2], strict=True)
-        )
-        checkpoint = torch.load(run["checkpoint"], map_location="cpu", weights_only=True)
-        assert checkpoint["metadata"]["selection_best_epoch"] == 2
-        assert checkpoint["metadata"]["refit_epochs_completed"] == 2

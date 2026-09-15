@@ -28,15 +28,7 @@ def prepare_visual_item(
     item_root = Path(assets_root) / content_id
     item_assets = item_root / "assets"
     timestamp_path = item_assets / f"timestamp_fixed_{scene_duration}s.json"
-    frames_dir = Path(output_root) / "data" / "resized_keyframes" / content_id
-    legacy_metadata_path = (
-        Path(output_root) / "data" / "cohort" / "metadata" / f"{content_id}.json"
-    )
-    legacy_metadata_path.unlink(missing_ok=True)
-    try:
-        legacy_metadata_path.parent.rmdir()
-    except OSError:
-        pass
+    frames_dir = Path(output_root) / "resized_keyframes" / content_id
     width, height = image_size
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
@@ -99,7 +91,7 @@ def resized_keyframes_match_timestamps(
             for path in output.iterdir()
             if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
         }
-        if actual != expected:
+        if not expected <= actual:
             return False
         for name in expected:
             if verified_image_size(output / name) != image_size:

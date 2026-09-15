@@ -16,20 +16,11 @@ from .diagnosis_support import (
 )
 
 
-SCENE_ARMS = {
-    "graph_qwen": (
-        "extraction/graph/qwen/scenes",
-        "extraction/graph/qwen/scenes/failures",
-    ),
-    "graph_gemini": (
-        "extraction/graph/gemini/scenes",
-        "extraction/graph/gemini/scenes/failures",
-    ),
-    "desc": (
-        "extraction/description/scenes",
-        "extraction/description/scenes/failures",
-    ),
-}
+def scene_arms(config):
+    from arm_registry import registry
+    return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
+                   f"extraction/{arm.representation}/{arm.model}/scenes/failures")
+            for name, arm in registry(config).items() if arm.model}
 
 
 def _expected_scenes(
@@ -44,7 +35,6 @@ def _expected_scenes(
     for content_id in content_ids:
         path = (
             run_root
-            / "data"
             / "cohort"
             / "source_assets"
             / content_id
@@ -125,7 +115,7 @@ def _success_scene_row_issues(
             if not valid_raw_graph(row):
                 invalid.append("invalid_raw_graph_scene")
             return invalid
-        if set(row) != {
+        if set(row) - {"provenance", "generation"} != {
             "scene_idx",
             "keyframes",
             "graph",
@@ -133,14 +123,17 @@ def _success_scene_row_issues(
             "semantic_warnings",
         }:
             invalid.append("invalid_graph_scene_fields")
-        if not isinstance(row.get("graph"), dict):
+        from extraction.structured_output import validate_graph_structure, OutputValidationError
+        try:
+            validate_graph_structure(row.get("graph"))
+        except OutputValidationError:
             invalid.append("invalid_graph")
         if row.get("parse_mode") not in {"native", "repaired", "unknown"}:
             invalid.append("invalid_parse_mode")
         if not isinstance(row.get("semantic_warnings"), list):
             invalid.append("invalid_semantic_warnings")
     else:
-        if set(row) != {
+        if set(row) - {"provenance", "generation"} != {
             "schema_version",
             "content_id",
             "scene_idx",
@@ -148,7 +141,7 @@ def _success_scene_row_issues(
             "description",
         }:
             invalid.append("invalid_description_scene_fields")
-        if row.get("schema_version") != "scene-description/v1":
+        if row.get("schema_version") != "scene-description/v2":
             invalid.append("invalid_description_schema_version")
         if row.get("content_id") != content_id:
             invalid.append("description_content_id_mismatch")
@@ -164,8 +157,9 @@ def _scene_arm_contract(
     content_ids: list[str],
     expected: set[tuple[str, int]],
     errors: list[dict[str, Any]],
+    paths,
 ) -> tuple[dict[str, Any], set[tuple[str, int]], bool]:
-    scene_relative, failure_relative = SCENE_ARMS[arm]
+    scene_relative, failure_relative = paths[arm]
     scene_dir = run_root / scene_relative
     failure_dir = run_root / failure_relative
     catalog_contents = set(content_ids)
@@ -332,9 +326,11 @@ def _scene_coverage(
     settings,
     decision_config_valid,
     runtime_paths_valid,
-    *, branches=None,
+    *, branches=None, config=None,
 ):
-    selected = [arm for arm in SCENE_ARMS if branches is None or arm in branches]
+    from validation.recommendation_contracts import DEFAULT_PROTOCOL
+    paths = scene_arms(config or DEFAULT_PROTOCOL)
+    selected = [arm for arm in paths if branches is None or arm in branches]
     if not selected:
         return {"status": "not_applicable", "reason": "no visual source selected", "arms": {}}, True, True, True
     expected_scenes, scene_denominator_valid = _expected_scenes(
@@ -348,7 +344,7 @@ def _scene_coverage(
     scene_arm_valid: dict[str, bool] = {}
     for arm in selected:
         document, success, valid = _scene_arm_contract(
-            arm, run_root, content_ids, expected_scenes, errors
+            arm, run_root, content_ids, expected_scenes, errors, paths
         )
         scene_documents[arm] = document
         successful_scenes[arm] = success

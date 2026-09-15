@@ -61,8 +61,8 @@ def test_benchmark_excludes_warmup_and_records_partial_failures(tmp_path, monkey
 
 def test_output_validation_uses_stage_contract():
     assert benchmark.check_output("graph-scenes", "not json")
-    assert benchmark.check_output("graph-summary-gemini", "not structured")
-    assert benchmark.check_output("description-summary", "not structured")
+    assert benchmark.check_output("graph-summary-gemini", "")
+    assert benchmark.check_output("description-summary", "")
     assert benchmark.check_output("description-scenes", "")
     assert benchmark.check_output("description-scenes", "person running") is None
 
@@ -74,14 +74,14 @@ def test_export_uses_first_penalty_and_the_graph_schema(tmp_path, monkeypatch):
         config={"extraction": {"graph": {"scene_max_new_tokens": 64},
                                "graph_repetition_penalty": [1.05, 1.1],
                                "visual_evidence": {"num_keyframes": 6}}},
-        config_path=lambda *_: prompt, path=lambda *_: tmp_path,
+        prompt_path=lambda *_: prompt, path=lambda *_: tmp_path,
     )
     monkeypatch.setattr(benchmark, "visual_rows", lambda _: [{"content_id": "a"}])
     def rows(visual, **kwargs):
         return [{"task": QwenGenerationTask("a:0", (), kwargs["prompt"], kwargs["max_new_tokens"],
                                             repetition_penalty=kwargs["repetition_penalty"])}]
     monkeypatch.setattr(benchmark, "scene_generation_rows", rows)
-    task = benchmark.export_requests(context, "graph-scenes", 1)["requests"][0]
+    task = benchmark.export_requests(context, "graph-scenes", 1, prompt)["requests"][0]
     assert task["repetition_penalty"] == 1.05
     assert task["structured_output"]["json"] == benchmark.GRAPH_JSON_SCHEMA
 

@@ -18,7 +18,7 @@ from extraction.step_support import (
 QWEN_GRAPH_SCENE_CONCURRENCY = 8
 
 
-def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=False):
+def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
     """Convert one response without changing artifacts or the raw graph."""
     parsed = parse_or_repair_graph(text) if error is None else None
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
@@ -85,7 +85,7 @@ def _report_scene(progress, name, record, failure, *, arm, source):
 def run_qwen_scenes(
     pending, *, scene_dir, failure_dir, model_path, gpus, generator_factory,
     names, progress, arm, existing_records, existing_failures, source=None,
-    qwen_options=None, image_limit=6, runtime=None, penalties=1.0, force=False,
+    qwen_options=None, image_limit=6, runtime=None, penalties=1.0, force=False, identity=None,
 ):
     records_by_content, failures_by_content = {}, {}
     rows_by_task, states = {}, {}
@@ -136,6 +136,7 @@ def run_qwen_scenes(
         if task_id in state["records"] or task_id in state["failures"]:
             return
         if record is not None:
+            record["provenance"] = row.get("provenance", {})
             state["records"][task_id] = record
         else:
             state["failures"][task_id] = failure
@@ -174,7 +175,7 @@ def run_qwen_scenes(
         generate_with_recovery(
             generate, [row["task"] for _, row in rows_by_task.values()],
             penalties=penalties, directory=scene_dir / ".recovery",
-            identity={"model": str(model_path), "settings": qwen_options, "backend": "vllm-0.28.0"},
+            identity=identity or {"model": str(model_path), "settings": qwen_options, "backend": "vllm-0.28.0"},
             validate=validate, complete=lambda task_id, record: publish(task_id, record, None),
             failed=failed,
             raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
@@ -232,6 +233,7 @@ def run_gemini_scenes(
     force,
     names,
     progress,
+    arm="graph",
 ):
     # This marker contains only content IDs, never generated Scene responses.
     # It distinguishes an interrupted refresh from an older completed output.
@@ -255,12 +257,18 @@ def run_gemini_scenes(
             if outcome.task_id in generated:
                 return
             row = rows_by_task[outcome.task_id]
-            record, failure = graph_scene_result(
-                row, outcome.text, error=outcome.error,
-                diagnostics=outcome.response_diagnostics,
-            )
-            if failure is not None and outcome.error is None and outcome.text.strip():
-                record, failure = raw_graph_record(row, outcome.text), None
+            if arm == "graph" or outcome.error:
+                record, failure = graph_scene_result(
+                    row, outcome.text, error=outcome.error, diagnostics=outcome.response_diagnostics,
+                )
+                if failure is not None and outcome.error is None and outcome.text.strip():
+                    record, failure = raw_graph_record(row, outcome.text), None
+            else:
+                record, failure = description_scene_result(row, outcome.text, content_id=content_id)
+            if record is not None:
+                record["provenance"] = row.get("provenance", {})
+                record["generation"] = {"input_key": row.get("input_key"), "attempt_count": 1,
+                                        "repair_mode": record.get("parse_mode", "native")}
             generated[outcome.task_id] = (record, failure)
             if failure is not None:
                 write_progress(progress, graph_skip_message(

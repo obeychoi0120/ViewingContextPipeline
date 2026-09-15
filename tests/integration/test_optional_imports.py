@@ -5,7 +5,6 @@ from pathlib import Path
 import subprocess
 import sys
 
-import yaml
 
 
 def test_public_clis_import_without_optional_backend_modules() -> None:
@@ -51,25 +50,9 @@ assert not any(name in loaded for name in blocked)
     assert completed.returncode == 0, completed.stderr
 
 
-def test_plan_only_cli_runs_without_optional_imports_assets_or_external_processes(tmp_path):
+def test_plan_only_cli_runs_without_optional_imports_assets_or_external_processes(v5_context):
     root = Path(__file__).resolve().parents[2]
-    config = yaml.safe_load((root / "config/pipeline.yaml").read_text(encoding="utf-8"))
-    config["schema_version"] = "viewing-context-config/v3"
-    config["protocol"].update(cohort_sampling="user_first_nested_stratified",
-                              catalog_scope="selected_user_sequence_union")
-    config["validation"]["cohort"] = dict(user_count=1, seed=42,
-        min_sequence_length=5, max_sequence_length=13, history_strata=[5, 10, 20, 50])
-    config["validation"]["evaluation"]["cutoffs"] = [4, 8, 10, 20]
-    config["artifacts_root"] = str(tmp_path / "artifacts")
-    config["validation"]["cohort"]["user_count"] = 1
-    config["data"] = {
-        "pairs_tsv": str(tmp_path / "pairs.tsv"),
-        "videos_dir": str(tmp_path / "absent-videos"),
-        "titles_csv": str(tmp_path / "absent-titles.csv"),
-    }
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config/pipeline.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
-    (tmp_path / "pairs.tsv").write_text("u1\t1 2 3 4 5\n", encoding="utf-8")
+    tmp_path = v5_context.root
     script = r'''
 import importlib.abc
 from pathlib import Path
@@ -99,4 +82,4 @@ assert not any(name in sys.modules for name in blocked)
         env={**os.environ, "PYTHONPATH": str(root / "src")},
     )
     assert completed.returncode == 0, completed.stderr
-    assert (tmp_path / "artifacts/plan/data/cohort/required_items.jsonl").is_file()
+    assert (tmp_path / "artifacts/plan/cohort/required_items.jsonl").is_file()

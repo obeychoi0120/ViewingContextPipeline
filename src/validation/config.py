@@ -19,26 +19,6 @@ class RollingDatasetConfig(DatasetConfig):
     pairs_csv: Path
 
 
-class CohortConfig(StrictModel):
-    user_count: int = Field(gt=0)
-    seed: int
-    min_sequence_length: int = Field(ge=5)
-    max_sequence_length: int = Field(ge=5)
-    history_strata: list[int]
-
-    @model_validator(mode="after")
-    def validate_cohort(self) -> "CohortConfig":
-        if (
-            not self.history_strata
-            or self.history_strata != sorted(set(self.history_strata))
-            or self.history_strata[0] != 5
-        ):
-            raise ValueError("history_strata must be sorted, unique, and start at 5")
-        if self.max_sequence_length < self.min_sequence_length:
-            raise ValueError("max_sequence_length must be at least min_sequence_length")
-        return self
-
-
 class EncoderConfig(StrictModel):
     model_path: Path
     embedding_dim: Literal[1024]
@@ -72,7 +52,6 @@ class EvaluationConfig(StrictModel):
     cutoffs: list[int]
     primary_cutoff: Literal[10]
     bootstrap_samples: int = Field(gt=0)
-    non_inferiority_margin: Literal[0.05]
     familywise_alpha: float = Field(gt=0, lt=1)
     multiple_comparison_correction: Literal["bonferroni"]
     min_scene_coverage: float = Field(ge=0, le=1)
@@ -97,25 +76,15 @@ class FullCohortConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v3", "validation-config/v4"]
+    schema_version: Literal["validation-config/v5"]
     run_id: str
-    dataset: DatasetConfig | RollingDatasetConfig
-    cohort: CohortConfig | FullCohortConfig
+    dataset: RollingDatasetConfig
+    cohort: FullCohortConfig
     encoder: EncoderConfig
     model: ModelConfig
     evaluation: EvaluationConfig
     output_dir: Path
 
-    @model_validator(mode="after")
-    def validate_protocol(self):
-        full = isinstance(self.cohort, FullCohortConfig)
-        if full != (self.schema_version == "validation-config/v4"):
-            raise ValueError("cohort and config versions do not match")
-        if full and (not isinstance(self.dataset, RollingDatasetConfig) or self.evaluation.cutoffs[-1] != 30):
-            raise ValueError("rolling requires pairs_csv and @30")
-        if not full and (isinstance(self.dataset, RollingDatasetConfig) or self.evaluation.cutoffs != [4, 8, 10, 20]):
-            raise ValueError("v3 requires the legacy dataset and cutoffs")
-        return self
 
 
 def build_validation_config(
@@ -124,10 +93,7 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": (
-                "validation-config/v4" if settings["cohort"].get("mode") == "full_rolling"
-                else "validation-config/v3"
-            ),
+            "schema_version": "validation-config/v5",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),

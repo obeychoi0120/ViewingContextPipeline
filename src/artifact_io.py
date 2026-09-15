@@ -30,13 +30,19 @@ def atomic_write_json(
             suffix=".tmp",
             delete=False,
         ) as handle:
+            temporary = Path(handle.name)
             json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             if durable:
                 os.fsync(handle.fileno())
-            temporary = Path(handle.name)
         temporary.replace(target)
+        if durable:
+            descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
@@ -61,13 +67,19 @@ def atomic_write_jsonl(
             suffix=".tmp",
             delete=False,
         ) as handle:
+            temporary = Path(handle.name)
             for row in rows:
                 handle.write(canonical_json(row) + "\n")
             handle.flush()
             if durable:
                 os.fsync(handle.fileno())
-            temporary = Path(handle.name)
         temporary.replace(target)
+        if durable:
+            descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()

@@ -72,7 +72,7 @@ def prepare_catalog(
             progress.update(1)
     prepared_rows = [prepared for prepared, _ in results if prepared is not None]
     failures = [failure for _, failure in results if failure is not None]
-    cohort_root = Path(output_root) / "data" / "cohort"
+    cohort_root = Path(assets_root).parent
     cohort_root.mkdir(parents=True, exist_ok=True)
     failure_path = cohort_root / "preparation_failures.jsonl"
     if failures:

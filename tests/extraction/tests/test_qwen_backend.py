@@ -95,8 +95,8 @@ def test_native_images_order_and_greedy_settings(backend, tmp_path):
 
 @pytest.mark.parametrize("kind", ["json", "grammar"])
 def test_structured_output_and_generated_token_penalty_are_passed_together(backend, kind):
-    from extraction.structured_output import GRAPH_JSON_SCHEMA, SUMMARY_GRAMMAR
-    constraint = {kind: GRAPH_JSON_SCHEMA if kind == "json" else SUMMARY_GRAMMAR}
+    from extraction.structured_output import GRAPH_JSON_SCHEMA
+    constraint = {kind: GRAPH_JSON_SCHEMA if kind == "json" else 'root ::= "test"'}
     task = QwenGenerationTask("structured", (), "prompt", 32,
                               repetition_penalty=1.15, structured_output=constraint)
     asyncio.run(backend.generate(task))

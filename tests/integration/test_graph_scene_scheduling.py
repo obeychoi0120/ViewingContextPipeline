@@ -18,8 +18,8 @@ def test_graph_scenes_finish_content_before_next(
     context, monkeypatch, capsys, model, threads, limit,
 ):
     visuals = [{"content_id": cid} for cid in ("a", "b")]
-    monkeypatch.setattr(steps, "_visual_rows", lambda _: visuals)
-    monkeypatch.setattr(steps, "_video_name_map", lambda _: {})
+    monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
+    monkeypatch.setattr(steps, "video_name_map", lambda _: {})
     context.config["extraction"]["graph_repetition_penalty"] = [1.0, 1.05]
 
     context.config["extraction"]["gemini"]["threads"] = threads
@@ -30,10 +30,9 @@ def test_graph_scenes_finish_content_before_next(
                  "scene_idx": i, "keyframes": [i * 30 + 5]}
                 for i in range(limit + 2 if cid == "a" else limit + 1)]
 
-    monkeypatch.setattr(steps, "_scene_generation_rows", rows)
+    monkeypatch.setattr(steps, "scene_generation_rows", rows)
     graph = json.dumps({
-        "setting_context": "indoor", "entities": [], "events": [], "semantic_topics": [],
-        "affect": {"valence": "neutral", "arousal": "medium"},
+        "entities": [], "relations": [], "context": [],
     })
     submissions = []
 
@@ -66,7 +65,7 @@ def test_graph_scenes_finish_content_before_next(
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
-    assert steps.extract_graph_scenes(context, model=model)["failure_count"] == 1
+    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model=model)["failure_count"] == 1
     expected = [[f"a:{i}" for i in range(limit)]]
     if model == "qwen":
         expected.append(["a:0"])
@@ -98,8 +97,8 @@ def test_gemini_refills_workers_and_saves_only_finished_contents(
     scene_dir = context.graph_scene_dir("gemini")
     context.config["extraction"]["gemini"]["threads"] = threads
     visuals = [{"content_id": cid} for cid in ("a", "b")]
-    monkeypatch.setattr(steps, "_visual_rows", lambda _: visuals)
-    monkeypatch.setattr(steps, "_video_name_map", lambda _: {})
+    monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
+    monkeypatch.setattr(steps, "video_name_map", lambda _: {})
     counts = {"a": threads + 3, "b": 2}
 
     def rows(visual, **kwargs):
@@ -107,7 +106,7 @@ def test_gemini_refills_workers_and_saves_only_finished_contents(
         return [{"task": QwenGenerationTask(f"{cid}:{i}", (), f"{cid}:{i}", 32),
                  "scene_idx": i, "keyframes": [i * 30 + 5]} for i in range(counts[cid])]
 
-    monkeypatch.setattr(steps, "_scene_generation_rows", rows)
+    monkeypatch.setattr(steps, "scene_generation_rows", rows)
     initial_workers = threading.Barrier(threads, timeout=5)
     next_scene_started = threading.Event()
     lock = threading.Lock()
@@ -154,7 +153,7 @@ def test_gemini_refills_workers_and_saves_only_finished_contents(
         checkpoint(scene_path, failure_path, records, failures)
 
     monkeypatch.setattr(scene_executor, "write_scene_checkpoint", save)
-    assert steps.extract_graph_scenes(context, model="gemini")["failure_count"] == 1
+    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini")["failure_count"] == 1
     assert peak == threads
     assert next_scene_started.is_set()
     assert saves == ["a", "b"]
@@ -170,15 +169,15 @@ def test_gemini_interrupt_discards_memory_and_restarts_unfinished_contents(
 
     scene_dir = context.graph_scene_dir("gemini")
     visuals = [{"content_id": cid} for cid in ("a", "b", "c")]
-    monkeypatch.setattr(steps, "_visual_rows", lambda _: visuals)
-    monkeypatch.setattr(steps, "_video_name_map", lambda _: {})
+    monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
+    monkeypatch.setattr(steps, "video_name_map", lambda _: {})
 
     def rows(visual, **kwargs):
         cid = visual["content_id"]
         return [{"task": QwenGenerationTask(f"{cid}:{i}", (), "prompt", 32),
                  "scene_idx": i, "keyframes": [i * 30 + 5]} for i in range(3)]
 
-    monkeypatch.setattr(steps, "_scene_generation_rows", rows)
+    monkeypatch.setattr(steps, "scene_generation_rows", rows)
     if force:
         for visual in visuals:
             write_jsonl(scene_dir / f"{visual['content_id']}.jsonl",
@@ -200,14 +199,14 @@ def test_gemini_interrupt_discards_memory_and_restarts_unfinished_contents(
 
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     with pytest.raises(KeyboardInterrupt):
-        steps.extract_graph_scenes(context, model="gemini", force=force)
+        steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini", force=force)
     saved_a = (scene_dir / "a.jsonl").read_bytes()
     assert ((scene_dir / "b.jsonl").read_bytes() if force else None) == before_b
     if not force:
         assert not (scene_dir / "b.jsonl").exists()
     assert not (scene_dir / ".recovery").exists()
     interrupted = False
-    assert steps.extract_graph_scenes(context, model="gemini")["failure_count"] == 0
+    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini")["failure_count"] == 0
     assert calls == [[f"{cid}:{i}" for i in range(3)] for cid in ("a", "b", "b", "c")]
     assert (scene_dir / "a.jsonl").read_bytes() == saved_a
     assert not (scene_dir / ".pending-contents.json").exists()

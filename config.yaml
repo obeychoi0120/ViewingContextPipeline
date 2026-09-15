@@ -1,14 +1,23 @@
-schema_version: viewing-context-config/v4
+schema_version: viewing-context-config/v5
 protocol:
   dataset: microlens_100k
   modality: visual_only
   sampling: fixed_windows
   cohort_sampling: full_rolling
   catalog_scope: full_source_catalog
-  graph_extractors: [qwen, gemini]
+  graph_extractors:
+  - qwen
+  - gemini
   graph_summarizer: qwen
-  description_model: qwen
-  arms: [metadata, graph_qwen, graph_gemini, description]
+  arms:
+  - desc_gemini
+  - desc_qwen
+  - graph_gemini
+  - graph_qwen
+  - metadata
+  description_extractors:
+  - qwen
+  - gemini
 artifacts_root: artifacts
 data:
   pairs_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs.csv
@@ -23,14 +32,13 @@ models:
     location: global
     model_id: gemini-3.8-flash
     temperature: 0.0
-    max_output_tokens: 1024
     thinking_level: low
     media_resolution: MEDIA_RESOLUTION_LOW
 extraction:
-  gemini: 
+  gemini:
     threads: 16
   qwen:
-    gpu_memory_utilization: 0.90
+    gpu_memory_utilization: 0.9
     max_num_seqs: 32
     max_num_batched_tokens: 16384
     max_model_len: auto
@@ -40,26 +48,39 @@ extraction:
     enforce_eager: false
     async_scheduling: null
   visual_evidence:
-    image_resolution: [640, 352]
+    image_resolution:
+    - 640
+    - 352
     scene_duration: 30
     num_keyframes: 6
   greedy_decoding: true
-  graph_repetition_penalty: [1.00, 1.05, 1.10, 1.15, 1.20]
-  description_repetition_penalty: [1.00, 1.05, 1.10, 1.15, 1.20]
-  summary_repetition_penalty: [1.00, 1.05, 1.10, 1.15, 1.20]
+  graph_repetition_penalty:
+  - 1.0
+  - 1.05
+  - 1.1
+  - 1.15
+  - 1.2
+  description_repetition_penalty:
+  - 1.0
+  - 1.05
+  - 1.1
+  - 1.15
+  - 1.2
+  summary_repetition_penalty:
+  - 1.0
+  - 1.05
+  - 1.1
+  - 1.15
+  - 1.2
   summary_sampling:
     temperature: 0.2
     top_p: 0.8
     top_k: 20
   graph:
-    scene_prompt: config/prompts/graph_scene_v2.md
-    summary_prompt: config/prompts/graph_summary_v3.md
     scene_max_new_tokens: 1024
     summary_max_new_tokens: 512
   description:
-    scene_prompt: config/prompts/description_scene_v1.md
-    summary_prompt: config/prompts/description_summary_v3.md
-    scene_max_new_tokens: 512
+    scene_max_new_tokens: 1024
     summary_max_new_tokens: 512
 validation:
   cohort:
@@ -86,14 +107,20 @@ validation:
     patience: 5
     learning_rate: 0.0001
     popularity_power: 1.0
-    seeds: [42, 43, 44]
+    seeds:
+    - 42
+    - 43
+    - 44
   evaluation:
-    cutoffs: [4, 8, 10, 20, 30]
+    cutoffs:
+    - 4
+    - 8
+    - 10
+    - 20
+    - 30
     primary_cutoff: 10
     bootstrap_samples: 10000
-    non_inferiority_margin: 0.05
     familywise_alpha: 0.05
     multiple_comparison_correction: bonferroni
-    # Retain original scene coverage gates; fallback does not increase coverage.
     min_scene_coverage: 0.95
     max_arm_coverage_gap: 0.05

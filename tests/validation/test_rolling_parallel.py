@@ -7,7 +7,6 @@ import pytest
 from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
-from test_rolling import full_context as full_context
 from validation.recommendation_contracts import RECOMMENDATION_ARMS
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_recommendation import (
@@ -15,6 +14,11 @@ from validation.rolling_recommendation import (
 )
 from validation.rolling_workers import run_parallel
 from validation.steps import validation_config
+
+
+@pytest.fixture
+def full_context(ready_context):
+    return ready_context
 
 
 class Progress:
@@ -33,7 +37,7 @@ class Progress:
 
 
 def prepare_embeddings(context):
-    context.representations_dir.mkdir(parents=True)
+    context.representations_dir.mkdir(parents=True, exist_ok=True)
     write_json(context.representations_dir / "item_index.json", {str(i): i - 1 for i in range(1, 5)})
     write_json(context.representations_dir / "graph_gemini_fallbacks.json", {"fallbacks": []})
     for branch in RECOMMENDATION_ARMS.values():
@@ -43,9 +47,13 @@ def prepare_embeddings(context):
 
 def two_jobs(context):
     split = context.require_ready_cohort()["plan"]["splits"][0]
+    from extraction.recovery import fingerprint
+    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
+    training_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
+                                 "cutoffs": context.config["validation"]["evaluation"]["cutoffs"]})
     return [(split, {
         "run_id": context.run_id, "evaluation_date": split["evaluation_date"],
-        "seed": seed, "arm": "SASRec_METADATA",
+        "seed": seed, "arm": "metadata", "training_input_hash": training_hash,
     }, "metadata") for seed in (42, 43)]
 
 
@@ -135,9 +143,11 @@ def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, mon
         return len(jobs)
 
     monkeypatch.setattr("validation.rolling_workers.run_parallel", capture)
+    monkeypatch.setattr("validation.rolling_recommendation.verify_representations", lambda *a, **k: None)
+    monkeypatch.setattr("validation.representation_provenance.recommendation_identity", lambda *a: {})
     result = run_rolling(context)
     assert result["skipped"] == len(protected)
-    assert len(pending) == 84 - len(protected)
+    assert len(pending) == 105 - len(protected)
     assert all(path.read_bytes() == original for path, original in protected.items())
     assert all(combination_dir(context, split["evaluation_date"], identity["seed"], identity["arm"])
                / "complete.json" not in protected for split, identity, _ in pending)
@@ -161,7 +171,7 @@ def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
     prepare_embeddings(context)
     monkeypatch.setattr("validation.rolling_recommendation.worker_devices",
                         lambda *_: ["cuda:0", "cuda:1"] * 2)
-    reused = ("2022-09-05", 42, "SASRec_METADATA")
+    reused = ("2022-09-05", 42, "metadata")
     monkeypatch.setattr("validation.rolling_recommendation.combination_complete",
                         lambda directory, identity, count:
                         tuple(identity[k] for k in ("evaluation_date", "seed", "arm")) == reused)
@@ -176,11 +186,13 @@ def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
         return len(jobs)
 
     monkeypatch.setattr("validation.rolling_workers.run_parallel", run)
+    monkeypatch.setattr("validation.rolling_recommendation.verify_representations", lambda *a, **k: None)
+    monkeypatch.setattr("validation.representation_provenance.recommendation_identity", lambda *a: {})
     assert run_rolling(context, gpus=2, workers_per_gpu=2) == {
-        "stage": "run-recommendation", "completed": 83, "skipped": 1,
+        "stage": "run-recommendation", "completed": 104, "skipped": 1,
     }
     assert reused not in dispatched[-1]
-    assert run_rolling(context, force=True, gpus=2, workers_per_gpu=2)["completed"] == 84
+    assert run_rolling(context, force=True, gpus=2, workers_per_gpu=2)["completed"] == 105
     assert reused in dispatched[-1]
 
 

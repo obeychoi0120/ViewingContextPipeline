@@ -11,7 +11,7 @@ from extraction.errors import ExtractionStepError
 from extraction.evidence import build_scene_evidence
 from extraction.monitoring import video_names
 from extraction.raw_output import is_raw_graph, valid_raw_graph
-from pipeline_runtime import RunContext, read_json, read_jsonl, write_json, write_jsonl
+from pipeline_runtime import RunContext, read_json, read_jsonl, write_jsonl
 
 
 def write_progress(progress: tqdm, message: str) -> None:
@@ -43,10 +43,16 @@ def write_scene_checkpoint(
         from extraction.input_tracking import invalidate_inputs
         invalidate_inputs(scene_path.parent.parent / "summaries" / f"{scene_path.stem}.json")
     journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
-    write_json(journal, {"records": records, "failures": failures})
-    write_jsonl(scene_path, records)
+    from artifact_io import atomic_write_json, atomic_write_jsonl
+    atomic_write_json(journal, {"records": records, "failures": failures}, durable=True)
+    if records:
+        atomic_write_jsonl(scene_path, records, durable=True)
+    else:
+        scene_path.unlink(missing_ok=True)
     write_failure_jsonl(failure_path, failures)
     journal.unlink()
+    if not any(journal.parent.iterdir()):
+        journal.parent.rmdir()
 
 
 def restore_scene_checkpoint(scene_path, failure_path):
@@ -133,12 +139,19 @@ def minimal_graph_records(
         "semantic_warnings",
     }
     invalid = [index for index, row in enumerate(records)
-               if (not valid_raw_graph(row) if is_raw_graph(row) else set(row) != required)]
+               if (not valid_raw_graph(row) if is_raw_graph(row) else set(row) - {"provenance", "generation"} != required)]
     if invalid:
         raise ExtractionStepError(
             f"incompatible graph scene output at rows {invalid[:10]}: {path}; "
             "use --force or a new run_id"
         )
+    from extraction.structured_output import validate_graph_structure, OutputValidationError
+    for row in records:
+        if not is_raw_graph(row):
+            try:
+                validate_graph_structure(row["graph"])
+            except OutputValidationError as exc:
+                raise ExtractionStepError(f"invalid TOBE graph: {path}: {exc}") from exc
     return records
 
 
@@ -153,12 +166,18 @@ def minimal_description_records(
         "keyframes",
         "description",
     }
-    invalid = [index for index, row in enumerate(records) if set(row) != required]
+    invalid = [index for index, row in enumerate(records) if set(row) - {"provenance", "generation"} != required]
     if invalid:
         raise ExtractionStepError(
             f"incompatible description scene output at rows {invalid[:10]}: {path}; "
             "use --force or a new run_id"
         )
+    from extraction.descriptions import SCENE_SCHEMA_VERSION
+    if any(row.get("schema_version") != SCENE_SCHEMA_VERSION
+           or row.get("content_id") != path.stem
+           or not isinstance(row.get("description"), str) or not row["description"].strip()
+           for row in records):
+        raise ExtractionStepError(f"invalid description scene: {path}")
     return records
 
 

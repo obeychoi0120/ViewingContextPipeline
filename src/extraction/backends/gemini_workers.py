@@ -151,7 +151,7 @@ class GeminiWorkerPool:
                 text = backend.generate(
                     load_images(list(task.image_paths)),
                     task.prompt,
-                    self.max_output_tokens or task.max_new_tokens,
+                    task.max_new_tokens,
                 )
                 outcome = GeminiGenerationOutcome(
                     task.task_id, text,

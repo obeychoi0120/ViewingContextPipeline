@@ -12,6 +12,7 @@ import numpy as np
 from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
+from extraction.recovery import fingerprint
 from validation.metrics import metrics_from_rank
 from validation.model import pad_sequences, require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
@@ -248,9 +249,6 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
             "untrained_test_target_fraction": float(
                 np.mean(frequencies[table.targets[ids["test"]]] == 0)
             ),
-            "refit_item_frequency": {
-                item: int(frequencies[i + 1]) for i, item in enumerate(table.items)
-            },
             "elapsed_seconds": time.monotonic() - started,
             "device": str(device),
             "environment": {
@@ -301,13 +299,15 @@ def run_rolling(context, *, force=False, gpus=None, workers_per_gpu=1, target=No
     from validation.steps import validation_config
     from validation.representation_provenance import recommendation_identity
 
-    arms = resolve_target_arms(target)
+    arms = resolve_target_arms(target, config=context.config)
     require_torch()
     devices = worker_devices(gpus, workers_per_gpu)
     config = validation_config(context)
     cohort = context.require_ready_cohort()
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
     verify_representations(context, cohort, arms=arms)
+    training_input_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
+                                       "cutoffs": config.evaluation.cutoffs})
     completed = skipped = 0
     jobs = []
     for split in cohort["plan"]["splits"]:
@@ -319,6 +319,7 @@ def run_rolling(context, *, force=False, gpus=None, workers_per_gpu=1, target=No
                     "evaluation_date": split["evaluation_date"],
                     "seed": seed,
                     "arm": arm,
+                    "training_input_hash": training_input_hash,
                     **recommendation_identity(context, branch),
                 }
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)

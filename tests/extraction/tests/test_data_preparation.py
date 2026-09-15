@@ -44,10 +44,9 @@ def test_direct_keyframe_uses_preceding_frame_for_safe_trailing_seek(
 ) -> None:
     video = tmp_path / "video.mp4"
     video.touch()
-    destination = tmp_path / ".keyframes.direct_tmp" / "0301.png"
 
     def extract_frame(command: list[str], **kwargs: object) -> mock.Mock:
-        destination.touch()
+        Path(command[-1]).touch()
         return mock.Mock(returncode=0, stderr="")
 
     with (
@@ -139,16 +138,12 @@ def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path
     assert "-show_frames" in command
 
 
-def test_prepare_visual_item_reuses_catalog_duration_and_removes_legacy_metadata(
+def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(
     tmp_path: Path,
 ) -> None:
     video = tmp_path / "video.mp4"
     video.touch()
     output_root = tmp_path / "run"
-    metadata_path = output_root / "data/cohort/metadata/content-1.json"
-    metadata_path.parent.mkdir(parents=True)
-    metadata_path.write_text('{"title": "stale"}\n', encoding="utf-8")
-
     with mock.patch(
         "extraction.data_preparation.fixed30.extract_resized_keyframes"
     ) as extract:
@@ -166,9 +161,7 @@ def test_prepare_visual_item_reuses_catalog_duration_and_removes_legacy_metadata
     scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
     assert scenes[-1]["scene_end"] == 30.1
     assert extract.call_args.args[1] == [2.5, 7.5, 12.5, 17.5, 22.5, 27.5, 30]
-    assert extract.call_args.args[2] == output_root / "data/resized_keyframes/content-1"
-    assert not metadata_path.exists()
-    assert not metadata_path.parent.exists()
+    assert extract.call_args.args[2] == output_root / "resized_keyframes/content-1"
 
 
 def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
@@ -176,7 +169,7 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         {"item_id": "1", "content_id": "microlens_100k_00001", "source_video_path": str(tmp_path / "1.mp4"), "duration_seconds": 30.0},
         {"item_id": "2", "content_id": "microlens_100k_00002", "source_video_path": str(tmp_path / "2.mp4"), "duration_seconds": 31.0},
     ]
-    failure_path = tmp_path / "run/data/cohort/preparation_failures.jsonl"
+    failure_path = tmp_path / "run/cohort/preparation_failures.jsonl"
     failure_path.parent.mkdir(parents=True)
     failure_path.write_text('{"error": "stale"}\n', encoding="utf-8")
 
@@ -194,13 +187,13 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
         progress = progress_factory.return_value.__enter__.return_value
         result = prepare_catalog(
             catalog,
-            assets_root=tmp_path / "assets",
-            output_root=tmp_path / "run",
+            assets_root=tmp_path / "run/cohort/source_assets",
+            output_root=tmp_path / "shared",
             image_size=(640, 352),
         )
 
     assert result["succeeded"] == 2 and result["failed"] == 0
-    assert result["workers"] == 4
+    assert result["workers"] == 8
     progress_factory.assert_called_once_with(
         total=2,
         desc="Extract resized keyframes",
@@ -209,7 +202,7 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
     )
     assert progress.update.call_count == 2
     progress.update.assert_has_calls([mock.call(1), mock.call(1)])
-    executor.assert_called_once_with(max_workers=4)
+    executor.assert_called_once_with(max_workers=8)
     assert sorted(call.kwargs["source_video_path"].name for call in process.call_args_list) == [
         "1.mp4",
         "2.mp4",
@@ -220,4 +213,4 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
     ]
     assert all("metadata" not in call.kwargs for call in process.call_args_list)
     assert not failure_path.exists()
-    assert not (tmp_path / "run/data/cohort/extraction_manifest.csv").exists()
+    assert not (tmp_path / "run/cohort/extraction_manifest.csv").exists()

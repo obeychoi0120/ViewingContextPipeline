@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from pipeline_runtime import read_json
 
 
 def missing_metadata_report(titles):
@@ -24,9 +23,6 @@ def missing_metadata_report(titles):
 
 def verify_missing_metadata(context, cohort):
     expected = missing_metadata_report(cohort["metadata_titles"])
-    actual = read_json(context.cohort_dir / "metadata_missing.json")
-    if actual != expected:
-        raise RuntimeError("metadata missing-title report does not match catalog titles")
     with np.load(context.representations_dir / "metadata_embeddings.npz") as data:
         values = data["values"]
         if values.shape != (
@@ -41,4 +37,4 @@ def verify_missing_metadata(context, cohort):
                 raise RuntimeError(
                     f"missing metadata requires a zero vector: item {row['item_id']}"
                 )
-    return actual
+    return expected

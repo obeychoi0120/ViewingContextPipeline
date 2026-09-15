@@ -150,6 +150,7 @@ def prepare_full_cohort(context, *, plan_only=False):
     plan = {
         "schema_version": SCHEMA,
         "metadata_missing_policy": settings["metadata_missing_policy"],
+        "pipeline_schema": context.config["schema_version"],
         "run_id": context.run_id,
         **observed,
         "duplicate_rows_preserved": duplicates,
@@ -187,8 +188,6 @@ def prepare_full_cohort(context, *, plan_only=False):
         print(f"[COHORT] Plan saved: {directory} (plan-only complete)", flush=True)
         return result
     write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
-    # A previous extraction report may describe an older source or sampling setup.
-    (directory / "media_preflight.json").unlink(missing_ok=True)
     print(f"[COHORT] Checking {len(table.items)} video files (existence, size, duplicates)...", flush=True)
     inventory, failures = build_item_inventory(
         set(table.items), context.path("data", "videos_dir"), probe=None,
@@ -213,7 +212,10 @@ def prepare_full_cohort(context, *, plan_only=False):
     titles_path = context.path("data", "titles_csv")
     titles = load_metadata_titles(titles_path, keep_blank=True) if titles_path.is_file() else {}
     failures += [{"item_id": i, "reason": "missing_title"} for i in table.items if i not in titles]
-    write_jsonl(directory / "preparation_failures.jsonl", failures)
+    if failures:
+        write_jsonl(directory / "preparation_failures.jsonl", failures)
+    else:
+        (directory / "preparation_failures.jsonl").unlink(missing_ok=True)
     write_jsonl(directory / "item_inventory.jsonl", inventory)
     if failures:
         raise RuntimeError(
@@ -231,7 +233,6 @@ def prepare_full_cohort(context, *, plan_only=False):
     metadata_titles = [{**r, "title": titles[r["item_id"]]} for r in required]
     write_jsonl(directory / "metadata_titles.jsonl", metadata_titles)
     missing_metadata = missing_metadata_report(metadata_titles)
-    write_json(directory / "metadata_missing.json", missing_metadata)
     print(
         f"[Metadata] zero-vector items={missing_metadata['missing_count']}: "
         + ",".join(r["item_id"] for r in missing_metadata["items"]), flush=True,

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import math
+import os
+import fcntl
+import tempfile
 from pathlib import Path
 import shutil
 import subprocess
@@ -53,7 +56,7 @@ def _decodable_frame_tail_timestamps_seconds(video_path: Path) -> tuple[float, f
     return safe_seek_timestamp, last_timestamp
 
 
-def extract_resized_keyframes(
+def _extract_missing_keyframes(
     video_path: str | Path,
     timestamps: list[int | float],
     output_folder: str | Path,
@@ -61,7 +64,6 @@ def extract_resized_keyframes(
 ) -> None:
     source = Path(video_path)
     output = Path(output_folder)
-    staging = output.with_name(f".{output.name}.direct_tmp")
     width, height = image_size
     if not source.is_file():
         raise FileNotFoundError(f"Video source is missing: {source}")
@@ -77,9 +79,7 @@ def extract_resized_keyframes(
         or timestamps != sorted(set(timestamps))
     ):
         raise ValueError("timestamps must be sorted unique non-negative numbers at 0.1s precision")
-    if staging.exists():
-        shutil.rmtree(staging)
-    staging.mkdir(parents=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.frames-", dir=output.parent))
     try:
         for timestamp in timestamps:
             destination = staging / f"{timestamp_stem(timestamp)}.png"
@@ -139,10 +139,40 @@ def extract_resized_keyframes(
                 raise RuntimeError(f"Invalid keyframe dimensions: {destination}")
             if clamp_message is not None:
                 print(clamp_message, flush=True)
-        if output.exists():
-            shutil.rmtree(output)
-        staging.replace(output)
+        for image in staging.iterdir():
+            # Creation is atomic and cannot replace a concurrently published file.
+            os.link(image, output / image.name)
+        shutil.rmtree(staging)
     except Exception:
         if staging.exists():
             shutil.rmtree(staging)
         raise
+
+
+def extract_resized_keyframes(video_path, timestamps, output_folder, image_size):
+    """Serialize writers by content directory; preserve all existing valid frames."""
+    output = Path(output_folder)
+    if not Path(video_path).is_file():
+        raise FileNotFoundError(f"Video source is missing: {video_path}")
+    if len(image_size) != 2 or any(type(v) is not int or v <= 0 for v in image_size):
+        raise ValueError("image_size must contain positive integers")
+    if (not timestamps or any(type(t) not in (int, float) or not math.isfinite(t) or t < 0
+                              or truncate_timestamp(t) != t for t in timestamps)
+            or timestamps != sorted(set(timestamps))):
+        raise ValueError("timestamps must be sorted unique non-negative numbers at 0.1s precision")
+    output.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(output, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        missing = []
+        for timestamp in timestamps:
+            path = output / f"{timestamp_stem(timestamp)}.png"
+            if path.exists():
+                if verified_image_size(path) != image_size:
+                    raise ValueError(f"invalid existing shared frame; repair manually: {path}")
+            else:
+                missing.append(timestamp)
+        if missing:
+            _extract_missing_keyframes(video_path, missing, output, image_size)
+    finally:
+        os.close(descriptor)
