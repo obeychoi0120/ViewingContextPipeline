@@ -13,6 +13,7 @@ class DatasetConfig(StrictModel):
     pairs_tsv: Path
     videos_dir: Path
     titles_csv: Path
+    titles_supplement_csv: Path | None = None
 
 
 class RollingDatasetConfig(DatasetConfig):

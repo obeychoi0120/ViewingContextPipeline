@@ -2,6 +2,8 @@
 
 설정은 저장소 루트의 [config.yaml](../config.yaml), 프롬프트는 [prompts](../prompts/)입니다. 실행 명령과 Run 간 프롬프트 비교 절차는 [README](../README.md)를 따릅니다.
 
+`prepare-cohort`는 단일 실행에서 필요한 아이템 목록을 만든 뒤 `data.titles_csv`의 빈 제목·누락 행을 `data.titles_supplement_csv`로 보완합니다. 원본 제목은 유지하고 미해결 제목은 영벡터용 빈 값으로 남깁니다. 결과는 `cohort/metadata_titles.jsonl`, 보완 출처·통계는 `cohort/cohort_plan.json`에 저장하므로 별도 completed CSV나 사전 `--plan-only` 실행은 필요하지 않습니다.
+
 ## 시간·학습 계약
 
 원본 CSV의 모든 interaction과 중복 행을 보존합니다. 정수 밀리초 timestamp를 UTC로 해석하고 마지막 관측일을 제외한 직전 7일을 평가합니다. 각 사건의 정답보다 **엄격히 앞선 시각**의 최근 10개 아이템을 입력합니다. 같은 timestamp의 사건은 서로의 이력이 되지 않습니다. 무이력 사건은 학습·평가에서 제외하지만 이후 사건의 이력과 원본에는 보존합니다.

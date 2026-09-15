@@ -18,7 +18,7 @@ def test_readme_relative_links_exist():
 
 
 def test_readme_documents_complete_stage_matrix():
-    assert len(COMMANDS) == 18
+    assert len(COMMANDS) == 17
     for step in ("extract-description-scenes", "extract-graph-scenes", "summarize-description", "summarize-graph"):
         assert sum(f" {step} " in command for command in COMMANDS) == 2
 

@@ -210,7 +210,24 @@ def prepare_full_cohort(context, *, plan_only=False):
             row["duration_seconds"] = old["duration_seconds"]
     print("[COHORT] Checking metadata titles...", flush=True)
     titles_path = context.path("data", "titles_csv")
-    titles = load_metadata_titles(titles_path, keep_blank=True) if titles_path.is_file() else {}
+    if "titles_supplement_csv" in context.config["data"]:
+        from validation.complete_titles import resolve_required_titles
+
+        titles, _, completion = resolve_required_titles(
+            primary_path=titles_path,
+            supplement_path=context.path("data", "titles_supplement_csv"),
+            required_items_path=directory / "required_items.jsonl",
+            unresolved_policy="zero-vector",
+        )
+        plan["title_completion"] = completion
+        write_json(directory / "cohort_plan.json", plan)
+        print(
+            f"[METADATA TITLES] supplemented={completion['supplemented_required_item_count']} "
+            f"unresolved={completion['unresolved_required_item_count']} policy=zero-vector",
+            flush=True,
+        )
+    else:
+        titles = load_metadata_titles(titles_path, keep_blank=True) if titles_path.is_file() else {}
     failures += [{"item_id": i, "reason": "missing_title"} for i in table.items if i not in titles]
     if failures:
         write_jsonl(directory / "preparation_failures.jsonl", failures)

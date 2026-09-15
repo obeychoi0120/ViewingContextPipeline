@@ -32,6 +32,7 @@ PROSE = "A person in a red jacket looks at a person in a blue shirt, who waves b
 def v5_context(tmp_path):
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
     config["artifacts_root"] = "artifacts"
+    config["data"].pop("titles_supplement_csv", None)
     for key in config["data"]:
         config["data"][key] = str(tmp_path / key)
     videos = Path(config["data"]["videos_dir"])

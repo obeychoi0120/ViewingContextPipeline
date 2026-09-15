@@ -333,8 +333,10 @@ def _validate_models(value: dict[str, Any]) -> None:
     data_keys = {"videos_dir", "pairs_tsv", "titles_csv"}
     if value["schema_version"] == CONFIG_SCHEMA:
         data_keys.add("pairs_csv")
-    if set(data) != data_keys:
-        raise ConfigError(f"data must contain exactly {sorted(data_keys)}")
+    if not data_keys <= set(data) or set(data) - data_keys - {"titles_supplement_csv"}:
+        raise ConfigError(f"data must contain {sorted(data_keys)} and optionally titles_supplement_csv")
+    if "titles_supplement_csv" in data and (not isinstance(data["titles_supplement_csv"], str) or not data["titles_supplement_csv"].strip()):
+        raise ConfigError("data.titles_supplement_csv must be a non-empty path")
     if set(models) != {"qwen", "bge", "gemini"}:
         raise ConfigError("models must contain exactly qwen, bge, and gemini")
     gemini = _require_mapping(models, "gemini")

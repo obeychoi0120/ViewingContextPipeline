@@ -130,6 +130,66 @@ def _atomic_write_text(path: Path, text: str) -> None:
             temporary.unlink()
 
 
+def resolve_required_titles(
+    *,
+    primary_path: Path,
+    supplement_path: Path,
+    required_items_path: Path,
+    unresolved_policy: str = "zero-vector",
+) -> tuple[dict[str, str], list[str], dict[str, Any]]:
+    """Resolve titles without creating a completed CSV or report artifact."""
+    if unresolved_policy not in {"error", "zero-vector"}:
+        raise TitleCompletionError("unresolved_policy must be error or zero-vector")
+    primary_path = primary_path.resolve()
+    supplement_path = supplement_path.resolve()
+    required_items_path = required_items_path.resolve()
+    primary, primary_order = _load_titles(
+        primary_path, allow_header=False, decode_quoted_title=False
+    )
+    supplement, _ = _load_titles(supplement_path, allow_header=True, decode_quoted_title=True)
+    required = _load_required_items(required_items_path)
+    missing = [item_id for item_id in required if not primary.get(item_id, "").strip()]
+    unresolved = [item_id for item_id in missing if not supplement.get(item_id, "").strip()]
+    if unresolved and unresolved_policy == "error":
+        raise TitleCompletionError(
+            "official supplement does not resolve required metadata titles: " + ",".join(unresolved)
+        )
+
+    completed = dict(primary)
+    unresolved_ids = set(unresolved)
+    supplemented = [item_id for item_id in missing if item_id not in unresolved_ids]
+    for item_id in missing:
+        completed[item_id] = supplement.get(item_id, "").strip()
+    appended = sorted((set(completed) - set(primary_order)), key=int)
+    output_order = [*primary_order, *appended]
+
+    report = {
+        "schema_version": (
+            REPORT_SCHEMA_VERSION
+            if unresolved_policy == "error"
+            else "metadata-title-completion/v2"
+        ),
+        "policy": "required_blank_or_missing_from_official_supplement",
+        "sources": {
+            "primary": {"path": str(primary_path)},
+            "supplement": {"path": str(supplement_path)},
+            "required_items": {
+                "path": str(required_items_path),
+            },
+        },
+        "primary_blank_item_count": sum(not title.strip() for title in primary.values()),
+        "required_item_count": len(required),
+        "required_missing_or_blank_in_primary_count": len(missing),
+        "supplemented_required_item_count": len(supplemented),
+        "supplemented_item_ids": supplemented,
+        "unresolved_required_item_count": len(unresolved),
+        "remaining_blank_item_count": sum(not title.strip() for title in completed.values()),
+    }
+    if unresolved_policy == "zero-vector":
+        report.update(unresolved_policy="zero_vector", unresolved_item_ids=unresolved)
+    return completed, output_order, report
+
+
 def complete_required_titles(
     *,
     primary_path: Path,
@@ -156,58 +216,19 @@ def complete_required_titles(
             "primary, supplement, required-items, output, and report must differ"
         )
 
-    primary, primary_order = _load_titles(
-        primary_path, allow_header=False, decode_quoted_title=False
+    completed, output_order, report = resolve_required_titles(
+        primary_path=primary_path,
+        supplement_path=supplement_path,
+        required_items_path=required_items_path,
+        unresolved_policy=unresolved_policy,
     )
-    supplement, _ = _load_titles(supplement_path, allow_header=True, decode_quoted_title=True)
-    required = _load_required_items(required_items_path)
-    missing = [item_id for item_id in required if not primary.get(item_id, "").strip()]
-    unresolved = [item_id for item_id in missing if not supplement.get(item_id, "").strip()]
-    if unresolved and unresolved_policy == "error":
-        raise TitleCompletionError(
-            "official supplement does not resolve required metadata titles: " + ",".join(unresolved)
-        )
-
-    completed = dict(primary)
-    unresolved_ids = set(unresolved)
-    supplemented = [item_id for item_id in missing if item_id not in unresolved_ids]
-    for item_id in missing:
-        completed[item_id] = supplement.get(item_id, "").strip()
-    appended = sorted((set(completed) - set(primary_order)), key=int)
-    output_order = [*primary_order, *appended]
     text = "".join(f"{item_id},{completed[item_id]}\n" for item_id in output_order)
     _atomic_write_text(output_path, text)
-
-    report = {
-        "schema_version": (
-            REPORT_SCHEMA_VERSION if unresolved_policy == "error" else "metadata-title-completion/v2"
-        ),
-        "policy": "required_blank_or_missing_from_official_supplement",
-        "sources": {
-            "primary": {"path": str(primary_path)},
-            "supplement": {"path": str(supplement_path)},
-            "required_items": {
-                "path": str(required_items_path),
-            },
-        },
-        "output": {
-            "path": str(output_path),
-            "row_count": len(output_order),
-        },
-        "primary_blank_item_count": sum(not title.strip() for title in primary.values()),
-        "required_item_count": len(required),
-        "required_missing_or_blank_in_primary_count": len(missing),
-        "supplemented_required_item_count": len(supplemented),
-        "supplemented_item_ids": supplemented,
-        "unresolved_required_item_count": len(unresolved),
-        "remaining_blank_item_count": sum(not title.strip() for title in completed.values()),
-    }
-    if unresolved_policy == "zero-vector":
-        report.update(unresolved_policy="zero_vector", unresolved_item_ids=unresolved)
+    report["output"] = {"path": str(output_path), "row_count": len(output_order)}
     atomic_write_json(report_path, report)
     print(
-        f"[METADATA TITLES] required={len(required)} supplemented={len(supplemented)} "
-        f"unresolved={len(unresolved)} policy={unresolved_policy} "
+        f"[METADATA TITLES] required={report['required_item_count']} supplemented={report['supplemented_required_item_count']} "
+        f"unresolved={report['unresolved_required_item_count']} policy={unresolved_policy} "
         f"output={output_path} report={report_path}",
         flush=True,
     )
@@ -224,7 +245,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path)
     parser.add_argument(
-        "--unresolved-policy", choices=("error", "zero-vector"), default="error",
+        "--unresolved-policy",
+        choices=("error", "zero-vector"),
+        default="error",
         help="Preserve unresolved titles as empty fields for v4 zero-vector encoding.",
     )
     args = parser.parse_args(argv)

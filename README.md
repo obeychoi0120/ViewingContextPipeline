@@ -41,7 +41,8 @@ Gemini 전용 환경은 `.[gemini,dev]`로 설치할 수 있습니다. Vertex AD
 | `data.pairs_csv` | `user,item,timestamp` CSV, 정수 밀리초 |
 | `data.pairs_tsv` | 존재하면 CSV와 사용자별 interaction multiset을 검증 |
 | `data.videos_dir` | `{item_id}.mp4` 파일들 |
-| `data.titles_csv` | `item_id,title` 영문 title CSV. 빈 title은 허용하고 누락 행은 오류 |
+| `data.titles_csv` | 원본 `MicroLens-100k_title_en.csv` (영문 title) |
+| `data.titles_supplement_csv` | 보완용 `MicroLens-50k_titles.csv`. 지정하면 빈 제목·누락 행을 자동 보완 |
 | `models.qwen`, `models.bge` | 로컬 모델 디렉터리 |
 | `models.gemini` | Vertex 프로젝트·위치·모델·생성 설정 |
 | `artifacts_root` | 산출물 상위 경로. 기본 `artifacts` |
@@ -51,7 +52,6 @@ Gemini 전용 환경은 `.[gemini,dev]`로 설치할 수 있습니다. Vertex AD
 ```bash
 RUN_ID=experiment_v5
 
-python -m validation prepare-cohort --run-id "$RUN_ID" --plan-only
 python -m validation prepare-cohort --run-id "$RUN_ID"
 python -m extraction prepare-input-data --run-id "$RUN_ID"
 
@@ -69,6 +69,12 @@ python -m validation embed-representations --run-id "$RUN_ID"
 python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
+
+`prepare-cohort` 한 번으로 required items 생성 → 원본·보완 CSV의 제목 병합 → 영상·제목 검증을 완료합니다. 원본의 비어 있지 않은 제목을 우선하고, 필요한 아이템의 빈 제목·누락 행만 보완합니다. 끝내 찾지 못한 제목은 빈 값으로 저장해 Metadata embedding에서 영벡터로 처리합니다. 보완 CSV 자체가 없거나 손상된 경우에는 실패합니다.
+
+병합 결과는 `artifacts/$RUN_ID/cohort/metadata_titles.jsonl`, 출처·보완 통계는 같은 폴더의 `cohort_plan.json`에 저장합니다. 원본 CSV를 변경하거나 별도 completed CSV·report 파일을 만들지 않습니다. `--plan-only`나 별도 `validation.complete_titles` 실행은 필요하지 않습니다. 재실행하면 최신 CSV를 다시 읽습니다. 이미 완성된 제목 CSV를 사용할 때는 `data.titles_csv`에 지정하고 `data.titles_supplement_csv`를 생략하면 됩니다(이 경우 누락 행은 오류).
+
+기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/$RUN_ID/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
 
 `--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용합니다. 와일드카드 문자열은 허용하지 않습니다. 네 생성 명령에서 필수이며, 추출은 `--model`, 요약은 `--source`도 필수입니다. 요약 모델은 항상 Qwen이고 `--source`는 입력 장면을 만든 모델입니다. Graph 명령은 항상 `graph`에 쓰며 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
 
