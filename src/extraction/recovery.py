@@ -54,6 +54,12 @@ def active_force_run(directory):
     return json.loads(path.read_text(encoding="utf-8"))["force_run_id"] if path.exists() else None
 
 
+def start_force_run(directory):
+    force_run_id = str(uuid4())
+    _save(directory / ".force-run", {"force_run_id": force_run_id})
+    return force_run_id
+
+
 def compact_origin(origin):
     """Keep execution identity and hardware/backend evidence, never another copy of text."""
     if not origin:
@@ -94,9 +100,10 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
     With rounds_across_batches, stream the entire pass with lazy preparation and
     retry only after all requests at the current penalty have finished.
     """
-    tasks = list(tasks)
-    if len({task.task_id for task in tasks}) != len(tasks):
-        raise ValueError("duplicate recovery task")
+    if not rounds_across_batches:
+        tasks = list(tasks)
+        if len({task.task_id for task in tasks}) != len(tasks):
+            raise ValueError("duplicate recovery task")
     if type(batch_size) is not int or batch_size <= 0:
         raise ValueError("recovery batch size must be a positive integer")
     if batch_key is not None and rounds_across_batches:
@@ -104,35 +111,38 @@ def generate_with_recovery(generate, tasks, *, penalties, directory, identity, v
     penalties = penalty_schedule(penalties)
     force_run_id = active_force_run(directory)
     if force:
-        force_run_id = str(uuid4())
         # One intent marker covers tasks in later batches, including existing good outputs.
-        _save(directory / ".force-run", {"force_run_id": force_run_id})
-    for attempt_index in (range(len(penalties)) if rounds_across_batches else [None]):
-        remaining = []
-        if rounds_across_batches:
+        force_run_id = start_force_run(directory)
+    if rounds_across_batches:
+        for attempt_index in range(len(penalties)):
+            count = len(tasks) if hasattr(tasks, "__len__") else "streaming"
             log(f"[RECOVERY] pass={attempt_index + 1}/{len(penalties)} "
-                f"repetition_penalty={penalties[attempt_index]} pending={len(tasks)}")
-        submission_size = (len(tasks) or 1) if rounds_across_batches else batch_size
-        groups = (group for _, group in groupby(tasks, key=batch_key)) if batch_key else [tasks]
-        offset = 0
-        for group in groups:
-            group = list(group)
-            for start in range(0, len(group), submission_size):
-                batch = group[start:start + submission_size]
-                if not rounds_across_batches:
-                    log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
-                        "(input hashes and checkpoints)")
-                remaining.extend(_generate_recovery_batch(
-                    generate, batch, penalties=penalties, directory=directory, identity=identity,
-                    validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
-                    force=force and attempt_index in (None, 0), force_run_id=force_run_id,
-                    runtime=runtime, attempt_metadata=attempt_metadata, log=log,
-                    attempt_index=attempt_index,
-                ))
-                offset += len(batch)
-        tasks = remaining
-        if not tasks:
-            break
+                f"repetition_penalty={penalties[attempt_index]} pending={count}")
+            tasks = _generate_recovery_batch(
+                generate, tasks, penalties=penalties, directory=directory, identity=identity,
+                validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
+                force=force and attempt_index == 0, force_run_id=force_run_id,
+                runtime=runtime, attempt_metadata=attempt_metadata, log=log,
+                attempt_index=attempt_index,
+            )
+            if not tasks:
+                break
+        return
+    groups = (group for _, group in groupby(tasks, key=batch_key)) if batch_key else [tasks]
+    offset = 0
+    for group in groups:
+        group = list(group)
+        for start in range(0, len(group), batch_size):
+            batch = group[start:start + batch_size]
+            log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
+                "(input hashes and checkpoints)")
+            _generate_recovery_batch(
+                generate, batch, penalties=penalties, directory=directory, identity=identity,
+                validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
+                force=force, force_run_id=force_run_id, runtime=runtime,
+                attempt_metadata=attempt_metadata, log=log, attempt_index=None,
+            )
+            offset += len(batch)
 
 
 def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity, validate,
@@ -141,12 +151,14 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
     """Only validation failures retry. Callbacks and engine errors propagate unchanged."""
     penalties = penalty_schedule(penalties)
     states = {}
+    admitted = set()
     streaming = attempt_index is not None
     remaining = []
 
     def prepare(task):
-        if task.task_id in states:
+        if task.task_id in admitted:
             raise ValueError(f"duplicate recovery task: {task.task_id}")
+        admitted.add(task.task_id)
         key = generation_key(task, identity, penalties)
         path = directory / f"{fingerprint(task.task_id)}.json"
         document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {

@@ -59,6 +59,7 @@ class InferenceProgress:
         )
         self.fp = self.bar.fp
         self.total = total
+        self.discovered = total or 0
         self.unit = unit
         self.reused = reused
         self.empty = empty
@@ -98,6 +99,16 @@ class InferenceProgress:
             elapsed = max(0, self._clock() - self._started)
             deadline = self._started + (int(elapsed / self.REFRESH_SECONDS) + 1) * self.REFRESH_SECONDS
 
+    def discover(self, count, *, reused=0):
+        with self._lock:
+            self.discovered += count
+            self.reused += reused
+
+    def finish_discovery(self):
+        with self._lock:
+            self.total = self.discovered
+            self.bar.total = self.total
+
     def complete(self, *, failed=False):
         with self._lock:
             if failed:
@@ -115,7 +126,7 @@ class InferenceProgress:
     def _render(self, *, refresh):
         with self._lock, tqdm.get_lock():
             completed = self.success + self.failed
-            remaining = max(0, self.total - completed)
+            remaining = None if self.total is None else max(0, self.total - completed)
             elapsed = max(0, self._clock() - self._started) if self._started is not None else 0
             rate = completed / elapsed if elapsed > 0 else 0
             phase = self.stats.get("phase")
@@ -123,7 +134,7 @@ class InferenceProgress:
                 eta = "--"
             elif remaining == 0:
                 eta = "00:00"
-            elif rate > 0:
+            elif remaining is not None and rate > 0:
                 eta = tqdm.format_interval(remaining / rate)
             else:
                 eta = "estimating"

@@ -212,3 +212,57 @@ def test_gemini_interrupt_discards_memory_and_restarts_unfinished_contents(
     assert not (scene_dir / ".pending-contents.json").exists()
     for cid in ("b", "c"):
         assert "old" not in str(read_jsonl(scene_dir / f"{cid}.jsonl"))
+
+
+@pytest.mark.parametrize("model", ["qwen", "gemini"])
+@pytest.mark.parametrize("representation", ["graph", "description"])
+def test_scene_inputs_are_read_as_inference_consumes_them(
+    context, monkeypatch, capsys, model, representation,
+):
+    visuals = [{"content_id": cid} for cid in ("a", "b", "c")]
+    monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
+    monkeypatch.setattr(steps, "video_name_map", lambda _: {})
+    completed = []
+    scene_dir = context.extraction_dir(representation, model, "scenes")
+    opened = []
+
+    def rows(visual, **kwargs):
+        cid = visual["content_id"]
+        if cid != "a":
+            previous = chr(ord(cid) - 1)
+            assert previous in completed
+            assert (scene_dir / f"{previous}.jsonl").is_file()
+        return [{"task": QwenGenerationTask(f"{cid}:0", (), "prompt", 32),
+                 "scene_idx": 0, "keyframes": [5]}]
+
+    monkeypatch.setattr(steps, "scene_generation_rows", rows)
+    response = json.dumps({"entities": [], "relations": [], "context": []})
+
+    def generate(tasks, callback):
+        for task in tasks:
+            callback(task.task_id, response)
+            completed.append(task.task_id.split(":")[0])
+        return {}
+
+    @contextmanager
+    def generator(**kwargs):
+        opened.append(True)
+        yield generate
+
+    class Pool:
+        def __init__(self, *args, **kwargs):
+            opened.append(True)
+
+        def generate(self, tasks, callback, **kwargs):
+            return generate(tasks, lambda task_id, text: callback(
+                GeminiGenerationOutcome(task_id, text)))
+
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
+    extract = getattr(steps, f"extract_{representation}_scenes")
+    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    assert extract(context, model=model, schema=schema)["failure_count"] == 0
+    assert completed == ["a", "b", "c"]
+    assert opened == [True]
+    output = capsys.readouterr()
+    assert "Prepare scene tasks" not in output.out + output.err

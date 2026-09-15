@@ -7,7 +7,7 @@ from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warn
 from extraction.semantic_graph.json_repair import repair_graph_json_once
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.raw_output import raw_graph_record
-from extraction.recovery import generate_with_recovery
+from extraction.recovery import generate_with_recovery, start_force_run
 from pipeline_runtime import write_json
 from extraction.step_support import (
     write_progress,
@@ -89,8 +89,10 @@ def run_qwen_scenes(
 ):
     records_by_content, failures_by_content = {}, {}
     rows_by_task, states = {}, {}
-    reused = sum(len(rows) for rows in existing_records.values())
-    for visual, scene_rows in pending:
+    if force:
+        start_force_run(scene_dir / ".recovery")
+
+    def register_content(visual, scene_rows):
         content_id = str(visual["content_id"])
         states[content_id] = {
             "records": {}, "failures": {}, "handled": set(), "remaining": len(scene_rows),
@@ -102,17 +104,12 @@ def run_qwen_scenes(
             if task_id in rows_by_task:
                 raise ValueError(f"duplicate scene task: {task_id}")
             rows_by_task[task_id] = (content_id, row)
-    write_progress(progress, f"[Qwen] reused={reused} "
-                             f"pending={len(rows_by_task)} contents={len(pending)}")
-    for content_id, state in states.items():
-        if state["remaining"] == 0:
-            write_scene_checkpoint(scene_dir / f"{content_id}.jsonl",
-                                   failure_dir / f"{content_id}.jsonl",
-                                   state["cached"], state["cached_failures"])
-            records_by_content[content_id] = state["cached"]
-            failures_by_content[content_id] = state["cached_failures"]
-    if not rows_by_task:
-        return records_by_content, failures_by_content
+        return [row["task"] for row in scene_rows]
+
+    def stream_tasks():
+        for visual, scene_rows in pending:
+            yield from register_content(visual, scene_rows)
+
     write_progress(progress, (
         "[Qwen] processing contents sequentially with up to 8 concurrent scenes; "
         "each completed scene is checkpointed immediately"
@@ -172,20 +169,28 @@ def run_qwen_scenes(
         image_limit=image_limit, runtime=runtime, log=lambda message: write_progress(progress, message),
         on_progress=lambda stats: qwen_progress(progress, stats),
     ) as generate:
-        generate_with_recovery(
-            generate, [row["task"] for _, row in rows_by_task.values()],
-            penalties=penalties, directory=scene_dir / ".recovery",
-            identity=identity or {"model": str(model_path), "settings": qwen_options, "backend": "vllm-0.28.0"},
-            validate=validate, complete=lambda task_id, record: publish(task_id, record, None),
-            failed=failed,
-            raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
-            if arm == "graph" else None,
-            force=force, runtime=runtime,
-            log=lambda message: write_progress(progress, message) if arm != "graph" else None,
-            rounds_across_batches=arm != "graph",
-            batch_size=QWEN_GRAPH_SCENE_CONCURRENCY if arm == "graph" else 256,
-            batch_key=(lambda task: rows_by_task[task.task_id][0]) if arm == "graph" else None,
-        )
+        def run(tasks):
+            generate_with_recovery(
+                generate, tasks,
+                penalties=penalties, directory=scene_dir / ".recovery",
+                identity=identity or {
+                    "model": str(model_path), "settings": qwen_options, "backend": "vllm-0.28.0",
+                },
+                validate=validate, complete=lambda task_id, record: publish(task_id, record, None),
+                failed=failed,
+                raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
+                if arm == "graph" else None,
+                runtime=runtime,
+                log=lambda message: write_progress(progress, message) if arm != "graph" else None,
+                rounds_across_batches=arm != "graph",
+                batch_size=QWEN_GRAPH_SCENE_CONCURRENCY if arm == "graph" else 256,
+            )
+
+        if arm == "graph":
+            for visual, scene_rows in pending:
+                run(register_content(visual, scene_rows))
+        else:
+            run(stream_tasks())
     return records_by_content, failures_by_content
 
 
@@ -233,19 +238,24 @@ def run_gemini_scenes(
     force,
     names,
     progress,
+    content_ids,
     arm="graph",
+    resume_force=False,
 ):
     # This marker contains only content IDs, never generated Scene responses.
     # It distinguishes an interrupted refresh from an older completed output.
     marker = scene_dir / ".pending-contents.json"
     cursor = scene_dir / ".completed-contents.json"
-    unfinished = [str(visual["content_id"]) for visual, _ in pending]
-    if not unfinished:
+    if not content_ids:
         return
+    positions = {str(cid): index for index, cid in enumerate(content_ids)}
     write_json(cursor, {"count": 0})
-    write_json(marker, {"content_ids": unfinished})
-    for content_index, (visual, scene_rows) in enumerate(pending):
+    write_json(marker, {"content_ids": content_ids, "force": force or resume_force})
+    for visual, scene_rows in pending:
         content_id = str(visual["content_id"])
+        content_index = positions[content_id]
+        # A crash during this content must not discard earlier completed contents.
+        write_json(cursor, {"count": content_index})
         rows_by_task = {row["task"].task_id: row for row in scene_rows}
         if len(rows_by_task) != len(scene_rows):
             raise ValueError(f"duplicate scene task in content: {content_id}")

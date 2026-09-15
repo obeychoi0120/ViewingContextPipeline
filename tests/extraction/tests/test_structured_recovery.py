@@ -167,3 +167,31 @@ def test_checkpoint_write_failure_preserves_last_durable_attempt(tmp_path, monke
     seen = []
     run(tmp_path, lambda tasks, _: (seen.append(tasks[0].repetition_penalty) or {"a": "valid replay"}))
     assert seen == [1.05]
+
+
+def test_streaming_recovery_does_not_consume_future_inputs_before_generation(tmp_path):
+    completed = []
+
+    def tasks():
+        yield task("a")
+        assert completed == ["a"]
+        yield task("b")
+
+    def generate(tasks, callback):
+        for item in tasks:
+            callback(item.task_id, "valid")
+            completed.append(item.task_id)
+        return {}
+
+    outputs, failures = run(tmp_path, generate, tasks(), rounds_across_batches=True)
+    assert set(outputs) == {"a", "b"} and not failures
+
+
+def test_streaming_recovery_rejects_duplicate_after_first_task_completes(tmp_path):
+    def generate(tasks, callback):
+        for item in tasks:
+            callback(item.task_id, "valid")
+        return {}
+
+    with pytest.raises(ValueError, match="duplicate recovery task"):
+        run(tmp_path, generate, iter([task("a"), task("a")]), rounds_across_batches=True)

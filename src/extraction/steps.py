@@ -15,6 +15,7 @@ from extraction.recovery import (
     clear_recovery,
     generation_key,
     has_pending_recovery,
+    start_force_run,
 )
 from extraction.recovery import file_fingerprint, penalty_schedule
 from extraction.progress import InferenceProgress
@@ -107,70 +108,84 @@ def _extract(context, *, representation, model, schema, force=False):
     failure_dir = scene_dir / "failures"
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
-    existing, failures, pending = {}, {}, []
+    existing, failures = {}, {}
+    if force and model == "qwen":
+        start_force_run(scene_dir / ".recovery")
     force_run = active_force_run(scene_dir / ".recovery")
     interrupted = set()
+    resume_force = False
     if model == "gemini" and (scene_dir / ".pending-contents.json").is_file():
         cursor = scene_dir / ".completed-contents.json"
         count = read_json(cursor)["count"] if cursor.is_file() else 0
-        interrupted = set(read_json(scene_dir / ".pending-contents.json")["content_ids"][count:])
-    print(f"[PREPARE] Building scene tasks and checking saved outputs for {len(visuals)} videos; prepared assets are trusted.", flush=True)
-    for visual in tqdm(visuals, desc="Prepare scene tasks", unit="video"):
-        cid = visual["content_id"]
-        output = scene_dir / f"{cid}.jsonl"
-        failure_path = failure_dir / f"{cid}.jsonl"
-        restore_scene_checkpoint(output, failure_path)
-        rows = scene_generation_rows(
-            visual,
-            prompt=prompt,
-            max_new_tokens=settings[representation]["scene_max_new_tokens"],
-            repetition_penalty=penalty_schedule(penalties)[0],
-        )
-        for row in rows:
-            if representation == "graph" and model == "qwen":
-                row["task"] = replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
-            row["provenance"] = provenance
-            row["input_key"] = generation_key(row["task"], provenance, penalties)
-        cached = normalize(read_jsonl(output), output) if output.is_file() and not force else []
-        by_index = {r["scene_idx"]: r for r in cached}
-        if len(by_index) != len(cached):
-            raise ExtractionStepError(f"duplicate cached scenes: {output}")
-        retained, missing = [], []
-        for row in rows:
-            saved = by_index.get(row["scene_idx"])
-            generation = saved.get("generation", {}) if saved else {}
-            reusable = (
-                saved is not None
-                and (
-                    generation.get("input_key") == row["input_key"]
-                    or (
-                        bool(generation.get("input_key"))
-                        and saved.get("provenance") == row["provenance"]
-                        and saved.get("keyframes") == row["keyframes"]
+        marker = read_json(scene_dir / ".pending-contents.json")
+        remaining = marker["content_ids"][count:]
+        resume_force = marker.get("force", True)
+        interrupted = set(remaining if resume_force else remaining[:1])
+    initial_penalty = penalty_schedule(penalties)[0]
+
+    def pending_contents(progress):
+        for visual in visuals:
+            cid = visual["content_id"]
+            output = scene_dir / f"{cid}.jsonl"
+            failure_path = failure_dir / f"{cid}.jsonl"
+            restore_scene_checkpoint(output, failure_path)
+            rows = scene_generation_rows(
+                visual,
+                prompt=prompt,
+                max_new_tokens=settings[representation]["scene_max_new_tokens"],
+                repetition_penalty=initial_penalty,
+            )
+            for row in rows:
+                if representation == "graph" and model == "qwen":
+                    row["task"] = replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
+                row["provenance"] = provenance
+            cached = normalize(read_jsonl(output), output) if output.is_file() and not force else []
+            by_index = {r["scene_idx"]: r for r in cached}
+            if len(by_index) != len(cached):
+                raise ExtractionStepError(f"duplicate cached scenes: {output}")
+            retained, missing = [], []
+            for row in rows:
+                saved = by_index.get(row["scene_idx"])
+                generation = saved.get("generation", {}) if saved else {}
+                reusable = (
+                    saved is not None
+                    and (
+                        (
+                            bool(generation.get("input_key"))
+                            and saved.get("provenance") == row["provenance"]
+                            and saved.get("keyframes") == row["keyframes"]
+                        )
+                        or generation.get("input_key") == generation_key(
+                            row["task"], provenance, penalties
+                        )
+                    )
+                    and cid not in interrupted
+                    and not has_pending_recovery(
+                        scene_dir / ".recovery", row["task"].task_id, force_run, generation
                     )
                 )
-                and cid not in interrupted
-                and not has_pending_recovery(
-                    scene_dir / ".recovery", row["task"].task_id, force_run, generation
-                )
-            )
-            (retained if reusable else missing).append(saved if reusable else row)
-        existing[cid] = retained
-        failures[cid] = []
-        if missing:
-            pending.append((visual, missing))
-        else:
-            failure_path.unlink(missing_ok=True)
+                (retained if reusable else missing).append(saved if reusable else row)
+            existing[cid] = retained
+            failures[cid] = []
+            progress.discover(len(missing), reused=len(retained))
+            if missing:
+                if model == "gemini":
+                    for row in missing:
+                        row["input_key"] = generation_key(row["task"], provenance, penalties)
+                yield visual, missing
+            else:
+                failure_path.unlink(missing_ok=True)
+        progress.finish_discovery()
+
     with InferenceProgress(
-        total=sum(len(r) for _, r in pending),
-        reused=sum(len(r) for r in existing.values()),
+        total=None,
         desc=arm.name,
         unit="scene",
         progress_factory=tqdm,
     ) as progress:
         if model == "qwen":
             done, failed = run_qwen_scenes(
-                pending,
+                pending_contents(progress),
                 scene_dir=scene_dir,
                 failure_dir=failure_dir,
                 model_path=context.path("models", "qwen"),
@@ -185,17 +200,17 @@ def _extract(context, *, representation, model, schema, force=False):
                 image_limit=settings["visual_evidence"]["num_keyframes"],
                 runtime=QwenRuntime(),
                 penalties=penalties,
-                force=force,
+                force=False,
                 identity=provenance,
             )
             existing.update(done)
             failures.update(failed)
-        elif pending:
+        else:
             pool = GeminiWorkerPool(
                 settings["gemini"]["threads"], **context.config["models"]["gemini"]
             )
             run_gemini_scenes(
-                pending,
+                pending_contents(progress),
                 pool=pool,
                 records_by_content=existing,
                 failures_by_content=failures,
@@ -205,6 +220,8 @@ def _extract(context, *, representation, model, schema, force=False):
                 names=video_name_map(context),
                 progress=progress,
                 arm=representation,
+                content_ids=[visual["content_id"] for visual in visuals],
+                resume_force=resume_force,
             )
     failure_count = sum(len(rows) for rows in failures.values())
     if not failure_count:
