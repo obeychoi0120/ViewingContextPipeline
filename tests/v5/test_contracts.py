@@ -79,6 +79,8 @@ def test_dynamic_targets_and_custom_artifact_root(v5_context):
     with pytest.raises(ValueError):
         select_arms(config, ["GRAPH_V8_QWEN"])
     assert context.keyframes_dir == v5_context.root / "custom/resized_keyframes"
+    assert context.source_assets_dir == v5_context.root / "custom/source_assets"
+    assert context.run_root == v5_context.root / "custom/runs/new"
     assert context.prompt_path("prompts/graph_scene_v3.md").is_file()
 
 
@@ -107,7 +109,7 @@ def test_target_forwarding(v5_context, monkeypatch, step):
     assert calls[0]["target"] == ["graph_qwen", "metadata"]
 
 
-@pytest.mark.parametrize("name", ["..", "a/b", "resized_keyframes", "a\\b", ""])
+@pytest.mark.parametrize("name", ["..", "a/b", "resized_keyframes", "source_assets", "a\\b", ""])
 def test_run_id_cannot_escape_or_claim_the_shared_frame_directory(v5_context, name):
     with pytest.raises(ConfigError):
         RunContext.load(name, root=v5_context.root)

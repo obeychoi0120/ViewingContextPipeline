@@ -38,9 +38,9 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 ## Artifact와 재개
 
-Run 루트에는 `cohort`, `extraction`, `validation`만 둡니다. cohort 문서는 `cohort_plan.json`, `eligibility.json`, `events.jsonl`, `required_items.jsonl`, `item_inventory.jsonl`, `catalog.jsonl`, `metadata_titles.jsonl`입니다. `source_assets/{content_id}/assets/`에 timestamp·영상 길이 cache를 둡니다.
+`artifacts/runs/{RUN_ID}/`에는 `cohort`, `extraction`, `validation`만 둡니다. cohort 문서는 `cohort_plan.json`, `eligibility.json`, `events.jsonl`, `required_items.jsonl`, `item_inventory.jsonl`, `catalog.jsonl`, `metadata_titles.jsonl`입니다. `artifacts_root/source_assets/{content_id}/assets/`에 timestamp·영상 길이 cache를 공유합니다.
 
-`artifacts_root/resized_keyframes`는 모든 run이 공유합니다. 정상 PNG는 자동 덮어쓰지 않으며 콘텐츠별 디렉터리 잠금으로 동시 쓰기를 보호합니다. 프레임은 임시 공간에서 검증한 후 누락 파일만 원자적으로 게시합니다. 새 run은 공유 PNG를 이용해 timestamp만 추가할 수 있습니다. 준비 결과 통계는 콘솔로 출력합니다.
+`artifacts_root/resized_keyframes`는 모든 run이 공유합니다. 정상 PNG는 자동 덮어쓰지 않으며 콘텐츠별 디렉터리 잠금으로 동시 쓰기를 보호합니다. 프레임은 임시 공간에서 검증한 후 누락 파일만 원자적으로 게시합니다. 새 Run은 공유 PNG와 duration·timestamp를 함께 재사용합니다. 준비 정보가 이미 있으면 `prepare-input-data`를 다시 실행할 필요가 없습니다. 준비 결과 통계는 콘솔로 출력합니다.
 
 Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 완료한 작업의 journal은 지우고 최종 artifact에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 중단 시 미완료 journal과 dirty/pending/checkpoint 표식을 보존하고 같은 명령으로 재개합니다. Gemini는 콘텐츠별 장면 결과를 함께 게시하며 중단된 콘텐츠는 다시 처리합니다. `--force`는 해당 단계 생성을 새로 시작하지만 공유 이미지는 보존합니다.
 
@@ -50,6 +50,6 @@ Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 
 
 ## 환경 간 전달
 
-GPU와 Gemini 장비에서 같은 코드·run ID·설정을 사용합니다. `artifacts/RUN_ID/cohort/`와 **공유** `artifacts/resized_keyframes/`를 같은 상대 위치에 배치하고, Gemini 결과는 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 생성 provenance의 경로가 달라지면 재생성 명령의 캐시가 무효화될 수 있으므로 같은 저장소 경로를 사용합니다. 재개할 때 진행 중 journal·cursor도 함께 보존합니다.
+GPU와 Gemini 장비에서 같은 코드·run ID·설정을 사용합니다. `artifacts/runs/RUN_ID/cohort/`와 **공유** `artifacts/resized_keyframes/`, `artifacts/source_assets/`를 같은 상대 위치에 배치하고, Gemini 결과는 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 생성 provenance의 경로가 달라지면 재생성 명령의 캐시가 무효화될 수 있으므로 같은 저장소 경로를 사용합니다. 재개할 때 진행 중 journal·cursor도 함께 보존합니다.
 
 별도 migration, donor-run 옵션, manifest 또는 전체 config snapshot은 없습니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.

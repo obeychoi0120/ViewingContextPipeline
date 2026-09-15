@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import os
+import fcntl
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,7 @@ def prepare_catalog(
     *,
     assets_root: str | Path,
     output_root: str | Path,
+    failure_path: str | Path,
     image_size: tuple[int, int],
     scene_duration: int = 30,
     num_keyframes: int = 6,
@@ -34,18 +37,33 @@ def prepare_catalog(
         item_id = str(row.get("item_id", ""))
         content_id = str(row.get("content_id", ""))
         try:
-            duration = resolve_duration(Path(assets_root), row)
-            prepared = prepare_visual_item(
-                content_id=content_id,
-                source_video_path=Path(str(row["source_video_path"])),
-                assets_root=assets_root,
-                output_root=output_root,
-                duration_seconds=duration,
-                image_size=image_size,
-                scene_duration=scene_duration,
-                num_keyframes=num_keyframes,
-                force=force,
-            )
+            from .fixed30 import _safe_content_id
+            item_assets = Path(assets_root) / _safe_content_id(content_id) / "assets"
+            item_assets.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(item_assets, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                from extraction.evidence_reuse import SOURCE_IDENTITY_KEYS
+                from pipeline_runtime import read_json
+                checkpoint = item_assets / "video_duration.json"
+                if checkpoint.exists():
+                    saved = read_json(checkpoint)
+                    if any(saved.get(key) != row.get(key) for key in SOURCE_IDENTITY_KEYS):
+                        raise ValueError(f"shared source identity mismatch: {checkpoint}; use a separate artifacts_root for changed source videos")
+                duration = resolve_duration(Path(assets_root), row)
+                prepared = prepare_visual_item(
+                    content_id=content_id,
+                    source_video_path=Path(str(row["source_video_path"])),
+                    assets_root=assets_root,
+                    output_root=output_root,
+                    duration_seconds=duration,
+                    image_size=image_size,
+                    scene_duration=scene_duration,
+                    num_keyframes=num_keyframes,
+                    force=force,
+                )
+            finally:
+                os.close(descriptor)
             return index, content_id, prepared, None
         except Exception as exc:
             return index, content_id, None, {
@@ -77,9 +95,8 @@ def prepare_catalog(
             progress.update(1)
     prepared_rows = [prepared for prepared, _ in results if prepared is not None]
     failures = [failure for _, failure in results if failure is not None]
-    cohort_root = Path(assets_root).parent
-    cohort_root.mkdir(parents=True, exist_ok=True)
-    failure_path = cohort_root / "preparation_failures.jsonl"
+    failure_path = Path(failure_path)
+    failure_path.parent.mkdir(parents=True, exist_ok=True)
     if failures:
         failure_path.write_text(
             "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in failures),

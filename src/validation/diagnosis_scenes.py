@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from visual_sampling import truncate_timestamp
+from visual_sampling import truncate_timestamp, timestamp_filename
 
 
 from .diagnosis_support import (
@@ -28,18 +28,18 @@ def _expected_scenes(
     content_ids: list[str],
     errors: list[dict[str, Any]],
     scene_duration: int = 30,
+    num_keyframes: int = 6,
 ) -> tuple[set[tuple[str, int]], bool]:
     expected: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
     examples: list[dict[str, Any]] = []
     for content_id in content_ids:
         path = (
-            run_root
-            / "cohort"
+            run_root.parent.parent
             / "source_assets"
             / content_id
             / "assets"
-            / f"timestamp_fixed_{scene_duration}s.json"
+            / timestamp_filename(scene_duration, num_keyframes)
         )
         value, loaded = _read_json(
             path,
@@ -338,6 +338,7 @@ def _scene_coverage(
         content_ids,
         errors,
         scene_duration,
+        config["extraction"]["visual_evidence"]["num_keyframes"] if config else 6,
     )
     scene_documents: dict[str, Any] = {}
     successful_scenes: dict[str, set[tuple[str, int]]] = {}

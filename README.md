@@ -72,9 +72,9 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 `prepare-cohort` 한 번으로 required items 생성 → 원본·보완 CSV의 제목 병합 → 영상·제목 검증을 완료합니다. 원본의 비어 있지 않은 제목을 우선하고, 필요한 아이템의 빈 제목·누락 행만 보완합니다. 끝내 찾지 못한 제목은 빈 값으로 저장해 Metadata embedding에서 영벡터로 처리합니다. 보완 CSV 자체가 없거나 손상된 경우에는 실패합니다.
 
-병합 결과는 `artifacts/$RUN_ID/cohort/metadata_titles.jsonl`, 출처·보완 통계는 같은 폴더의 `cohort_plan.json`에 저장합니다. 원본 CSV를 변경하거나 별도 completed CSV·report 파일을 만들지 않습니다. `--plan-only`나 별도 `validation.complete_titles` 실행은 필요하지 않습니다. 재실행하면 최신 CSV를 다시 읽습니다. 이미 완성된 제목 CSV를 사용할 때는 `data.titles_csv`에 지정하고 `data.titles_supplement_csv`를 생략하면 됩니다(이 경우 누락 행은 오류).
+병합 결과는 `artifacts/runs/$RUN_ID/cohort/metadata_titles.jsonl`, 출처·보완 통계는 같은 폴더의 `cohort_plan.json`에 저장합니다. 원본 CSV를 변경하거나 별도 completed CSV·report 파일을 만들지 않습니다. `--plan-only`나 별도 `validation.complete_titles` 실행은 필요하지 않습니다. 재실행하면 최신 CSV를 다시 읽습니다. 이미 완성된 제목 CSV를 사용할 때는 `data.titles_csv`에 지정하고 `data.titles_supplement_csv`를 생략하면 됩니다(이 경우 누락 행은 오류).
 
-기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/$RUN_ID/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
+기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/runs/$RUN_ID/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
 
 `--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용합니다. 와일드카드 문자열은 허용하지 않습니다. 네 생성 명령에서 필수이며, 추출은 `--model`, 요약은 `--source`도 필수입니다. 요약 모델은 항상 Qwen이고 `--source`는 입력 장면을 만든 모델입니다. Graph 명령은 항상 `graph`에 쓰며 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
 
@@ -105,9 +105,11 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference
 ```text
 artifacts/
 ├── resized_keyframes/{content_id}/{timestamp}.png
-└── RUN_ID/
+├── source_assets/{content_id}/assets/
+│   ├── video_duration.json
+│   └── timestamp_fixed_30s.json
+└── runs/{RUN_ID}/
     ├── cohort/
-    │   └── source_assets/{content_id}/assets/
     ├── extraction/
     │   ├── description/{gemini|qwen}/{scenes|summaries}/
     │   └── graph/{gemini|qwen}/{scenes|summaries}/
@@ -117,9 +119,13 @@ artifacts/
         └── diagnosis/diagnosis.json
 ```
 
-공유 프레임은 `artifacts_root` 바로 아래에 있으며 run마다 복사하지 않습니다. 각 run의 timestamp와 duration cache는 `cohort/source_assets`에 저장합니다. 새 run에 timestamp가 없어도 정상 PNG는 재사용하고 누락된 프레임만 콘텐츠별 잠금과 원자적 게시로 추가합니다. `--force`도 정상 공유 이미지를 덮어쓰지 않습니다. 손상되거나 해상도가 다른 기존 PNG는 오류로 알리므로 직접 정리한 뒤 실행합니다.
+공유 프레임과 영상 길이·장면 timestamp는 `artifacts_root` 바로 아래의 `resized_keyframes`, `source_assets`에 저장하며 Run 간 재사용합니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 정보가 준비되어 있고 원본 식별 정보와 샘플링 설정이 맞으면 새 Run에서도 `prepare-cohort` 후 바로 추출할 수 있습니다. 자동 준비 호출은 하지 않습니다.
 
-`prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 새 Run은 영상 길이 확인과 timestamp 생성이 필요하므로 이미지 재추출이 없어도 이 진행률이 표시됩니다.
+기본 6개 keyframe 정책은 `timestamp_fixed_{scene_duration}s.json`, 다른 개수는 `timestamp_fixed_{scene_duration}s_{num_keyframes}kf.json`을 사용하므로 서로 다른 정책이 공유 timestamp를 덮어쓰지 않습니다. 콘텐츠별 잠금과 원자적 저장으로 동시 준비를 보호합니다. `--force`도 정상 이미지를 덮어쓰지 않습니다. 공유 duration의 원본 식별 정보가 달라지면 재사용을 거부하므로 변경된 영상은 별도 `artifacts_root`로 분리합니다.
+
+`prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 공유 duration과 timestamp가 유효하면 영상 길이를 재확인하거나 timestamp를 다시 만들지 않습니다. 준비 실패 보고서는 각 Run의 `cohort/preparation_failures.jsonl`에 저장합니다.
+
+기존 Run은 `artifacts/runs/{RUN_ID}/`로, 기존 준비 정보는 `artifacts/source_assets/`로 직접 배치해야 합니다. 자동 migration이나 기존 artifact 이동·삭제는 수행하지 않습니다.
 
 실패 파일은 실패가 있을 때만 생성합니다. 완료된 recovery journal과 임시 checkpoint·dirty·pending 표식은 정리하고, 최종 장면·요약의 provenance와 간단한 생성 이력은 남깁니다. 별도 migration manifest, 전체 설정 snapshot, 요약별 `.inputs` 및 `.changed`, run별 이미지, media preflight·metadata missing 문서는 만들지 않습니다. 준비 통계는 콘솔, 결측 title 진단은 최종 diagnosis에 포함합니다. embedding별 `.inputs`는 실제 입력·fallback·truncation 및 캐시 검증 상태이므로 보존합니다.
 

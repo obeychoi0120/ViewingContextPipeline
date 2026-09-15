@@ -82,4 +82,4 @@ assert not any(name in sys.modules for name in blocked)
         env={**os.environ, "PYTHONPATH": str(root / "src")},
     )
     assert completed.returncode == 0, completed.stderr
-    assert (tmp_path / "artifacts/plan/cohort/required_items.jsonl").is_file()
+    assert (tmp_path / "artifacts/runs/plan/cohort/required_items.jsonl").is_file()

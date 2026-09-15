@@ -190,6 +190,7 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
             catalog,
             assets_root=tmp_path / "run/cohort/source_assets",
             output_root=tmp_path / "shared",
+            failure_path=failure_path,
             image_size=(640, 352),
         )
 

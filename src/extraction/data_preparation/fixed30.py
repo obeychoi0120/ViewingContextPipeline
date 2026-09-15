@@ -6,7 +6,7 @@ from typing import Any
 
 from .video_processor import extract_resized_keyframes
 from extraction.image_validation import verified_image_size
-from visual_sampling import build_fixed_windows, timestamp_stem, truncate_timestamp
+from visual_sampling import build_fixed_windows, timestamp_stem, truncate_timestamp, timestamp_filename
 
 
 def prepare_visual_item(
@@ -27,7 +27,7 @@ def prepare_visual_item(
     content_id = _safe_content_id(content_id)
     item_root = Path(assets_root) / content_id
     item_assets = item_root / "assets"
-    timestamp_path = item_assets / f"timestamp_fixed_{scene_duration}s.json"
+    timestamp_path = item_assets / timestamp_filename(scene_duration, num_keyframes)
     frames_dir = Path(output_root) / "resized_keyframes" / content_id
     width, height = image_size
     if width <= 0 or height <= 0:
@@ -132,10 +132,5 @@ def _safe_content_id(value: object) -> str:
 
 
 def _write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    from artifact_io import atomic_write_json
+    atomic_write_json(path, value, durable=True)

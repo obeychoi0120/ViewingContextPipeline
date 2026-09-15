@@ -23,8 +23,9 @@ def _duration_path(assets_root: Path, row: dict[str, Any]) -> Path:
 
 
 def cached_duration(assets_root: Path, row: dict[str, Any]) -> float | None:
-    # Existing runs already carry a probed duration in their source inventory.
-    if _valid_duration(row.get("duration_seconds")):
+    # A present shared checkpoint must match this cohort's source identity.
+    # Only a missing checkpoint may fall back to a previously probed inventory.
+    if not _duration_path(assets_root, row).exists() and _valid_duration(row.get("duration_seconds")):
         return row["duration_seconds"]
     try:
         cached = read_json(_duration_path(assets_root, row))

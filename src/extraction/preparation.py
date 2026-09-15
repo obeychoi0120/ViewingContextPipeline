@@ -7,14 +7,14 @@ from extraction.evidence_reuse import source_matches_inventory
 from extraction.errors import ExtractionStepError
 from extraction.step_support import result
 from pipeline_logging import log_step_start
-from visual_sampling import build_fixed_windows
+from visual_sampling import build_fixed_windows, timestamp_filename
 
 
 def prepare_input_data(context, *, force=False):
     log_step_start(context, "prepare-input-data", force=force)
     context.initialize()
     cohort = context.require_ready_cohort()
-    assets_root = context.cohort_dir / "source_assets"
+    assets_root = context.source_assets_dir
     settings = context.config["extraction"]["visual_evidence"]
     image_size = tuple(settings["image_resolution"])
     sampling = {key: settings[key] for key in ("scene_duration", "num_keyframes")}
@@ -24,7 +24,7 @@ def prepare_input_data(context, *, force=False):
             raise ExtractionStepError(f"source changed since prepare-cohort: {item['content_id']}")
         cid = str(item["content_id"])
         timestamp = (
-            assets_root / cid / "assets" / f"timestamp_fixed_{sampling['scene_duration']}s.json"
+            assets_root / cid / "assets" / timestamp_filename(**sampling)
         )
         frames = context.keyframes_dir / cid
         duration = cached_duration(assets_root, inventory)
@@ -38,6 +38,7 @@ def prepare_input_data(context, *, force=False):
             pending,
             assets_root=assets_root,
             output_root=context.evidence_dir,
+            failure_path=context.cohort_dir / "preparation_failures.jsonl",
             image_size=image_size,
             **sampling,
             force=force,
@@ -51,7 +52,7 @@ def prepare_input_data(context, *, force=False):
         cid = str(item["content_id"])
         duration = cached_duration(assets_root, inventory)
         timestamp = (
-            assets_root / cid / "assets" / f"timestamp_fixed_{sampling['scene_duration']}s.json"
+            assets_root / cid / "assets" / timestamp_filename(**sampling)
         )
         if not visual_evidence_matches(
             timestamp, context.keyframes_dir / cid, image_size, duration, **sampling

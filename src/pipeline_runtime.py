@@ -84,7 +84,7 @@ class RunContext:
         selected = str(run_id or "").strip()
         if (
             not selected
-            or selected in {".", "..", "resized_keyframes"}
+            or selected in {".", "..", "resized_keyframes", "source_assets"}
             or Path(selected).name != selected
             or "\\" in selected
         ):
@@ -100,7 +100,7 @@ class RunContext:
             repo_root,
             selected,
             config,
-            artifact_root / selected,
+            artifact_root / "runs" / selected,
         )
 
     def initialize(self) -> None:
@@ -117,11 +117,15 @@ class RunContext:
 
     @property
     def evidence_dir(self) -> Path:
-        return self.run_root.parent
+        return self.run_root.parent.parent
 
     @property
     def keyframes_dir(self) -> Path:
         return self.evidence_dir / "resized_keyframes"
+
+    @property
+    def source_assets_dir(self) -> Path:
+        return self.evidence_dir / "source_assets"
 
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:

@@ -5,7 +5,7 @@ relations: an array of directed objects with subject_id, predicate, object_id. B
 context: an array of scene-level observations or grounded interpretations, retaining uncertainty.
 
 Example of structure:
-{"entities":[{"id":"person1","name":"person","attributes":["red jacket"]},{"id":"person2","name":"person","attributes":["blue shirt"]}],"relations":[{"subject_id":"person1","predicate":"looking at","object_id":"person2"},{"subject_id":"person2","predicate":"waving to","object_id":"person1"}],"context":[]}
+{"entities":[{"id":"person1","name":"person","attributes":["red jacket"]},{"id":"person2","name":"person","attributes":["blue shirt"]}],"relations":[{"subject_id":"person1","predicate":"looking at","object_id":"person2"},{"subject_id":"person2","predicate":"waving to","object_id":"person1"}],"context":["An outdoor setting in daylight", "The interaction may be a casual greeting"]}
 The example is not evidence. Use only entities and relations supported by the supplied keyframes. Empty arrays are allowed.
 
 Use all visual evidence in these keyframes. On-screen text may be used as a clue to meaning, but never transcribe, quote, reproduce, or translate its wording in your output. Grounded interpretations of genre, content purpose, and relevant background knowledge are allowed when supported by the scene. Express uncertainty explicitly. Do not invent unseen facts or relationships. Do not claim a person's real identity.

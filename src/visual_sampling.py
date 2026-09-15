@@ -58,3 +58,10 @@ def build_fixed_windows(
             "keyframe_timestamps": keyframes,
         })
     return windows
+
+
+def timestamp_filename(scene_duration: int, num_keyframes: int) -> str:
+    """Separate shared timestamp caches by sampling policy; retain the default filename."""
+    validate_sampling(scene_duration, num_keyframes)
+    suffix = "" if num_keyframes == 6 else f"_{num_keyframes}kf"
+    return f"timestamp_fixed_{scene_duration}s{suffix}.json"
