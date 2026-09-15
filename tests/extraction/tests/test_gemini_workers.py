@@ -96,3 +96,26 @@ def test_gemini_pool_propagates_ctrl_c_without_waiting_for_http_call() -> None:
         assert monotonic() - began < 1.0
     finally:
         release.set()
+
+
+def test_gemini_pool_bounds_input_read_ahead_and_reuses_workers():
+    completed = []
+    factories = []
+
+    class Backend:
+        def __init__(self):
+            factories.append(threading.get_ident())
+
+        def generate(self, images, prompt, max_new_tokens):
+            return prompt
+
+    def tasks():
+        for index in range(50):
+            assert index - len(completed) < 4
+            yield QwenGenerationTask(str(index), (), str(index), 8)
+
+    pool = GeminiWorkerPool(2, project_id="project", location="global", model_id="gemini",
+                            backend_factory=Backend)
+    outcomes = pool.generate(tasks(), lambda outcome: completed.append(outcome.task_id))
+    assert len(outcomes) == len(completed) == 50
+    assert 1 <= len(factories) <= 2

@@ -61,19 +61,12 @@ class GeminiWorkerPool:
         *,
         on_progress: Callable[[dict], None] | None = None,
     ) -> dict[str, GeminiGenerationOutcome]:
-        task_list = list(tasks)
-        task_ids = [task.task_id for task in task_list]
-        if len(set(task_ids)) != len(task_ids):
-            raise ValueError("Gemini generation task ids must be unique")
-        if not task_list:
-            return {}
-
+        source = iter(tasks)
+        task_ids: set[str] = set()
+        exhausted = False
         task_queue: queue.Queue[QwenGenerationTask] = queue.Queue()
         result_queue: queue.Queue[GeminiGenerationOutcome] = queue.Queue()
         stop = threading.Event()
-        for task in task_list:
-            task_queue.put(task)
-
         workers = [
             threading.Thread(
                 target=self._worker,
@@ -81,7 +74,7 @@ class GeminiWorkerPool:
                 name=f"gemini-worker-{index}",
                 daemon=True,
             )
-            for index in range(min(self.concurrency, len(task_list)))
+            for index in range(self.concurrency)
         ]
         for worker in workers:
             worker.start()
@@ -96,17 +89,29 @@ class GeminiWorkerPool:
                 stats = throughput.snapshot()
                 stats.pop("output_tokens_per_second")
                 on_progress({**stats, "completed": len(outcomes),
-                             "inflight": min(len(workers), len(task_list) - len(outcomes))})
+                             "inflight": min(len(workers), len(task_ids) - len(outcomes))})
 
-        interrupted = False
         try:
             report()
-            while len(outcomes) < len(task_list):
+            while True:
+                # Bound read-ahead while keeping workers supplied across content boundaries.
+                while not exhausted and len(task_ids) - len(outcomes) < 2 * self.concurrency:
+                    try:
+                        task = next(source)
+                    except StopIteration:
+                        exhausted = True
+                        break
+                    if task.task_id in task_ids:
+                        raise ValueError("Gemini generation task ids must be unique")
+                    task_ids.add(task.task_id)
+                    task_queue.put(task)
+                if exhausted and len(outcomes) == len(task_ids):
+                    break
                 try:
                     outcome = result_queue.get(timeout=0.1)
                 except queue.Empty:
                     if not any(worker.is_alive() for worker in workers):
-                        missing = sorted(set(task_ids) - set(outcomes))
+                        missing = sorted(task_ids - outcomes.keys())
                         raise RuntimeError(
                             f"Gemini workers stopped before completing tasks: {missing}"
                         )
@@ -119,14 +124,11 @@ class GeminiWorkerPool:
                     report()
                     last_progress = time.monotonic()
             report()
-        except KeyboardInterrupt:
-            interrupted = True
+        finally:
             stop.set()
             self._discard_pending(task_queue)
-            raise
-        finally:
-            if not interrupted:
-                stop.set()
+            # Interrupted HTTP requests run in daemon threads; never block on them.
+            if exhausted and len(outcomes) == len(task_ids):
                 for worker in workers:
                     worker.join()
         return outcomes
@@ -140,9 +142,9 @@ class GeminiWorkerPool:
         backend: VLMBackend | None = None
         while not stop.is_set():
             try:
-                task = task_queue.get_nowait()
+                task = task_queue.get(timeout=0.1)
             except queue.Empty:
-                return
+                continue
             if stop.is_set():
                 return
             try:

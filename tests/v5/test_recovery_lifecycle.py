@@ -148,11 +148,11 @@ def test_repeated_gemini_interrupt_keeps_unvisited_cached_contents(
         def generate(self, tasks, callback, **kwargs):
             for task in tasks:
                 calls.append(task.task_id)
+                if interrupt:
+                    raise KeyboardInterrupt
                 callback(GeminiGenerationOutcome(
                     task.task_id, '{"entities": [], "relations": [], "context": []}',
                 ))
-                if interrupt:
-                    raise KeyboardInterrupt
 
     monkeypatch.setattr("extraction.steps.GeminiWorkerPool", Pool)
     for _ in range(2):

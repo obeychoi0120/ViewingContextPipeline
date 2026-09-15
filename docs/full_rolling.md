@@ -42,7 +42,7 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 `artifacts_root/resized_keyframes`는 모든 run이 공유합니다. 정상 PNG는 자동 덮어쓰지 않으며 콘텐츠별 디렉터리 잠금으로 동시 쓰기를 보호합니다. 프레임은 임시 공간에서 검증한 후 누락 파일만 원자적으로 게시합니다. 새 Run은 공유 PNG와 duration·timestamp를 함께 재사용합니다. 준비 정보가 이미 있으면 `prepare-input-data`를 다시 실행할 필요가 없습니다. 장면 추출은 준비된 assets를 신뢰하며 폴더 스캔·파일 존재 검사·이미지 해시 계산을 생략합니다. timestamp는 작업 구성에 필요한 입력으로 한 번 읽습니다. 이미지 내용 변경 후 재추론은 `--force`로 요청합니다. 준비 결과 통계는 콘솔로 출력합니다.
 
-Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 완료한 작업의 journal은 지우고 최종 artifact에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 중단 시 미완료 journal과 dirty/pending/checkpoint 표식을 보존하고 같은 명령으로 재개합니다. Gemini는 콘텐츠별 장면 결과를 함께 게시하며 중단된 콘텐츠는 다시 처리합니다. `--force`는 해당 단계 생성을 새로 시작하지만 공유 이미지는 보존합니다.
+Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 완료한 작업의 journal은 지우고 최종 artifact에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 중단 시 미완료 journal과 dirty/pending/checkpoint 표식을 보존하고 같은 명령으로 재개합니다. Gemini는 영상 경계 없이 scene을 병렬 처리하고, 콘텐츠별 장면이 모두 끝나면 해당 결과를 함께 게시합니다. 완료 순서가 뒤바뀌어도 저장 완료한 콘텐츠는 재사용하며, 중단 시 미완료 콘텐츠는 다시 처리합니다. `--force`는 해당 단계 생성을 새로 시작하지만 공유 이미지는 보존합니다.
 
 신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 길이·형식 교정은 한 번이며 교정 결과가 비어 있으면 첫 비어 있지 않은 초안을 Raw로 남깁니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
 

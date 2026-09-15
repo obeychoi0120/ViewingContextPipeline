@@ -1,0 +1,69 @@
+import json
+from pathlib import Path
+
+import pytest
+
+import extraction.steps as steps
+from pipeline_runtime import read_jsonl, write_jsonl
+
+
+@pytest.mark.parametrize("model", ["qwen", "gemini"])
+@pytest.mark.parametrize("representation", ["description", "graph"])
+def test_progress_counts_only_pending_scenes(
+    ready_context, fake_models, monkeypatch, model, representation,
+):
+    context = ready_context
+    timestamp = Path(steps.visual_rows(context)[0]["timestamp_json"])
+    scenes = json.loads(timestamp.read_text())
+    scenes.append({**scenes[0], "scene_idx": 1})
+    timestamp.write_text(json.dumps(scenes))
+    extract = getattr(steps, f"extract_{representation}_scenes")
+    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    expected_total = 5
+    expected_reused = 0
+    instances = []
+    original_progress = steps.InferenceProgress
+
+    def progress_factory(**kwargs):
+        # Check before a worker can consume (and exhaust) the task iterator.
+        assert kwargs["total"] == expected_total
+        assert kwargs["reused"] == expected_reused
+        progress = original_progress(**kwargs)
+        instances.append(progress)
+        return progress
+
+    monkeypatch.setattr(steps, "InferenceProgress", progress_factory)
+
+    def run(**kwargs):
+        assert extract(context, model=model, schema=schema, **kwargs)["failure_count"] == 0
+        progress = instances[-1]
+        assert progress.total == progress.bar.total == expected_total
+        assert progress.success == progress.bar.n == expected_total
+        assert progress.failed == 0
+        assert "ETA=00:00" in progress.bar.postfix
+
+    run()
+    expected_total, expected_reused = 0, 5
+    run()
+
+    paths = sorted(context.extraction_dir(representation, model, "scenes").glob("*.jsonl"))
+    # Reuse one scene within a partially completed content.
+    rows = read_jsonl(paths[0])
+    assert len(rows) == 2
+    write_jsonl(paths[0], rows[:1])
+    expected_total, expected_reused = 1, 4
+    run()
+    assert [row["scene_idx"] for row in read_jsonl(paths[0])] == [0, 1]
+
+    paths[1].unlink()
+    run()
+
+    # Existing output is still pending if its generation provenance is stale.
+    rows = read_jsonl(paths[1])
+    rows[0]["provenance"] = {}
+    rows[0]["generation"]["input_key"] = "stale"
+    write_jsonl(paths[1], rows)
+    run()
+
+    expected_total, expected_reused = 5, 0
+    run(force=True)

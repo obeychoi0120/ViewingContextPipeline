@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from itertools import chain
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.monitoring import graph_skip_message, scene_messages
@@ -8,7 +9,7 @@ from extraction.semantic_graph.json_repair import repair_graph_json_once
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.raw_output import raw_graph_record
 from extraction.recovery import generate_with_recovery, start_force_run
-from pipeline_runtime import write_json
+from pipeline_runtime import read_json, write_json
 from extraction.step_support import (
     write_progress,
     write_scene_checkpoint,
@@ -249,54 +250,91 @@ def run_gemini_scenes(
     if not content_ids:
         return
     positions = {str(cid): index for index, cid in enumerate(content_ids)}
-    write_json(cursor, {"count": 0})
+    states = {}
+    rows_by_task = {}
+    completed_positions = set()
+    frontier = 0
+    discovered_position = -1
+    if resume_force and not force and cursor.is_file():
+        previous = read_json(cursor)
+        frontier = previous["count"]
+        completed_positions.update(positions[cid]
+                                   for cid in previous.get("completed_content_ids", []))
+
+    def checkpoint_cursor():
+        nonlocal frontier
+        while frontier in completed_positions:
+            completed_positions.remove(frontier)
+            frontier += 1
+        write_json(cursor, {
+            "count": frontier,
+            "completed_content_ids": [content_ids[i] for i in sorted(completed_positions)],
+            "active_content_ids": list(states),
+        })
+
+    checkpoint_cursor()
     write_json(marker, {"content_ids": content_ids, "force": force or resume_force})
-    for visual, scene_rows in pending:
-        content_id = str(visual["content_id"])
-        content_index = positions[content_id]
-        # A crash during this content must not discard earlier completed contents.
-        write_json(cursor, {"count": content_index})
-        rows_by_task = {row["task"].task_id: row for row in scene_rows}
-        if len(rows_by_task) != len(scene_rows):
-            raise ValueError(f"duplicate scene task in content: {content_id}")
-        generated = {}
 
-        def receive(outcome):
-            if outcome.task_id not in rows_by_task:
-                raise RuntimeError(f"unexpected Gemini result: {outcome.task_id}")
-            if outcome.task_id in generated:
-                return
-            row = rows_by_task[outcome.task_id]
-            if arm == "graph" or outcome.error:
-                record, failure = graph_scene_result(
-                    row, outcome.text, error=outcome.error, diagnostics=outcome.response_diagnostics,
-                )
-                if failure is not None and outcome.error is None and outcome.text.strip():
-                    record, failure = raw_graph_record(row, outcome.text), None
-            else:
-                record, failure = description_scene_result(row, outcome.text, content_id=content_id)
-            if record is not None:
-                record["provenance"] = row.get("provenance", {})
-                record["generation"] = {"input_key": row.get("input_key"), "attempt_count": 1,
-                                        "repair_mode": record.get("parse_mode", "native")}
-            generated[outcome.task_id] = (record, failure)
-            if failure is not None:
-                write_progress(progress, graph_skip_message(
-                    names.get(content_id, f"{content_id}.mp4"), failure, source="gemini"))
-            progress.complete(failed=failure is not None)
+    def stream_tasks():
+        nonlocal discovered_position
+        for visual, scene_rows in pending:
+            content_id = str(visual["content_id"])
+            content_index = positions[content_id]
+            # Contents omitted by pending are already cached, including on resume.
+            completed_positions.update(range(max(frontier, discovered_position + 1), content_index))
+            discovered_position = content_index
+            states[content_id] = (visual, scene_rows, {})
+            for row in scene_rows:
+                task_id = row["task"].task_id
+                if task_id in rows_by_task:
+                    raise ValueError(f"duplicate scene task: {task_id}")
+                rows_by_task[task_id] = (content_id, row)
+            checkpoint_cursor()
+            yield from (row["task"] for row in scene_rows)
 
-        # The pool bounds concurrency and each worker immediately takes the next
-        # Scene from this content's queue, even while other workers are still busy.
-        pool.generate([row["task"] for row in scene_rows], receive,
-                      on_progress=progress.update_stats)
-        missing = rows_by_task.keys() - generated.keys()
-        if missing:
-            raise RuntimeError(f"missing Gemini results: {sorted(missing)}")
-        _complete_gemini_content(
-            visual, scene_rows, generated,
-            records_by_content=records_by_content, failures_by_content=failures_by_content,
-            scene_dir=scene_dir, failure_dir=failure_dir, force=force,
-        )
-        write_json(cursor, {"count": content_index + 1})
+    def receive(outcome):
+        if outcome.task_id not in rows_by_task:
+            raise RuntimeError(f"unexpected Gemini result: {outcome.task_id}")
+        content_id, row = rows_by_task[outcome.task_id]
+        visual, scene_rows, generated = states[content_id]
+        if outcome.task_id in generated:
+            return
+        if arm == "graph" or outcome.error:
+            record, failure = graph_scene_result(
+                row, outcome.text, error=outcome.error, diagnostics=outcome.response_diagnostics,
+            )
+            if failure is not None and outcome.error is None and outcome.text.strip():
+                record, failure = raw_graph_record(row, outcome.text), None
+        else:
+            record, failure = description_scene_result(row, outcome.text, content_id=content_id)
+        if record is not None:
+            record["provenance"] = row.get("provenance", {})
+            record["generation"] = {"input_key": row.get("input_key"), "attempt_count": 1,
+                                    "repair_mode": record.get("parse_mode", "native")}
+        generated[outcome.task_id] = (record, failure)
+        if failure is not None:
+            write_progress(progress, graph_skip_message(
+                names.get(content_id, f"{content_id}.mp4"), failure, source="gemini"))
+        if len(generated) == len(scene_rows):
+            _complete_gemini_content(
+                visual, scene_rows, generated,
+                records_by_content=records_by_content, failures_by_content=failures_by_content,
+                scene_dir=scene_dir, failure_dir=failure_dir, force=force,
+            )
+            for completed_row in scene_rows:
+                del rows_by_task[completed_row["task"].task_id]
+            del states[content_id]
+            completed_positions.add(positions[content_id])
+            checkpoint_cursor()
+        progress.complete(failed=failure is not None)
+
+    tasks = stream_tasks()
+    first = next(tasks, None)
+    if first is not None:
+        write_progress(progress, "[Gemini] streaming scenes across contents; "
+                       "idle workers immediately take the next scene")
+        pool.generate(chain((first,), tasks), receive, on_progress=progress.update_stats)
+    if rows_by_task:
+        raise RuntimeError(f"missing Gemini results: {sorted(rows_by_task)}")
     marker.unlink()
     cursor.unlink()

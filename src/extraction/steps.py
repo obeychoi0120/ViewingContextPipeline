@@ -116,29 +116,37 @@ def _extract(context, *, representation, model, schema, force=False):
     resume_force = False
     if model == "gemini" and (scene_dir / ".pending-contents.json").is_file():
         cursor = scene_dir / ".completed-contents.json"
-        count = read_json(cursor)["count"] if cursor.is_file() else 0
+        checkpoint = read_json(cursor) if cursor.is_file() else {"count": 0}
+        count = checkpoint["count"]
         marker = read_json(scene_dir / ".pending-contents.json")
-        remaining = marker["content_ids"][count:]
+        completed = set(checkpoint.get("completed_content_ids", []))
+        remaining = [cid for cid in marker["content_ids"][count:] if cid not in completed]
         resume_force = marker.get("force", True)
-        interrupted = set(remaining if resume_force else remaining[:1])
+        interrupted = set(remaining if resume_force else
+                          checkpoint.get("active_content_ids", remaining[:1]))
     initial_penalty = penalty_schedule(penalties)[0]
 
-    def pending_contents(progress):
+    def prepare_rows(visual, *, scenes=None):
+        rows = scene_generation_rows(
+            visual,
+            prompt=prompt,
+            max_new_tokens=settings[representation]["scene_max_new_tokens"],
+            repetition_penalty=initial_penalty,
+            scenes=scenes,
+        )
+        for row in rows:
+            if representation == "graph" and model == "qwen":
+                row["task"] = replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
+            row["provenance"] = provenance
+        return rows
+
+    def plan_contents():
         for visual in visuals:
             cid = visual["content_id"]
             output = scene_dir / f"{cid}.jsonl"
             failure_path = failure_dir / f"{cid}.jsonl"
             restore_scene_checkpoint(output, failure_path)
-            rows = scene_generation_rows(
-                visual,
-                prompt=prompt,
-                max_new_tokens=settings[representation]["scene_max_new_tokens"],
-                repetition_penalty=initial_penalty,
-            )
-            for row in rows:
-                if representation == "graph" and model == "qwen":
-                    row["task"] = replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
-                row["provenance"] = provenance
+            rows = prepare_rows(visual)
             cached = normalize(read_jsonl(output), output) if output.is_file() and not force else []
             by_index = {r["scene_idx"]: r for r in cached}
             if len(by_index) != len(cached):
@@ -167,25 +175,41 @@ def _extract(context, *, representation, model, schema, force=False):
                 (retained if reusable else missing).append(saved if reusable else row)
             existing[cid] = retained
             failures[cid] = []
-            progress.discover(len(missing), reused=len(retained))
             if missing:
-                if model == "gemini":
-                    for row in missing:
-                        row["input_key"] = generation_key(row["task"], provenance, penalties)
-                yield visual, missing
+                # Retain compact scene metadata, not tasks or image paths.
+                # Inference can then build tasks lazily without rereading assets.
+                yield visual, [
+                    {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"],
+                     "scene_start": row.get("scene_start_seconds"),
+                     "scene_end": row.get("scene_end_seconds")}
+                    for row in missing
+                ]
             else:
                 failure_path.unlink(missing_ok=True)
-        progress.finish_discovery()
+
+    print("[PREPARE] Counting pending scenes and checking cached outputs...", flush=True)
+    planned = list(plan_contents())
+    total = sum(len(scenes) for _, scenes in planned)
+    reused = sum(len(records) for records in existing.values())
+
+    def pending_contents():
+        for visual, scenes in planned:
+            missing = prepare_rows(visual, scenes=scenes)
+            if model == "gemini":
+                for row in missing:
+                    row["input_key"] = generation_key(row["task"], provenance, penalties)
+            yield visual, missing
 
     with InferenceProgress(
-        total=None,
+        total=total,
+        reused=reused,
         desc=arm.name,
         unit="scene",
         progress_factory=tqdm,
     ) as progress:
         if model == "qwen":
             done, failed = run_qwen_scenes(
-                pending_contents(progress),
+                pending_contents(),
                 scene_dir=scene_dir,
                 failure_dir=failure_dir,
                 model_path=context.path("models", "qwen"),
@@ -210,7 +234,7 @@ def _extract(context, *, representation, model, schema, force=False):
                 settings["gemini"]["threads"], **context.config["models"]["gemini"]
             )
             run_gemini_scenes(
-                pending_contents(progress),
+                pending_contents(),
                 pool=pool,
                 records_by_content=existing,
                 failures_by_content=failures,

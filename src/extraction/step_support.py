@@ -72,8 +72,10 @@ def scene_generation_rows(
     prompt: str,
     max_new_tokens: int,
     repetition_penalty: float = 1.0,
+    scenes: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
+    if scenes is None:
+        scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
     rows: list[dict[str, Any]] = []
     for scene in build_scene_evidence(
         scenes, visual["frames_dir"], visual["timestamp_json"], prepared=True
