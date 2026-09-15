@@ -280,28 +280,26 @@ def prepare_split(table, split):
     return ids, probabilities, frequencies
 
 
-def worker_devices(gpus, workers_per_gpu):
-    if gpus is not None and (type(gpus) is not int or gpus < 1):
-        raise ValueError("gpus must be a positive integer")
+def worker_devices(workers_per_gpu):
     if type(workers_per_gpu) is not int or workers_per_gpu < 1:
         raise ValueError("workers_per_gpu must be a positive integer")
     available = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    if gpus is None and not available and workers_per_gpu == 1:
-        return ["cpu"]
-    count = gpus if gpus is not None else 1
-    if count > available:
-        raise ValueError(f"requested {count} GPUs but only {available} CUDA devices are visible")
-    # Round-robin device order also spreads a small pending set across GPUs.
-    return [f"cuda:{i}" for _ in range(workers_per_gpu) for i in range(count)]
+    if not available:
+        if workers_per_gpu == 1:
+            return ["cpu"]
+        raise ValueError("workers_per_gpu requires visible CUDA devices")
+    # Logical indices respect CUDA_VISIBLE_DEVICES, including UUID masks.
+    # Round-robin order spreads a small pending set across visible GPUs first.
+    return [f"cuda:{i}" for _ in range(workers_per_gpu) for i in range(available)]
 
 
-def run_rolling(context, *, force=False, gpus=None, workers_per_gpu=1, target=None):
+def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
     from validation.steps import validation_config
     from validation.representation_provenance import recommendation_identity
 
     arms = resolve_target_arms(target, config=context.config)
     require_torch()
-    devices = worker_devices(gpus, workers_per_gpu)
+    devices = worker_devices(workers_per_gpu)
     config = validation_config(context)
     cohort = context.require_ready_cohort()
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))

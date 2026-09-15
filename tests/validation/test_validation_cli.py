@@ -59,14 +59,20 @@ def test_recommendation_gpu_options_are_forwarded(monkeypatch):
     monkeypatch.setattr(cli_module.RunContext, "load", lambda _: object())
     monkeypatch.setitem(cli_module.STEP_HANDLERS, "run-recommendation",
                         lambda context, **kwargs: received.update(kwargs))
-    assert cli_module.main(["run-recommendation", "--run-id", "test", "--gpus", "4",
+    assert cli_module.main(["run-recommendation", "--run-id", "test",
                             "--workers-per-gpu", "2"]) == 0
-    assert received == {"force": False, "gpus": 4, "workers_per_gpu": 2}
+    assert received == {"force": False, "workers_per_gpu": 2}
 
 
-@pytest.mark.parametrize("option", ["--gpus", "--workers-per-gpu"])
+@pytest.mark.parametrize("option", ["--workers-per-gpu"])
 def test_gpu_options_are_scoped_and_positive(option):
     assert cli_module.main(["run-diagnosis", "--run-id", "test", option, "2"]) == 1
     with pytest.raises(SystemExit) as raised:
         cli_module.main(["run-recommendation", "--run-id", "test", option, "0"])
+    assert raised.value.code == 2
+
+
+def test_recommendation_gpu_count_flag_removed():
+    with pytest.raises(SystemExit) as raised:
+        cli_module.main(["run-recommendation", "--run-id", "test", "--gpus", "2"])
     assert raised.value.code == 2

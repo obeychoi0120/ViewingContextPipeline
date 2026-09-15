@@ -20,7 +20,7 @@ def test_benchmark_excludes_warmup_and_records_partial_failures(tmp_path, monkey
                 "stage": "description-scenes"}
 
     class Pool:
-        def __init__(self, count, model, **kwargs):
+        def __init__(self, model, **kwargs):
             kwargs["on_runtime"]({"gpu_id": "0"})
 
         def wait_ready(self):
@@ -41,7 +41,7 @@ def test_benchmark_excludes_warmup_and_records_partial_failures(tmp_path, monkey
             shutdown.append("abort")
 
     monkeypatch.setattr(benchmark, "QwenWorkerPool", Pool)
-    monkeypatch.setattr(benchmark, "_visible_gpu_ids", lambda _: ["0"])
+    monkeypatch.setattr(benchmark, "_visible_gpu_ids", lambda: ["0"])
     monkeypatch.setattr(benchmark.subprocess, "check_output", lambda *args, **kwargs: "GPU-uuid, 1000\n")
     output = tmp_path / "report.json"
     if fail:

@@ -69,7 +69,6 @@ def run_summary_stage(
     provenance,
     generation,
     force=False,
-    gpus=None,
     generator_factory,
 ):
     output_dir = context.extraction_dir(arm.representation, arm.model, "summaries")
@@ -205,7 +204,6 @@ def run_summary_stage(
         generate = resources.enter_context(
             generator_factory(
                 model_path=context.path("models", "qwen"),
-                gpus=gpus,
                 settings=settings.get("qwen"),
                 image_limit=settings["visual_evidence"]["num_keyframes"],
                 runtime=runtime,
@@ -291,7 +289,6 @@ def qwen_progress(progress, stats):
 def qwen_generator(
     *,
     model_path: Path,
-    gpus: int | None,
     settings=None,
     image_limit=6,
     runtime=None,
@@ -317,7 +314,6 @@ def qwen_generator(
                     log("[Qwen] starting vLLM GPU workers")
                 pool = resources.enter_context(
                     QwenWorkerPool(
-                        1 if gpus is None else gpus,
                         str(model_path),
                         settings=settings,
                         image_limit=image_limit,

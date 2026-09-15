@@ -44,11 +44,11 @@ def _start_worker(context, worker_index, gpu_id, model_path, result_queue, setti
 class QwenWorkerPool:
     """One vLLM engine per GPU, with bounded completion-driven admission."""
 
-    def __init__(self, gpu_count, model_path, *, settings=None, image_limit=6,
+    def __init__(self, model_path, *, settings=None, image_limit=6,
                  on_runtime=None, on_progress=None):
         self.settings = qwen_settings(settings)
-        self.gpu_ids = _visible_gpu_ids(gpu_count)
-        self.gpu_count = gpu_count
+        self.gpu_ids = _visible_gpu_ids()
+        self.gpu_count = len(self.gpu_ids)
         self.capacity = 2 * self.settings["max_num_seqs"]
         self.on_runtime = on_runtime
         self.on_progress = on_progress
@@ -257,18 +257,24 @@ class QwenWorkerPool:
         self.close() if exc_type is None else self.abort()
 
 
-def _visible_gpu_ids(gpu_count):
-    if type(gpu_count) is not int or gpu_count <= 0:
-        raise ValueError("--gpus must be a positive integer")
+def _visible_gpu_ids():
+    """Use every CUDA-visible GPU, preserving physical IDs/UUIDs for spawned workers."""
     try:
         import torch
     except ImportError as exc:
         raise RuntimeError("Qwen requires the 'qwen' optional dependencies") from exc
     available = int(torch.cuda.device_count())
-    if available < gpu_count:
-        raise RuntimeError(f"--gpus {gpu_count} requested, but only {available} CUDA device(s) are visible")
-    configured = [v.strip() for v in os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",") if v.strip()]
-    return configured[:gpu_count] if configured else [str(i) for i in range(gpu_count)]
+    if available <= 0:
+        raise RuntimeError("Qwen requires at least one visible CUDA GPU; check CUDA_VISIBLE_DEVICES")
+    mask = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if mask is None:
+        return [str(i) for i in range(available)]
+    configured = [value.strip() for value in mask.split(",")]
+    # CUDA may ignore a suffix following an invalid/duplicate device identifier.
+    visible = configured[:available]
+    if len(visible) != available or any(not value or value == "-1" for value in visible):
+        raise RuntimeError("CUDA_VISIBLE_DEVICES does not match the visible CUDA device count")
+    return visible
 
 
 def _receive(channel):

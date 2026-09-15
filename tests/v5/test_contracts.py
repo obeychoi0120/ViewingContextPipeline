@@ -42,13 +42,9 @@ def test_required_generation_options_and_prompt_paths(
     assert (
         extract(prefix + [selector, model, wrong, model, "--schema", str(calls[-1]["schema"])]) == 1
     )
-    if selector == "--model" and model == "gemini":
-        assert (
-            extract(
-                prefix + [selector, model, "--gpus", "1", "--schema", "prompts/graph_scene_v3.md"]
-            )
-            == 1
-        )
+    assert "gpus" not in calls[-1]
+    with pytest.raises(SystemExit):
+        extract(prefix + [selector, model, "--schema", "prompts/graph_scene_v3.md", "--gpus", "1"])
 
 
 def test_no_donor_option_and_no_prompt_in_preparation(v5_context, monkeypatch):

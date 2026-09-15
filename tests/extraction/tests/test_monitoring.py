@@ -64,7 +64,7 @@ def test_graph_monitoring_can_identify_source() -> None:
     )[0].startswith("[Graph_qwen] 1.mp4 | scene #000\n")
 
 
-def test_generator_defaults_to_one_gpu_and_passes_completed_request_metadata(
+def test_generator_uses_visible_gpu_pool_and_passes_completed_request_metadata(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -73,8 +73,7 @@ def test_generator_defaults_to_one_gpu_and_passes_completed_request_metadata(
     runtime = QwenRuntime()
 
     class Pool:
-        def __init__(self, count, model_path, **kwargs):
-            assert count == 1
+        def __init__(self, model_path, **kwargs):
             kwargs["on_runtime"]({"worker_index": 0, "gpu_id": "0"})
 
         def __enter__(self):
@@ -102,7 +101,7 @@ def test_generator_defaults_to_one_gpu_and_passes_completed_request_metadata(
         assert runtime.current_result["task_id"] == task_id
         completed.append((task_id, text))
 
-    with summary_executor.qwen_generator(model_path=tmp_path, gpus=None, runtime=runtime) as generate:
+    with summary_executor.qwen_generator(model_path=tmp_path, runtime=runtime) as generate:
         results = generate(tasks, complete)
 
     assert completed == [("b", "result:second"), ("a", "result:first")]

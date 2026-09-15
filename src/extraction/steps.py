@@ -93,13 +93,11 @@ def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     return generation
 
 
-def _extract(context, *, representation, model, schema, force=False, gpus=None):
+def _extract(context, *, representation, model, schema, force=False):
     arm = generated_arm(context.config, representation, model)
-    if model == "gemini" and gpus is not None:
-        raise ValueError("--gpus cannot be used with Gemini extraction")
     stage = f"extract-{representation}-scenes"
     path = context.prompt_path(schema)
-    log_step_start(context, stage, model=model, schema=path, force=force, gpus=gpus)
+    log_step_start(context, stage, model=model, schema=path, force=force)
     context.initialize()
     prompt = path.read_text(encoding="utf-8")
     provenance = prompt_provenance(context, path, arm)
@@ -168,7 +166,6 @@ def _extract(context, *, representation, model, schema, force=False, gpus=None):
                 scene_dir=scene_dir,
                 failure_dir=failure_dir,
                 model_path=context.path("models", "qwen"),
-                gpus=gpus,
                 generator_factory=qwen_generator,
                 names=video_name_map(context),
                 progress=progress,
@@ -207,11 +204,11 @@ def _extract(context, *, representation, model, schema, force=False, gpus=None):
     return result(f"{stage}-{model}", content_count=len(visuals), failure_count=failure_count)
 
 
-def _summarize(context, *, representation, source, schema, force=False, gpus=None):
+def _summarize(context, *, representation, source, schema, force=False):
     arm = generated_arm(context.config, representation, source)
     path = context.prompt_path(schema)
     stage = f"summarize-{representation}"
-    log_step_start(context, stage, source=source, schema=path, force=force, gpus=gpus)
+    log_step_start(context, stage, source=source, schema=path, force=force)
     context.initialize()
     cohort = context.require_ready_cohort()
     return run_summary_stage(
@@ -222,32 +219,31 @@ def _summarize(context, *, representation, source, schema, force=False, gpus=Non
         provenance=prompt_provenance(context, path, arm, summary=True),
         generation=_summary_generation_settings(context),
         force=force,
-        gpus=gpus,
         generator_factory=qwen_generator,
     )
 
 
-def extract_graph_scenes(context, *, model, schema, force=False, gpus=None):
+def extract_graph_scenes(context, *, model, schema, force=False):
     return _extract(
-        context, representation="graph", model=model, schema=schema, force=force, gpus=gpus
+        context, representation="graph", model=model, schema=schema, force=force
     )
 
 
-def extract_description_scenes(context, *, model, schema, force=False, gpus=None):
+def extract_description_scenes(context, *, model, schema, force=False):
     return _extract(
-        context, representation="description", model=model, schema=schema, force=force, gpus=gpus
+        context, representation="description", model=model, schema=schema, force=force
     )
 
 
-def summarize_graph(context, *, source, schema, force=False, gpus=None):
+def summarize_graph(context, *, source, schema, force=False):
     return _summarize(
-        context, representation="graph", source=source, schema=schema, force=force, gpus=gpus
+        context, representation="graph", source=source, schema=schema, force=force
     )
 
 
-def summarize_description(context, *, source, schema, force=False, gpus=None):
+def summarize_description(context, *, source, schema, force=False):
     return _summarize(
-        context, representation="description", source=source, schema=schema, force=force, gpus=gpus
+        context, representation="description", source=source, schema=schema, force=force
     )
 
 

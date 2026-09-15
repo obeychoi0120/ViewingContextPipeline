@@ -61,12 +61,12 @@ def pool_factory(monkeypatch):
         task_queues = [Channel() for _ in range(count)]
         results = Channel(events)
         processes = [Process() for _ in range(count)]
-        monkeypatch.setattr(workers, "_visible_gpu_ids", lambda count: [str(i) for i in range(count)])
+        monkeypatch.setattr(workers, "_visible_gpu_ids", lambda: [str(i) for i in range(count)])
         monkeypatch.setattr(workers.mp, "get_context", lambda method: SimpleNamespace(Queue=lambda: results))
         monkeypatch.setattr(workers, "_start_worker",
                             lambda context, index, *args: (task_queues[index], processes[index]))
         monkeypatch.setattr(QwenWorkerPool, "_signal_groups", lambda *args: None)
-        return QwenWorkerPool(count, "model", settings={"max_num_seqs": 1}, **kwargs)
+        return QwenWorkerPool("model", settings={"max_num_seqs": 1}, **kwargs)
     return create
 
 
@@ -235,18 +235,29 @@ def test_engine_readiness_can_be_measured_before_request_submission(pool_factory
     pool.abort()
 
 
-@pytest.mark.parametrize("gpu_count", [0, -1, True])
-def test_invalid_gpu_count(gpu_count):
-    with pytest.raises(ValueError, match="positive"):
-        _visible_gpu_ids(gpu_count)
+@pytest.mark.parametrize("mask,available,expected", [
+    ("4,7,9", 3, ["4", "7", "9"]),
+    ("7", 1, ["7"]),
+    (None, 3, ["0", "1", "2"]),
+    ("GPU-abc,GPU-def", 2, ["GPU-abc", "GPU-def"]),
+    ("MIG-abc", 1, ["MIG-abc"]),
+    ("4,7,-1,9", 2, ["4", "7"]),
+])
+def test_all_visible_devices_preserved(monkeypatch, mask, available, expected):
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: available)))
+    if mask is None:
+        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    else:
+        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    assert _visible_gpu_ids() == expected
 
 
-def test_visible_devices_preserved(monkeypatch):
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: 3)))
-    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4,7,9")
-    assert _visible_gpu_ids(2) == ["4", "7"]
-    with pytest.raises(RuntimeError, match="only 3"):
-        _visible_gpu_ids(4)
+@pytest.mark.parametrize("mask", ["", "-1"])
+def test_no_visible_gpu_fails_clearly(monkeypatch, mask):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: 0)))
+    with pytest.raises(RuntimeError, match="CUDA_VISIBLE_DEVICES"):
+        _visible_gpu_ids()
 
 
 def test_worker_reuses_one_engine_and_passes_requests_concurrently(monkeypatch):
@@ -317,7 +328,8 @@ def test_partial_startup_failure_disposes_first_worker(pool_factory, monkeypatch
         return first_queue, first_process
 
     monkeypatch.setattr(workers, "_start_worker", start)
+    monkeypatch.setattr(workers, "_visible_gpu_ids", lambda: ["0", "1"])
     with pytest.raises(RuntimeError, match="spawn failed"):
-        QwenWorkerPool(2, "model")
+        QwenWorkerPool("model")
     assert first_process.killed
     assert first_queue.closed

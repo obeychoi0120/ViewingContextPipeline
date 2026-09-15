@@ -1,4 +1,4 @@
-Represent this scene as a JSON scene graph. Return only one JSON object with exactly entities, relations, and context. Use open vocabulary English; no allowed-value lists.
+Represent this scene as a JSON scene graph. Return only one JSON object with exactly entities, relations, and context. Use open vocabulary English.
 
 entities: an array of objects with id (unique within this scene), name (a kind label, not a real name or identity), and attributes (an array of appearance, state, or unary action observations). Multiple entities may have the same name. Use attributes to distinguish them. Keep an ID across these keyframes only when there is evidence it is the same entity. Do not link IDs across scenes.
 relations: an array of directed objects with subject_id, predicate, object_id. Both IDs must refer to entities. Preserve who acts on whom; do not reverse relations or invent them.

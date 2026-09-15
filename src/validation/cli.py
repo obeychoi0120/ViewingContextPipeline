@@ -24,10 +24,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Sources to include (embedding/recommendation/diagnosis; default: configured active arms).",
     )
     parser.add_argument(
-        "--gpus", type=_positive_int,
-        help="Number of visible CUDA devices (run-recommendation only; default: one).",
-    )
-    parser.add_argument(
         "--workers-per-gpu", type=_positive_int,
         help="Independent combination processes per GPU (run-recommendation only; default: one).",
     )
@@ -44,8 +40,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--target is only supported by run-recommendation/run-diagnosis")
         if args.plan_only and args.step != "prepare-cohort":
             raise ValueError("--plan-only is only supported by prepare-cohort")
-        if (args.gpus is not None or args.workers_per_gpu is not None) and args.step != "run-recommendation":
-            raise ValueError("--gpus/--workers-per-gpu are only supported by run-recommendation")
+        if args.workers_per_gpu is not None and args.step != "run-recommendation":
+            raise ValueError("--workers-per-gpu is only supported by run-recommendation")
         context = RunContext.load(args.run_id)
         kwargs = {"force": args.force}
         if args.compare_run_id is not None:
@@ -56,8 +52,6 @@ def main(argv: list[str] | None = None) -> int:
             kwargs["target"] = args.target
         if args.step == "prepare-cohort":
             kwargs["plan_only"] = args.plan_only
-        if args.gpus is not None:
-            kwargs["gpus"] = args.gpus
         if args.workers_per_gpu is not None:
             kwargs["workers_per_gpu"] = args.workers_per_gpu
         STEP_HANDLERS[args.step](context, **kwargs)

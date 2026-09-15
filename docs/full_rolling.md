@@ -12,6 +12,8 @@
 
 BGE 1,024차원 특징은 고정하고 projection과 SASRec을 학습합니다. 별도 item ID embedding을 더하지 않습니다. SASRec은 hidden 512, 2 blocks, 2 heads, sequence 10, batch 256, 기본 seeds 42·43·44입니다. 5개 고정 Arm은 105개 조합입니다. `--target`은 embedding·추천·진단에서 동일하게 지원합니다.
 
+추천도 `CUDA_VISIBLE_DEVICES`에서 보이는 모든 GPU를 자동으로 사용하며 `--gpus`는 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m validation run-recommendation --run-id "$RUN_ID"`는 물리 GPU 0·2에서 날짜 × seed × Arm 조합을 병렬 학습합니다. 환경 변수를 생략하면 CUDA에서 보이는 모든 GPU를 사용합니다. 기본 GPU당 동시 작업은 1개이며 `--workers-per-gpu 2`이면 각 GPU에 2개씩 배치합니다. 남은 작업이 적으면 필요한 수의 워커만 실행합니다. GPU가 없으면 기본 설정에서 CPU로 실행하고, 이때 `--workers-per-gpu`가 1보다 크면 오류를 냅니다.
+
 ## 통계 계약
 
 주 지표 NDCG@10과 HR/NDCG @4·8·10·20·30을 보고합니다. 사건 지표를 seed 평균하고 날짜별 적격 사건 평균을 계산한 뒤 날짜에 동일 가중치를 줍니다. 사용자를 단위로 복원 추출하는 paired bootstrap 10,000회를 수행하며 한 사용자의 모든 날짜·seed·Arm을 함께 재표집합니다.

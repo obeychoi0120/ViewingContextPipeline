@@ -83,7 +83,7 @@ def _report_scene(progress, name, record, failure, *, arm, source):
 
 
 def run_qwen_scenes(
-    pending, *, scene_dir, failure_dir, model_path, gpus, generator_factory,
+    pending, *, scene_dir, failure_dir, model_path, generator_factory,
     names, progress, arm, existing_records, existing_failures, source=None,
     qwen_options=None, image_limit=6, runtime=None, penalties=1.0, force=False, identity=None,
 ):
@@ -168,7 +168,7 @@ def run_qwen_scenes(
 
     from extraction.summary_executor import qwen_progress
     with generator_factory(
-        model_path=model_path, gpus=gpus, settings=qwen_options,
+        model_path=model_path, settings=qwen_options,
         image_limit=image_limit, runtime=runtime, log=lambda message: write_progress(progress, message),
         on_progress=lambda stats: qwen_progress(progress, stats),
     ) as generate:

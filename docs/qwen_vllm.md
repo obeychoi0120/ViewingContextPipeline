@@ -14,11 +14,11 @@ v5 Qwen 추출과 모든 요약은 로컬 비양자화 checkpoint, BF16, vLLM 0.
 | `enforce_eager` | false | 컴파일/CUDA graph 허용 |
 | `async_scheduling` | null | vLLM 호환성 판단과 기본값 사용 |
 
-`--gpus N`은 사용할 GPU 개수입니다. GPU마다 독립 엔진을 복제하고 tensor parallel은 1입니다. GPU당 미완료 요청 공급은 `2 × max_num_seqs`로 제한합니다. 워커는 이미지 경로·프롬프트를 받아 처리하고 완료 GPU에 다음 요청을 먼저 공급합니다.
+Qwen의 네 생성 단계는 `--gpus` 없이 `CUDA_VISIBLE_DEVICES`에서 보이는 GPU를 모두 사용합니다. 변수를 생략하면 CUDA에서 보이는 모든 GPU를 사용합니다. 빈 값이나 `-1`로 GPU를 숨기면 실행에 실패합니다. GPU 번호와 GPU/MIG UUID의 순서를 보존합니다. GPU마다 독립 엔진을 복제하고 tensor parallel은 1입니다. GPU당 미완료 요청 공급은 `2 × max_num_seqs`로 제한합니다. 워커는 이미지 경로·프롬프트를 받아 처리하고 완료 GPU에 다음 요청을 먼저 공급합니다.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m extraction extract-graph-scenes --model qwen --run-id "$RUN_ID" --schema prompts/graph_scene_v3.md
-CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source qwen --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --gpus 2
+CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source qwen --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md
 ```
 
 Qwen Graph는 콘텐츠별 최대 8개 장면 묶음의 재시도·저장을 완료한 뒤 다음 묶음을 처리합니다. Qwen Description은 장면을 연속 공급합니다. Gemini 추출은 `extraction.gemini.threads`로 콘텐츠 내부 동시성을 제한하며 콘텐츠 완료 시 결과를 게시합니다.
@@ -45,3 +45,5 @@ CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/q
 ```
 
 처음 16개는 warmup, 나머지는 측정입니다. 요청이 적으면 `--warmup 1`처럼 조절합니다. 같은 고정 요청·이미지 hash를 사용하며 생성 1회 처리량을 측정합니다. 운영 단계의 전체 재시도·교정·Raw 게시 비용은 포함하지 않습니다. 실제 CUDA/API 호환성·속도·내용 품질은 CPU 및 mock 회귀 테스트와 별도로 검증해야 합니다.
+
+벤치마크의 vLLM backend도 보이는 GPU를 모두 사용합니다. Transformers 비교용 backend는 단일 GPU 전용이므로 `CUDA_VISIBLE_DEVICES`로 하나만 지정합니다.

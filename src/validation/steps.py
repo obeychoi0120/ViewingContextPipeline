@@ -175,7 +175,7 @@ def embed_representations(context, *, force=False, target=None):
     }
 
 
-def run_recommendation(context, *, force=False, gpus=None, workers_per_gpu=1, target=None):
+def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):
     from validation.rolling_recommendation import run_rolling
 
     log_step_start(
@@ -183,12 +183,11 @@ def run_recommendation(context, *, force=False, gpus=None, workers_per_gpu=1, ta
         "run-recommendation",
         force=force,
         target=target,
-        gpus=gpus,
         workers_per_gpu=workers_per_gpu,
     )
     context.initialize()
     return run_rolling(
-        context, force=force, gpus=gpus, workers_per_gpu=workers_per_gpu, target=target
+        context, force=force, workers_per_gpu=workers_per_gpu, target=target
     )
 
 

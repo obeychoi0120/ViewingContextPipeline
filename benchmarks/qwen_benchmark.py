@@ -128,7 +128,9 @@ def measure(manifest, backend, settings, warmup_count, output_path):
     tasks = [QwenGenerationTask(**{**row, "image_paths": tuple(row["image_paths"])}) for row in manifest["requests"]]
     if backend == "transformers" and any(task.structured_output for task in tasks):
         raise ValueError("Transformers reference does not support structured outputs; use a legacy unconstrained request manifest")
-    gpu_ids = _visible_gpu_ids(1)
+    gpu_ids = _visible_gpu_ids()
+    if backend == "transformers" and len(gpu_ids) != 1:
+        raise ValueError("Transformers reference benchmark requires one GPU via CUDA_VISIBLE_DEVICES")
     if not 0 < warmup_count < len(tasks):
         raise ValueError("warmup must leave at least one disjoint measurement request")
     for path, expected in manifest["image_hashes"].items():
@@ -148,7 +150,7 @@ def measure(manifest, backend, settings, warmup_count, output_path):
     with GpuMonitor(gpu_ids) as monitor:
         try:
             if backend == "vllm":
-                pool = QwenWorkerPool(1, manifest["model_path"], settings=settings,
+                pool = QwenWorkerPool(manifest["model_path"], settings=settings,
                                       image_limit=manifest["image_limit"], on_runtime=report["runtime"].append)
                 pool.wait_ready()
 

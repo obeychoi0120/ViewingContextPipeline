@@ -188,11 +188,11 @@ def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
     monkeypatch.setattr("validation.rolling_workers.run_parallel", run)
     monkeypatch.setattr("validation.rolling_recommendation.verify_representations", lambda *a, **k: None)
     monkeypatch.setattr("validation.representation_provenance.recommendation_identity", lambda *a: {})
-    assert run_rolling(context, gpus=2, workers_per_gpu=2) == {
+    assert run_rolling(context, workers_per_gpu=2) == {
         "stage": "run-recommendation", "completed": 104, "skipped": 1,
     }
     assert reused not in dispatched[-1]
-    assert run_rolling(context, force=True, gpus=2, workers_per_gpu=2)["completed"] == 105
+    assert run_rolling(context, force=True, workers_per_gpu=2)["completed"] == 105
     assert reused in dispatched[-1]
 
 
@@ -200,14 +200,12 @@ def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
 def test_gpu_assignment_respects_visible_devices(monkeypatch):
     monkeypatch.setattr("validation.model.torch.cuda.is_available", lambda: True)
     monkeypatch.setattr("validation.model.torch.cuda.device_count", lambda: 4)
-    assert worker_devices(4, 2) == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"] * 2
-    assert worker_devices(None, 1) == ["cuda:0"]
-    with pytest.raises(ValueError, match="only 4"):
-        worker_devices(5, 1)
-    with pytest.raises(ValueError, match="positive"):
-        worker_devices(4, 0)
+    assert worker_devices(2) == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"] * 2
+    assert worker_devices(1) == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"]
+    for invalid in (0, -1, True):
+        with pytest.raises(ValueError, match="positive"):
+            worker_devices(invalid)
     monkeypatch.setattr("validation.model.torch.cuda.is_available", lambda: False)
-    assert worker_devices(None, 1) == ["cpu"]
-    for gpus, workers in [(1, 1), (None, 2)]:
-        with pytest.raises(ValueError, match="only 0"):
-            worker_devices(gpus, workers)
+    assert worker_devices(1) == ["cpu"]
+    with pytest.raises(ValueError, match="visible CUDA"):
+        worker_devices(2)
