@@ -16,7 +16,7 @@ def _valid_duration(value: object) -> bool:
 
 
 def _duration_path(assets_root: Path, row: dict[str, Any]) -> Path:
-    path = assets_root / row["content_id"] / "assets" / "video_duration.json"
+    path = assets_root / row["content_id"] / "video_duration.json"
     if not path.resolve().is_relative_to(assets_root.resolve()):
         raise ValueError("duration checkpoint must remain inside source_assets")
     return path

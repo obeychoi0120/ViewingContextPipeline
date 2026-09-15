@@ -36,6 +36,11 @@ def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypat
     prepare_input_data(second, force=True)
     assert list(second.source_assets_dir.rglob("timestamp_fixed*.json"))
     assert not (second.cohort_dir / "source_assets").exists()
+    for row in second.require_ready_cohort()["catalog"]:
+        directory = second.source_assets_dir / row["content_id"]
+        assert (directory / "video_duration.json").is_file()
+        assert (directory / "timestamp_fixed_30s.json").is_file()
+        assert not (directory / "assets").exists()
     assert images == {p: p.read_bytes() for p in images}
     assert stamps == {p: p.stat().st_mtime_ns for p in images}
 
@@ -172,7 +177,7 @@ def test_concurrent_runs_share_one_duration_probe(ready_context, monkeypatch):
     assert not list(first.source_assets_dir.rglob("*.tmp"))
 
 
-def test_changed_source_cannot_reuse_shared_metadata(ready_context):
+def test_preparation_rejects_changed_source_without_overwriting_shared_metadata(ready_context):
     from extraction.step_support import visual_rows
 
     first = ready_context
@@ -181,8 +186,21 @@ def test_changed_source_cannot_reuse_shared_metadata(ready_context):
     source.write_bytes(b"a different source video")
     second = RunContext.load("changed_source", root=first.root)
     prepare_cohort_step(second)
-    with pytest.raises(RuntimeError, match="shared source metadata"):
-        visual_rows(second)
+    assert visual_rows(second)
     with pytest.raises(RuntimeError, match="preparation incomplete"):
         prepare_input_data(second)
     assert all(p.read_bytes() == data for p, data in before.items())
+
+
+def test_extraction_does_not_revalidate_shared_duration_or_sampling(ready_context, fake_models, monkeypatch):
+    from extraction.steps import extract_description_scenes
+
+    context = ready_context
+    for checkpoint in context.source_assets_dir.rglob("video_duration.json"):
+        checkpoint.unlink()
+    monkeypatch.setattr("extraction.data_preparation.media.cached_duration",
+                        lambda *a: pytest.fail("extraction must not read shared duration metadata"))
+    monkeypatch.setattr("visual_sampling.build_fixed_windows",
+                        lambda *a, **k: pytest.fail("extraction must use existing timestamps"))
+    extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
+    assert len(list(context.description_scene_dir("qwen").glob("*.jsonl"))) == 4

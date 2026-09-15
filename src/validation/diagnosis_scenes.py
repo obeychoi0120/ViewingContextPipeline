@@ -38,7 +38,6 @@ def _expected_scenes(
             run_root.parent.parent
             / "source_assets"
             / content_id
-            / "assets"
             / timestamp_filename(scene_duration, num_keyframes)
         )
         value, loaded = _read_json(

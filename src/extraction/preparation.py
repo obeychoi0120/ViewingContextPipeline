@@ -24,7 +24,7 @@ def prepare_input_data(context, *, force=False):
             raise ExtractionStepError(f"source changed since prepare-cohort: {item['content_id']}")
         cid = str(item["content_id"])
         timestamp = (
-            assets_root / cid / "assets" / timestamp_filename(**sampling)
+            assets_root / cid / timestamp_filename(**sampling)
         )
         frames = context.keyframes_dir / cid
         duration = cached_duration(assets_root, inventory)
@@ -52,7 +52,7 @@ def prepare_input_data(context, *, force=False):
         cid = str(item["content_id"])
         duration = cached_duration(assets_root, inventory)
         timestamp = (
-            assets_root / cid / "assets" / timestamp_filename(**sampling)
+            assets_root / cid / timestamp_filename(**sampling)
         )
         if not visual_evidence_matches(
             timestamp, context.keyframes_dir / cid, image_size, duration, **sampling

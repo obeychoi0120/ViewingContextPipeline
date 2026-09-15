@@ -206,7 +206,6 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
     cohort = context.require_ready_cohort()
     from visual_sampling import timestamp_filename
     sampling = context.config["extraction"]["visual_evidence"]
-    inventories = {row["content_id"]: row for row in cohort["inventory"]}
     rows: list[dict[str, Any]] = []
     for item in cohort["catalog"]:
         content_id = str(item["content_id"])
@@ -214,7 +213,6 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
         timestamp = (
             context.source_assets_dir
             / content_id
-            / "assets"
             / timestamp_filename(sampling["scene_duration"], sampling["num_keyframes"])
         )
         frames = (
@@ -237,17 +235,6 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
                 f"missing visual evidence for {content_id}: {'; '.join(missing)}. "
                 f"Run python -m extraction prepare-input-data --run-id {context.run_id}. "
                 "Existing valid shared frames are reused while shared timestamps are prepared."
-            )
-        from extraction.data_preparation.media import cached_duration
-        from visual_sampling import build_fixed_windows
-        inventory = inventories[content_id]
-        duration = cached_duration(context.source_assets_dir, inventory)
-        if duration is None or json.loads(timestamp.read_text(encoding="utf-8")) != build_fixed_windows(
-            duration, scene_duration=sampling["scene_duration"], num_keyframes=sampling["num_keyframes"]
-        ):
-            raise ExtractionStepError(
-                f"shared source metadata or sampling mismatch for {content_id}: {timestamp}; "
-                f"run python -m extraction prepare-input-data --run-id {context.run_id}"
             )
         rows.append(
             {

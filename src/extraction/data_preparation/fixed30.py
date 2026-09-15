@@ -25,8 +25,7 @@ def prepare_visual_item(
     if not source.is_file():
         raise FileNotFoundError(f"local video source not found: {source}")
     content_id = _safe_content_id(content_id)
-    item_root = Path(assets_root) / content_id
-    item_assets = item_root / "assets"
+    item_assets = Path(assets_root) / content_id
     timestamp_path = item_assets / timestamp_filename(scene_duration, num_keyframes)
     frames_dir = Path(output_root) / "resized_keyframes" / content_id
     width, height = image_size

@@ -38,7 +38,7 @@ def prepare_catalog(
         content_id = str(row.get("content_id", ""))
         try:
             from .fixed30 import _safe_content_id
-            item_assets = Path(assets_root) / _safe_content_id(content_id) / "assets"
+            item_assets = Path(assets_root) / _safe_content_id(content_id)
             item_assets.mkdir(parents=True, exist_ok=True)
             descriptor = os.open(item_assets, os.O_RDONLY | os.O_DIRECTORY)
             try:

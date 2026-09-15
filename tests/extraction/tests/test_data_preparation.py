@@ -158,7 +158,7 @@ def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(
         )
 
     assert result == {"content_id": "content-1", "reused_frames": 0, "extracted_frames": 7}
-    timestamp_path = tmp_path / "assets/content-1/assets/timestamp_fixed_30s.json"
+    timestamp_path = tmp_path / "assets/content-1/timestamp_fixed_30s.json"
     scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
     assert scenes[-1]["scene_end"] == 30.1
     assert extract.call_args.args[1] == [2.5, 7.5, 12.5, 17.5, 22.5, 27.5, 30]

@@ -38,7 +38,7 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 ## Artifact와 재개
 
-`artifacts/runs/{RUN_ID}/`에는 `cohort`, `extraction`, `validation`만 둡니다. cohort 문서는 `cohort_plan.json`, `eligibility.json`, `events.jsonl`, `required_items.jsonl`, `item_inventory.jsonl`, `catalog.jsonl`, `metadata_titles.jsonl`입니다. `artifacts_root/source_assets/{content_id}/assets/`에 timestamp·영상 길이 cache를 공유합니다.
+`artifacts/runs/{RUN_ID}/`에는 `cohort`, `extraction`, `validation`만 둡니다. cohort 문서는 `cohort_plan.json`, `eligibility.json`, `events.jsonl`, `required_items.jsonl`, `item_inventory.jsonl`, `catalog.jsonl`, `metadata_titles.jsonl`입니다. `artifacts_root/source_assets/{content_id}/`에 timestamp·영상 길이 cache를 공유합니다.
 
 `artifacts_root/resized_keyframes`는 모든 run이 공유합니다. 정상 PNG는 자동 덮어쓰지 않으며 콘텐츠별 디렉터리 잠금으로 동시 쓰기를 보호합니다. 프레임은 임시 공간에서 검증한 후 누락 파일만 원자적으로 게시합니다. 새 Run은 공유 PNG와 duration·timestamp를 함께 재사용합니다. 준비 정보가 이미 있으면 `prepare-input-data`를 다시 실행할 필요가 없습니다. 준비 결과 통계는 콘솔로 출력합니다.
 
