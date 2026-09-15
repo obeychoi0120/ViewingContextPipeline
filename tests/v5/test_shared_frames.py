@@ -11,7 +11,7 @@ from pipeline_runtime import RunContext
 from validation.steps import prepare_cohort_step
 
 
-def test_second_run_creates_timestamps_and_preserves_shared_frames(ready_context, monkeypatch):
+def test_second_run_creates_timestamps_and_preserves_shared_frames(ready_context, monkeypatch, capsys):
     first = ready_context
     images = {p: p.read_bytes() for p in first.keyframes_dir.rglob("*.png")}
     stamps = {p: p.stat().st_mtime_ns for p in images}
@@ -22,7 +22,12 @@ def test_second_run_creates_timestamps_and_preserves_shared_frames(ready_context
         "extraction.data_preparation.video_processor.subprocess.run",
         lambda *a, **k: pytest.fail("shared frames must not be extracted again"),
     )
+    capsys.readouterr()
     prepare_input_data(second)
+    output = capsys.readouterr()
+    assert "new_frames=0" in output.out
+    assert "[KEYFRAMES] extracting" not in output.out
+    assert "Extract resized keyframes" not in output.err
     prepare_input_data(second, force=True)
     assert list(second.cohort_dir.rglob("timestamp_fixed*.json"))
     assert images == {p: p.read_bytes() for p in images}
@@ -50,8 +55,9 @@ def test_missing_frames_concurrent_writers_and_invalid_existing(tmp_path, monkey
             pool.submit(extract_resized_keyframes, source, [1, 2], output, (16, 8))
             for _ in range(2)
         ]
-        for future in futures:
-            future.result()
+        counts = [future.result() for future in futures]
+        assert sum(row["extracted_frames"] for row in counts) == 1
+        assert sum(row["reused_frames"] for row in counts) == 3
     assert calls == ["2"]
     assert (existing.read_bytes(), existing.stat().st_mtime_ns) == original
     assert {p.name for p in output.iterdir()} == {"0001.png", "0002.png"}

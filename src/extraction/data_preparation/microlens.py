@@ -26,11 +26,11 @@ def prepare_catalog(
 ) -> dict[str, Any]:
     """Prepare exactly the cohort catalog from caller-owned MicroLens MP4 files."""
 
-    results: list[tuple[dict[str, str] | None, dict[str, str] | None]] = [
+    results: list[tuple[dict[str, Any] | None, dict[str, Any] | None]] = [
         (None, None) for _ in catalog
     ]
 
-    def prepare(index: int, row: dict[str, Any]) -> tuple[int, str, dict[str, str] | None, dict[str, str] | None]:
+    def prepare(index: int, row: dict[str, Any]) -> tuple[int, str, dict[str, Any] | None, dict[str, Any] | None]:
         item_id = str(row.get("item_id", ""))
         content_id = str(row.get("content_id", ""))
         try:
@@ -54,9 +54,10 @@ def prepare_catalog(
                 "error": str(exc),
             }
 
+    counts = {"reused_frames": 0, "extracted_frames": 0}
     with tqdm(
         total=len(catalog),
-        desc="Extract resized keyframes",
+        desc="Prepare visual evidence",
         unit="video",
         dynamic_ncols=True,
     ) as progress, ThreadPoolExecutor(max_workers=PREPARATION_WORKERS) as executor:
@@ -69,6 +70,10 @@ def prepare_catalog(
                     f"[FAILURE] prepare_data {content_id} {failure['error']}",
                     file=progress.fp,
                 )
+            if prepared is not None:
+                for key in counts:
+                    counts[key] += prepared[key]
+                progress.set_postfix(reused_frames=counts["reused_frames"], new_frames=counts["extracted_frames"])
             progress.update(1)
     prepared_rows = [prepared for prepared, _ in results if prepared is not None]
     failures = [failure for _, failure in results if failure is not None]
@@ -83,6 +88,7 @@ def prepare_catalog(
     else:
         failure_path.unlink(missing_ok=True)
     return {
+        **counts,
         "selected": len(catalog),
         "succeeded": len(prepared_rows),
         "failed": len(failures),

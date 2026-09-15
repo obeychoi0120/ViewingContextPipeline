@@ -173,6 +173,12 @@ def extract_resized_keyframes(video_path, timestamps, output_folder, image_size)
             else:
                 missing.append(timestamp)
         if missing:
+            print(
+                f"[KEYFRAMES] extracting {len(missing)} missing images in {output}; "
+                f"timestamps={missing[:6]}" + ("..." if len(missing) > 6 else ""),
+                flush=True,
+            )
             _extract_missing_keyframes(video_path, missing, output, image_size)
+        return {"reused_frames": len(timestamps) - len(missing), "extracted_frames": len(missing)}
     finally:
         os.close(descriptor)

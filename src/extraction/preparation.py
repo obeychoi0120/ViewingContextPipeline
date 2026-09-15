@@ -32,6 +32,7 @@ def prepare_input_data(context, *, force=False):
             timestamp, frames, image_size, duration, **sampling
         ):
             pending.append({**inventory, **item, "duration_seconds": duration})
+    prepared = {"reused_frames": 0, "extracted_frames": 0}
     if pending:
         prepared = prepare_catalog(
             pending,
@@ -61,7 +62,8 @@ def prepare_input_data(context, *, force=False):
         frame_count += sum(len(w["keyframe_timestamps"]) for w in windows)
     print(
         f"[EVIDENCE] videos={len(cohort['catalog'])} scenes={scene_count} keyframes={frame_count} "
-        f"prepared={len(pending)} shared_frames={context.keyframes_dir}",
+        f"prepared_videos={len(pending)} reused_frames={frame_count - prepared['extracted_frames']} "
+        f"new_frames={prepared['extracted_frames']} shared_frames={context.keyframes_dir}",
         flush=True,
     )
     return result("prepare-input-data", content_count=len(cohort["catalog"]))

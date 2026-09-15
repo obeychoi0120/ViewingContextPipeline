@@ -119,6 +119,8 @@ artifacts/
 
 공유 프레임은 `artifacts_root` 바로 아래에 있으며 run마다 복사하지 않습니다. 각 run의 timestamp와 duration cache는 `cohort/source_assets`에 저장합니다. 새 run에 timestamp가 없어도 정상 PNG는 재사용하고 누락된 프레임만 콘텐츠별 잠금과 원자적 게시로 추가합니다. `--force`도 정상 공유 이미지를 덮어쓰지 않습니다. 손상되거나 해상도가 다른 기존 PNG는 오류로 알리므로 직접 정리한 뒤 실행합니다.
 
+`prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 새 Run은 영상 길이 확인과 timestamp 생성이 필요하므로 이미지 재추출이 없어도 이 진행률이 표시됩니다.
+
 실패 파일은 실패가 있을 때만 생성합니다. 완료된 recovery journal과 임시 checkpoint·dirty·pending 표식은 정리하고, 최종 장면·요약의 provenance와 간단한 생성 이력은 남깁니다. 별도 migration manifest, 전체 설정 snapshot, 요약별 `.inputs` 및 `.changed`, run별 이미지, media preflight·metadata missing 문서는 만들지 않습니다. 준비 통계는 콘솔, 결측 title 진단은 최종 diagnosis에 포함합니다. embedding별 `.inputs`는 실제 입력·fallback·truncation 및 캐시 검증 상태이므로 보존합니다.
 
 각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.

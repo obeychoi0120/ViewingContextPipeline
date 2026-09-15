@@ -20,7 +20,7 @@ def prepare_visual_item(
     scene_duration: int = 30,
     num_keyframes: int = 6,
     force: bool = False,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     source = Path(source_video_path)
     if not source.is_file():
         raise FileNotFoundError(f"local video source not found: {source}")
@@ -36,11 +36,13 @@ def prepare_visual_item(
         timestamp_path, frames_dir, image_size, duration_seconds,
         scene_duration=scene_duration, num_keyframes=num_keyframes,
     )
+    scenes = build_fixed_windows(
+        duration_seconds, scene_duration=scene_duration, num_keyframes=num_keyframes,
+    )
+    counts = {"reused_frames": sum(len(scene["keyframe_timestamps"]) for scene in scenes),
+              "extracted_frames": 0}
     if force or not complete:
-        scenes = build_fixed_windows(
-            duration_seconds, scene_duration=scene_duration, num_keyframes=num_keyframes,
-        )
-        extract_resized_keyframes(
+        counts = extract_resized_keyframes(
             source,
             [timestamp for scene in scenes for timestamp in scene["keyframe_timestamps"]],
             frames_dir,
@@ -48,7 +50,7 @@ def prepare_visual_item(
         )
         # Commit the timestamp only after the complete frame directory is installed.
         _write_json(timestamp_path, scenes)
-    return {"content_id": content_id}
+    return {"content_id": content_id, **counts}
 
 
 def build_fixed_30s_windows(video_duration: int) -> list[dict[str, Any]]:

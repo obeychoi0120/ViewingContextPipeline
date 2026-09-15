@@ -145,7 +145,8 @@ def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(
     video.touch()
     output_root = tmp_path / "run"
     with mock.patch(
-        "extraction.data_preparation.fixed30.extract_resized_keyframes"
+        "extraction.data_preparation.fixed30.extract_resized_keyframes",
+        return_value={"reused_frames": 0, "extracted_frames": 7},
     ) as extract:
         result = prepare_visual_item(
             content_id="content-1",
@@ -156,7 +157,7 @@ def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(
             image_size=(640, 352),
         )
 
-    assert result == {"content_id": "content-1"}
+    assert result == {"content_id": "content-1", "reused_frames": 0, "extracted_frames": 7}
     timestamp_path = tmp_path / "assets/content-1/assets/timestamp_fixed_30s.json"
     scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
     assert scenes[-1]["scene_end"] == 30.1
@@ -176,7 +177,7 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
     with (
         mock.patch(
             "extraction.data_preparation.microlens.prepare_visual_item",
-            side_effect=lambda **kwargs: {"content_id": kwargs["content_id"]},
+            side_effect=lambda **kwargs: {"content_id": kwargs["content_id"], "reused_frames": 6, "extracted_frames": 0},
         ) as process,
         mock.patch(
             "extraction.data_preparation.microlens.ThreadPoolExecutor",
@@ -196,7 +197,7 @@ def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
     assert result["workers"] == 8
     progress_factory.assert_called_once_with(
         total=2,
-        desc="Extract resized keyframes",
+        desc="Prepare visual evidence",
         unit="video",
         dynamic_ncols=True,
     )
