@@ -94,3 +94,28 @@ def test_failed_preparation_resumes_without_new_probe_for_completed_duration(
     assert sorted(probes) == ["1", "2", "3", "4"]
     assert set(extracted[before:]) == {"4"}
     assert not (context.cohort_dir / "preparation_failures.jsonl").exists()
+
+
+@pytest.mark.parametrize("missing", ["timestamps", "frames", "both"])
+def test_extraction_reports_exact_missing_evidence_and_preparation_command(ready_context, missing):
+    from extraction.step_support import visual_rows
+
+    context = ready_context
+    cid = context.require_ready_cohort()["catalog"][0]["content_id"]
+    timestamp = next((context.cohort_dir / "source_assets" / cid).rglob("timestamp_fixed*.json"))
+    frames = context.keyframes_dir / cid
+    if missing in {"timestamps", "both"}:
+        timestamp.unlink()
+    if missing in {"frames", "both"}:
+        for image in frames.glob("*.png"):
+            image.unlink()
+    with pytest.raises(RuntimeError) as error:
+        visual_rows(context)
+    message = str(error.value)
+    assert ("run scene timestamps" in message) == (missing in {"timestamps", "both"})
+    assert ("shared keyframe images" in message) == (missing in {"frames", "both"})
+    if missing in {"timestamps", "both"}:
+        assert str(timestamp) in message
+    if missing in {"frames", "both"}:
+        assert str(frames) in message
+    assert f"prepare-input-data --run-id {context.run_id}" in message

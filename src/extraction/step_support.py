@@ -208,7 +208,7 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in cohort["catalog"]:
         content_id = str(item["content_id"])
-        frames_dir = context.evidence_dir / "resized_keyframes" / content_id
+        frames_dir = context.keyframes_dir / content_id
         timestamp = (
             context.cohort_dir
             / "source_assets"
@@ -226,8 +226,17 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
             if frames_dir.is_dir()
             else []
         )
-        if not frames or not timestamp.is_file():
-            raise ExtractionStepError(f"missing visual evidence for {content_id}")
+        missing = []
+        if not frames:
+            missing.append(f"shared keyframe images: {frames_dir}")
+        if not timestamp.is_file():
+            missing.append(f"run scene timestamps: {timestamp}")
+        if missing:
+            raise ExtractionStepError(
+                f"missing visual evidence for {content_id}: {'; '.join(missing)}. "
+                f"Run python -m extraction prepare-input-data --run-id {context.run_id}. "
+                "Existing valid shared frames are reused while run timestamps are prepared."
+            )
         rows.append(
             {
                 "content_id": content_id,
