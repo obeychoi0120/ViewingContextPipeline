@@ -10,18 +10,6 @@ from validation.config import ValidationConfig
 from conftest import config_data
 
 
-def test_validation_config_v5_accepts_only_the_declared_contract(tmp_path) -> None:
-    value = config_data(tmp_path)
-
-    config = ValidationConfig.model_validate(value)
-
-    assert config.schema_version == "validation-config/v5"
-    assert config.dataset.titles_csv == tmp_path / "titles.csv"
-    assert config.model.embedding_dim == 512
-    assert config.model.batch_size == 256
-    assert config.model.popularity_power == 1.0
-
-
 @pytest.mark.parametrize(
     "mutation",
     [

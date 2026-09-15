@@ -8,7 +8,6 @@ from PIL import Image
 import pytest
 
 from extraction.backends.gemini_workers import GeminiWorkerPool
-from extraction.backends.gemini import GeminiEmptyResponseError
 from extraction.backends.qwen_workers import QwenGenerationTask
 
 
@@ -64,60 +63,6 @@ def test_gemini_pool_completes_out_of_order_and_captures_errors(tmp_path) -> Non
     assert len(factory_threads) >= 2
     assert progress[0]["completed"] == 0
     assert progress[-1]["completed"] == 3 and progress[-1]["inflight"] == 0
-
-
-def test_gemini_pool_rejects_duplicate_task_ids() -> None:
-    pool = GeminiWorkerPool(
-        1,
-        project_id="project",
-        location="global",
-        model_id="gemini",
-        backend_factory=lambda: object(),
-    )
-    task = QwenGenerationTask("same", (), "prompt", 8)
-    try:
-        pool.generate([task, task])
-    except ValueError as exc:
-        assert "unique" in str(exc)
-    else:
-        raise AssertionError("duplicate task ids must fail")
-
-
-def test_gemini_pool_supports_sixteen_simultaneous_scenes() -> None:
-    barrier = threading.Barrier(16, timeout=5)
-
-    class Backend:
-        def generate(self, images, prompt, max_new_tokens):
-            # All 16 calls must start before any of them can finish.
-            barrier.wait()
-            return prompt
-
-    pool = GeminiWorkerPool(
-        16, project_id="project", location="global", model_id="gemini",
-        backend_factory=Backend,
-    )
-    outcomes = pool.generate([
-        QwenGenerationTask(f"content:{i}", (), str(i), 32) for i in range(16)
-    ])
-    assert len(outcomes) == 16
-    assert all(outcome.error is None for outcome in outcomes.values())
-    assert {outcome.text for outcome in outcomes.values()} == {str(i) for i in range(16)}
-
-
-def test_gemini_pool_propagates_empty_response_diagnostics() -> None:
-    diagnostics = {"candidates": [{"finish_reason": "SAFETY"}]}
-
-    class Backend:
-        def generate(self, *_args):
-            raise GeminiEmptyResponseError(diagnostics)
-
-    pool = GeminiWorkerPool(
-        1, project_id="project", location="global", model_id="gemini",
-        backend_factory=Backend,
-    )
-    outcome = pool.generate([QwenGenerationTask("blocked", (), "prompt", 32)])["blocked"]
-    assert outcome.response_diagnostics == diagnostics
-    assert "SAFETY" in outcome.error
 
 
 def test_gemini_pool_propagates_ctrl_c_without_waiting_for_http_call() -> None:

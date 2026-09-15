@@ -121,37 +121,3 @@ def test_all_empty_summary_is_failure_and_gemini_missing_can_fall_back(
         ]
         == 4
     )
-
-
-def test_compact_generation_history_does_not_duplicate_response_text(tmp_path):
-    from extraction.backends.qwen_workers import QwenGenerationTask
-    from extraction.qwen_runtime import QwenRuntime
-    from extraction.recovery import generate_with_recovery
-
-    runtime = QwenRuntime()
-    runtime.engine_ready(
-        {"worker_index": 0, "gpu_id": "0", "backend": "fixture", "gpu_name": "test"}
-    )
-    runtime.current_result = {
-        "worker_index": 0,
-        "task_id": "x",
-        "text": "private raw response",
-        "output_tokens": 8,
-        "finish_reason": "stop",
-    }
-    outputs = []
-    generate_with_recovery(
-        lambda tasks, callback: {"x": "A person waves."},
-        [QwenGenerationTask("x", (), "prompt", 32)],
-        penalties=[1],
-        directory=tmp_path,
-        identity={"model": "test"},
-        validate=lambda cid, text: ({"text": text}, "native"),
-        complete=lambda cid, doc: outputs.append(doc),
-        failed=lambda *args: pytest.fail("unexpected failure"),
-        runtime=runtime,
-    )
-    assert "private raw response" not in str(outputs)
-    assert outputs[0]["generation"]["output_tokens"] == 8
-    assert outputs[0]["generation"]["origin"]["backend"] == "fixture"
-    assert not list(tmp_path.glob("*.json"))

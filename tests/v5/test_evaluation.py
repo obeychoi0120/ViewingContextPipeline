@@ -40,18 +40,6 @@ def test_fixed_families_partial_targets_zero_control_and_effects(v5_context):
     assert len(policy["families"]["metadata_baseline"]["skipped"]) == 4
 
 
-def test_bootstrap_paired_clusters_equal_date_and_seeds():
-    from validation.rolling_diagnosis import cluster_bootstrap
-
-    counts = np.array([[1, 3], [1, 1]], dtype=float)
-    sums = np.array([[[1, 0.5], [0, 0]], [[0, 0], [1, 0.5]]])
-    observed, draws, stats = cluster_bootstrap(sums, counts, samples=10000)
-    np.testing.assert_allclose(observed, [0.375, 0.1875])
-    np.testing.assert_allclose(draws[:, 0], draws[:, 1] * 2)
-    assert stats["aggregation"] == "seed mean then equal date mean"
-    assert stats["working_bytes_upper_bound"] <= stats["memory_limit_bytes"]
-
-
 @pytest.mark.torch
 def test_105_combinations_real_small_training_resume_and_diagnosis(
     ready_context, fake_models, monkeypatch

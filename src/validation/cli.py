@@ -27,10 +27,6 @@ def main(argv: list[str] | None = None) -> int:
         "--workers-per-gpu", type=_positive_int,
         help="Independent combination processes per GPU (run-recommendation only; default: one).",
     )
-    parser.add_argument(
-        "--plan-only", action="store_true",
-        help="Freeze users and list required items without media/title validation (prepare-cohort only).",
-    )
     parser.add_argument("--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only).")
     args = parser.parse_args(argv)
     try:
@@ -38,8 +34,6 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--compare-run-id is only supported by run-diagnosis")
         if args.target is not None and args.step not in {"embed-representations", "run-recommendation", "run-diagnosis"}:
             raise ValueError("--target is only supported by run-recommendation/run-diagnosis")
-        if args.plan_only and args.step != "prepare-cohort":
-            raise ValueError("--plan-only is only supported by prepare-cohort")
         if args.workers_per_gpu is not None and args.step != "run-recommendation":
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")
         context = RunContext.load(args.run_id)
@@ -50,8 +44,6 @@ def main(argv: list[str] | None = None) -> int:
             from arm_registry import select_arms
             select_arms(context.config, args.target)
             kwargs["target"] = args.target
-        if args.step == "prepare-cohort":
-            kwargs["plan_only"] = args.plan_only
         if args.workers_per_gpu is not None:
             kwargs["workers_per_gpu"] = args.workers_per_gpu
         STEP_HANDLERS[args.step](context, **kwargs)

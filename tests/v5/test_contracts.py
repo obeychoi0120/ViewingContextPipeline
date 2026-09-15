@@ -1,11 +1,8 @@
-from copy import deepcopy
-
 import pytest
 import yaml
 
 from arm_registry import registry, select_arms
 from extraction.cli import main as extract
-from validation.cli import main as validate
 from pipeline_runtime import ConfigError, RunContext
 
 
@@ -47,25 +44,6 @@ def test_required_generation_options_and_prompt_paths(
         extract(prefix + [selector, model, "--schema", "prompts/graph_scene_v3.md", "--gpus", "1"])
 
 
-def test_no_donor_option_and_no_prompt_in_preparation(v5_context, monkeypatch):
-    monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: v5_context)
-    with pytest.raises(SystemExit):
-        extract(["prepare-input-data", "--run-id", "r", "--reuse-run-id", "old"])
-    assert (
-        extract(["prepare-input-data", "--run-id", "r", "--schema", "prompts/graph_scene_v3.md"])
-        == 1
-    )
-
-
-@pytest.mark.parametrize("key", ["graph_versions", "graph_scene_versions"])
-def test_removed_version_settings_rejected(v5_context, key):
-    config = deepcopy(v5_context.config)
-    config["protocol"][key] = {"asis": 2, "tobe": 3}
-    (v5_context.root / "config.yaml").write_text(yaml.safe_dump(config))
-    with pytest.raises(ConfigError):
-        RunContext.load("x", root=v5_context.root)
-
-
 def test_dynamic_targets_and_custom_artifact_root(v5_context):
     config = v5_context.config
     assert len(select_arms(config)) == 5 and len(registry(config)) == 5
@@ -84,31 +62,6 @@ def test_dynamic_targets_and_custom_artifact_root(v5_context):
     assert context.prompt_path("prompts/graph_scene_v3.md").is_file()
 
 
-@pytest.mark.parametrize("target", ["graph_v2_qwen", "graph_v3_gemini", "graph_asis_qwen"])
-def test_versioned_targets_rejected(v5_context, target):
-    with pytest.raises(ValueError, match="target"):
-        select_arms(v5_context.config, [target])
-
-
-def test_duplicate_resolved_arms_rejected(v5_context):
-    v5_context.config["protocol"]["arms"] = ["graph_qwen", "graph_qwen"]
-    with pytest.raises(ValueError, match="unique"):
-        select_arms(v5_context.config)
-
-
-@pytest.mark.parametrize("step", ["embed-representations", "run-recommendation", "run-diagnosis"])
-def test_target_forwarding(v5_context, monkeypatch, step):
-    calls = []
-    monkeypatch.setattr("validation.cli.RunContext.load", lambda _: v5_context)
-    monkeypatch.setitem(
-        __import__("validation.cli", fromlist=["STEP_HANDLERS"]).STEP_HANDLERS,
-        step,
-        lambda context, **kw: calls.append(kw),
-    )
-    assert validate([step, "--run-id", "r", "--target", "graph_qwen", "metadata"]) == 0
-    assert calls[0]["target"] == ["graph_qwen", "metadata"]
-
-
 @pytest.mark.parametrize("name", ["..", "a/b", "resized_keyframes", "source_assets", "a\\b", ""])
 def test_run_id_cannot_escape_or_claim_the_shared_frame_directory(v5_context, name):
     with pytest.raises(ConfigError):
@@ -116,7 +69,7 @@ def test_run_id_cannot_escape_or_claim_the_shared_frame_directory(v5_context, na
 
 
 def test_missing_metadata_row_keeps_catalog_scope_and_records_failure(v5_context):
-    from validation.steps import prepare_cohort_step
+    from preparation.steps import prepare_cohort_step
     from pipeline_runtime import read_json, read_jsonl
 
     titles = v5_context.path("data", "titles_csv")

@@ -128,11 +128,6 @@ def test_fallback_missing_only_raw_precedence_and_identical_vectors(ready_contex
         embed_representations(context, target=["desc_gemini"])
 
 
-def test_asis_directory_is_not_a_supported_input(ready_context):
-    with pytest.raises(ValueError, match="invalid representation"):
-        ready_context.extraction_dir("graph_asis", "qwen", "summaries")
-
-
 @pytest.mark.parametrize(
     "length,expected_calls,status",
     [(200, 1, "complete"), (201, 2, "complete"), (20, 1, "complete")],
@@ -211,7 +206,7 @@ def test_tobe_ids_and_directed_relations():
     assert inspect_summary("A person walks.\n\nAnother waves.")[1] == ["multiple_paragraphs"]
 
 
-def test_changed_model_settings_and_frame_bytes_refresh_generation(ready_context, fake_models):
+def test_changed_model_settings_refresh_but_prepared_frame_bytes_are_trusted(ready_context, fake_models):
     context = ready_context
     schema = "prompts/description_scene_v2.md"
     extract_description_scenes(context, model="qwen", schema=schema)
@@ -228,5 +223,6 @@ def test_changed_model_settings_and_frame_bytes_refresh_generation(ready_context
     frame = next(context.keyframes_dir.rglob("*.png"))
     Image.new("RGB", (16, 8), "red").save(frame)
     extract_description_scenes(context, model="qwen", schema=schema)
+    assert len(fake_models) == count + 2
+    extract_description_scenes(context, model="qwen", schema=schema, force=True)
     assert len(fake_models) == count + 3
-    assert len(fake_models[-1]) == 1

@@ -52,8 +52,8 @@ Gemini 전용 환경은 `.[gemini,dev]`로 설치할 수 있습니다. Vertex AD
 ```bash
 RUN_ID=experiment_v5
 
-python -m validation prepare-cohort --run-id "$RUN_ID"
-python -m extraction prepare-input-data --run-id "$RUN_ID"
+python -m preparation prepare-cohort --run-id "$RUN_ID"
+python -m preparation prepare-input-data --run-id "$RUN_ID"
 
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model qwen
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model gemini
@@ -119,7 +119,7 @@ artifacts/
         └── diagnosis/diagnosis.json
 ```
 
-공유 프레임과 영상 길이·장면 timestamp는 `artifacts_root` 바로 아래의 `resized_keyframes`, `source_assets`에 저장하며 Run 간 재사용합니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 timestamp와 프레임이 준비되어 있으면 새 Run에서도 `prepare-cohort` 후 바로 추출할 수 있습니다. 장면 추출 시작 시 공유 duration의 원본 식별 정보나 timestamp 샘플링을 다시 검증하지 않고 기존 timestamp를 입력으로 사용합니다. 자동 준비 호출은 하지 않습니다.
+공유 프레임과 영상 길이·장면 timestamp는 `artifacts_root` 바로 아래의 `resized_keyframes`, `source_assets`에 저장하며 Run 간 재사용합니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 timestamp와 프레임이 준비되어 있으면 새 Run에서도 `prepare-cohort` 후 바로 추출할 수 있습니다. 장면 추출은 `prepare-input-data`가 정상 완료됐다고 가정합니다. 이미지·asset 존재 검사, 폴더 스캔, duration·샘플링 재검증 및 이미지 내용 해시 계산을 하지 않습니다. timestamp JSON은 콘텐츠마다 한 번 읽고 준비 단계의 PNG 파일명 규칙으로 경로를 직접 구성합니다. 이미지는 실제 추론 시 읽으며, 필요한 파일이 없으면 해당 입력을 읽는 시점에 실패합니다. 자동 준비 호출은 하지 않습니다.
 
 기본 6개 keyframe 정책은 `timestamp_fixed_{scene_duration}s.json`, 다른 개수는 `timestamp_fixed_{scene_duration}s_{num_keyframes}kf.json`을 사용하므로 서로 다른 정책이 공유 timestamp를 덮어쓰지 않습니다. 콘텐츠별 잠금과 원자적 저장으로 동시 준비를 보호합니다. `--force`도 정상 이미지를 덮어쓰지 않습니다. `prepare-input-data`를 명시적으로 실행할 때는 공유 duration의 원본 식별 정보가 달라지면 재사용을 거부하므로 변경된 영상은 별도 `artifacts_root`로 분리합니다.
 
@@ -137,7 +137,7 @@ artifacts/
 - 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
 - Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 관계의 양 끝 ID를 검증합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
 - 신규 Summary는 자연스러운 영어 한 문단, 100–200단어 권장·최대 200단어입니다. 정보가 적으면 100단어 미만도 허용합니다. 필드별 할당과 summary grammar는 없습니다. 형식·길이 위반은 원본 장면 관찰을 포함해 한 번 교정하고, 여전히 실패하면 마지막 비어 있지 않은 결과를 명시적 Raw로 사용합니다. 빈 결과와 실행 오류는 구분합니다.
-- 프롬프트 경로·내용, 모델·설정·입력 hash가 바뀌면 생성 캐시를 재사용하지 않습니다. 로컬 모델 서명은 설정·tokenizer 텍스트의 내용 hash와 가중치 파일명·크기·mtime으로 계산합니다. 완료 journal을 삭제해도 최종 artifact의 provenance로 재개합니다.
+- 프롬프트 경로·내용, 모델·설정·장면 timestamp가 바뀌면 생성 캐시를 재사용하지 않습니다. 준비된 이미지 내용의 변경은 자동 감지하지 않으므로 이미지를 교체한 뒤 재추론하려면 `--force`를 사용합니다. 기존 완료 결과도 프롬프트·모델·설정·장면 정보가 같으면 재사용합니다. 로컬 모델 서명은 설정·tokenizer 텍스트의 내용 hash와 가중치 파일명·크기·mtime으로 계산합니다. 완료 journal을 삭제해도 최종 artifact의 provenance로 재개합니다.
 - Gemini Summary **파일이 없을 때만** 같은 Run·표현의 Qwen Summary로 fallback합니다. Raw Gemini가 있으면 우선 사용합니다. 손상된 일반 파일은 오류이며 Qwen 요약 누락을 영벡터로 대체하지 않습니다. 실제 사용 경로를 기록하고 Gemini 결과가 추가되면 embedding·추천 캐시를 갱신합니다.
 - BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata title만 영벡터를 사용합니다.
 

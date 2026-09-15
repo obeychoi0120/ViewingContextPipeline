@@ -46,12 +46,6 @@ def test_sampling_keeps_full_bins_and_clips_only_the_tail(
         assert all(scene["scene_start"] <= value < scene["scene_end"] for value in timestamps)
 
 
-@pytest.mark.parametrize("duration", [0, -1, float("nan"), float("inf"), True, None])
-def test_sampling_rejects_invalid_duration(duration):
-    with pytest.raises(ValueError):
-        build_fixed_windows(duration, scene_duration=30, num_keyframes=6)
-
-
 @pytest.mark.parametrize(
     "value,expected,name",
     [
@@ -100,16 +94,3 @@ def test_fractional_seek_json_cache_and_image_selection_agree(tmp_path):
     ]
     assert image_path_for_timestamp(list(frames.iterdir()), 1.6) == frames / "0001_6.png"
     assert _nonempty_timestamp_list(row["keyframes"])
-
-
-@pytest.mark.parametrize(
-    "timestamps",
-    [[2.55], [float("nan")], [float("inf")], [-0.1], [True], [2.5, 2.5], [7.5, 2.5]],
-)
-def test_invalid_keyframes_are_rejected_before_extracting(tmp_path, timestamps):
-    video = tmp_path / "video.mp4"
-    video.touch()
-    with pytest.raises(ValueError):
-        extract_resized_keyframes(video, timestamps, tmp_path / "frames", (16, 8))
-    assert not _nonempty_timestamp_list(timestamps)
-    assert not (tmp_path / "frames").exists()

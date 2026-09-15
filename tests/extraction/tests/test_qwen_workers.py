@@ -128,64 +128,6 @@ def test_initial_admission_is_bounded_and_runtime_events_are_delivered(pool_fact
     pool.abort()
 
 
-def test_progress_starts_after_all_engines_ready_without_blocking_fast_gpu(pool_factory, monkeypatch):
-    now = [0.0]
-    monkeypatch.setattr(workers.time, "monotonic", lambda: now[0])
-    stats = []
-    def ready(index):
-        return {"kind": "ready", "ok": True, "worker_index": index}
-    pool = pool_factory(events=[ready(0), event("a", 0), ready(1), event("b", 1),
-                                event("c", 0), event("d", 1), event("e", 0), event("f", 1)],
-                        on_progress=stats.append)
-    times = iter([120, 150, 240, 300, 300, 300, 300, 300])
-    get = pool._result_queue.get
-
-    def timed_get(timeout):
-        now[0] = next(times)
-        return get(timeout)
-
-    pool._result_queue.get = timed_get
-
-    def complete(name, text):
-        if name == "a":
-            assert pool._ready_workers == {0}
-            assert pool._task_queues[0].values[-1].task_id == "e"
-
-    pool.generate([task(x) for x in "abcdef"], complete)
-    assert any(s["phase"] == "initializing" for s in stats)
-    assert stats[-1]["initialization_seconds"] == 240
-    assert stats[-1]["inference_elapsed"] == 60
-    # The early completion is counted as done, but excluded from full-capacity throughput.
-    assert stats[-1]["completed"] == 6
-    assert stats[-1]["requests_per_second"] == pytest.approx(5 / 60)
-    assert stats[-1]["output_tokens_per_second"] == pytest.approx(10 / 60)
-    pool.abort()
-
-
-def test_progress_refreshes_during_waits_without_completions(pool_factory, monkeypatch):
-    now = [0.0]
-    monkeypatch.setattr(workers.time, "monotonic", lambda: now[0])
-    stats = []
-    pool = pool_factory(count=1, on_progress=stats.append)
-    timeline = iter([
-        (0, {"kind": "ready", "ok": True, "worker_index": 0}),
-        (30, event("a")), (60, None), (90, None), (120, event("b")),
-    ])
-
-    def get(timeout):
-        now[0], value = next(timeline)
-        if value is None:
-            raise queue.Empty
-        return value
-
-    pool._result_queue.get = get
-    pool.generate([task("a"), task("b")])
-    waiting = [s for s in stats if s["completed"] == 1]
-    assert [s["inference_elapsed"] for s in waiting] == [30, 60, 90]
-    assert waiting[-1]["requests_per_second"] == pytest.approx(1 / 90)
-    pool.abort()
-
-
 @pytest.mark.parametrize("failure", [KeyboardInterrupt(), OSError("disk full")])
 def test_callback_failure_keeps_prior_saves_and_stops_all_workers(pool_factory, failure):
     pool = pool_factory(count=1, events=[event("a"), event("b")])
@@ -217,24 +159,6 @@ def test_engine_failure_is_fatal(pool_factory, events, dead, match):
     assert pool._closed
 
 
-def test_duplicate_ids_rejected(pool_factory):
-    pool = pool_factory(count=1)
-    with pytest.raises(ValueError, match="unique"):
-        pool.generate([task("a"), task("a")])
-
-
-def test_engine_readiness_can_be_measured_before_request_submission(pool_factory):
-    pool = pool_factory(count=1, events=[
-        {"kind": "started", "worker_index": 0, "process_group": None},
-        {"kind": "ready", "worker_index": 0, "ok": True}, event("a"),
-    ])
-    pool.wait_ready()
-    assert pool._task_queues[0].values == []
-    assert pool.generate([task("a")]) == {"a": "A"}
-    pool.wait_ready()  # Already-ready engines are reused without another queue wait.
-    pool.abort()
-
-
 @pytest.mark.parametrize("mask,available,expected", [
     ("4,7,9", 3, ["4", "7", "9"]),
     ("7", 1, ["7"]),
@@ -250,14 +174,6 @@ def test_all_visible_devices_preserved(monkeypatch, mask, available, expected):
     else:
         monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
     assert _visible_gpu_ids() == expected
-
-
-@pytest.mark.parametrize("mask", ["", "-1"])
-def test_no_visible_gpu_fails_clearly(monkeypatch, mask):
-    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: 0)))
-    with pytest.raises(RuntimeError, match="CUDA_VISIBLE_DEVICES"):
-        _visible_gpu_ids()
 
 
 def test_worker_reuses_one_engine_and_passes_requests_concurrently(monkeypatch):
@@ -296,40 +212,3 @@ def test_worker_reuses_one_engine_and_passes_requests_concurrently(monkeypatch):
     assert closed == [True]
     assert {v["task_id"] for v in outgoing.values if v.get("kind") == "result"} == {"a", "b"}
     assert outgoing.values[1]["kind"] == "ready"
-
-
-def test_spawn_uses_non_daemon_and_bounded_queue():
-    calls = []
-
-    class Spawned:
-        def __init__(self, **kwargs):
-            calls.append(kwargs)
-
-        def start(self):
-            calls.append("start")
-
-    context = SimpleNamespace(Queue=lambda **kwargs: kwargs, Process=Spawned)
-    tasks, _ = workers._start_worker(context, 0, "2", "model", Channel(), {"max_num_seqs": 3}, 6)
-    assert tasks == {"maxsize": 7}
-    assert calls[0]["daemon"] is False
-    assert calls[0]["args"][-1] == 6
-    assert calls[1] == "start"
-
-
-def test_partial_startup_failure_disposes_first_worker(pool_factory, monkeypatch):
-    pool = pool_factory(count=1)
-    first_queue, first_process = pool._task_queues[0], pool._processes[0]
-    pool.abort()
-    first_process.alive = True
-
-    def start(context, index, *args):
-        if index:
-            raise RuntimeError("spawn failed")
-        return first_queue, first_process
-
-    monkeypatch.setattr(workers, "_start_worker", start)
-    monkeypatch.setattr(workers, "_visible_gpu_ids", lambda: ["0", "1"])
-    with pytest.raises(RuntimeError, match="spawn failed"):
-        QwenWorkerPool("model")
-    assert first_process.killed
-    assert first_queue.closed

@@ -76,7 +76,7 @@ def scene_generation_rows(
     scenes = json.loads(Path(visual["timestamp_json"]).read_text(encoding="utf-8"))
     rows: list[dict[str, Any]] = []
     for scene in build_scene_evidence(
-        scenes, visual["frames_dir"], visual["timestamp_json"]
+        scenes, visual["frames_dir"], visual["timestamp_json"], prepared=True
     ):
         scene_idx = scene["scene_idx"]
         keyframes = scene["keyframes"]
@@ -215,27 +215,6 @@ def visual_rows(context: RunContext) -> list[dict[str, Any]]:
             / content_id
             / timestamp_filename(sampling["scene_duration"], sampling["num_keyframes"])
         )
-        frames = (
-            sorted(
-                path
-                for path in frames_dir.iterdir()
-                if path.is_file()
-                and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
-            )
-            if frames_dir.is_dir()
-            else []
-        )
-        missing = []
-        if not frames:
-            missing.append(f"shared keyframe images: {frames_dir}")
-        if not timestamp.is_file():
-            missing.append(f"shared scene timestamps: {timestamp}")
-        if missing:
-            raise ExtractionStepError(
-                f"missing visual evidence for {content_id}: {'; '.join(missing)}. "
-                f"Run python -m extraction prepare-input-data --run-id {context.run_id}. "
-                "Existing valid shared frames are reused while shared timestamps are prepared."
-            )
         rows.append(
             {
                 "content_id": content_id,

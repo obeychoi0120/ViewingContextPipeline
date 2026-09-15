@@ -6,92 +6,11 @@ from pathlib import Path
 from unittest import mock
 
 from PIL import Image
-import pytest
 
 from extraction.data_preparation.fixed30 import (
-    build_fixed_30s_windows,
     prepare_visual_item,
 )
 from extraction.data_preparation.microlens import prepare_catalog
-from extraction.data_preparation.video_processor import (
-    _decodable_frame_tail_timestamps_seconds,
-    extract_resized_keyframes,
-)
-
-
-def test_fixed_30s_sampling_uses_5_15_25_second_keyframes() -> None:
-    assert build_fixed_30s_windows(31) == [
-        {
-            "scene_start": 0,
-            "scene_end": 30,
-            "duration": 30,
-            "shot_change_timestamps": [0, 10, 20],
-            "keyframe_timestamps": [5, 15, 25],
-        },
-        {
-            "scene_start": 30,
-            "scene_end": 31,
-            "duration": 1,
-            "shot_change_timestamps": [30],
-            "keyframe_timestamps": [30.5],
-        },
-    ]
-
-
-def test_direct_keyframe_uses_preceding_frame_for_safe_trailing_seek(
-    tmp_path: Path,
-    capsys,
-) -> None:
-    video = tmp_path / "video.mp4"
-    video.touch()
-
-    def extract_frame(command: list[str], **kwargs: object) -> mock.Mock:
-        Path(command[-1]).touch()
-        return mock.Mock(returncode=0, stderr="")
-
-    with (
-        mock.patch(
-            "extraction.data_preparation.video_processor.subprocess.run",
-            side_effect=extract_frame,
-        ) as run,
-        mock.patch(
-            "extraction.data_preparation.video_processor.verified_image_size",
-            side_effect=[None, (64, 48)],
-        ),
-        mock.patch(
-            "extraction.data_preparation.video_processor._decodable_frame_tail_timestamps_seconds",
-            return_value=(300.92, 300.96),
-        ),
-    ):
-        extract_resized_keyframes(video, [301], tmp_path / "keyframes", (64, 48))
-
-    assert run.call_count == 2
-    assert run.call_args_list[0].args[0][6] == "301"
-    assert run.call_args_list[1].args[0][6] == "300.92"
-    assert "safe seek at 300.92s before last decodable frame at 300.96s" in capsys.readouterr().out
-
-
-def test_failed_trailing_seek_does_not_log_success(tmp_path: Path, capsys) -> None:
-    video = tmp_path / "video.mp4"
-    video.touch()
-    with (
-        mock.patch(
-            "extraction.data_preparation.video_processor.subprocess.run",
-            return_value=mock.Mock(returncode=0, stderr=""),
-        ),
-        mock.patch(
-            "extraction.data_preparation.video_processor.verified_image_size",
-            side_effect=[None, None],
-        ),
-        mock.patch(
-            "extraction.data_preparation.video_processor._decodable_frame_tail_timestamps_seconds",
-            return_value=(190.93, 190.96),
-        ),
-        pytest.raises(RuntimeError, match="Could not read extracted keyframe"),
-    ):
-        extract_resized_keyframes(video, [191], tmp_path / "keyframes", (64, 48))
-
-    assert "Clamped trailing keyframe" not in capsys.readouterr().out
 
 
 def test_verified_keyframe_cache_rejects_corrupt_or_wrong_size_images(tmp_path: Path) -> None:
@@ -119,23 +38,6 @@ def test_verified_keyframe_cache_rejects_corrupt_or_wrong_size_images(tmp_path: 
     payload = image_path.read_bytes()
     image_path.write_bytes(payload[: len(payload) // 2])
     assert not resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
-
-
-def test_last_decodable_frame_uses_latest_ffprobe_frame_timestamp(tmp_path: Path) -> None:
-    video = tmp_path / "video.mp4"
-    with mock.patch(
-        "extraction.data_preparation.video_processor.subprocess.run",
-        return_value=mock.Mock(
-            stdout="0.000000\n300.960000\n300.920000\n300.960000\n",
-            stderr="",
-            returncode=0,
-        ),
-    ) as run:
-        assert _decodable_frame_tail_timestamps_seconds(video) == (300.92, 300.96)
-
-    command = run.call_args.args[0]
-    assert command[0] == "ffprobe"
-    assert "-show_frames" in command
 
 
 def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(

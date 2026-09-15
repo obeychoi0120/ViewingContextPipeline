@@ -9,7 +9,6 @@ from arm_registry import generated_arm
 from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
-from extraction.preparation import prepare_input_data
 from extraction.qwen_runtime import QwenRuntime
 from extraction.recovery import (
     active_force_run,
@@ -100,6 +99,7 @@ def _extract(context, *, representation, model, schema, force=False):
     log_step_start(context, stage, model=model, schema=path, force=force)
     context.initialize()
     prompt = path.read_text(encoding="utf-8")
+    print("[PREPARE] Reading prompt/model settings and cohort...", flush=True)
     provenance = prompt_provenance(context, path, arm)
     settings = context.config["extraction"]
     penalties = settings[f"{representation}_repetition_penalty"] if model == "qwen" else [1.0]
@@ -114,7 +114,8 @@ def _extract(context, *, representation, model, schema, force=False):
         cursor = scene_dir / ".completed-contents.json"
         count = read_json(cursor)["count"] if cursor.is_file() else 0
         interrupted = set(read_json(scene_dir / ".pending-contents.json")["content_ids"][count:])
-    for visual in visuals:
+    print(f"[PREPARE] Building scene tasks and checking saved outputs for {len(visuals)} videos; prepared assets are trusted.", flush=True)
+    for visual in tqdm(visuals, desc="Prepare scene tasks", unit="video"):
         cid = visual["content_id"]
         output = scene_dir / f"{cid}.jsonl"
         failure_path = failure_dir / f"{cid}.jsonl"
@@ -140,7 +141,14 @@ def _extract(context, *, representation, model, schema, force=False):
             generation = saved.get("generation", {}) if saved else {}
             reusable = (
                 saved is not None
-                and generation.get("input_key") == row["input_key"]
+                and (
+                    generation.get("input_key") == row["input_key"]
+                    or (
+                        bool(generation.get("input_key"))
+                        and saved.get("provenance") == row["provenance"]
+                        and saved.get("keyframes") == row["keyframes"]
+                    )
+                )
                 and cid not in interrupted
                 and not has_pending_recovery(
                     scene_dir / ".recovery", row["task"].task_id, force_run, generation
@@ -248,7 +256,6 @@ def summarize_description(context, *, source, schema, force=False):
 
 
 STEP_HANDLERS = {
-    "prepare-input-data": prepare_input_data,
     "extract-graph-scenes": extract_graph_scenes,
     "extract-description-scenes": extract_description_scenes,
     "summarize-graph": summarize_graph,

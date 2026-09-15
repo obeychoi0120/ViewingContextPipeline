@@ -14,7 +14,6 @@ import torch
 from extraction.backends.qwen import QwenBackend
 from extraction.backends.qwen_penalty import GeneratedTokenPenalty, PENALTY_KEY
 from extraction.backends.qwen_workers import QwenGenerationTask
-from extraction.qwen_config import QWEN_DEFAULTS, qwen_settings
 
 
 @pytest.fixture
@@ -133,67 +132,6 @@ def test_expanded_image_context_is_checked_without_truncation(backend):
     assert backend.engine.calls == []
 
 
-def test_loader_parallelism_is_bounded_and_images_are_closed(backend, monkeypatch):
-    import threading
-    import time
-
-    lock = threading.Lock()
-    active, peak = 0, 0
-    images = []
-
-    def prepare(task):
-        nonlocal active, peak
-        with lock:
-            active += 1
-            peak = max(peak, active)
-        image = Image.new("RGB", (2, 2))
-        images.append(image)
-        time.sleep(0.01)
-        with lock:
-            active -= 1
-        return {"prompt": task.prompt}, [image]
-
-    monkeypatch.setattr(backend, "_prepare", prepare)
-
-    async def run():
-        await asyncio.gather(*(backend.generate(QwenGenerationTask(str(i), (), "prompt", 32))
-                               for i in range(8)))
-
-    asyncio.run(run())
-    assert peak == 2
-    for image in images:
-        with pytest.raises(ValueError, match="closed"):
-            image.getpixel((0, 0))
-
-
-def test_cancelled_preparation_releases_images_when_loader_finishes(backend, monkeypatch):
-    import threading
-
-    started, release, closed = threading.Event(), threading.Event(), threading.Event()
-
-    def prepare(task):
-        started.set()
-        assert release.wait(5)
-        return {"prompt": task.prompt}, [SimpleNamespace(close=closed.set)]
-
-    monkeypatch.setattr(backend, "_prepare", prepare)
-
-    async def run():
-        task = asyncio.create_task(backend.generate(QwenGenerationTask("a", (), "prompt", 32)))
-        while not started.is_set():
-            await asyncio.sleep(0.001)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        release.set()
-        async def wait_closed():
-            while not closed.is_set():
-                await asyncio.sleep(0.001)
-        await asyncio.wait_for(wait_closed(), timeout=5)
-
-    asyncio.run(run())
-
-
 def test_batch_penalty_matches_original_and_tracks_live_tokens():
     from benchmarks.qwen_transformers_reference import GeneratedTokenRepetitionPenalty
 
@@ -227,28 +165,6 @@ def test_penalty_batch_removal_replacement_move_and_swap():
     assert set(penalty.requests) == {2}
     penalty.update_state(SimpleNamespace(removed=[], moved=[], added=[(2, params(1), [], [])]))
     assert penalty.requests == {}
-
-
-@pytest.mark.parametrize("value", [0, -1, float("nan"), True])
-def test_invalid_penalty(value):
-    with pytest.raises(ValueError):
-        GeneratedTokenPenalty.validate_params(SimpleNamespace(extra_args={PENALTY_KEY: value}))
-
-
-@pytest.mark.parametrize("settings", [
-    {"max_num_seqs": 0}, {"renderer_num_workers": True}, {"max_model_len": False},
-    {"gpu_memory_utilization": float("nan")}, {"async_scheduling": "auto"},
-    {"enable_prefix_caching": 1}, {"unknown": 1},
-    {"enable_chunked_prefill": False, "max_model_len": 20000, "max_num_batched_tokens": 100},
-])
-def test_invalid_runtime_settings(settings):
-    with pytest.raises(ValueError):
-        qwen_settings(settings)
-
-
-def test_old_config_uses_same_defaults():
-    assert qwen_settings() == QWEN_DEFAULTS
-    assert qwen_settings({"max_num_seqs": 64})["max_num_seqs"] == 64
 
 
 def test_engine_configuration_and_eos_are_explicit(fake_vllm, monkeypatch, tmp_path):

@@ -61,8 +61,8 @@ def v5_context(tmp_path):
 
 @pytest.fixture
 def ready_context(v5_context, monkeypatch):
-    from validation.steps import prepare_cohort_step
-    from extraction.preparation import prepare_input_data
+    from preparation.steps import prepare_cohort_step
+    from preparation.input_data import prepare_input_data
 
     prepare_cohort_step(v5_context)
     monkeypatch.setattr("extraction.data_preparation.media.probe_duration", lambda _: 10.0)

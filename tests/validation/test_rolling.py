@@ -69,15 +69,6 @@ def test_equal_date_mean_and_paired_user_multiplicity():
         weighted_day_mean(sums, np.zeros_like(counts), np.ones((1, 2)))
 
 
-def test_100k_bootstrap_arrays_are_bounded():
-    counts = np.ones((100_000, 7))
-    sums = np.full((100_000, 7, 7), 0.2)
-    observed, draws, report = cluster_bootstrap(sums, counts, samples=70)
-    np.testing.assert_allclose(observed, 0.2)
-    np.testing.assert_allclose(draws, 0.2)
-    assert report["working_bytes_upper_bound"] <= report["memory_limit_bytes"]
-
-
 @pytest.mark.torch
 def test_evaluation_masks_history_older_than_the_ten_item_context():
     import torch

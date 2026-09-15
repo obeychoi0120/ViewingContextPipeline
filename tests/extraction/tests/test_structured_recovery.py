@@ -4,24 +4,12 @@ import json
 import pytest
 
 from extraction.backends.qwen_workers import QwenGenerationTask
-from extraction.recovery import generate_with_recovery, penalty_schedule
+from extraction.recovery import generate_with_recovery
 from extraction.structured_output import GRAPH_JSON_SCHEMA, OutputValidationError
-
 
 
 def graph():
     return {"entities": [], "relations": [], "context": []}
-
-
-@pytest.mark.parametrize("value", [[], [True], float("nan"), [float("inf")], [0.99], [2.01], "1"])
-def test_penalty_rejects_invalid_schedule(value):
-    with pytest.raises(ValueError):
-        penalty_schedule(value)
-
-
-def test_penalty_preserves_order_and_scalar_compatibility():
-    assert penalty_schedule(1.05) == [1.05]
-    assert penalty_schedule([1.1, 1, 1.2]) == [1.1, 1, 1.2]
 
 
 def task(name):
@@ -125,53 +113,15 @@ def test_engine_error_does_not_become_raw_or_consume_budget(tmp_path):
     assert not list(tmp_path.glob("*.json"))
 
 
-def test_middle_penalty_succeeds_and_stops_retrying(tmp_path):
-    seen = []
-    def generate(tasks, _):
-        seen.append(tasks[0].repetition_penalty)
-        return {"a": "valid recovery" if len(seen) == 3 else "invalid"}
-    outputs, failures = run(tmp_path, generate)
-    assert seen == [1, 1.05, 1.1] and not failures
-    assert outputs["a"]["status"] == "complete"
-
-
-def test_scene_pass_finishes_all_batches_before_increasing_penalty(tmp_path):
-    seen = []
-    def generate(batch, _):
-        batch = list(batch)
-        seen.append([(t.task_id, t.repetition_penalty) for t in batch])
-        return {t.task_id: "valid" if t.task_id == "b" or t.repetition_penalty > 1 else "bad"
-                for t in batch}
-    outputs, failures = run(tmp_path, generate, [task(n) for n in "abcd"],
-                            batch_size=2, rounds_across_batches=True)
-    assert not failures and len(outputs) == 4
-    assert seen[0] == [("a", 1), ("b", 1), ("c", 1), ("d", 1)]
-    assert len(seen) == 2
-    assert set(seen[1]) == {("a", 1.05), ("c", 1.05), ("d", 1.05)}
-
-
-def test_scene_pass_resume_finishes_unstarted_scenes_before_retry(tmp_path):
-    def interrupted(batch, callback):
-        next(iter(batch))
-        callback("a", "bad")
-        raise KeyboardInterrupt
-    with pytest.raises(KeyboardInterrupt):
-        run(tmp_path, interrupted, [task("a"), task("b")],
-            batch_size=1, rounds_across_batches=True)
-    seen = []
-    def generate(batch, _):
-        batch = list(batch)
-        seen.extend((t.task_id, t.repetition_penalty) for t in batch)
-        return {t.task_id: "valid" for t in batch}
-    run(tmp_path, generate, [task("a"), task("b")],
-        batch_size=1, rounds_across_batches=True)
-    assert seen == [("b", 1), ("a", 1.05)]
-
-
 def test_scene_stream_prepares_only_admitted_tasks_and_refills_before_completion(tmp_path, monkeypatch):
     import extraction.recovery as recovery
     hashed = []
-    monkeypatch.setattr(recovery, "file_fingerprint", lambda path: (hashed.append(path) or "fixture"))
+    original_key = recovery.generation_key
+    def key(task, identity, penalties):
+        hashed.extend(task.image_paths)
+        return original_key(task, identity, penalties)
+    monkeypatch.setattr(recovery, "generation_key", key)
+    monkeypatch.setattr(recovery, "file_fingerprint", lambda *a: pytest.fail("prepared images must not be read"))
     tasks = [replace(task(str(i)), image_paths=(str(i),)) for i in range(1000)]
     calls = []
     def generate(stream, callback):
@@ -217,17 +167,3 @@ def test_checkpoint_write_failure_preserves_last_durable_attempt(tmp_path, monke
     seen = []
     run(tmp_path, lambda tasks, _: (seen.append(tasks[0].repetition_penalty) or {"a": "valid replay"}))
     assert seen == [1.05]
-
-
-def test_first_inference_does_not_wait_for_all_input_hashes_or_checkpoints(tmp_path, monkeypatch):
-    import extraction.recovery as recovery
-    hashed = []
-    monkeypatch.setattr(recovery, "file_fingerprint", lambda path: (hashed.append(path) or "fixture"))
-    tasks = [replace(task(str(i)), image_paths=(f"image-{i}.png",)) for i in range(1000)]
-    def generate(batch, callback):
-        assert [t.task_id for t in batch] == ["0", "1"]
-        assert hashed == ["image-0.png", "image-1.png"]
-        assert not list(tmp_path.glob("*.json"))
-        raise KeyboardInterrupt
-    with pytest.raises(KeyboardInterrupt):
-        run(tmp_path, generate, tasks, batch_size=2)

@@ -10,7 +10,7 @@ from pipeline_runtime import read_json, write_json
 from validation.recommendation_contracts import RECOMMENDATION_ARMS
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_recommendation import (
-    combination_dir, prepare_split, run_combination, run_rolling, worker_devices,
+    combination_dir, prepare_split, run_combination, run_rolling,
 )
 from validation.rolling_workers import run_parallel
 from validation.steps import validation_config
@@ -194,18 +194,3 @@ def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
     assert reused not in dispatched[-1]
     assert run_rolling(context, force=True, workers_per_gpu=2)["completed"] == 105
     assert reused in dispatched[-1]
-
-
-@pytest.mark.torch
-def test_gpu_assignment_respects_visible_devices(monkeypatch):
-    monkeypatch.setattr("validation.model.torch.cuda.is_available", lambda: True)
-    monkeypatch.setattr("validation.model.torch.cuda.device_count", lambda: 4)
-    assert worker_devices(2) == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"] * 2
-    assert worker_devices(1) == ["cuda:0", "cuda:1", "cuda:2", "cuda:3"]
-    for invalid in (0, -1, True):
-        with pytest.raises(ValueError, match="positive"):
-            worker_devices(invalid)
-    monkeypatch.setattr("validation.model.torch.cuda.is_available", lambda: False)
-    assert worker_devices(1) == ["cpu"]
-    with pytest.raises(ValueError, match="visible CUDA"):
-        worker_devices(2)

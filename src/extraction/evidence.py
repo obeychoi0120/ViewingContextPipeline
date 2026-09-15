@@ -32,9 +32,10 @@ def build_scene_evidence(
     scenes: list[dict[str, Any]],
     frames_dir: str | Path,
     timestamp_json_path: str | Path,
+    *, prepared: bool = False,
 ) -> list[dict[str, Any]]:
-    timeline = load_scene_timestamps(timestamp_json_path)
-    frame_index = _frame_image_index(frames_dir)
+    timeline = scenes if prepared else load_scene_timestamps(timestamp_json_path)
+    frame_index = None if prepared else _frame_image_index(frames_dir)
     rows: list[dict[str, Any]] = []
     for fallback_idx, scene in enumerate(scenes):
         keyframes = normalize_keyframe_timestamps(
@@ -54,7 +55,8 @@ def build_scene_evidence(
                 keyframes[-1] if keyframes else 0,
             ),
             "keyframes": keyframes,
-            "image_paths": select_scene_image_paths(
+            "image_paths": [str(Path(frames_dir) / f"{timestamp_stem(t)}.png") for t in keyframes]
+            if prepared else select_scene_image_paths(
                 frames_dir,
                 scene,
                 timeline,

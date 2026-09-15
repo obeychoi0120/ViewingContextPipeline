@@ -76,8 +76,9 @@ def has_pending_recovery(directory, task_id, force_run_id=None, generation=None)
 
 
 def generation_key(task, identity, penalties):
+    """Hash task/provenance only; prepared image bytes are trusted until an explicit force run."""
     return fingerprint({"task": asdict(task),
-                        "images": [file_fingerprint(p) for p in task.image_paths],
+                        "images": "prepared-assets" if task.image_paths else [],
                         "identity": identity, "penalties": penalty_schedule(penalties),
                         "recovery_version": 2})
 

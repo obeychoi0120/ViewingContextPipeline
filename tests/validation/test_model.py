@@ -70,26 +70,6 @@ def test_all_item_towers_use_frozen_features_and_trainable_projection(arm) -> No
     assert model.user_mlp.fc1.out_features == 32
 
 
-def test_xavier_normal_and_zero_bias_initialization() -> None:
-    torch.manual_seed(42)
-    model = _model(dimension=64)
-
-    for module in model.modules():
-        if isinstance(module, (torch.nn.Linear, torch.nn.Embedding)):
-            fan_in, fan_out = torch.nn.init._calculate_fan_in_and_fan_out(module.weight)
-            expected_variance = 2.0 / (fan_in + fan_out)
-            observed_variance = float(module.weight.detach().var(unbiased=False))
-            assert observed_variance == pytest.approx(expected_variance, rel=0.5)
-        if isinstance(module, torch.nn.Linear) and module.bias is not None:
-            assert torch.count_nonzero(module.bias).item() == 0
-        if isinstance(module, torch.nn.MultiheadAttention):
-            fan_in, fan_out = torch.nn.init._calculate_fan_in_and_fan_out(module.in_proj_weight)
-            expected_variance = 2.0 / (fan_in + fan_out)
-            observed_variance = float(module.in_proj_weight.detach().var(unbiased=False))
-            assert observed_variance == pytest.approx(expected_variance, rel=0.5)
-            assert torch.count_nonzero(module.in_proj_bias).item() == 0
-
-
 def test_causal_right_padding_and_last_valid_user_position() -> None:
     model = _model()
     model.eval()

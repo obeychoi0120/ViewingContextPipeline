@@ -6,7 +6,6 @@ import subprocess
 import sys
 
 
-
 def test_public_clis_import_without_optional_backend_modules() -> None:
     script = r'''
 import importlib.abc
@@ -23,6 +22,7 @@ class Blocker(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Blocker())
 import extraction
 import extraction.cli
+import preparation.cli
 import validation.cli
 import pipeline_runtime
 
@@ -48,38 +48,3 @@ assert not any(name in loaded for name in blocked)
         },
     )
     assert completed.returncode == 0, completed.stderr
-
-
-def test_plan_only_cli_runs_without_optional_imports_assets_or_external_processes(v5_context):
-    root = Path(__file__).resolve().parents[2]
-    tmp_path = v5_context.root
-    script = r'''
-import importlib.abc
-from pathlib import Path
-import subprocess
-import sys
-
-blocked = ("torch", "transformers", "google.genai")
-class Blocker(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname in blocked or fullname.startswith(tuple(name + "." for name in blocked)):
-            raise ModuleNotFoundError(fullname)
-sys.meta_path.insert(0, Blocker())
-
-def forbidden(*args, **kwargs):
-    raise AssertionError("plan-only must not launch ffprobe or another process")
-subprocess.run = forbidden
-from pipeline_runtime import RunContext
-from validation.cli import main
-load = RunContext.load
-RunContext.load = lambda run_id: load(run_id, root=Path(sys.argv[1]))
-assert main(["prepare-cohort", "--run-id", "plan", "--plan-only"]) == 0
-assert not any(name in sys.modules for name in blocked)
-'''
-    completed = subprocess.run(
-        [sys.executable, "-c", script, str(tmp_path)],
-        capture_output=True, text=True, check=False,
-        env={**os.environ, "PYTHONPATH": str(root / "src")},
-    )
-    assert completed.returncode == 0, completed.stderr
-    assert (tmp_path / "artifacts/runs/plan/cohort/required_items.jsonl").is_file()

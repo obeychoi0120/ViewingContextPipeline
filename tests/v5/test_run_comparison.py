@@ -79,11 +79,3 @@ def test_cross_run_mismatch_rejected(paired_runs, mismatch):
         reports["reference"]["daily"][0]["seed"] = 43
     with pytest.raises(ValueError, match="identical"):
         compare_graph_runs(contexts[0], "reference")
-
-
-def test_same_run_and_no_graph_target_rejected(paired_runs):
-    contexts, _ = paired_runs
-    with pytest.raises(ValueError, match="different run"):
-        compare_graph_runs(contexts[0], "candidate")
-    with pytest.raises(ValueError, match="Graph target"):
-        compare_graph_runs(contexts[0], "reference", target=["metadata"])

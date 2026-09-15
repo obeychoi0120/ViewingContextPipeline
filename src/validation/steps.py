@@ -32,14 +32,6 @@ def validation_config(context):
     )
 
 
-def prepare_cohort_step(context, *, force=False, plan_only=False):
-    from validation.rolling_data import prepare_full_cohort
-
-    log_step_start(context, "prepare-cohort", force=force, plan_only=plan_only)
-    context.initialize()
-    return prepare_full_cohort(context, plan_only=plan_only)
-
-
 def _embedding_path(context, branch):
     return context.representations_dir / f"{branch}_embeddings.npz"
 
@@ -199,7 +191,6 @@ def run_diagnosis(context, *, force=False, target=None, compare_run_id=None):
 
 
 STEP_HANDLERS = {
-    "prepare-cohort": prepare_cohort_step,
     "embed-representations": embed_representations,
     "run-recommendation": run_recommendation,
     "run-diagnosis": run_diagnosis,

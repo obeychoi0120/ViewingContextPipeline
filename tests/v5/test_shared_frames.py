@@ -6,9 +6,9 @@ from PIL import Image
 import pytest
 
 from extraction.data_preparation.video_processor import extract_resized_keyframes
-from extraction.preparation import prepare_input_data
+from preparation.input_data import prepare_input_data
 from pipeline_runtime import RunContext
-from validation.steps import prepare_cohort_step
+from preparation.steps import prepare_cohort_step
 
 
 def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypatch, capsys):
@@ -113,68 +113,36 @@ def test_failed_preparation_resumes_without_new_probe_for_completed_duration(
     assert not (context.cohort_dir / "preparation_failures.jsonl").exists()
 
 
-@pytest.mark.parametrize("missing", ["timestamps", "frames", "both"])
-def test_extraction_reports_exact_missing_evidence_and_preparation_command(ready_context, missing):
-    from extraction.step_support import visual_rows
+def test_extraction_builds_paths_without_probing_assets(ready_context, fake_models, monkeypatch):
+    from extraction.steps import extract_description_scenes
 
     context = ready_context
-    cid = context.require_ready_cohort()["catalog"][0]["content_id"]
-    timestamp = next((context.source_assets_dir / cid).rglob("timestamp_fixed*.json"))
-    frames = context.keyframes_dir / cid
-    if missing in {"timestamps", "both"}:
-        timestamp.unlink()
-    if missing in {"frames", "both"}:
-        for image in frames.glob("*.png"):
-            image.unlink()
-    with pytest.raises(RuntimeError) as error:
-        visual_rows(context)
-    message = str(error.value)
-    assert ("shared scene timestamps" in message) == (missing in {"timestamps", "both"})
-    assert ("shared keyframe images" in message) == (missing in {"frames", "both"})
-    if missing in {"timestamps", "both"}:
-        assert str(timestamp) in message
-    if missing in {"frames", "both"}:
-        assert str(frames) in message
-    assert f"prepare-input-data --run-id {context.run_id}" in message
-
-
-def test_shared_sampling_policies_coexist(ready_context):
-    from extraction.step_support import visual_rows
-    from visual_sampling import timestamp_filename
-
-    context = ready_context
-    original = {p: p.read_bytes() for p in context.source_assets_dir.rglob("timestamp_fixed*.json")}
-    context.config["extraction"]["visual_evidence"]["num_keyframes"] = 3
-    prepare_input_data(context)
-    rows = visual_rows(context)
-    assert all(Path(r["timestamp_json"]).name == timestamp_filename(30, 3) for r in rows)
-    assert all(p.read_bytes() == data for p, data in original.items())
-    context.config["extraction"]["visual_evidence"]["num_keyframes"] = 6
-    assert all(Path(r["timestamp_json"]).name == timestamp_filename(30, 6) for r in visual_rows(context))
-
-
-def test_concurrent_runs_share_one_duration_probe(ready_context, monkeypatch):
-    import shutil
-
-    first = ready_context
-    second = RunContext.load("concurrent", root=first.root)
-    prepare_cohort_step(second)
-    shutil.rmtree(first.source_assets_dir)
-    calls = []
-    def probe(source):
-        calls.append(source.name)
-        return 10.0
-    monkeypatch.setattr("extraction.data_preparation.media.probe_duration", probe)
-    monkeypatch.setattr("extraction.data_preparation.video_processor.subprocess.run",
-                        lambda *a, **kw: pytest.fail("all shared images already exist"))
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(prepare_input_data, ctx) for ctx in (first, second)]
-        for future in futures:
-            future.result()
-    assert sorted(calls) == ["1.mp4", "2.mp4", "3.mp4", "4.mp4"]
-    assert len(list(first.source_assets_dir.rglob("video_duration.json"))) == 4
-    assert not list(first.evidence_dir.glob("preparation_failures*"))
-    assert not list(first.source_assets_dir.rglob("*.tmp"))
+    original_is_file, original_is_dir = Path.is_file, Path.is_dir
+    original_iterdir, original_open = Path.iterdir, Path.open
+    def asset(path):
+        return path.is_relative_to(context.keyframes_dir) or path.is_relative_to(context.source_assets_dir)
+    def is_file(path):
+        assert not asset(path), f"unexpected asset is_file: {path}"
+        return original_is_file(path)
+    def is_dir(path):
+        assert not asset(path), f"unexpected asset is_dir: {path}"
+        return original_is_dir(path)
+    def iterdir(path):
+        assert not asset(path), f"unexpected asset scan: {path}"
+        return original_iterdir(path)
+    reads = []
+    def open_file(path, *a, **kw):
+        if asset(path):
+            assert path.name.startswith("timestamp_fixed"), f"unexpected asset read: {path}"
+            reads.append(path)
+        return original_open(path, *a, **kw)
+    monkeypatch.setattr(Path, "is_file", is_file)
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    monkeypatch.setattr(Path, "open", open_file)
+    extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
+    assert len(reads) == len(set(reads)) == 4
+    assert fake_models
 
 
 def test_preparation_rejects_changed_source_without_overwriting_shared_metadata(ready_context):
@@ -190,17 +158,3 @@ def test_preparation_rejects_changed_source_without_overwriting_shared_metadata(
     with pytest.raises(RuntimeError, match="preparation incomplete"):
         prepare_input_data(second)
     assert all(p.read_bytes() == data for p, data in before.items())
-
-
-def test_extraction_does_not_revalidate_shared_duration_or_sampling(ready_context, fake_models, monkeypatch):
-    from extraction.steps import extract_description_scenes
-
-    context = ready_context
-    for checkpoint in context.source_assets_dir.rglob("video_duration.json"):
-        checkpoint.unlink()
-    monkeypatch.setattr("extraction.data_preparation.media.cached_duration",
-                        lambda *a: pytest.fail("extraction must not read shared duration metadata"))
-    monkeypatch.setattr("visual_sampling.build_fixed_windows",
-                        lambda *a, **k: pytest.fail("extraction must use existing timestamps"))
-    extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
-    assert len(list(context.description_scene_dir("qwen").glob("*.jsonl"))) == 4
