@@ -6,3 +6,4 @@
 **/.ruff_cache/
 **/.mypy_cache/
 run*.sh
+update_repo.sh
