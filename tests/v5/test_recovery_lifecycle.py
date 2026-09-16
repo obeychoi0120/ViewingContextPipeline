@@ -17,7 +17,7 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     extract = extract_graph_scenes if representation == "graph" else extract_description_scenes
     extract(context, model=source,
             schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
-    context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
+    context.config["extraction"]["summary_repetition_penalty"] = [1.0]
     summarize = getattr(steps, f"summarize_{representation}")
     options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
     directory = context.extraction_dir(representation, source, "summaries")
@@ -58,7 +58,8 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
         summarize(context, **options)
     interrupt = False
     assert summarize(context, **options)["failure_count"] == 2
-    assert calls == ids
+    expected = ids[:2] + [ids[0]] + ids[2:]
+    assert calls == expected
     rows = read_jsonl(directory / "failures.jsonl")
     assert rows == [
         {"content_id": ids[0], "error": "empty", "raw_output": ""},
@@ -71,10 +72,11 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
     assert not (directory / f"{ids[0]}.json").exists()
     assert summarize(context, **options)["failure_count"] == 2
-    assert calls == ids
+    expected.extend([ids[0], ids[2]])
+    assert calls == expected
     succeed = True
     assert summarize(context, **options, force=True)["failure_count"] == 0
-    assert calls == ids * 2
+    assert calls == expected + ids
     assert not (directory / "failures.jsonl").exists()
 
 

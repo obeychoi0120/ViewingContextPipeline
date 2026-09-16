@@ -153,11 +153,13 @@ def _extract(context, *, representation, model, schema, force=False):
                         )
                     )
                 )
-                if reusable:
+                if reusable and is_raw_graph(saved) and not failures.contains(cid, row["scene_idx"]):
+                    failures.record(cid, row["scene_idx"], "graph validation failed; raw response retained",
+                                    saved["raw_response"])
+                if failures.contains(cid, row["scene_idx"]):
+                    missing.append(row)
+                elif reusable:
                     retained.append(saved)
-                    if is_raw_graph(saved) and not failures.contains(cid, row["scene_idx"]):
-                        failures.record(cid, row["scene_idx"], "graph validation failed; raw response retained",
-                                        saved["raw_response"])
                 elif not failures.contains(cid, row["scene_idx"]):
                     missing.append(row)
             existing[cid] = retained
@@ -203,6 +205,7 @@ def _extract(context, *, representation, model, schema, force=False):
                 qwen_options=settings.get("qwen"),
                 image_limit=settings["visual_evidence"]["num_keyframes"],
                 runtime=QwenRuntime(),
+                penalties=penalty_schedule(penalties),
             )
         else:
             pool = GeminiWorkerPool(

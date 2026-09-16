@@ -75,6 +75,20 @@ class FailureLog:
     def contains(self, content_id, scene_idx):
         return (str(content_id), scene_idx) in self.rows
 
+    def remove(self, content_id, scene_idx):
+        cid = str(content_id)
+        key = (cid, scene_idx)
+        if key not in self.rows:
+            return
+        rows = (self.by_content[cid].values() if self.scenes else self.rows.values())
+        remaining = [row for row in rows
+                     if (row["content_id"], row.get("scene_idx")) != key]
+        self._write(self.path_for(cid), remaining)
+        del self.rows[key]
+        del self.by_content[cid][scene_idx]
+        if not self.by_content[cid]:
+            del self.by_content[cid]
+
     def record(self, content_id, scene_idx, error, raw_output=""):
         cid = str(content_id)
         previous = self.rows.get((cid, scene_idx))

@@ -1,4 +1,4 @@
-"""One summary request per content, with compact terminal failure records."""
+"""Summary generation with failure-only repetition penalty passes."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from extraction.errors import ExtractionStepError
 from extraction.input_tracking import clear_dirty, input_state_path
 from extraction.recovery import fingerprint
 from extraction.failures import FailureLog
-from extraction.generation import generate_once
+from extraction.generation import generate_penalty_passes
 from extraction.scene_storage import read_scene_records
 from extraction.semantic_graph import graph_summary_prompt
 from extraction.step_support import minimal_description_records, minimal_graph_records, result
@@ -84,13 +84,7 @@ def run_summary_stage(
         cid = str(item["content_id"])
         source = scene_dir / f"{cid}.jsonl"
         output = output_dir / f"{cid}.json"
-        if failures.contains(cid, None) and not force:
-            if output.is_file():
-                try:
-                    documents[cid] = reuse_summary_document(output, content_id=cid, arm=arm.name)
-                except ExtractionStepError:
-                    pass
-            continue
+        retry_failed = failures.contains(cid, None)
         if not source.is_file():
             output.unlink(missing_ok=True)
             failures.record(cid, None, "missing scene input")
@@ -126,7 +120,7 @@ def run_summary_stage(
         )
         pending[cid] = (records, prov, task)
         output = output_dir / f"{cid}.json"
-        if output.is_file() and not force and not input_state_path(output).exists():
+        if output.is_file() and not force and not retry_failed and not input_state_path(output).exists():
             try:
                 existing = reuse_summary_document(
                     output, content_id=cid, arm=arm.name, scene_count=len(records)
@@ -135,10 +129,12 @@ def run_summary_stage(
                 pass
             else:
                 if existing["provenance"] == prov:
-                    documents[cid] = existing
                     if existing["status"] == "raw_fallback":
                         failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary",
                                         existing["text"])
+                        tasks.append(task)
+                        continue
+                    documents[cid] = existing
                     continue
         tasks.append(task)
 
@@ -149,20 +145,20 @@ def run_summary_stage(
             desc=f"Summary {arm.name}", unit="summary", progress_factory=tqdm,
         ))
 
-        def receive(cid, text):
+        def receive(cid, text, *, final):
             records, prov, _ = pending[cid]
             normalized, violations = inspect_summary(text)
             event = runtime.current_result or {}
             if event.get("finish_reason") == "length":
                 violations.append("max_tokens")
             output = output_dir / f"{cid}.json"
-            if normalized:
+            if normalized and (not violations or final):
                 doc = {
                     "schema_version": SUMMARY_SCHEMA_VERSION,
                     "content_id": cid,
                     "arm": arm.name,
                     "status": "raw_fallback" if violations else "complete",
-                    "text": text.strip() if violations else normalized,
+                    "text": text if violations else normalized,
                     "scene_count": len(records),
                     "word_count": len(normalized.split()),
                     "violations": violations,
@@ -174,10 +170,14 @@ def run_summary_stage(
                 documents[cid] = doc
             else:
                 output.unlink(missing_ok=True)
+                documents.pop(cid, None)
             if violations:
                 failures.record(cid, None, ", ".join(violations), text)
+            else:
+                failures.remove(cid, None)
             progress.complete(task_id=cid, failed=bool(violations),
-                              raw=bool(normalized and violations))
+                              raw=bool(final and normalized and violations))
+            return bool(violations)
 
         if tasks:
             generate = resources.enter_context(generator_factory(
@@ -185,7 +185,8 @@ def run_summary_stage(
                 image_limit=settings["visual_evidence"]["num_keyframes"], runtime=runtime,
                 on_progress=progress.update_stats, log=lambda message: print(message, flush=True),
             ))
-            generate_once(generate, tasks, receive)
+            generate_penalty_passes(generate, tasks, settings["summary_repetition_penalty"], receive,
+                                    log=lambda message: print(message, flush=True))
     failed_count = failures.count(content_ids)
     print(f"[SUMMARY] {arm.name}: outputs={len(documents)} failed={failed_count}", flush=True)
     return result(f"summarize-{arm.name}", content_count=len(documents), failure_count=failed_count)

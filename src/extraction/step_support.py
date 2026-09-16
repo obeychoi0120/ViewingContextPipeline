@@ -138,7 +138,8 @@ def minimal_description_records(
         "keyframes",
         "description",
     }
-    invalid = [index for index, row in enumerate(records) if set(row) - {"provenance", "generation"} != required]
+    invalid = [index for index, row in enumerate(records) if set(row) - {"provenance", "generation", "status"} != required
+               or row.get("status", "raw_fallback") != "raw_fallback"]
     if invalid:
         raise ExtractionStepError(
             f"incompatible description scene output at rows {invalid[:10]}: {path}; "

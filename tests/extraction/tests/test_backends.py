@@ -77,3 +77,64 @@ def test_gemini_backend_uses_images_prompt_and_operational_controls(monkeypatch)
         "thinking_config": {"thinking_level": "low"},
         "media_resolution": "MEDIA_RESOLUTION_MEDIUM",
     }
+
+
+def test_gemini_backend_retries_resource_exhausted_once_after_30_seconds(monkeypatch) -> None:
+    types = SimpleNamespace(Part=FakePart, GenerateContentConfig=FakeConfig)
+    monkeypatch.setattr(gemini_module, "_google_genai", lambda: (None, types))
+    delays = []
+    monkeypatch.setattr(gemini_module.time, "sleep", delays.append)
+
+    class ResourceExhausted(RuntimeError):
+        code = 429
+        status = "RESOURCE_EXHAUSTED"
+
+    calls = 0
+
+    def generate_content(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ResourceExhausted("capacity unavailable")
+        return SimpleNamespace(text="retried response")
+
+    backend = GeminiBackend(
+        client=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+        model_id="gemini",
+    )
+    assert backend.generate([], "prompt", 64) == "retried response"
+    assert calls == 2
+    assert delays == [30]
+
+
+@pytest.mark.parametrize(
+    "code,status",
+    [(429, "RESOURCE_EXHAUSTED"), (500, "INTERNAL")],
+)
+def test_gemini_backend_does_not_retry_beyond_policy(monkeypatch, code, status) -> None:
+    types = SimpleNamespace(Part=FakePart, GenerateContentConfig=FakeConfig)
+    monkeypatch.setattr(gemini_module, "_google_genai", lambda: (None, types))
+    delays = []
+    monkeypatch.setattr(gemini_module.time, "sleep", delays.append)
+
+    class ApiError(RuntimeError):
+        pass
+
+    error = ApiError("request failed")
+    error.code = code
+    error.status = status
+    calls = 0
+
+    def generate_content(**kwargs):
+        nonlocal calls
+        calls += 1
+        raise error
+
+    backend = GeminiBackend(
+        client=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+        model_id="gemini",
+    )
+    with pytest.raises(ApiError):
+        backend.generate([], "prompt", 64)
+    assert calls == (2 if code == 429 else 1)
+    assert delays == ([30] if code == 429 else [])

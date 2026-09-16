@@ -132,7 +132,9 @@ def _success_scene_row_issues(
         if not isinstance(row.get("semantic_warnings"), list):
             invalid.append("invalid_semantic_warnings")
     else:
-        if set(row) - {"provenance", "generation"} != {
+        if row.get("status", "raw_fallback") != "raw_fallback":
+            invalid.append("invalid_description_status")
+        if set(row) - {"provenance", "generation", "status"} != {
             "schema_version",
             "content_id",
             "scene_idx",

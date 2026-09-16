@@ -6,8 +6,8 @@ from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.monitoring import graph_skip_message, scene_messages
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.structured_output import OutputValidationError, validate_graph_structure
-from extraction.raw_output import raw_graph_record, is_raw_graph
-from extraction.generation import generate_once
+from extraction.raw_output import raw_graph_record
+from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
     write_progress,
     write_scene_results,
@@ -96,7 +96,7 @@ class SceneResults:
                 self.rows[task_id] = (cid, row)
                 yield row["task"]
 
-    def receive(self, task_id, text, *, error=None, diagnostics=None, truncated=False):
+    def receive(self, task_id, text, *, error=None, diagnostics=None, truncated=False, final=True):
         if task_id not in self.rows:
             raise RuntimeError(f"unexpected scene result: {task_id}")
         if task_id in self.completed:
@@ -108,10 +108,18 @@ class SceneResults:
                 diagnostics=diagnostics,
             )
             # Keep nonempty failed observations usable by the downstream E2E run.
-            if failure is not None and error is None and text.strip():
+            if final and failure is not None and error is None and text.strip():
                 record = raw_graph_record(row, text)
         else:
-            record, failure = description_scene_result(row, text, content_id=cid, error=error)
+            record, failure = description_scene_result(
+                row, text, content_id=cid,
+                error=error or ("description: output truncated at token limit" if truncated else None),
+            )
+        if (self.arm == "description" and self.source == "qwen" and final
+                and failure is not None and error is None and text.strip()):
+            record, _ = description_scene_result(row, text, content_id=cid)
+            record["description"] = text
+            record["status"] = "raw_fallback"
         if record is not None:
             record["provenance"] = row.get("provenance", {})
             record["generation"] = {"input_key": row.get("input_key")}
@@ -126,23 +134,27 @@ class SceneResults:
             if record is None:
                 _report_scene(self.progress, self.names.get(cid, f"{cid}.mp4"),
                               record, failure, arm=self.arm, source=self.source)
+        else:
+            self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)
         self.progress.complete(task_id=task_id, failed=failure is not None,
-                               raw=record is not None and is_raw_graph(record))
+                               raw=record is not None and record.get("status") == "raw_fallback")
+        return failure is not None
 
 
 def run_qwen_scenes(
     pending, *, scene_dir, failures, model_path, generator_factory,
     names, progress, arm, existing_records, source=None,
-    qwen_options=None, image_limit=6, runtime=None,
+    qwen_options=None, image_limit=6, runtime=None, penalties=(1.0,),
 ):
     results = SceneResults(pending, scene_dir=scene_dir, failures=failures,
                            records=existing_records, progress=progress,
                            arm=arm, source=source, names=names)
 
-    def receive(task_id, text):
+    def receive(task_id, text, *, final):
         event = runtime.current_result if runtime and runtime.current_result else {}
-        results.receive(task_id, text, truncated=event.get("finish_reason") == "length")
+        results.completed.discard(task_id)
+        return results.receive(task_id, text, truncated=event.get("finish_reason") == "length", final=final)
 
     tasks = results.tasks()
     first = next(tasks, None)
@@ -153,7 +165,8 @@ def run_qwen_scenes(
         runtime=runtime, on_progress=progress.update_stats,
         log=lambda message: write_progress(progress, message),
     ) as generate:
-        generate_once(generate, chain((first,), tasks), receive)
+        generate_penalty_passes(generate, chain((first,), tasks), list(penalties), receive,
+                                log=lambda message: write_progress(progress, message))
 
 
 def run_gemini_scenes(

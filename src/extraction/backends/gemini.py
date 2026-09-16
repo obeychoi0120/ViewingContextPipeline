@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import io
+import time
 from dataclasses import dataclass
 from typing import Any, Sequence
+
+
+RESOURCE_EXHAUSTED_RETRY_DELAY_SECONDS = 30
+RESOURCE_EXHAUSTED_MAX_ATTEMPTS = 2
+
 
 class GeminiEmptyResponseError(RuntimeError):
     def __init__(self, diagnostics: dict[str, Any]) -> None:
@@ -69,11 +75,18 @@ class GeminiBackend:
             config_kwargs["media_resolution"] = types.MediaResolution(
                 self.media_resolution
             )
-        response = self.client.models.generate_content(
-            model=self.model_id,
-            contents=contents,
-            config=types.GenerateContentConfig(**config_kwargs),
-        )
+        for attempt in range(RESOURCE_EXHAUSTED_MAX_ATTEMPTS):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_id,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_kwargs),
+                )
+                break
+            except Exception as exc:
+                if attempt + 1 == RESOURCE_EXHAUSTED_MAX_ATTEMPTS or not _is_resource_exhausted(exc):
+                    raise
+                time.sleep(RESOURCE_EXHAUSTED_RETRY_DELAY_SECONDS)
         text = str(getattr(response, "text", "") or "")
         candidates = getattr(response, "candidates", None) or []
         feedback = getattr(response, "prompt_feedback", None)
@@ -90,6 +103,18 @@ class GeminiBackend:
         if not text.strip():
             raise GeminiEmptyResponseError(self.last_response_diagnostics)
         return text
+
+
+def _is_resource_exhausted(exc: Exception) -> bool:
+    code = getattr(exc, "code", None)
+    if callable(code):
+        code = code()
+    status = getattr(exc, "status", None)
+    if callable(status):
+        status = status()
+    return str(code).upper() in {"429", "STATUSCODE.RESOURCE_EXHAUSTED", "RESOURCE_EXHAUSTED"} or (
+        str(status).upper() == "RESOURCE_EXHAUSTED"
+    )
 
 
 def _image_part(image: Any, types: Any) -> Any:

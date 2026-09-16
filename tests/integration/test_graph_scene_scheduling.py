@@ -12,7 +12,7 @@ from extraction.scene_storage import read_scene_records
 from pipeline_fixtures import context as context
 
 
-def test_qwen_graph_generates_once_even_with_legacy_penalty_list(
+def test_qwen_graph_finishes_each_penalty_pass_before_retrying_failures(
     context, monkeypatch, capsys,
 ):
     visuals = [{"content_id": cid} for cid in ("a", "b")]
@@ -60,18 +60,19 @@ def test_qwen_graph_generates_once_even_with_legacy_penalty_list(
     monkeypatch.setattr(steps, "qwen_generator", generator)
     assert steps.extract_graph_scenes(
         context, schema="prompts/graph_scene_v3.md", model="qwen",
-    )["failure_count"] == 4  # Every first failure is terminal.
+    )["failure_count"] == 2
     assert submissions == [{f"{cid}:{i}" for cid, count in (("a", 10), ("b", 9))
-                            for i in range(count)}]
+                            for i in range(count)}, {"a:0", "a:1", "b:0", "b:8"},
+                           {"a:1", "b:0", "b:8"}, {"a:1", "b:8"}, {"a:1", "b:8"}]
     assert opened == [True]
     records = {f"{cid}:{row['scene_idx']}": row for cid in ("a", "b")
                for row in read_scene_records(context.graph_scene_dir("qwen") / f"{cid}.jsonl")}
-    assert len(records) == 16
+    assert len(records) == 18
     assert records["a:1"]["status"] == "raw_fallback"
     failures = [row for cid in ("a", "b")
                 for row in read_jsonl(context.graph_failure_path("qwen", cid))]
     assert {(row["content_id"], row["scene_idx"]) for row in failures} == {
-        ("a", 0), ("a", 1), ("b", 0), ("b", 8),
+        ("a", 1), ("b", 8),
     }
     assert all(set(row) == {"content_id", "scene_idx", "error", "raw_output"} for row in failures)
     assert next(row for row in failures if row["content_id"] == "a" and row["scene_idx"] == 1)["raw_output"] == '{"context": []}'
@@ -82,7 +83,7 @@ def test_qwen_graph_generates_once_even_with_legacy_penalty_list(
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
-def test_qwen_resume_skips_successful_and_failed_scenes(
+def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
     context, monkeypatch, representation,
 ):
     visuals = [{"content_id": cid} for cid in ("a", "b")]
@@ -122,13 +123,14 @@ def test_qwen_resume_skips_successful_and_failed_scenes(
         extract(context, model="qwen", schema=schema)
     interrupt = False
     calls.clear()
-    assert extract(context, model="qwen", schema=schema)["failure_count"] == 2
-    assert calls == [(1.0, "b:0"), (1.0, "b:1")]
+    assert extract(context, model="qwen", schema=schema)["failure_count"] == 0
+    assert calls == [(1.0, "a:0"), (1.0, "b:0"), (1.0, "b:1"),
+                     (1.05, "a:0"), (1.05, "b:0"), (1.1, "a:0")]
     scene_dir = context.extraction_dir(representation, "qwen", "scenes")
     assert not (scene_dir / ".recovery").exists()
     for cid in ("a", "b"):
         records = read_scene_records(scene_dir / f"{cid}.jsonl")
-        assert [r["scene_idx"] for r in records] == [1]
+        assert [r["scene_idx"] for r in records] == [0, 1]
 
 
 @pytest.mark.parametrize("threads", [2, 8, 16])
@@ -232,7 +234,7 @@ def test_gemini_interrupt_preserves_each_completed_scene(
             tasks = list(tasks)
             calls.append([task.task_id for task in tasks])
             for task in tasks:
-                callback(GeminiGenerationOutcome(task.task_id, "new observation"))
+                callback(GeminiGenerationOutcome(task.task_id, '{"entities": [], "relations": [], "context": []}'))
                 if interrupted and task.task_id == "b:0":
                     raise KeyboardInterrupt
 
@@ -243,7 +245,7 @@ def test_gemini_interrupt_preserves_each_completed_scene(
     assert [row["scene_idx"] for row in read_scene_records(scene_dir / "b.jsonl")] == [0]
     assert not (scene_dir / ".recovery").exists()
     interrupted = False
-    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini")["failure_count"] == 9
+    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini")["failure_count"] == 0
     assert calls == [[f"{cid}:{i}" for cid in ("a", "b", "c") for i in range(3)],
                      ["b:1", "b:2", "c:0", "c:1", "c:2"]]
     assert (scene_dir / "a.jsonl").read_bytes() == saved_a
@@ -368,10 +370,10 @@ def test_gemini_resume_preserves_out_of_order_completions_across_interrupts(
             submitted.append([task.task_id for task in tasks])
             if run == 0:
                 for task_id in ("b:1", "b:0", "a:0"):
-                    callback(GeminiGenerationOutcome(task_id, "new observation"))
+                    callback(GeminiGenerationOutcome(task_id, '{"entities": [], "relations": [], "context": []}'))
                 raise KeyboardInterrupt
             for task in tasks:
-                callback(GeminiGenerationOutcome(task.task_id, "new observation"))
+                callback(GeminiGenerationOutcome(task.task_id, '{"entities": [], "relations": [], "context": []}'))
 
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     schema = "prompts/graph_scene_v3.md"
@@ -382,7 +384,7 @@ def test_gemini_resume_preserves_out_of_order_completions_across_interrupts(
     with pytest.raises(KeyboardInterrupt):
         steps.extract_graph_scenes(context, schema=schema, model="gemini")
     run = 2
-    assert steps.extract_graph_scenes(context, schema=schema, model="gemini")["failure_count"] == 6
+    assert steps.extract_graph_scenes(context, schema=schema, model="gemini")["failure_count"] == 0
     assert submitted[-1] == ["a:1", "c:0", "c:1"]
     assert (scene_dir / "b.jsonl").read_bytes() == saved_b
     assert not (scene_dir / ".pending-contents.json").exists()

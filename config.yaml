@@ -37,7 +37,7 @@ models:
     media_resolution: MEDIA_RESOLUTION_LOW
 extraction:
   gemini:
-    threads: 96
+    threads: 128
   qwen:
     gpu_memory_utilization: 0.9
     max_num_seqs: 32

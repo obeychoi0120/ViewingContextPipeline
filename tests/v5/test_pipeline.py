@@ -151,7 +151,8 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
             tasks = list(tasks)
             calls.append(tasks)
             for task in tasks:
-                assert task.structured_output is None and task.max_new_tokens == 512
+                assert task.structured_output is None
+                assert task.max_new_tokens == context.config["extraction"][representation]["summary_max_new_tokens"]
                 callback(task.task_id, "word " * length)
             return {}
 
@@ -172,7 +173,7 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
     assert embed_representations(context, target=[arm])["generated_arms"] == [arm]
 
 
-def test_summary_keeps_first_nonempty_raw_without_correction(ready_context, fake_models, monkeypatch):
+def test_summary_keeps_final_nonempty_raw_without_correction(ready_context, fake_models, monkeypatch):
     context = ready_context
     extract_graph_scenes(context, model="qwen", schema="prompts/graph_scene_v3.md")
     calls = []
@@ -190,7 +191,7 @@ def test_summary_keeps_first_nonempty_raw_without_correction(ready_context, fake
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert len(calls) == 1
+    assert len(calls) == len(context.config["extraction"]["summary_repetition_penalty"])
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
     assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
     assert doc["word_count"] == 201
