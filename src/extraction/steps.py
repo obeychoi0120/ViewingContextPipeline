@@ -100,7 +100,7 @@ def _extract(context, *, representation, model, schema, force=False):
     settings = context.config["extraction"]
     penalties = settings[f"{representation}_repetition_penalty"] if model == "qwen" else [1.0]
     scene_dir = context.extraction_dir(arm.representation, model, "scenes")
-    failures = FailureLog(scene_dir)
+    failures = FailureLog(scene_dir, scenes=True)
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
     existing = {}
@@ -157,7 +157,8 @@ def _extract(context, *, representation, model, schema, force=False):
                 if reusable:
                     retained.append(saved)
                     if is_raw_graph(saved) and not failures.contains(cid, row["scene_idx"]):
-                        failures.record(cid, row["scene_idx"], "graph validation failed; raw response retained")
+                        failures.record(cid, row["scene_idx"], "graph validation failed; raw response retained",
+                                        saved["raw_response"])
                 elif not failures.contains(cid, row["scene_idx"]):
                     missing.append(row)
             existing[cid] = retained

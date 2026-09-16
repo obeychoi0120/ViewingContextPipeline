@@ -44,9 +44,9 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 장면 JSONL은 `content_id`와 본문(`description` 또는 `scene_graph`)만 저장합니다. 장면 번호·keyframes·provenance·생성 이력은 `scenes/.metadata/{content_id}.json`에 같은 행 순서로 보존합니다. Raw Graph의 `scene_graph`는 원문 문자열입니다. 기존 JSONL도 읽을 수 있으며, `python -m extraction migrate-scene-schema --run-id "$RUN_ID"`로 본문과 메타데이터를 분리할 수 있습니다. 해당 Run의 장면 추출을 중지한 상태에서 실행하며, 형식만 바뀐 결과의 요약·임베딩은 재사용합니다.
 
-Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 완료한 작업의 journal은 지우고 장면 `.metadata` 또는 요약 문서에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 중단 시 미완료 journal과 dirty/pending/checkpoint 표식을 보존하고 같은 명령으로 재개합니다. 장면 본문과 메타데이터 저장 사이의 중단도 journal로 복구합니다. Gemini는 영상 경계 없이 scene을 병렬 처리하고, 콘텐츠별 장면이 모두 끝나면 해당 결과를 함께 게시합니다. 완료 순서가 뒤바뀌어도 저장 완료한 콘텐츠는 재사용하며, 중단 시 미완료 콘텐츠는 다시 처리합니다. `--force`는 해당 단계 생성을 새로 시작하지만 공유 이미지는 보존합니다.
+Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 즉시 저장합니다. 요청은 한 번만 생성하며, 실패는 Graph·Description의 `scenes/failures/{content_id}.jsonl`에 콘텐츠 ID·scene 번호·실패 이유·생성 원문을 기록합니다. 생성 journal이나 pending/checkpoint·진행 cursor는 저장하지 않습니다. 중단 후에는 정상 저장 결과와 실패 기록을 건너뛰고 미완료 항목을 다시 생성합니다. `--force`는 해당 단계의 실패 기록을 비우고 생성을 새로 시작하며 공유 이미지는 보존합니다.
 
-신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 한 번 생성한 결과의 길이·형식 위반은 즉시 `summaries/failure.jsonl`에 콘텐츠 ID와 이유만 기록하고 비어 있지 않은 출력은 Raw로 남깁니다. 자동 재시도나 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
+신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 한 번 생성한 결과의 길이·형식 위반은 즉시 `summaries/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 비어 있지 않은 출력은 Raw로 남깁니다. 자동 재시도나 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
 
 추천은 `recommendations/{date}/seed_{seed}/{arm}/`에 사건별 결과, 학습 이력, `sasrec.pt`를 저장한 뒤 `complete.json`을 마지막으로 게시합니다. 완료 검증에 실패한 조합만 재실행합니다. `training.json`에 전체 아이템 빈도 사전을 중복 저장하지 않으며 검증에 쓰는 사건별 `refit_item_frequency`는 유지합니다.
 

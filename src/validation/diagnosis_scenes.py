@@ -19,7 +19,7 @@ from .diagnosis_support import (
 def scene_arms(config):
     from arm_registry import registry
     return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
-                   f"extraction/{arm.representation}/{arm.model}/scenes/failure.jsonl")
+                   f"extraction/{arm.representation}/{arm.model}/scenes/failures")
             for name, arm in registry(config).items() if arm.model}
 
 
@@ -160,7 +160,7 @@ def _scene_arm_contract(
 ) -> tuple[dict[str, Any], set[tuple[str, int]], bool]:
     scene_relative, failure_relative = paths[arm]
     scene_dir = run_root / scene_relative
-    failure_path = run_root / failure_relative
+    failure_dir = run_root / failure_relative
     catalog_contents = set(content_ids)
     success: set[tuple[str, int]] = set()
     failures: set[tuple[str, int]] = set()
@@ -172,7 +172,7 @@ def _scene_arm_contract(
 
     existing_scene_files = set()
     if scene_dir.is_dir():
-        existing_scene_files = {path.stem for path in scene_dir.glob("*.jsonl") if path.name != "failure.jsonl"}
+        existing_scene_files = {path.stem for path in scene_dir.glob("*.jsonl") if path.name not in {"failure.jsonl", "failures.jsonl"}}
     else:
         issues["missing_scene_directory"] += 1
         examples.append({"path": str(scene_dir)})
@@ -181,22 +181,27 @@ def _scene_arm_contract(
         issues["extra_scene_files"] += len(extra_scene_files)
         examples.extend({"content_id": value} for value in _bounded_examples(extra_scene_files))
 
-    all_failures, failure_loaded = _read_jsonl(
-        failure_path, f"{arm} failure outcomes", errors, required=False, report_error=False,
-    )
-    if not failure_loaded:
-        issues["invalid_failure_file"] += 1
     failures_by_content = {}
-    for row in all_failures:
-        cid = row.get("content_id")
-        if (set(row) != {"content_id", "scene_idx", "error"}
-                or not isinstance(row.get("error"), str) or not row["error"].strip()):
-            issues["invalid_failure_fields"] += 1
-            continue
-        if cid not in catalog_contents:
-            issues["unexpected_failure_content"] += 1
-            continue
-        failures_by_content.setdefault(cid, []).append(row)
+    for failure_path in sorted(failure_dir.glob("*.jsonl")):
+        rows, failure_loaded = _read_jsonl(
+            failure_path, f"{arm} failure outcomes", errors, report_error=False,
+        )
+        if not failure_loaded:
+            issues["invalid_failure_file"] += 1
+        for row in rows:
+            cid = row.get("content_id")
+            if (set(row) != {"content_id", "scene_idx", "error", "raw_output"}
+                    or not isinstance(row.get("error"), str) or not row["error"].strip()
+                    or not isinstance(row.get("raw_output"), str)):
+                issues["invalid_failure_fields"] += 1
+                continue
+            if cid != failure_path.stem:
+                issues["failure_content_id_mismatch"] += 1
+                continue
+            if cid not in catalog_contents:
+                issues["unexpected_failure_content"] += 1
+                continue
+            failures_by_content.setdefault(cid, []).append(row)
 
     for content_id in content_ids:
         scene_rows, scene_loaded = _read_jsonl(

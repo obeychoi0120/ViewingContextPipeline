@@ -1,4 +1,4 @@
-"""One compact, terminal failure record per scene or summary."""
+"""Terminal scene failures per content, and summary failures in one JSONL file."""
 
 import json
 from pathlib import Path
@@ -9,24 +9,38 @@ from pipeline_runtime import read_jsonl
 
 
 class FailureLog:
-    def __init__(self, directory):
+    def __init__(self, directory, *, scenes=False):
         directory = Path(directory)
-        self.path = directory / "failure.jsonl"
+        self.scenes = scenes
+        self.path = directory / ("failures" if scenes else "failures.jsonl")
         self.rows = {}
-        saved = read_jsonl(self.path) if self.path.is_file() else []
-        for row in saved:
-            self._remember(row["content_id"], row.get("scene_idx"), row["error"])
-        legacy = directory / "failures"
-        if legacy.is_dir():
-            for path in sorted(legacy.glob("*.jsonl")):
-                for row in read_jsonl(path):
-                    self._remember(row.get("content_id", path.stem), row.get("scene_idx"),
-                                   row.get("error") or "generation failed")
-            self._rewrite()
-            shutil.rmtree(legacy)
-        elif saved != list(self.rows.values()):
-            self._rewrite()
-        # The new policy deliberately discards unfinished generation/repair state.
+        self.by_content = {}
+        # Read the current layout last so an interrupted migration cannot restore stale rows.
+        per_content = sorted((directory / "failures").glob("*.jsonl"))
+        sources = [directory / "failure.jsonl"]
+        sources.extend([directory / "failures.jsonl", *per_content] if scenes
+                       else [*per_content, directory / "failures.jsonl"])
+        existing = {}
+        for path in sources:
+            if not path.is_file():
+                continue
+            existing[path] = read_jsonl(path)
+            for row in existing[path]:
+                self._remember(row.get("content_id", path.stem), row.get("scene_idx"),
+                               row.get("error") or "generation failed",
+                               row.get("raw_output", row.get("raw_response", "")))
+        targets = ({self.path_for(cid): list(rows.values()) for cid, rows in self.by_content.items()}
+                   if scenes else {self.path: list(self.rows.values())})
+        for path, rows in targets.items():
+            if existing.get(path, []) != rows:
+                self._write(path, rows)
+        # Remove old paths only after all migrated records have been published.
+        for path in existing:
+            if path not in targets:
+                path.unlink()
+        if not scenes and (directory / "failures").is_dir():
+            shutil.rmtree(directory / "failures")
+        # The one-attempt policy deliberately discards unfinished generation/repair state.
         for name in (".recovery", ".pending", ".checkpoints"):
             path = directory / name
             if path.is_dir():
@@ -34,43 +48,60 @@ class FailureLog:
         for name in (".pending-contents.json", ".completed-contents.json"):
             (directory / name).unlink(missing_ok=True)
 
-    def _remember(self, content_id, scene_idx, error):
-        row = {"content_id": str(content_id), "error": str(error)}
-        if scene_idx is not None:
+    def path_for(self, content_id):
+        return self.path / f"{content_id}.jsonl" if self.scenes else self.path
+
+    def _remember(self, content_id, scene_idx, error, raw_output):
+        cid = str(content_id)
+        row = {"content_id": cid}
+        if self.scenes:
+            if type(scene_idx) is not int or scene_idx < 0:
+                raise ValueError(f"invalid failed scene index for {cid}: {scene_idx}")
             row["scene_idx"] = scene_idx
-        self.rows[(row["content_id"], scene_idx)] = row
+        else:
+            scene_idx = None
+        row.update(error=str(error), raw_output=raw_output if raw_output is not None else "")
+        self.rows[(cid, scene_idx)] = row
+        self.by_content.setdefault(cid, {})[scene_idx] = row
         return row
 
-    def _rewrite(self):
-        if self.rows:
-            atomic_write_jsonl(self.path, self.rows.values(), durable=False)
+    @staticmethod
+    def _write(path, rows):
+        if rows:
+            atomic_write_jsonl(path, rows, durable=False)
         else:
-            self.path.unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
 
     def contains(self, content_id, scene_idx):
         return (str(content_id), scene_idx) in self.rows
 
-    def record(self, content_id, scene_idx, error):
-        key = (str(content_id), scene_idx)
-        previous = self.rows.get(key)
-        row = self._remember(content_id, scene_idx, error)
+    def record(self, content_id, scene_idx, error, raw_output=""):
+        cid = str(content_id)
+        previous = self.rows.get((cid, scene_idx))
+        row = self._remember(cid, scene_idx, error, raw_output)
         if previous == row:
             return
+        path = self.path_for(cid)
         if previous is not None:
-            self._rewrite()
+            rows = self.by_content[cid].values() if self.scenes else self.rows.values()
+            self._write(path, list(rows))
             return
-        # Append new failures in O(1); do not rewrite a growing run-wide file per scene.
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
+        # New failures append in O(1), including runs with many failed scenes.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def clear_contents(self, content_ids):
-        selected = {str(cid) for cid in content_ids}
-        remaining = {key: row for key, row in self.rows.items() if key[0] not in selected}
-        if remaining != self.rows:
-            self.rows = remaining
-            self._rewrite()
+        selected = {str(cid) for cid in content_ids} & self.by_content.keys()
+        if not selected:
+            return
+        for cid in selected:
+            for scene_idx in self.by_content.pop(cid):
+                del self.rows[(cid, scene_idx)]
+            if self.scenes:
+                self.path_for(cid).unlink(missing_ok=True)
+        if not self.scenes:
+            self._write(self.path, list(self.rows.values()))
 
     def count(self, content_ids):
-        selected = {str(cid) for cid in content_ids}
-        return sum(cid in selected for cid, _ in self.rows)
+        return sum(len(self.by_content.get(str(cid), {})) for cid in set(content_ids))

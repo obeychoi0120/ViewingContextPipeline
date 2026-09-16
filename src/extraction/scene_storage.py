@@ -85,9 +85,9 @@ def migrate_scene_schema(context, *, force=False):
     for representation in ("description", "graph"):
         for model in ("qwen", "gemini"):
             directory = context.extraction_dir(representation, model, "scenes")
-            FailureLog(directory)
+            FailureLog(directory, scenes=True)
             for path in sorted(directory.glob("*.jsonl")):
-                if path.name == "failure.jsonl":
+                if path.name in {"failure.jsonl", "failures.jsonl"}:
                     continue
                 records = read_scene_records(path)
                 if all(is_compact_scene(row) for row in read_jsonl(path)):

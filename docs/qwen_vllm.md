@@ -31,7 +31,7 @@ Graph에는 TOBE JSON Schema 제약을 적용합니다. JSON 구조만 검증하
 
 장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다. Desc·Graph·Summary 모두 한 번 생성한 결과로 성공·실패를 확정합니다. 기본 repetition penalty는 `1.00`이고 기존 목록 설정은 첫 값만 사용합니다. Summary의 형식·길이 위반도 즉시 실패이며 별도 교정 요청은 하지 않습니다. Qwen Graph·Summary의 `finish_reason=length`는 토큰 한도 실패입니다. 실패한 Graph·Summary의 비어 있지 않은 원문은 E2E 입력용 Raw로 보존합니다.
 
-각 장면 출력 폴더의 `failure.jsonl`에는 `content_id`, `scene_idx`, `error`만 저장합니다. 각 Summary 출력 폴더의 같은 파일에는 `content_id`, `error`만 저장합니다. `failures/`, `.recovery`, `.pending`, `.checkpoints` 및 콘텐츠 진행 cursor는 생성하지 않습니다. 기존 `failures/`는 실행 시작 시 최소 필드로 통합하고 이전 임시 기록을 제거합니다.
+장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`을 저장합니다. 원문은 공백·줄바꿈을 포함해 그대로 보존하며 응답이 없으면 빈 문자열입니다. `.recovery`, `.pending`, `.checkpoints` 및 콘텐츠 진행 cursor는 생성하지 않습니다. 실행 시작 시 이전 실패 파일을 새 경로·필드로 옮기며, 예전 기록에 원문이 없으면 빈 문자열을 사용합니다.
 
 정상 결과와 실패 기록은 다음 실행에서 재사용합니다. 실패 항목을 다시 처리하려면 `--force`로 해당 단계를 실행합니다. 중단 후에는 저장된 장면·요약과 실패 기록을 건너뛰고 미완료 항목을 생성합니다. 저장 전에 유실된 응답은 다시 생성하며, 이전 시도나 교정 초안을 복구하지 않습니다. 엔진/OOM/저장 오류는 그대로 전파합니다.
 

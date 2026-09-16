@@ -146,11 +146,11 @@ python -m extraction migrate-scene-schema --run-id "$RUN_ID"
 
 Desc·Graph·Summary는 요청당 한 번만 생성합니다. 자동 재시도·Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면의 식별 정보와 캐시 provenance는 `.metadata`에, 요약의 provenance는 요약 문서에 남깁니다.
 
-실패가 있으면 각 `scenes/` 또는 `summaries/` 폴더의 `failure.jsonl`에 즉시 기록합니다. 장면 실패는 `content_id`, `scene_idx`, `error`만, Summary 실패는 `content_id`, `error`만 저장합니다. 원문·토큰 수·penalty·시도 이력은 실패 파일에 넣지 않습니다. 같은 Run을 재실행해도 기록된 실패는 건너뛰며, `--force`로 실행하면 대상 콘텐츠의 실패 기록을 비우고 다시 처리합니다. 실행 시작 시 기존 `failures/`를 이 형식으로 통합하고 이전 임시 복구 폴더와 cursor를 제거합니다.
+장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`을 저장합니다. `raw_output`은 생성 원문이며 공백·줄바꿈도 보존합니다. 응답이 없으면 빈 문자열입니다. 토큰 수·penalty·시도 이력은 실패 파일에 넣지 않습니다. 같은 Run을 재실행해도 기록된 실패는 건너뛰며, `--force`로 실행하면 대상 콘텐츠의 실패 기록을 비우고 다시 처리합니다. 실행 시작 시 기존 `failure.jsonl`·`failures.jsonl`과 예전 콘텐츠별 실패 파일을 새 형식으로 옮깁니다. 예전 기록에 원문이 없으면 `raw_output`은 빈 문자열로 남습니다.
 
 ```json
-{"content_id":"123","scene_idx":2,"error":"model produced an empty description"}
-{"content_id":"123","error":"over_200_words"}
+{"content_id":"123","scene_idx":2,"error":"model produced an empty description","raw_output":""}
+{"content_id":"123","error":"multiple_paragraphs","raw_output":"First paragraph.\n\nSecond paragraph."}
 ```
 
 진행률의 `failed`는 첫 응답에서 확정된 실패 수이고, `raw`는 그중 비어 있지 않은 Graph·Summary 원문을 E2E 입력으로 보존한 수입니다. Qwen Graph와 Summary의 토큰 한도 종료는 실패로 기록합니다. `scene/s`는 이번 실행의 성공·실패 장면 수를 경과 시간으로 나눈 값입니다.

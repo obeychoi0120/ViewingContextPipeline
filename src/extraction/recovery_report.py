@@ -1,4 +1,4 @@
-"""Read existing scene metadata without treating failure.jsonl as scene payloads."""
+"""Read existing scene metadata without treating legacy aggregate failure files as scene payloads."""
 from collections import Counter
 from arm_registry import select_arms
 from extraction.scene_storage import read_scene_records
@@ -14,7 +14,7 @@ def recovery_report(context, *, branches=None):
         attempt_count = unknown = 0
         directory = context.extraction_dir(arm.representation, arm.model, "scenes")
         for path in directory.glob("*.jsonl"):
-            if path.name == "failure.jsonl":
+            if path.name in {"failure.jsonl", "failures.jsonl"}:
                 continue
             for row in read_scene_records(path):
                 history = row.get("generation", {})

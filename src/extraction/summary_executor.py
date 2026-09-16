@@ -137,7 +137,8 @@ def run_summary_stage(
                 if existing["provenance"] == prov:
                     documents[cid] = existing
                     if existing["status"] == "raw_fallback":
-                        failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary")
+                        failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary",
+                                        existing["text"])
                     continue
         tasks.append(task)
 
@@ -174,7 +175,7 @@ def run_summary_stage(
             else:
                 output.unlink(missing_ok=True)
             if violations:
-                failures.record(cid, None, ", ".join(violations))
+                failures.record(cid, None, ", ".join(violations), text)
             progress.complete(task_id=cid, failed=bool(violations),
                               raw=bool(normalized and violations))
 

@@ -130,7 +130,7 @@ class SceneResults:
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
         self.records[cid] = records
         if failure is not None:
-            self.failures.record(cid, int(row["scene_idx"]), failure["error"])
+            self.failures.record(cid, int(row["scene_idx"]), failure["error"], text)
             if record is None:
                 _report_scene(self.progress, self.names.get(cid, f"{cid}.mp4"),
                               record, failure, arm=self.arm, source=self.source)

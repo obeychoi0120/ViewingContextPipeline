@@ -19,7 +19,7 @@ def test_first_scene_failure_is_terminal_minimal_and_skipped_on_resume(
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
     context.config["extraction"][f"{representation}_repetition_penalty"] = [1.0, 1.05, 1.1]
     scene_dir = context.extraction_dir(representation, model, "scenes")
-    failure_path = scene_dir / "failure.jsonl"
+    failure_path = scene_dir / "failures" / f"{visuals[0]['content_id']}.jsonl"
     first_id, other_id = [f"{v['content_id']}:0" for v in visuals]
     instances = []
     original_progress = steps.InferenceProgress
@@ -37,16 +37,16 @@ def test_first_scene_failure_is_terminal_minimal_and_skipped_on_resume(
     def generate(tasks, callback):
         for task in tasks:
             calls.append((task.task_id, task.repetition_penalty))
-            text = good if succeed or task.task_id == other_id else ""
+            text = good if succeed or task.task_id == other_id else " \n\t"
             callback(task.task_id, text)
             if interrupt:
                 assert read_jsonl(failure_path) == [{
                     "content_id": visuals[0]["content_id"], "scene_idx": 0,
-                    "error": read_jsonl(failure_path)[0]["error"],
+                    "error": read_jsonl(failure_path)[0]["error"], "raw_output": text,
                 }]
                 progress = instances[-1]
                 assert (progress.success, progress.failed) == (0, 1)
-                for name in (".recovery", ".pending", ".checkpoints", "failures", ".pending-contents.json"):
+                for name in (".recovery", ".pending", ".checkpoints", ".pending-contents.json"):
                     assert not (scene_dir / name).exists()
                 raise KeyboardInterrupt
         return {}
@@ -87,7 +87,7 @@ def test_first_scene_failure_is_terminal_minimal_and_skipped_on_resume(
     assert len(calls) == 4
 
 
-def test_graph_length_cutoff_keeps_raw_but_logs_only_identity_and_reason(ready_context, monkeypatch):
+def test_graph_length_cutoff_logs_identity_reason_and_raw_output(ready_context, monkeypatch):
     context = ready_context
     visuals = steps.visual_rows(context)[:1]
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
@@ -109,8 +109,8 @@ def test_graph_length_cutoff_keeps_raw_but_logs_only_identity_and_reason(ready_c
     options = {"model": "qwen", "schema": "prompts/graph_scene_v3.md"}
     assert steps.extract_graph_scenes(context, **options)["failure_count"] == 1
     cid = visuals[0]["content_id"]
-    assert read_jsonl(scene_dir / "failure.jsonl") == [{
-        "content_id": cid, "scene_idx": 0, "error": "graph: output truncated at token limit",
+    assert read_jsonl(scene_dir / "failures" / f"{visuals[0]['content_id']}.jsonl") == [{
+        "content_id": cid, "scene_idx": 0, "error": "graph: output truncated at token limit", "raw_output": text,
     }]
     raw = read_scene_records(scene_dir / f"{cid}.jsonl")[0]
     assert raw["raw_response"] == text and raw["status"] == "raw_fallback"

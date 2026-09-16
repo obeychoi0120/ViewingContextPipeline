@@ -43,8 +43,8 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
                 kwargs["runtime"].current_result = {"finish_reason": "length" if index == 2 and not succeed else "stop"}
                 callback(task.task_id, text)
                 if interrupt and index == 1:
-                    rows = read_jsonl(directory / "failure.jsonl")
-                    assert len(rows) == 2 and all(set(row) == {"content_id", "error"} for row in rows)
+                    rows = read_jsonl(directory / "failures.jsonl")
+                    assert len(rows) == 2 and all(set(row) == {"content_id", "error", "raw_output"} for row in rows)
                     assert progress_instances[-1].failed == 2
                     for name in (".recovery", ".pending", "failures"):
                         assert not (directory / name).exists()
@@ -58,11 +58,11 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     interrupt = False
     assert summarize(context, **options)["failure_count"] == 3
     assert calls == ids
-    rows = read_jsonl(directory / "failure.jsonl")
+    rows = read_jsonl(directory / "failures.jsonl")
     assert rows == [
-        {"content_id": ids[0], "error": "empty"},
-        {"content_id": ids[1], "error": "over_200_words"},
-        {"content_id": ids[2], "error": "max_tokens"},
+        {"content_id": ids[0], "error": "empty", "raw_output": ""},
+        {"content_id": ids[1], "error": "over_200_words", "raw_output": "word " * 201},
+        {"content_id": ids[2], "error": "max_tokens", "raw_output": "A truncated sentence"},
     ]
     for cid in ids[1:3]:
         doc = read_json(directory / f"{cid}.json")
@@ -73,7 +73,7 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     succeed = True
     assert summarize(context, **options, force=True)["failure_count"] == 0
     assert calls == ids * 2
-    assert not (directory / "failure.jsonl").exists()
+    assert not (directory / "failures.jsonl").exists()
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
@@ -110,21 +110,56 @@ def test_summary_publish_error_requires_regeneration_without_journal(
     assert calls[0] == calls[1] and len(calls) == 5
 
 
-def test_legacy_failure_records_are_compacted_and_temporary_state_removed(tmp_path):
+@pytest.mark.parametrize("scenes", [False, True])
+def test_legacy_failures_migrate_with_raw_output_and_no_temporary_state(tmp_path, scenes):
     from extraction.failures import FailureLog
     write_jsonl(tmp_path / "failures/a.jsonl", [{
-        "scene_idx": 2, "error": "invalid JSON", "raw_response": "discard me",
+        "scene_idx": 2, "error": "invalid JSON", "raw_response": "  raw text\n",
         "attempt_count": 5, "status": "retry_pending", "keyframes": [5],
+    }])
+    write_jsonl(tmp_path / "failure.jsonl", [{
+        "content_id": "b", "scene_idx": 0, "error": "empty",
+    }])
+    write_jsonl(tmp_path / "failures.jsonl", [{
+        "content_id": "c", "scene_idx": 1, "error": "invalid", "raw_output": "truncated",
     }])
     for name in (".recovery", ".pending", ".checkpoints"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "old.json").write_text("unfinished")
     (tmp_path / ".pending-contents.json").write_text("old cursor")
-    log = FailureLog(tmp_path)
-    assert read_jsonl(log.path) == [{"content_id": "a", "scene_idx": 2, "error": "invalid JSON"}]
-    assert sorted(path.name for path in tmp_path.iterdir()) == ["failure.jsonl"]
-    log.record("b", 0, "empty")
-    log.record("b", 0, "empty")
-    assert len(read_jsonl(log.path)) == 2
-    log.clear_contents(["a"])
-    assert read_jsonl(log.path) == [{"content_id": "b", "scene_idx": 0, "error": "empty"}]
+    log = FailureLog(tmp_path, scenes=scenes)
+    expected = [
+        {"content_id": "b", "error": "empty", "raw_output": "", **({"scene_idx": 0} if scenes else {})},
+        {"content_id": "c", "error": "invalid", "raw_output": "truncated", **({"scene_idx": 1} if scenes else {})},
+        {"content_id": "a", "error": "invalid JSON", "raw_output": "  raw text\n", **({"scene_idx": 2} if scenes else {})},
+    ]
+    rows = [row for cid in ("b", "c", "a") for row in read_jsonl(log.path_for(cid))] if scenes else read_jsonl(log.path)
+    assert sorted(rows, key=lambda row: row["content_id"]) == sorted(expected, key=lambda row: row["content_id"])
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["failures" if scenes else "failures.jsonl"]
+    log = FailureLog(tmp_path, scenes=scenes)  # Reopening preserves the new format and raw bytes.
+    log.record("b", 0 if scenes else None, "empty", "")
+    log.record("d", 3 if scenes else None, "invalid", "new response")
+    log.record("d", 3 if scenes else None, "invalid", "replacement response\n")
+    assert log.count(["a", "b", "c", "d"]) == 4
+    row = next(r for r in read_jsonl(log.path_for("d")) if r["content_id"] == "d")
+    assert row["raw_output"] == "replacement response\n"
+    log.clear_contents(["a", "b", "c"])
+    assert log.count(["a", "b", "c", "d"]) == 1
+    if scenes:
+        assert sorted(path.name for path in log.path.iterdir()) == ["d.jsonl"]
+    else:
+        assert len(read_jsonl(log.path)) == 1
+
+
+@pytest.mark.parametrize("scenes", [False, True])
+def test_current_failure_format_wins_over_old_records_after_partial_migration(tmp_path, scenes):
+    from extraction.failures import FailureLog
+    old = {"content_id": "a", "scene_idx": 2, "error": "old", "raw_output": "old output"}
+    current = {"content_id": "a", "error": "current", "raw_output": "current output"}
+    if scenes:
+        current["scene_idx"] = 2
+    write_jsonl(tmp_path / "failure.jsonl", [old])
+    write_jsonl(tmp_path / "failures.jsonl", [old if scenes else current])
+    write_jsonl(tmp_path / "failures/a.jsonl", [current if scenes else old])
+    log = FailureLog(tmp_path, scenes=scenes)
+    assert read_jsonl(log.path_for("a")) == [current]

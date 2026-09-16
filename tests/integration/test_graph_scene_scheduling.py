@@ -68,11 +68,14 @@ def test_qwen_graph_generates_once_even_with_legacy_penalty_list(
                for row in read_scene_records(context.graph_scene_dir("qwen") / f"{cid}.jsonl")}
     assert len(records) == 16
     assert records["a:1"]["status"] == "raw_fallback"
-    failures = read_jsonl(context.graph_failure_path("qwen"))
+    failures = [row for cid in ("a", "b")
+                for row in read_jsonl(context.graph_failure_path("qwen", cid))]
     assert {(row["content_id"], row["scene_idx"]) for row in failures} == {
         ("a", 0), ("a", 1), ("b", 0), ("b", 8),
     }
-    assert all(set(row) == {"content_id", "scene_idx", "error"} for row in failures)
+    assert all(set(row) == {"content_id", "scene_idx", "error", "raw_output"} for row in failures)
+    assert next(row for row in failures if row["content_id"] == "a" and row["scene_idx"] == 1)["raw_output"] == '{"context": []}'
+    assert all(row["raw_output"] == "" for row in failures if (row["content_id"], row["scene_idx"]) != ("a", 1))
     output = capsys.readouterr()
     assert "[Graph_skip_qwen] b.mp4 | scene #008" in output.err
     assert "[RECOVERY]" not in output.err

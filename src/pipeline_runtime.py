@@ -137,26 +137,26 @@ class RunContext:
     def graph_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("graph", source, "scenes")
 
-    def graph_failure_path(self, source: str) -> Path:
-        return self.graph_scene_dir(source) / "failure.jsonl"
+    def graph_failure_path(self, source: str, content_id: str) -> Path:
+        return self.graph_scene_dir(source) / "failures" / f"{content_id}.jsonl"
 
     def description_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("description", source, "scenes")
 
-    def description_failure_path(self, source: str) -> Path:
-        return self.description_scene_dir(source) / "failure.jsonl"
+    def description_failure_path(self, source: str, content_id: str) -> Path:
+        return self.description_scene_dir(source) / "failures" / f"{content_id}.jsonl"
 
     def graph_summary_dir(self, source: str) -> Path:
         return self.extraction_dir("graph", source, "summaries")
 
     def graph_summary_failure_path(self, source: str) -> Path:
-        return self.graph_summary_dir(source) / "failure.jsonl"
+        return self.graph_summary_dir(source) / "failures.jsonl"
 
     def description_summary_dir(self, source: str) -> Path:
         return self.extraction_dir("description", source, "summaries")
 
     def description_summary_failure_path(self, source: str) -> Path:
-        return self.description_summary_dir(source) / "failure.jsonl"
+        return self.description_summary_dir(source) / "failures.jsonl"
 
     def prompt_path(self, schema: str | Path) -> Path:
         path = _resolve(self.root, str(schema), "--schema")
