@@ -190,13 +190,23 @@ def test_summary_keeps_last_nonempty_raw(ready_context, fake_models, monkeypatch
     embed_representations(context, target=["graph_qwen"])
 
 
-def test_tobe_ids_and_directed_relations():
+def test_graph_preserves_ids_and_only_validates_json_shape():
     validate_graph_structure(GRAPH)
     assert GRAPH["relations"][0]["subject_id"] == "p1"
     for mutate in (
         lambda g: g["entities"][1].update(id="p1"),
         lambda g: g["relations"][0].update(object_id="missing"),
+    ):
+        value = deepcopy(GRAPH)
+        mutate(value)
+        before = deepcopy(value)
+        validate_graph_structure(value)
+        assert value == before
+    for mutate in (
         lambda g: g["entities"][0].update(attributes="red"),
+        lambda g: g["relations"][0].update(object_id=None),
+        lambda g: g["entities"][0].update(id=""),
+        lambda g: g.pop("context"),
     ):
         value = deepcopy(GRAPH)
         mutate(value)
@@ -204,6 +214,58 @@ def test_tobe_ids_and_directed_relations():
             validate_graph_structure(value)
     assert inspect_summary("A person walks.\nAnother waves.")[1] == []
     assert inspect_summary("A person walks.\n\nAnother waves.")[1] == ["multiple_paragraphs"]
+
+
+@pytest.mark.parametrize("model", ["qwen", "gemini"])
+def test_graph_id_mismatches_do_not_retry_or_block_downstream(
+    ready_context, fake_models, monkeypatch, model,
+):
+    import json
+    from types import SimpleNamespace
+    from pipeline_runtime import read_jsonl
+    from validation.diagnosis_scenes import _success_scene_row_issues
+
+    context = ready_context
+    graph = deepcopy(GRAPH)
+    graph["entities"][1]["id"] = "p1"
+    graph["relations"][0].update(subject_id="unregistered", object_id="missing")
+    generated = []
+
+    def generate(tasks, callback):
+        for task in tasks:
+            generated.append(task.task_id)
+            callback(task.task_id, json.dumps(graph))
+        return {}
+
+    @contextmanager
+    def generator(**kwargs):
+        yield generate
+
+    class Pool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, tasks, callback, **kwargs):
+            return generate(tasks, lambda task_id, text: callback(SimpleNamespace(
+                task_id=task_id, text=text, error=None, response_diagnostics=None)))
+
+    # Restore the ordinary summary fake after exercising scene generation.
+    with monkeypatch.context() as patch:
+        patch.setattr("extraction.steps.qwen_generator", generator)
+        patch.setattr("extraction.steps.GeminiWorkerPool", Pool)
+        for _ in range(2):
+            result = extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
+            assert result["failure_count"] == 0
+    assert len(generated) == len(set(generated)) == 4
+    for path in context.graph_scene_dir(model).glob("*.jsonl"):
+        for row in read_jsonl(path):
+            assert row["graph"] == graph
+            assert row["generation"]["attempt_count"] == 1
+            assert row["semantic_warnings"] == []
+            assert _success_scene_row_issues(f"graph_{model}", row, path.stem) == []
+    summarize_graph(context, source=model, schema="prompts/graph_summary_v4.md")
+    assert embed_representations(context, target=[f"graph_{model}"])["generated_arms"] == [
+        f"graph_{model}"]
 
 
 def test_changed_model_settings_refresh_but_prepared_frame_bytes_are_trusted(ready_context, fake_models):

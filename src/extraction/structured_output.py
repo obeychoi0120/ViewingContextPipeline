@@ -33,6 +33,7 @@ class OutputValidationError(ValueError):
 
 
 def validate_graph_structure(value, schema=GRAPH_JSON_SCHEMA, path="graph"):
+    """Validate JSON shape only; preserve duplicate IDs and unresolved references."""
     kind = schema["type"]
     expected = {"object": dict, "array": list, "string": str}[kind]
     if not isinstance(value, expected):
@@ -47,10 +48,3 @@ def validate_graph_structure(value, schema=GRAPH_JSON_SCHEMA, path="graph"):
             validate_graph_structure(item, schema["items"], f"{path}[{index}]")
     elif not value.strip():
         raise OutputValidationError(f"{path}: empty string")
-    if path == "graph":
-        ids = [entity["id"] for entity in value["entities"]]
-        if len(ids) != len(set(ids)):
-            raise OutputValidationError("graph: duplicate entity IDs")
-        for relation in value["relations"]:
-            if relation["subject_id"] not in ids or relation["object_id"] not in ids:
-                raise OutputValidationError("graph: unresolved relation reference")
