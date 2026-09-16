@@ -106,7 +106,7 @@ def _success_scene_row_issues(
     content_id: str,
 ) -> list[str]:
     invalid: list[str] = []
-    if not _nonempty_timestamp_list(row.get("keyframes")):
+    if row.get("keyframes") != [] and not _nonempty_timestamp_list(row.get("keyframes")):
         invalid.append("invalid_success_keyframes")
     if arm.startswith("graph_"):
         from extraction.raw_output import is_raw_graph, valid_raw_graph

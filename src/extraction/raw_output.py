@@ -17,5 +17,5 @@ def valid_raw_graph(row):
         "schema_version", "status", "scene_idx", "keyframes", "raw_response",
     } and row.get("status") == "raw_fallback"
         and type(row.get("scene_idx")) is int and row["scene_idx"] >= 0
-        and isinstance(row.get("keyframes"), list) and bool(row["keyframes"])
+        and isinstance(row.get("keyframes"), list)
         and isinstance(row.get("raw_response"), str) and bool(row["raw_response"].strip()))

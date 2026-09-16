@@ -13,7 +13,7 @@ from artifact_io import atomic_write_json
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
 from extraction.errors import ExtractionStepError
-from extraction.input_tracking import clear_dirty, input_state_path
+from extraction.input_tracking import clear_dirty
 from extraction.recovery import fingerprint
 from extraction.failures import FailureLog
 from extraction.generation import generate_penalty_passes
@@ -84,7 +84,18 @@ def run_summary_stage(
         cid = str(item["content_id"])
         source = scene_dir / f"{cid}.jsonl"
         output = output_dir / f"{cid}.json"
-        retry_failed = failures.contains(cid, None)
+        if output.is_file() and not force and not failures.contains(cid, None):
+            try:
+                existing = reuse_summary_document(output, content_id=cid, arm=arm.name)
+            except ExtractionStepError:
+                pass
+            else:
+                if existing["status"] == "complete":
+                    clear_dirty(output)
+                    documents[cid] = existing
+                    continue
+                failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary",
+                                existing["text"])
         if not source.is_file():
             output.unlink(missing_ok=True)
             failures.record(cid, None, "missing scene input")
@@ -94,14 +105,6 @@ def run_summary_stage(
             output.unlink(missing_ok=True)
             failures.record(cid, None, "empty scene input")
             continue
-        if any(
-            record.get("provenance", {}).get("arm") != arm.name
-            or record.get("provenance", {}).get("representation") != arm.representation
-            for record in records
-        ):
-            raise ExtractionStepError(
-                f"scene source provenance mismatch: {source}; rerun extraction"
-            )
         raw_count = sum(r.get("status") == "raw_fallback" for r in records)
         prov = {
             **provenance,
@@ -119,23 +122,6 @@ def run_summary_stage(
             **generation,
         )
         pending[cid] = (records, prov, task)
-        output = output_dir / f"{cid}.json"
-        if output.is_file() and not force and not retry_failed and not input_state_path(output).exists():
-            try:
-                existing = reuse_summary_document(
-                    output, content_id=cid, arm=arm.name, scene_count=len(records)
-                )
-            except ExtractionStepError:
-                pass
-            else:
-                if existing["provenance"] == prov:
-                    if existing["status"] == "raw_fallback":
-                        failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary",
-                                        existing["text"])
-                        tasks.append(task)
-                        continue
-                    documents[cid] = existing
-                    continue
         tasks.append(task)
 
     runtime = QwenRuntime()

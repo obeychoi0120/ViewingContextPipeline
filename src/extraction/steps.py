@@ -9,7 +9,7 @@ from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
-from extraction.recovery import file_fingerprint, generation_key, penalty_schedule
+from extraction.recovery import file_fingerprint, penalty_schedule
 from extraction.failures import FailureLog
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -23,7 +23,7 @@ from extraction.step_support import (
     visual_rows,
 )
 from extraction.summary_executor import run_summary_stage, qwen_generator
-from extraction.scene_storage import read_scene_records, migrate_scene_schema
+from extraction.scene_storage import read_scene_records, migrate_scene_schema, migrate_scene_file
 from extraction.raw_output import is_raw_graph
 from pipeline_logging import log_step_start
 from pipeline_runtime import RunContext
@@ -97,7 +97,6 @@ def _extract(context, *, representation, model, schema, force=False):
     context.initialize()
     prompt = path.read_text(encoding="utf-8")
     print("[PREPARE] Reading prompt/model settings and cohort...", flush=True)
-    provenance = prompt_provenance(context, path, arm)
     settings = context.config["extraction"]
     penalties = settings[f"{representation}_repetition_penalty"] if model == "qwen" else [1.0]
     scene_dir = context.extraction_dir(arm.representation, model, "scenes")
@@ -118,9 +117,6 @@ def _extract(context, *, representation, model, schema, force=False):
             repetition_penalty=initial_penalty,
             scenes=scenes,
         )
-        for row in rows:
-            row["provenance"] = provenance
-            row["input_key"] = generation_key(row["task"], provenance, penalties)
         return rows
 
     def plan_contents():
@@ -130,29 +126,18 @@ def _extract(context, *, representation, model, schema, force=False):
             rows = prepare_rows(visual)
             try:
                 cached = normalize(read_scene_records(output), output) if output.is_file() and not force else []
-            except (ValueError, ExtractionStepError):
-                # No journal is kept: incomplete metadata/payload pairs are regenerated.
-                cached = []
+            except (ValueError, ExtractionStepError) as exc:
+                raise ExtractionStepError(f"cannot safely identify existing scenes: {output}: {exc}") from exc
+            if output.is_file() and not force:
+                migrate_scene_file(output, cached)
             by_index = {r["scene_idx"]: r for r in cached}
             if len(by_index) != len(cached):
                 raise ExtractionStepError(f"duplicate cached scenes: {output}")
             retained, missing = [], []
             for row in rows:
                 saved = by_index.get(row["scene_idx"])
-                generation = saved.get("generation", {}) if saved else {}
-                reusable = (
-                    saved is not None
-                    and (
-                        (
-                            bool(generation.get("input_key"))
-                            and saved.get("provenance") == row["provenance"]
-                            and saved.get("keyframes") == row["keyframes"]
-                        )
-                        or generation.get("input_key") == generation_key(
-                            row["task"], provenance, penalties
-                        )
-                    )
-                )
+                # Successful scenes are reusable regardless of generation settings.
+                reusable = saved is not None
                 if reusable and is_raw_graph(saved) and not failures.contains(cid, row["scene_idx"]):
                     failures.record(cid, row["scene_idx"], "graph validation failed; raw response retained",
                                     saved["raw_response"])

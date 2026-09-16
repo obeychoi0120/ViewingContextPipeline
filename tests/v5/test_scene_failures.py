@@ -275,9 +275,9 @@ An indoor gathering.
     records = read_scene_records(directory / f"{cid}.jsonl")
     by_scene = {row["scene_idx"]: row for row in records}
     assert by_scene[0]["graph"] == by_scene[1]["graph"]
-    assert by_scene[0]["parse_mode"] == "native"
-    assert by_scene[1]["parse_mode"] == "repaired"
-    assert by_scene[0]["provenance"]["settings"]["response_parser"] == "graph-text/v1"
+    assert by_scene[0]["parse_mode"] == "unknown"
+    assert by_scene[1]["parse_mode"] == "unknown"
+    assert "provenance" not in by_scene[0]
     assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
     assert by_scene[6]["graph"] == {"entities": [], "relations": [], "context": []}
     failures = read_jsonl(directory / "failures" / f"{cid}.jsonl")

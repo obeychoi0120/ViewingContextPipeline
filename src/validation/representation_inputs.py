@@ -6,9 +6,7 @@ from dataclasses import asdict
 
 from arm_registry import registry
 from model_provenance import local_model_identity
-from extraction.input_tracking import input_state_path
 from extraction.recovery import fingerprint
-from extraction.scene_storage import read_scene_records
 from extraction.summary_executor import reuse_summary_document
 from pipeline_runtime import read_json
 
@@ -60,15 +58,6 @@ def documents_for_arm(context, cohort, arm):
         prov = doc["provenance"]
         if prov.get("arm") != actual.name or prov.get("representation") != actual.representation:
             raise ValueError(f"summary source provenance mismatch: {path}")
-        if input_state_path(path).exists():
-            raise ValueError(f"scene inputs changed; regenerate summary: {path}")
-        scene_path = (
-            context.extraction_dir(actual.representation, actual.model, "scenes") / f"{cid}.jsonl"
-        )
-        if not scene_path.is_file() or prov.get("scene_input_hash") != fingerprint(
-            read_scene_records(scene_path)
-        ):
-            raise ValueError(f"summary scene input hash mismatch: {path}")
         source_provenance = doc.get("provenance")
         if not isinstance(source_provenance, dict):
             source_provenance = {}

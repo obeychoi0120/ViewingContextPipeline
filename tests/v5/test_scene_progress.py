@@ -98,10 +98,11 @@ def test_progress_counts_only_pending_scenes(
     paths[1].unlink()
     run()
 
-    # Existing output is still pending if its generation provenance is stale.
+    # Successful output is reused even if its generation provenance is stale.
     rows = read_scene_records(paths[1])
     rows[0]["provenance"] = {}
-    rows[0]["generation"]["input_key"] = "stale"
+    rows[0]["generation"] = {"input_key": "stale"}
+    expected_total, expected_reused = 0, 5
     write_scene_results(paths[1], rows)
     run()
 

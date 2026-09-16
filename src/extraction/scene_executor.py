@@ -121,8 +121,6 @@ class SceneResults:
             record["description"] = text
             record["status"] = "raw_fallback"
         if record is not None:
-            record["provenance"] = row.get("provenance", {})
-            record["generation"] = {"input_key": row.get("input_key")}
             self.contents[cid][int(row["scene_idx"])] = record
         else:
             self.contents[cid].pop(int(row["scene_idx"]), None)

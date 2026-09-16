@@ -42,16 +42,16 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 `artifacts_root/resized_keyframes`는 모든 run이 공유합니다. 정상 PNG는 자동 덮어쓰지 않으며 콘텐츠별 디렉터리 잠금으로 동시 쓰기를 보호합니다. 프레임은 임시 공간에서 검증한 후 누락 파일만 원자적으로 게시합니다. 새 Run은 공유 PNG와 duration·timestamp를 함께 재사용합니다. 준비 정보가 이미 있으면 `prepare-input-data`를 다시 실행할 필요가 없습니다. 장면 추출은 준비된 assets를 신뢰하며 폴더 스캔·파일 존재 검사·이미지 해시 계산을 생략합니다. timestamp는 작업 구성에 필요한 입력으로 한 번 읽습니다. 이미지 내용 변경 후 재추론은 `--force`로 요청합니다. 준비 결과 통계는 콘솔로 출력합니다.
 
-장면 JSONL은 `content_id`와 본문(`description` 또는 `scene_graph`)만 저장합니다. 장면 번호·keyframes·provenance·생성 이력은 `scenes/.metadata/{content_id}.json`에 같은 행 순서로 보존합니다. Raw Graph의 `scene_graph`는 원문 문자열입니다. 기존 JSONL도 읽을 수 있으며, `python -m extraction migrate-scene-schema --run-id "$RUN_ID"`로 본문과 메타데이터를 분리할 수 있습니다. 해당 Run의 장면 추출을 중지한 상태에서 실행하며, 형식만 바뀐 결과의 요약·임베딩은 재사용합니다.
+장면 JSONL은 `content_id`, `scene_idx`, 본문(`description` 또는 `scene_graph`) 세 필드만 저장하며 `.metadata`를 생성하지 않습니다. Raw Graph의 `scene_graph`는 원문 문자열이고 Raw Desc는 동일 장면의 실패 기록으로 식별합니다. 추출 재실행 또는 `python -m extraction migrate-scene-schema --run-id "$RUN_ID"`로 이전 파일을 변환하며, 두 필드 파일은 원래 `.metadata`에서 장면 번호를 복원한 후 새 파일 저장이 성공하면 메타데이터를 삭제합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
 
-Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 즉시 저장합니다. Qwen은 각 repetition penalty pass를 완료한 뒤 실패 항목만 다음 값으로 재생성합니다. 실패는 Graph·Description의 `scenes/failures/{content_id}.jsonl`에 콘텐츠 ID·scene 번호·실패 이유·생성 원문을 기록합니다. 생성 journal이나 pending/checkpoint·진행 cursor는 저장하지 않습니다. 중단 후 정상 저장 결과를 재사용하며, Graph·Desc·Summary의 기존 실패는 다시 처리하며 Qwen은 첫 penalty부터 시작합니다. 정상 결과 저장 후 해당 실패 행을 제거하고 남은 실패가 없으면 파일도 삭제합니다. `--force`는 해당 단계의 실패 기록을 비우고 생성을 새로 시작하며 공유 이미지는 보존합니다.
+Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 즉시 저장합니다. Qwen은 각 repetition penalty pass를 완료한 뒤 실패 항목만 다음 값으로 재생성합니다. 실패는 Graph·Description의 `scenes/failures/{content_id}.jsonl`에 콘텐츠 ID·scene 번호·실패 이유·생성 원문을 기록합니다. 생성 journal이나 pending/checkpoint·진행 cursor는 저장하지 않습니다. 설정·프롬프트·경로가 달라도 정상 저장 결과를 재사용하며, Graph·Desc·Summary의 기존 실패는 다시 처리하며 Qwen은 첫 penalty부터 시작합니다. 정상 결과 저장 후 해당 실패 행을 제거하고 남은 실패가 없으면 파일도 삭제합니다. `--force`는 해당 단계의 실패 기록을 비우고 생성을 새로 시작하며 공유 이미지는 보존합니다.
 
-신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 200단어 상한은 프롬프트 지시로만 유지하며, 단어 수 초과만으로 실패나 Raw로 분류하지 않습니다. 형식 위반·토큰 제한으로 잘린 출력은 `summaries/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 다음 penalty로 재생성합니다. 마지막까지 실패한 비어 있지 않은 최종 출력은 Raw로 남깁니다. 재생성 대기열은 메모리에만 보관하며 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
+성공한 Summary도 설정 변경이나 장면 갱신으로 재생성하지 않습니다. 일반 실행은 실패 및 결과가 없는 Summary만 처리하며, 전체 재생성은 `--force`로 요청합니다. 신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 200단어 상한은 프롬프트 지시로만 유지하며, 단어 수 초과만으로 실패나 Raw로 분류하지 않습니다. 형식 위반·토큰 제한으로 잘린 출력은 `summaries/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 다음 penalty로 재생성합니다. 마지막까지 실패한 비어 있지 않은 최종 출력은 Raw로 남깁니다. 재생성 대기열은 메모리에만 보관하며 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
 
 추천은 `recommendations/{date}/seed_{seed}/{arm}/`에 사건별 결과, 학습 이력, `sasrec.pt`를 저장한 뒤 `complete.json`을 마지막으로 게시합니다. 완료 검증에 실패한 조합만 재실행합니다. `training.json`에 전체 아이템 빈도 사전을 중복 저장하지 않으며 검증에 쓰는 사건별 `refit_item_frequency`는 유지합니다.
 
 ## 환경 간 전달
 
-GPU와 Gemini 장비에서 같은 코드·run ID·설정을 사용합니다. `artifacts/runs/RUN_ID/cohort/`와 **공유** `artifacts/resized_keyframes/`, `artifacts/source_assets/`를 같은 상대 위치에 배치하고, Gemini 결과는 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. `scenes/.metadata` 숨김 폴더도 포함해야 합니다. 생성 provenance의 경로가 달라지면 재생성 명령의 캐시가 무효화될 수 있으므로 같은 저장소 경로를 사용합니다. 재개할 때 진행 중 journal·cursor도 함께 보존합니다.
+GPU와 Gemini 장비에서는 같은 run ID의 `artifacts/runs/RUN_ID/cohort/`와 공유 `artifacts/resized_keyframes/`, `artifacts/source_assets/`를 배치하고 Gemini 결과를 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
 
 Run 간 이동용 migration, donor-run 옵션, manifest 또는 전체 config snapshot은 없습니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.

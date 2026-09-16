@@ -26,9 +26,7 @@ def complete_content_progress(progress: tqdm) -> None:
 
 def write_scene_results(scene_path: Path, records: list[dict[str, Any]]) -> None:
     """Publish completed scene results without a recovery journal."""
-    from extraction.input_tracking import invalidate_inputs
     records.sort(key=lambda row: int(row["scene_idx"]))
-    invalidate_inputs(scene_path.parent.parent / "summaries" / f"{scene_path.stem}.json")
     write_scene_records(scene_path, records)
 
 

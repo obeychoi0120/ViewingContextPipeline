@@ -31,13 +31,13 @@ Graph는 JSON Schema 강제 생성 없이 `[Entities]`, `[Relations]`, `[Context
 
 Repair는 화살표 변형(`→`, `⇒`, `-->`, `=>`), 공백으로 구분된 하이픈·대시, 헤더 대소문자·콜론·Markdown 제목, 항목 앞 bullet·번호, 전각 구분자, 마지막 세미콜론, 응답 전체 코드 펜스를 처리합니다. 관계는 주체·관계·대상이 유일하게 분리될 때만 변환하며 ID·속성·관계 문구 안의 하이픈은 보존합니다. 빈 섹션은 `none` 또는 `[]`를 명시해야 합니다. 필수 섹션·종료 표식 누락, 역방향·모호한 관계, 중복 섹션, 종료 후 추가 내용은 실패입니다. JSON의 작은따옴표·구문 따옴표·마지막 쉼표는 복구할 수 있지만 잘린 괄호를 닫거나 여러 객체 중 하나를 선택하지 않습니다. Parser 버전은 Graph 생성 provenance에 포함합니다.
 
-장면·요약의 현재 상한은 각각 1,024 tokens입니다. Qwen Graph·Desc 및 모든 Summary는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20` 순서로 각 pass의 실패 항목만 재생성합니다(설정 목록 사용). 프롬프트는 그대로 사용하며 별도 교정 프롬프트는 만들지 않습니다. Qwen Graph·Desc·Summary의 `finish_reason=length`와 Gemini Graph·Desc의 `MAX_TOKENS`는 완전해 보이는 본문이라도 토큰 한도 실패입니다. 마지막까지 실패한 Qwen Graph·Desc·Summary의 비어 있지 않은 최종 원문은 E2E 입력용 Raw로 보존합니다. 빈 원문은 실패 기록만 남깁니다. Raw Desc는 `description`에 원문을, 장면 메타데이터에 `status=raw_fallback`을 저장합니다.
+장면·요약의 현재 상한은 각각 1,024 tokens입니다. Qwen Graph·Desc 및 모든 Summary는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20` 순서로 각 pass의 실패 항목만 재생성합니다(설정 목록 사용). 프롬프트는 그대로 사용하며 별도 교정 프롬프트는 만들지 않습니다. Qwen Graph·Desc·Summary의 `finish_reason=length`와 Gemini Graph·Desc의 `MAX_TOKENS`는 완전해 보이는 본문이라도 토큰 한도 실패입니다. 마지막까지 실패한 Qwen Graph·Desc·Summary의 비어 있지 않은 최종 원문은 E2E 입력용 Raw로 보존합니다. 빈 원문은 실패 기록만 남깁니다. Raw Desc는 `description`에 원문을 저장하며 같은 `scene_idx`의 실패 기록으로 Raw를 식별합니다.
 
 장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`을 저장합니다. 원문은 공백·줄바꿈을 포함해 그대로 보존하며 응답이 없으면 빈 문자열입니다. `.recovery`, `.pending`, `.checkpoints` 및 콘텐츠 진행 cursor는 생성하지 않습니다. 실행 시작 시 이전 실패 파일을 새 경로·필드로 옮기며, 예전 기록에 원문이 없으면 빈 문자열을 사용합니다.
 
-정상 결과는 다음 실행에서 재사용합니다. Graph·Desc·Summary는 기존 실패 항목을 다음 실행에서 다시 처리합니다. Qwen 생성은 첫 penalty부터 다시 시작합니다. 정상 결과 저장 후 해당 실패 행을 지우고, 마지막 실패가 해결되면 파일도 삭제합니다. 재시도 중단·재실패 시에는 실패 기록을 유지하거나 최신 오류·원문으로 갱신합니다. 저장 전에 유실된 응답은 다시 생성하며, 이전 시도나 교정 초안을 복구하지 않습니다. 엔진/OOM/저장 오류는 그대로 전파합니다.
+Qwen·Gemini Graph·Desc와 모든 Summary의 정상 결과는 설정·프롬프트·모델 경로가 달라도 다음 실행에서 재사용합니다. 일반 실행은 실패 및 결과가 없는 항목만 처리합니다. 장면을 갱신해도 성공한 Summary는 보존하며 전체 재생성은 해당 단계의 `--force`로 요청합니다. Graph·Desc·Summary는 기존 실패 항목을 다음 실행에서 다시 처리합니다. Qwen 생성은 첫 penalty부터 다시 시작합니다. 정상 결과 저장 후 해당 실패 행을 지우고, 마지막 실패가 해결되면 파일도 삭제합니다. 재시도 중단·재실패 시에는 실패 기록을 유지하거나 최신 오류·원문으로 갱신합니다. 저장 전에 유실된 응답은 다시 생성하며, 이전 시도나 교정 초안을 복구하지 않습니다. 엔진/OOM/저장 오류는 그대로 전파합니다.
 
-진행률은 이번 실행의 요청을 기준으로 하며 `failed`는 각 항목의 최신 결과를 나타내며 재생성에 성공하면 `success`로 옮깁니다. `raw`는 실패의 부분집합입니다. 장면 `scene/s`에는 실패 결과도 포함합니다. Qwen과 Gemini 모두 장면별로 결과를 저장합니다. 장면 JSONL은 `content_id`와 `description` 또는 `scene_graph`만 담으며, 식별 정보와 캐시 provenance는 `scenes/.metadata/{content_id}.json`에 보존합니다.
+진행률은 이번 실행의 요청을 기준으로 하며 `failed`는 각 항목의 최신 결과를 나타내며 재생성에 성공하면 `success`로 옮깁니다. `raw`는 실패의 부분집합입니다. 장면 `scene/s`에는 실패 결과도 포함합니다. Qwen과 Gemini 모두 장면별로 결과를 저장합니다. 장면 JSONL은 `content_id`, `scene_idx`, 본문(`description` 또는 `scene_graph`)만 담습니다. `.metadata`는 생성하지 않습니다. 이전 두 필드 파일의 장면 번호는 기존 `.metadata`에서 읽어 옮기고 새 파일 저장 후 해당 메타데이터를 삭제합니다. 이전 메타데이터가 없으면 장면 번호를 추측하지 않고 오류를 보고합니다.
 
 ## 선택적 처리량 측정
 

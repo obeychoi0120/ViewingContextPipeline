@@ -65,7 +65,7 @@ def test_default_flow_and_artifact_lifecycle(ready_context, fake_models):
         assert state["sources"] and state["truncation"]["truncated_count"] == 0
 
 
-def test_prompt_changes_invalidate_cache_without_changing_arm(ready_context, fake_models):
+def test_scene_prompt_changes_reuse_success_without_changing_arm(ready_context, fake_models):
     context = ready_context
     schema = "prompts/graph_scene_v3.md"
     extract_graph_scenes(context, model="qwen", schema=schema)
@@ -75,25 +75,24 @@ def test_prompt_changes_invalidate_cache_without_changing_arm(ready_context, fak
     path = context.prompt_path(schema)
     path.write_text(path.read_text() + "\nPreserve direction carefully.")
     extract_graph_scenes(context, model="qwen", schema=schema)
-    assert len(fake_models) > count
+    assert len(fake_models) == count
     summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
     count = len(fake_models)
     prompt = context.prompt_path("prompts/graph_summary_v4.md")
     prompt.write_text(prompt.read_text() + "\nUse concise prose.")
     summarize_graph(context, source="qwen", schema=prompt)
-    assert len(fake_models) == count + 1
+    assert len(fake_models) == count
     name = "graph_qwen"
     embed_representations(context, target=[name])
     replacement = context.root / "prompts/graph_scene_v99.md"
     replacement.write_text(path.read_text() + "\nPreserve all visible attributes.")
     extract_graph_scenes(context, model="qwen", schema=replacement)
-    with pytest.raises((ValueError, RuntimeError), match="changed|hash"):
-        embed_representations(context, target=[name])
+    assert embed_representations(context, target=[name])["generated_arms"] == []
     summarize_graph(context, source="qwen", schema=prompt)
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
     assert doc["arm"] == "graph_qwen"
     assert "graph_version" not in doc["provenance"]
-    assert embed_representations(context, target=[name])["generated_arms"] == [name]
+    assert embed_representations(context, target=[name])["generated_arms"] == []
 
 
 def test_fallback_missing_only_raw_precedence_and_identical_vectors(ready_context, fake_models):
@@ -270,7 +269,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
     for path in context.graph_scene_dir(model).glob("*.jsonl"):
         for row in read_scene_records(path):
             assert row["graph"] == graph
-            assert set(row["generation"]) == {"input_key"}
+            assert "generation" not in row and "provenance" not in row
             assert row["semantic_warnings"] == []
             assert _success_scene_row_issues(f"graph_{model}", row, path.stem) == []
     summarize_graph(context, source=model, schema="prompts/graph_summary_v4.md")
@@ -278,23 +277,22 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
         f"graph_{model}"]
 
 
-def test_changed_model_settings_refresh_but_prepared_frame_bytes_are_trusted(ready_context, fake_models):
+def test_changed_model_settings_and_frame_bytes_reuse_success_until_force(ready_context, fake_models):
     context = ready_context
     schema = "prompts/description_scene_v2.md"
     extract_description_scenes(context, model="qwen", schema=schema)
     count = len(fake_models)
     context.config["extraction"]["description"]["scene_max_new_tokens"] = 768
     extract_description_scenes(context, model="qwen", schema=schema)
-    assert len(fake_models) == count + 1
-    assert all(t.max_new_tokens == 768 for t in fake_models[-1])
+    assert len(fake_models) == count
     (context.path("models", "qwen") / "config.json").write_text('{"revision": 2}')
     extract_description_scenes(context, model="qwen", schema=schema)
-    assert len(fake_models) == count + 2
+    assert len(fake_models) == count
     from PIL import Image
 
     frame = next(context.keyframes_dir.rglob("*.png"))
     Image.new("RGB", (16, 8), "red").save(frame)
     extract_description_scenes(context, model="qwen", schema=schema)
-    assert len(fake_models) == count + 2
+    assert len(fake_models) == count
     extract_description_scenes(context, model="qwen", schema=schema, force=True)
-    assert len(fake_models) == count + 3
+    assert len(fake_models) == count + 1

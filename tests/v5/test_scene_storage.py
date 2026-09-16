@@ -1,11 +1,9 @@
-from copy import deepcopy
-
 import pytest
 
 from extraction.recovery import fingerprint
 from extraction.scene_storage import metadata_path, migrate_scene_schema, read_scene_records
 from extraction.step_support import write_scene_results
-from pipeline_runtime import read_json, read_jsonl, write_jsonl
+from pipeline_runtime import read_jsonl, write_jsonl
 
 
 def scene(kind, index=0):
@@ -25,58 +23,84 @@ def scene(kind, index=0):
 
 
 @pytest.mark.parametrize("kind", ["description", "graph", "raw"])
-def test_public_scenes_have_only_content_id_and_body_with_lossless_metadata(tmp_path, kind):
+def test_scenes_have_explicit_indices_without_metadata(tmp_path, kind):
     path = tmp_path / "scenes/video.jsonl"
-    records = [scene(kind, 0), scene(kind, 3)]
-    original = deepcopy(records)
+    records = [scene(kind, 3), scene(kind, 0)]
     write_scene_results(path, records)
     payload = read_jsonl(path)
     field = "description" if kind == "description" else "scene_graph"
-    assert all(set(row) == {"content_id", field} and row["content_id"] == "video"
-               for row in payload)
-    if kind == "raw":
-        assert payload[0][field] == records[0]["raw_response"]
-    assert read_scene_records(path) == original
-    assert fingerprint(read_scene_records(path)) == fingerprint(original)
-    saved = read_json(metadata_path(path))
-    assert saved["payload_hash"] == fingerprint(payload)
-    assert all(not ({"description", "graph", "raw_response"} & set(row["record"]))
-               for row in saved["rows"])
+    assert all(set(row) == {"content_id", "scene_idx", field} for row in payload)
+    assert [row["scene_idx"] for row in payload] == [0, 3]
+    assert not metadata_path(path).parent.exists()
+    restored = read_scene_records(path)
+    assert [row["scene_idx"] for row in restored] == [0, 3]
+    body = "raw_response" if kind == "raw" else kind
+    assert restored[0][body] == records[0][body]
+    assert all("provenance" not in row and "generation" not in row for row in restored)
 
 
-def test_interrupted_scene_publication_has_no_journal_and_is_detectably_incomplete(tmp_path, monkeypatch):
+def test_interrupted_publication_preserves_readable_previous_results(tmp_path, monkeypatch):
     import extraction.scene_storage as storage
-
     path = tmp_path / "scenes/video.jsonl"
-    write_scene_results(path, [scene("graph")])
+    write_scene_results(path, [scene("graph", 3)])
     before = path.read_bytes()
-    records = [scene("graph"), scene("raw", 1)]
 
     def fail(*args, **kwargs):
-        raise OSError("interrupted after metadata write")
+        raise OSError("interrupted write")
 
     with monkeypatch.context() as patch:
         patch.setattr(storage, "atomic_write_jsonl", fail)
         with pytest.raises(OSError, match="interrupted"):
-            write_scene_results(path, records)
+            write_scene_results(path, [scene("graph", 3), scene("raw", 1)])
     assert path.read_bytes() == before
-    with pytest.raises(ValueError, match="metadata"):
-        read_scene_records(path)
-    assert not (path.parent / ".checkpoints").exists()
+    assert read_scene_records(path)[0]["scene_idx"] == 3
+    assert not metadata_path(path).parent.exists()
+
+
+def legacy_file(path):
+    records = [scene("graph", 2), scene("graph", 7)]
+    payload = [{"content_id": "video", "scene_graph": row["graph"]} for row in records]
+    write_jsonl(path, payload)
+    from artifact_io import atomic_write_json
+    atomic_write_json(metadata_path(path), {
+        "schema_version": "scene-metadata/v1", "content_id": "video",
+        "payload_hash": fingerprint(payload),
+        "rows": [{"body_field": "graph", "record": {k: v for k, v in row.items() if k != "graph"}}
+                 for row in records],
+    }, durable=True)
 
 
 @pytest.mark.parametrize("damage", ["missing_metadata", "changed_payload"])
-def test_compact_scene_cannot_silently_use_missing_or_stale_metadata(tmp_path, damage):
+def test_legacy_missing_identity_is_not_silently_guessed(tmp_path, damage):
     path = tmp_path / "scenes/video.jsonl"
-    write_scene_results(path, [scene("description")])
+    legacy_file(path)
     if damage == "missing_metadata":
         metadata_path(path).unlink()
     else:
         payload = read_jsonl(path)
-        payload[0]["description"] = "Different observation."
+        payload[0]["scene_graph"]["context"] = ["changed"]
         write_jsonl(path, payload)
     with pytest.raises(ValueError, match="metadata"):
         read_scene_records(path)
+
+
+def test_legacy_migration_deletes_metadata_only_after_successful_write(tmp_path, monkeypatch):
+    import extraction.scene_storage as storage
+    path = tmp_path / "scenes/video.jsonl"
+    legacy_file(path)
+    records = read_scene_records(path)
+    assert [row["scene_idx"] for row in records] == [2, 7]
+    before = path.read_bytes()
+    with monkeypatch.context() as patch:
+        def fail(*args, **kwargs):
+            raise OSError("disk full")
+        patch.setattr(storage, "atomic_write_jsonl", fail)
+        with pytest.raises(OSError):
+            storage.migrate_scene_file(path, records)
+    assert path.read_bytes() == before and metadata_path(path).exists()
+    assert storage.migrate_scene_file(path, records)
+    assert not metadata_path(path).parent.exists()
+    assert read_scene_records(path) == records
 
 
 def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context, fake_models):
@@ -97,7 +121,7 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
                 records_by_path[path] = records
                 # Simulate outputs created before the storage format changed.
                 write_jsonl(path, records)
-                metadata_path(path).unlink()
+                metadata_path(path).unlink(missing_ok=True)
         summarize_graph(context, source=model, schema="prompts/graph_summary_v4.md")
         summarize_description(context, source=model, schema="prompts/description_summary_v4.md")
     arms = ["graph_qwen", "graph_gemini", "desc_qwen", "desc_gemini"]
@@ -116,7 +140,7 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
     assert migrate_scene_schema(context) == {"converted": 0, "unchanged": 16}
     for path, records in records_by_path.items():
         assert read_scene_records(path) == records
-        assert len(read_jsonl(path)[0]) == 2
+        assert len(read_jsonl(path)[0]) == 3
     for model in ("qwen", "gemini"):
         extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
         extract_description_scenes(context, model=model, schema="prompts/description_scene_v2.md")
@@ -127,3 +151,56 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
     assert embed_representations(context, target=arms)["generated_arms"] == []
     assert all(export_requests(context, stage, 2, benchmark_schemas[stage]) == saved
                for stage, saved in requests.items())
+
+
+@pytest.mark.parametrize("model", ["qwen", "gemini"])
+@pytest.mark.parametrize("representation", ["graph", "description"])
+def test_changed_settings_retry_only_explicit_scene_and_summary_failures(
+    ready_context, fake_models, model, representation,
+):
+    import extraction.steps as steps
+    from extraction.failures import FailureLog
+    from validation.steps import embed_representations
+
+    context = ready_context
+    extract = getattr(steps, f"extract_{representation}_scenes")
+    summarize = getattr(steps, f"summarize_{representation}")
+    scene_schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    summary_schema = f"prompts/{representation}_summary_v4.md"
+    extract(context, model=model, schema=scene_schema)
+    summarize(context, source=model, schema=summary_schema)
+    directory = context.extraction_dir(representation, model, "scenes")
+    summary_dir = context.extraction_dir(representation, model, "summaries")
+    scene_paths = sorted(directory.glob("*.jsonl"))
+    selected = scene_paths[0].stem
+    before = {path: path.read_bytes() for path in scene_paths[1:]}
+    summaries = {path: path.read_bytes() for path in summary_dir.glob("*.json")}
+    failures = FailureLog(directory, scenes=True)
+    failures.record(selected, 0, "previous failure", "")
+    context.config["extraction"][representation]["scene_max_new_tokens"] = 768
+    context.config["extraction"][representation]["summary_max_new_tokens"] = 768
+    for schema in (scene_schema, summary_schema):
+        path = context.prompt_path(schema)
+        path.write_text(path.read_text() + "\nChanged prompt instructions.\n")
+    count = len(fake_models)
+    assert extract(context, model=model, schema=scene_schema)["failure_count"] == 0
+    assert len(fake_models) == count + 1
+    assert [task.task_id for task in fake_models[-1]] == [f"{selected}:0"]
+    assert all(path.read_bytes() == saved for path, saved in before.items())
+    assert not (directory / ".metadata").exists()
+    assert not failures.path_for(selected).exists()
+    # Even newly generated scene inputs do not replace a successful summary.
+    summarize(context, source=model, schema=summary_schema)
+    assert len(fake_models) == count + 1
+    assert all(path.read_bytes() == saved for path, saved in summaries.items())
+    summary_failures = FailureLog(summary_dir)
+    summary_failures.record(selected, None, "previous failure", "")
+    summarize(context, source=model, schema=summary_schema)
+    assert len(fake_models) == count + 2
+    assert [task.task_id for task in fake_models[-1]] == [selected]
+    assert not summary_failures.path.exists()
+    assert all(path.read_bytes() == saved for path, saved in summaries.items() if path.stem != selected)
+    arm = f"{'desc' if representation == 'description' else 'graph'}_{model}"
+    assert embed_representations(context, target=[arm])["generated_arms"] == [arm]
+    extract(context, model=model, schema=scene_schema, force=True)
+    assert len(fake_models[-1]) == len(scene_paths)
