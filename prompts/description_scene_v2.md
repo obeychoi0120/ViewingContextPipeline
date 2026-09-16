@@ -7,6 +7,7 @@ Evidence rules:
 - Distinguish individual people and objects. Merge repeated views when continuity and appearance support the same entity; a change of camera angle or illustration style alone does not imply a new entity. Similar appearance alone does not establish identity across cuts. When identity or object kind is unclear, preserve the visible features without forcing a specific identification.
 
 Writing guidance:
+- Write a single comprehensive paragraph. Aim for 200-300 words, with a hard maximum of 350 words. Fewer than 200 words are fine when evidence is sparse; do not pad.
 - Preserve who does what to whom, including important objects, tools, and meaningful changes. Do not assign a target to an action unless the frames support that connection.
 - Merge equivalent observations while preserving important differences. Prioritize concrete content over generic claims about emotional depth, personal journeys, or significant decisions.
 - Organize the description naturally. Avoid repeating the same information in an introduction, frame descriptions, and a conclusion. Stop when the distinct, supported content is covered.
