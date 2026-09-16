@@ -1,11 +1,49 @@
 import json
+from functools import partial
+from io import StringIO
 from pathlib import Path
 
 import pytest
+from tqdm import tqdm
 
 import extraction.steps as steps
+from extraction.progress import InferenceProgress
 from extraction.scene_storage import read_scene_records
 from extraction.step_support import write_scene_results
+
+
+@pytest.mark.parametrize("unit", ["scene", "summary"])
+def test_progress_displays_step_rate_for_each_unit(unit):
+    now = [0.0]
+    stream = StringIO()
+    with InferenceProgress(
+        total=4, desc="Generation", unit=unit, reused=10,
+        clock=lambda: now[0], progress_factory=partial(tqdm, file=stream),
+    ) as progress:
+        assert f"{unit}/s=--" in progress.bar.postfix
+        now[0] = 5.0
+        progress._render(refresh=True)
+        assert f"{unit}/s=0.00" in progress.bar.postfix
+
+        progress.complete(task_id="a")
+        progress.complete(task_id="b", failed=True, raw=True)
+        now[0] = 10.0
+        progress._render(refresh=True)
+        assert f"{unit}/s=0.20" in progress.bar.postfix
+        assert "ETA=00:10" in progress.bar.postfix
+        assert "success=1 failed=1 raw=1" in progress.bar.postfix
+
+        # A backend reset must not remove or reset the step-wide rate.
+        progress.update_stats({"phase": "initializing", "requests_per_second": 0})
+        progress._render(refresh=True)
+        assert f"{unit}/s=0.20" in progress.bar.postfix
+        progress.complete(task_id="c")
+        progress.complete(task_id="d")
+        now[0] = 20.0
+
+    assert f"{unit}/s=0.20" in progress.bar.postfix
+    assert "ETA=00:00" in progress.bar.postfix
+    assert f"{unit}/s=0.20" in stream.getvalue()
 
 
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
@@ -42,6 +80,7 @@ def test_progress_counts_only_pending_scenes(
         assert progress.success == progress.bar.n == expected_total
         assert progress.failed == 0
         assert "ETA=00:00" in progress.bar.postfix
+        assert "scene/s=" in progress.bar.postfix
 
     run()
     expected_total, expected_reused = 0, 5

@@ -151,8 +151,7 @@ class InferenceProgress:
                 eta = "estimating"
             fields = f"ETA={eta} success={self.success} failed={self.failed}"
             fields += f" raw={self.raw}"
-            if self.unit == "scene":
-                scene_rate = f"{rate:.2f}" if elapsed > 0 else "--"
-                fields += f" scene/s={scene_rate}"
+            formatted_rate = f"{rate:.2f}" if elapsed > 0 else "--"
+            fields += f" {self.unit}/s={formatted_rate}"
             self.bar.n = completed
             self.bar.set_postfix_str(fields, refresh=refresh)

@@ -153,7 +153,7 @@ Desc·Graph·Summary는 요청당 한 번만 생성합니다. 자동 재시도·
 {"content_id":"123","error":"multiple_paragraphs","raw_output":"First paragraph.\n\nSecond paragraph."}
 ```
 
-진행률의 `failed`는 첫 응답에서 확정된 실패 수이고, `raw`는 그중 비어 있지 않은 Graph·Summary 원문을 E2E 입력으로 보존한 수입니다. Qwen·Gemini Graph와 Qwen Summary의 토큰 한도 종료는 실패로 기록합니다. `scene/s`는 이번 실행의 성공·실패 장면 수를 경과 시간으로 나눈 값입니다.
+진행률의 `failed`는 첫 응답에서 확정된 실패 수이고, `raw`는 그중 비어 있지 않은 Graph·Summary 원문을 E2E 입력으로 보존한 수입니다. Qwen·Gemini Graph와 Qwen Summary의 토큰 한도 종료는 실패로 기록합니다. 장면 추출의 `scene/s`와 요약의 `summary/s`는 이번 실행의 성공·실패 완료 건수를 해당 단계의 경과 시간으로 나눈 값이며, 재사용 결과는 제외합니다.
 
 각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.
 
