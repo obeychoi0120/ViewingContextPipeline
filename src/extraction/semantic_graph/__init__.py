@@ -1,4 +1,4 @@
-from extraction.semantic_graph.json_repair import (
+from extraction.semantic_graph.parser import (
     GraphParseResult,
     parse_or_repair_graph,
 )

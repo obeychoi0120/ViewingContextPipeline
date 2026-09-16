@@ -116,3 +116,118 @@ def test_graph_length_cutoff_logs_identity_reason_and_raw_output(ready_context, 
     assert raw["raw_response"] == text and raw["status"] == "raw_fallback"
     assert steps.extract_graph_scenes(context, **options)["failure_count"] == 1
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("model", ["qwen", "gemini"])
+def test_graph_text_repair_and_cutoff_share_storage_and_failure_policy(
+    ready_context, monkeypatch, model,
+):
+    from enum import Enum
+
+    from extraction.backends.qwen_workers import QwenGenerationTask
+    from extraction.semantic_graph.schema import graph_summary_prompt
+
+    class FinishReason(Enum):
+        MAX_TOKENS = "MAX_TOKENS"
+
+    context = ready_context
+    visual = steps.visual_rows(context)[0]
+    cid = visual["content_id"]
+    monkeypatch.setattr(steps, "visual_rows", lambda _: [visual])
+    text = """[Entities]
+person1: person; long-haired
+cup1: cup; blue-green
+[Relations]
+person1 -> holding -> cup1
+[Context]
+An indoor gathering.
+[End]"""
+    responses = [
+        text,
+        text.replace("[Entities]", "Entities:").replace(" -> ", " - "),
+        text.removesuffix("[End]"),
+        text.replace("person1 ->", "person1 <-"),
+        text,  # Even a complete-looking response fails when the backend reports truncation.
+        text,
+        json.dumps({"entities": [], "relations": [], "context": []}),
+    ]
+
+    def rows(visual, **kwargs):
+        indices = (range(len(responses)) if kwargs.get("scenes") is None
+                   else [row["scene_idx"] for row in kwargs["scenes"]])
+        return [{"task": QwenGenerationTask(f"{cid}:{i}", (), kwargs["prompt"], 1024),
+                 "scene_idx": i, "keyframes": [i * 30 + 5]} for i in indices]
+
+    monkeypatch.setattr(steps, "scene_generation_rows", rows)
+    instances = []
+    original_progress = steps.InferenceProgress
+
+    def progress_factory(**kwargs):
+        progress = original_progress(**kwargs)
+        instances.append(progress)
+        return progress
+
+    monkeypatch.setattr(steps, "InferenceProgress", progress_factory)
+    calls = []
+
+    def receive_tasks(tasks, receive):
+        for task in tasks:
+            assert task.structured_output is None
+            assert "[Entities]" in task.prompt
+            calls.append(task.task_id)
+            index = int(task.task_id.split(":")[1])
+            receive(task.task_id, index, responses[index])
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            def receive(key, index, output):
+                kwargs["runtime"].current_result = {
+                    "finish_reason": "length" if index in (4, 5) else "stop",
+                }
+                callback(key, output)
+            receive_tasks(tasks, receive)
+            return {}
+        yield generate
+
+    class Pool:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, tasks, callback, **kwargs):
+            def receive(key, index, output):
+                reason = (FinishReason.MAX_TOKENS if index == 4 else
+                          "MAX_TOKENS" if index == 5 else "STOP")
+                callback(GeminiGenerationOutcome(key, output, response_diagnostics={
+                    "candidates": [{"finish_reason": reason}],
+                }))
+            receive_tasks(tasks, receive)
+
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
+    options = {"model": model, "schema": "prompts/graph_scene_v3.md"}
+    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 4
+    assert calls == [f"{cid}:{i}" for i in range(len(responses))]
+    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (3, 4, 4)
+    directory = context.graph_scene_dir(model)
+    records = read_scene_records(directory / f"{cid}.jsonl")
+    by_scene = {row["scene_idx"]: row for row in records}
+    assert by_scene[0]["graph"] == by_scene[1]["graph"]
+    assert by_scene[0]["parse_mode"] == "native"
+    assert by_scene[1]["parse_mode"] == "repaired"
+    assert by_scene[0]["provenance"]["settings"]["response_parser"] == "graph-text/v1"
+    assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
+    assert by_scene[6]["graph"] == {"entities": [], "relations": [], "context": []}
+    failures = read_jsonl(directory / "failures" / f"{cid}.jsonl")
+    assert {row["scene_idx"] for row in failures} == {2, 3, 4, 5}
+    for failure in failures:
+        index = failure["scene_idx"]
+        assert failure["raw_output"] == by_scene[index]["raw_response"] == responses[index]
+        assert by_scene[index]["status"] == "raw_fallback"
+        if index in (4, 5):
+            assert failure["error"] == "graph: output truncated at token limit"
+    observations = json.loads(graph_summary_prompt("{scenes}", records))
+    assert observations[0]["observation"] == by_scene[0]["graph"]
+    assert observations[2]["observation"] == responses[2]
+    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 4
+    assert len(calls) == len(responses)  # No automatic retry, including on resume.

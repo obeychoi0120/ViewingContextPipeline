@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 from tqdm import tqdm
@@ -13,7 +12,7 @@ from extraction.qwen_runtime import QwenRuntime
 from extraction.recovery import file_fingerprint, generation_key, penalty_schedule
 from extraction.failures import FailureLog
 from extraction.progress import InferenceProgress
-from extraction.structured_output import GRAPH_JSON_SCHEMA
+from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
 from extraction.scene_executor import run_gemini_scenes, run_qwen_scenes
 from extraction.step_support import (
     minimal_description_records,
@@ -67,6 +66,8 @@ def prompt_provenance(context, schema, arm, *, summary=False):
             settings["sampling"] = dict(extraction["summary_sampling"])
     else:
         settings["visual_evidence"] = dict(extraction["visual_evidence"])
+        if arm.representation == "graph":
+            settings["response_parser"] = GRAPH_PARSER_VERSION
     return {
         "arm": arm.name,
         "representation": arm.representation,
@@ -118,8 +119,6 @@ def _extract(context, *, representation, model, schema, force=False):
             scenes=scenes,
         )
         for row in rows:
-            if representation == "graph" and model == "qwen":
-                row["task"] = replace(row["task"], structured_output={"json": GRAPH_JSON_SCHEMA})
             row["provenance"] = provenance
             row["input_key"] = generation_key(row["task"], provenance, penalties)
         return rows

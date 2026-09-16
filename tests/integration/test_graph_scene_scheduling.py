@@ -39,7 +39,7 @@ def test_qwen_graph_generates_once_even_with_legacy_penalty_list(
         assert {task.repetition_penalty for task in tasks} == {penalty}
         submissions.append({task.task_id for task in tasks})
         for task in reversed(tasks):
-            assert task.structured_output is not None
+            assert task.structured_output is None
             text = graph
             if task.task_id == "b:8":
                 text = ""  # Exhaust the budget without any raw output.

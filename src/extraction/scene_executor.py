@@ -5,7 +5,6 @@ from itertools import chain
 from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.monitoring import graph_skip_message, scene_messages
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
-from extraction.semantic_graph.json_repair import repair_graph_json_once
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.raw_output import raw_graph_record, is_raw_graph
 from extraction.generation import generate_once
@@ -23,14 +22,7 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
         try:
             validate_graph_structure(parsed.graph)
         except OutputValidationError as exc:
-            repaired = repair_graph_json_once(text) if parsed.parse_mode == "native" else None
-            try:
-                validate_graph_structure(repaired)
-            except OutputValidationError:
-                error = str(exc)
-            else:
-                from extraction.semantic_graph.json_repair import GraphParseResult
-                parsed = GraphParseResult(graph=repaired, parse_mode="repaired")
+            error = str(exc)
     if error is None and parsed is not None and parsed.graph is not None:
         return {
             **common,
@@ -40,8 +32,8 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
         }, None
     failure = {
         **common,
-        "failure_kind": "generation" if error else "json_repair",
-        "error": error or (parsed.error if parsed is not None else None) or "JSON repair failed",
+        "failure_kind": "generation" if error else "graph_parse",
+        "error": error or (parsed.error if parsed is not None else None) or "Graph parsing failed",
         "raw_response": text,
     }
     if diagnostics is not None:
@@ -172,8 +164,14 @@ def run_gemini_scenes(
                            arm=arm, source="gemini", names=names)
 
     def receive(outcome):
+        candidates = (outcome.response_diagnostics or {}).get("candidates") or []
+        truncated = any(
+            str(getattr(candidate.get("finish_reason"), "value", candidate.get("finish_reason")))
+            .rsplit(".", 1)[-1].upper() == "MAX_TOKENS"
+            for candidate in candidates
+        )
         results.receive(outcome.task_id, outcome.text, error=outcome.error,
-                        diagnostics=outcome.response_diagnostics)
+                        diagnostics=outcome.response_diagnostics, truncated=truncated)
 
     tasks = results.tasks()
     first = next(tasks, None)

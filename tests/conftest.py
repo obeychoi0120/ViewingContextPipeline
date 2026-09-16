@@ -26,6 +26,15 @@ GRAPH = {
     "context": ["possibly a casual greeting"],
 }
 PROSE = "A person in a red jacket looks at a person in a blue shirt, who waves back. The interaction appears to be a casual greeting."
+GRAPH_TEXT = """[Entities]
+person1: person; red jacket
+person2: person; blue shirt
+[Relations]
+person1 -> looking at -> person2
+person2 -> waving to -> person1
+[Context]
+possibly a casual greeting
+[End]"""
 
 
 @pytest.fixture
@@ -79,8 +88,6 @@ def ready_context(v5_context, monkeypatch):
 
 @pytest.fixture
 def fake_models(monkeypatch):
-    import json
-
     calls = []
 
     @contextmanager
@@ -89,7 +96,7 @@ def fake_models(monkeypatch):
             tasks = list(tasks)
             calls.append(tasks)
             for task in tasks:
-                callback(task.task_id, json.dumps(GRAPH) if task.structured_output else PROSE)
+                callback(task.task_id, GRAPH_TEXT if "[Entities]" in task.prompt else PROSE)
             return {}
 
         yield generate
@@ -107,7 +114,7 @@ def fake_models(monkeypatch):
                         task_id=task.task_id,
                         error=None,
                         response_diagnostics=None,
-                        text=json.dumps(GRAPH) if "JSON scene graph" in task.prompt else PROSE,
+                        text=GRAPH_TEXT if "[Entities]" in task.prompt else PROSE,
                     )
                 )
 

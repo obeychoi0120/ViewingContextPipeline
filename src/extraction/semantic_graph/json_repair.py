@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
+import io
 import json
-import re
+import tokenize
 from typing import Any
 
 
@@ -19,7 +20,7 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
     raw = str(text or "")
     if not raw.strip():
         return GraphParseResult(graph=None, error="empty VLM output")
-    parsed = _parse_json_candidates(raw)
+    parsed = _load_json_dict(raw)
     if parsed is not None:
         return GraphParseResult(graph=parsed, parse_mode="native")
     repaired = repair_graph_json_once(raw)
@@ -29,137 +30,73 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
 
 
 def repair_graph_json_once(text: str) -> dict[str, Any] | None:
-    """Repair syntax only; never add semantic fields or alter references."""
-    normalized = str(text or "").translate(
-        str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
-    )
-    candidates = _candidate_texts(normalized)
-
-    without_trailing_commas = [
-        re.sub(r",(\s*[}\]])", r"\1", candidate)
-        for candidate in candidates
-    ]
-    parsed = _parse_json_candidates("\n".join(without_trailing_commas))
+    """Repair punctuation in a complete object; never close a truncated response."""
+    normalized = _normalize_punctuation(str(text or "").strip())
+    parsed = _load_json_dict(normalized)
     if parsed is not None:
         return parsed
-
-    for candidate in candidates:
-        parsed = _parse_python_dict(candidate)
-        if parsed is not None:
-            return parsed
-
-    truncated = _close_truncated_json(normalized)
-    if truncated is None:
+    try:
+        # Python literal syntax must not silently join adjacent strings or overwrite keys.
+        previous = None
+        for token in tokenize.generate_tokens(io.StringIO(normalized).readline):
+            if token.type == tokenize.COMMENT or token.type == previous == tokenize.STRING:
+                return None
+            if token.type not in (tokenize.NL, tokenize.NEWLINE):
+                previous = token.type
+        tree = ast.parse(normalized, mode="eval")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                keys = [ast.literal_eval(key) for key in node.keys]
+                if len(keys) != len(set(keys)):
+                    return None
+        value = ast.literal_eval(tree)
+        normalized_value = json.loads(json.dumps(value, ensure_ascii=False))
+    except (SyntaxError, ValueError, TypeError, tokenize.TokenError, RecursionError):
         return None
-    return _load_json_dict(re.sub(r",(\s*[}\]])", r"\1", truncated))
+    return normalized_value if isinstance(normalized_value, dict) else None
 
 
-def _candidate_texts(text: str) -> list[str]:
-    fenced = re.findall(r"```(?:json|python)?\s*\n?(.*?)```", text, re.DOTALL | re.IGNORECASE)
-    candidates = [item.strip() for item in fenced if item.strip()]
-    candidates.extend(_object_candidates(text))
-    stripped = text.strip()
-    if stripped:
-        candidates.append(stripped)
-    return _unique(candidates)
-
-
-def _parse_json_candidates(text: str) -> dict[str, Any] | None:
-    for candidate in _candidate_texts(text):
-        parsed = _load_json_dict(candidate)
-        if parsed is not None:
-            return parsed
-    return None
-
-
-def _object_candidates(text: str) -> list[str]:
-    candidates: list[str] = []
-    stack: list[str] = []
-    start: int | None = None
-    in_string = False
+def _normalize_punctuation(text):
+    # Only syntax punctuation outside string values may be removed or replaced.
+    output = []
+    closing = None
+    quote = None
     escaped = False
     for index, char in enumerate(text):
-        if escaped:
-            escaped = False
+        if closing is not None:
+            if escaped:
+                output.append(char)
+                escaped = False
+            elif char == "\\":
+                output.append(char)
+                escaped = True
+            elif char == closing:
+                output.append(quote)
+                closing = None
+            else:
+                output.append(char)
+        elif char in ('"', "'", "“", "‘"):
+            closing, quote = {"“": ("”", '"'), "‘": ("’", "'")}.get(char, (char, char))
+            output.append(quote)
+        elif char == "," and text[index + 1:].lstrip().startswith(("}", "]")):
             continue
-        if char == "\\" and in_string:
-            escaped = True
-            continue
-        if char == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if char == "{":
-            if not stack:
-                start = index
-            stack.append(char)
-        elif char == "}" and stack:
-            stack.pop()
-            if not stack and start is not None:
-                candidates.append(text[start : index + 1])
-                start = None
-    return sorted(_unique(candidates), key=len, reverse=True)
-
-
-def _parse_python_dict(text: str) -> dict[str, Any] | None:
-    for candidate in [*_object_candidates(text), text.strip()]:
-        try:
-            value = ast.literal_eval(candidate)
-            normalized = json.loads(json.dumps(value, ensure_ascii=False))
-        except (SyntaxError, ValueError, TypeError, json.JSONDecodeError):
-            continue
-        if isinstance(normalized, dict):
-            return normalized
-    return None
-
-
-def _close_truncated_json(text: str) -> str | None:
-    start = text.find("{")
-    if start < 0:
-        return None
-    fragment = text[start:].split("```", 1)[0].rstrip()
-    fragment = re.sub(r",\s*$", "", fragment)
-    fragment = re.sub(r',\s*"[^"\\]*$', "", fragment)
-
-    stack: list[str] = []
-    in_string = False
-    escaped = False
-    for char in fragment:
-        if escaped:
-            escaped = False
-            continue
-        if char == "\\" and in_string:
-            escaped = True
-            continue
-        if char == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if char in "[{":
-            stack.append(char)
-        elif char in "]}":
-            expected = "[" if char == "]" else "{"
-            if not stack or stack[-1] != expected:
-                return None
-            stack.pop()
-    if escaped:
-        fragment = fragment[:-1]
-    if in_string:
-        fragment += '"'
-    fragment = re.sub(r",(\s*)$", r"\1", fragment)
-    fragment += "".join("]" if opener == "[" else "}" for opener in reversed(stack))
-    return fragment
+        else:
+            output.append(char)
+    return "".join(output)
 
 
 def _load_json_dict(text: str) -> dict[str, Any] | None:
     try:
-        value = json.loads(text)
-    except (TypeError, json.JSONDecodeError):
+        value = json.loads(text, object_pairs_hook=_unique_object)
+    except (TypeError, ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
 
 
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(values))
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result

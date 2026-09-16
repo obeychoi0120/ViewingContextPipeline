@@ -27,9 +27,11 @@ Qwen Graph와 Description은 영상 경계 없이 장면을 연속 공급하고 
 
 ## 생성과 실패 기록
 
-Graph에는 TOBE JSON Schema 제약을 적용합니다. JSON 구조만 검증하며 ID 중복·미해결 관계 참조는 허용합니다. Description과 Summary에는 구조 grammar를 적용하지 않습니다.
+Graph는 JSON Schema 강제 생성 없이 `[Entities]`, `[Relations]`, `[Context]`, `[End]` 줄 형식을 요청합니다. Qwen과 Gemini가 공통 파서로 기존 `entities / relations / context` JSON 객체를 구성한 뒤 필드·타입을 검증합니다. 완전한 JSON 응답도 계속 지원합니다. ID 중복·미해결 관계 참조는 허용하며 개체·관계 개수 제한은 프롬프트 지침입니다. Description과 Summary에도 구조 grammar를 적용하지 않습니다.
 
-장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다. Desc·Graph·Summary 모두 한 번 생성한 결과로 성공·실패를 확정합니다. 기본 repetition penalty는 `1.00`이고 기존 목록 설정은 첫 값만 사용합니다. Summary의 형식·길이 위반도 즉시 실패이며 별도 교정 요청은 하지 않습니다. Qwen Graph·Summary의 `finish_reason=length`는 토큰 한도 실패입니다. 실패한 Graph·Summary의 비어 있지 않은 원문은 E2E 입력용 Raw로 보존합니다.
+Repair는 화살표 변형(`→`, `⇒`, `-->`, `=>`), 공백으로 구분된 하이픈·대시, 헤더 대소문자·콜론·Markdown 제목, 항목 앞 bullet·번호, 전각 구분자, 마지막 세미콜론, 응답 전체 코드 펜스를 처리합니다. 관계는 주체·관계·대상이 유일하게 분리될 때만 변환하며 ID·속성·관계 문구 안의 하이픈은 보존합니다. 빈 섹션은 `none` 또는 `[]`를 명시해야 합니다. 필수 섹션·종료 표식 누락, 역방향·모호한 관계, 중복 섹션, 종료 후 추가 내용은 실패입니다. JSON의 작은따옴표·구문 따옴표·마지막 쉼표는 복구할 수 있지만 잘린 괄호를 닫거나 여러 객체 중 하나를 선택하지 않습니다. Parser 버전은 Graph 생성 provenance에 포함합니다.
+
+장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다. Desc·Graph·Summary 모두 한 번 생성한 결과로 성공·실패를 확정합니다. 기본 repetition penalty는 `1.00`이고 기존 목록 설정은 첫 값만 사용합니다. Summary의 형식·길이 위반도 즉시 실패이며 별도 교정 요청은 하지 않습니다. Qwen Graph·Summary의 `finish_reason=length`와 Gemini Graph의 `MAX_TOKENS`는 완전해 보이는 본문이라도 토큰 한도 실패입니다. 실패한 Graph·Summary의 비어 있지 않은 원문은 E2E 입력용 Raw로 보존합니다.
 
 장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`을 저장합니다. 원문은 공백·줄바꿈을 포함해 그대로 보존하며 응답이 없으면 빈 문자열입니다. `.recovery`, `.pending`, `.checkpoints` 및 콘텐츠 진행 cursor는 생성하지 않습니다. 실행 시작 시 이전 실패 파일을 새 경로·필드로 옮기며, 예전 기록에 원문이 없으면 빈 문자열을 사용합니다.
 
