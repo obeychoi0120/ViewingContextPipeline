@@ -33,7 +33,7 @@ Graph에는 TOBE JSON Schema 제약을 적용합니다. JSON 구조만 검증하
 
 진행률은 재사용을 제외한 요청 수를 기준으로 하며 장면과 요약 단위를 구분합니다. 장면 추출은 timestamp와 캐시를 먼저 확인해 처리할 전체 scene 수를 확정합니다. 출력·저장·재시도까지 포함한 처리 속도와 ETA입니다. 요약 교정은 같은 요약 작업의 일부입니다.
 
-각 Qwen 응답을 durable journal에 먼저 저장한 후 최종 artifact를 게시합니다. 저장 오류나 중단 시 응답을 재추론하지 않고 게시를 재개합니다. 완료 journal은 삭제하고 최종 artifact에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 입력·프롬프트·설정 변경은 기존 캐시를 무효화합니다. 엔진/OOM/저장 오류는 그대로 중단하며 원인을 해결한 뒤 같은 명령으로 재개합니다.
+각 Qwen 응답을 durable journal에 먼저 저장한 후 최종 artifact를 게시합니다. 장면 JSONL은 `content_id`와 `description` 또는 `scene_graph`만 담으며, Raw Graph는 `scene_graph`에 원문 문자열을 담습니다. 장면 번호·keyframes·provenance·생성 이력은 `scenes/.metadata/{content_id}.json`에 보존합니다. 저장 오류나 중단 시 응답을 재추론하지 않고 본문과 메타데이터 게시를 재개합니다. 완료 journal은 삭제하고 장면 `.metadata` 또는 요약 문서에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 입력·프롬프트·설정 변경은 기존 캐시를 무효화합니다. 엔진/OOM/저장 오류는 그대로 중단하며 원인을 해결한 뒤 같은 명령으로 재개합니다.
 
 ## 선택적 처리량 측정
 

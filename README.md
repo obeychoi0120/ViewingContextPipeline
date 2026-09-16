@@ -98,7 +98,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference
 
 현재 Run에서 reference Run을 뺀 NDCG@10 차이를 `validation/diagnosis/diagnosis.json`의 `run_comparison`에 기록합니다. 원본 사건·catalog·평가 날짜·seed와 사건 수가 일치해야 하며 두 Run의 추천 캐시도 검증합니다. 모델별 두 비교는 Bonferroni 보정, 개선 폭의 모델 간 차이는 탐색적 95% 구간을 사용합니다. 프롬프트·모델·요약 정책·fallback의 차이가 함께 포함될 수 있으므로 출처를 확인합니다.
 
-`--schema`는 프롬프트 선택이며 Python 출력 검증 계약을 바꾸지 않습니다. 다른 구조의 과거 Graph나 Summary를 그대로 입력하는 ASIS 전용 경로·자동 변환은 제공하지 않습니다. 기존 artifact를 수동 재사용하려면 현재 계약과 provenance를 충족해야 합니다.
+`--schema`는 프롬프트 선택이며 Python 출력 검증 계약을 바꾸지 않습니다. 다른 본문 구조의 과거 Graph나 Summary를 그대로 입력하는 ASIS 전용 경로·본문 자동 변환은 제공하지 않습니다. 기존 artifact를 수동 재사용하려면 현재 계약과 provenance를 충족해야 합니다.
 
 ## Artifact 구조
 
@@ -119,6 +119,21 @@ artifacts/
         └── diagnosis/diagnosis.json
 ```
 
+`scenes/{content_id}.jsonl`은 장면당 한 줄이며, Description·Graph 모두 `content_id`와 본문 두 필드만 저장합니다. Qwen·Gemini에 같은 형식을 적용합니다.
+
+```json
+{"content_id":"123","description":"A person walks outdoors."}
+{"content_id":"123","scene_graph":{"entities":[],"relations":[],"context":[]}}
+```
+
+장면 번호 순서로 저장하며, `scene_idx`, `keyframes`, `generation`, `provenance`, 파싱·Raw 상태는 `scenes/.metadata/{content_id}.json`의 같은 순서 행에 보관합니다. 재시도 후에도 파싱하지 못한 Graph는 `scene_graph`에 원문 문자열을 저장합니다. 요약·재개·진단에서는 본문과 메타데이터를 함께 읽으므로 장비 간 전달 시 숨김 폴더 `.metadata`도 포함합니다. 두 파일 저장 도중 중단되면 checkpoint journal로 복구합니다.
+
+기존 메타데이터 포함 JSONL도 읽을 수 있습니다. 다음 명령은 기존 장면 파일을 두 필드 형식과 별도 메타데이터로 분리합니다. 본문·생성 이력을 보존하므로 형식 변환만으로 재추론하거나 기존 요약·임베딩을 다시 만들지 않습니다. 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
+
+```bash
+python -m extraction migrate-scene-schema --run-id "$RUN_ID"
+```
+
 공유 프레임과 영상 길이·장면 timestamp는 `artifacts_root` 바로 아래의 `resized_keyframes`, `source_assets`에 저장하며 Run 간 재사용합니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 timestamp와 프레임이 준비되어 있으면 새 Run에서도 `prepare-cohort` 후 바로 추출할 수 있습니다. 장면 추출은 `prepare-input-data`가 정상 완료됐다고 가정합니다. 이미지·asset 존재 검사, 폴더 스캔, duration·샘플링 재검증 및 이미지 내용 해시 계산을 하지 않습니다. timestamp JSON으로 scene 수와 재사용 여부를 확인하고, 추론 입력을 공급할 때 필요한 경로를 준비 단계의 PNG 파일명 규칙으로 구성합니다. 이미지는 실제 추론 시 읽으며, 필요한 파일이 없으면 해당 입력을 읽는 시점에 실패합니다. 자동 준비 호출은 하지 않습니다.
 
 장면 추출은 추론 전에 timestamp와 저장 결과를 확인해 처리할 전체 scene 수를 계산합니다. 추론용 task와 이미지는 요청을 공급하면서 읽습니다. Gemini는 제한된 수의 scene을 미리 공급하고 빈 worker가 영상 경계 없이 다음 scene을 바로 처리합니다. 처리 속도와 ETA는 추론 단계의 완료 건수와 경과 시간을 기준으로 표시합니다.
@@ -127,9 +142,9 @@ artifacts/
 
 `prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 공유 duration과 timestamp가 유효하면 영상 길이를 재확인하거나 timestamp를 다시 만들지 않습니다. 준비 실패 보고서는 각 Run의 `cohort/preparation_failures.jsonl`에 저장합니다.
 
-기존 Run은 `artifacts/runs/{RUN_ID}/`로, 기존 준비 정보는 `artifacts/source_assets/`로 직접 배치해야 합니다. 자동 migration이나 기존 artifact 이동·삭제는 수행하지 않습니다.
+기존 Run은 `artifacts/runs/{RUN_ID}/`로, 기존 준비 정보는 `artifacts/source_assets/`로 직접 배치해야 합니다. 자동 Run 이동·삭제는 수행하지 않습니다.
 
-실패 파일은 실패가 있을 때만 생성합니다. 완료된 recovery journal과 임시 checkpoint·dirty·pending 표식은 정리하고, 최종 장면·요약의 provenance와 간단한 생성 이력은 남깁니다. 별도 migration manifest, 전체 설정 snapshot, 요약별 `.inputs` 및 `.changed`, run별 이미지, media preflight·metadata missing 문서는 만들지 않습니다. 준비 통계는 콘솔, 결측 title 진단은 최종 diagnosis에 포함합니다. embedding별 `.inputs`는 실제 입력·fallback·truncation 및 캐시 검증 상태이므로 보존합니다.
+실패 파일은 실패가 있을 때만 생성합니다. 완료된 recovery journal과 임시 checkpoint·dirty·pending 표식은 정리하고, 장면의 provenance·생성 이력은 `.metadata`에, 요약의 provenance·생성 이력은 요약 문서에 남깁니다. 별도 migration manifest, 전체 설정 snapshot, 요약별 `.inputs` 및 `.changed`, run별 이미지, media preflight·metadata missing 문서는 만들지 않습니다. 준비 통계는 콘솔, 결측 title 진단은 최종 diagnosis에 포함합니다. embedding별 `.inputs`는 실제 입력·fallback·truncation 및 캐시 검증 상태이므로 보존합니다.
 
 각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.
 
@@ -140,7 +155,7 @@ artifacts/
 - Qwen Graph·Description은 전체 scene을 `1.00`으로 생성한 뒤 검증 실패분만 `1.05 → 1.10 → 1.15 → 1.20` 순서로 재시도합니다. Qwen이 생성하는 Summary도 입력 출처와 무관하게 전체 초안 pass 후 빈 응답만 재시도하며, 길이·형식 교정은 마지막에 별도로 한 번 수행합니다.
 - Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 필수 필드·타입·빈 문자열 등 JSON 구조 검증은 유지합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
 - 신규 Summary는 자연스러운 영어 한 문단, 100–200단어 권장·최대 200단어입니다. 정보가 적으면 100단어 미만도 허용합니다. 필드별 할당과 summary grammar는 없습니다. 형식·길이 위반은 원본 장면 관찰을 포함해 한 번 교정하고, 여전히 실패하면 마지막 비어 있지 않은 결과를 명시적 Raw로 사용합니다. 빈 결과와 실행 오류는 구분합니다.
-- 프롬프트 경로·내용, 모델·설정·장면 timestamp가 바뀌면 생성 캐시를 재사용하지 않습니다. 준비된 이미지 내용의 변경은 자동 감지하지 않으므로 이미지를 교체한 뒤 재추론하려면 `--force`를 사용합니다. 기존 완료 결과도 프롬프트·모델·설정·장면 정보가 같으면 재사용합니다. 로컬 모델 서명은 설정·tokenizer 텍스트의 내용 hash와 가중치 파일명·크기·mtime으로 계산합니다. 완료 journal을 삭제해도 최종 artifact의 provenance로 재개합니다.
+- 프롬프트 경로·내용, 모델·설정·장면 timestamp가 바뀌면 생성 캐시를 재사용하지 않습니다. 준비된 이미지 내용의 변경은 자동 감지하지 않으므로 이미지를 교체한 뒤 재추론하려면 `--force`를 사용합니다. 기존 완료 결과도 프롬프트·모델·설정·장면 정보가 같으면 재사용합니다. 로컬 모델 서명은 설정·tokenizer 텍스트의 내용 hash와 가중치 파일명·크기·mtime으로 계산합니다. 완료 journal을 삭제해도 장면 `.metadata`와 요약 문서의 provenance로 재개합니다.
 - Gemini Summary **파일이 없을 때만** 같은 Run·표현의 Qwen Summary로 fallback합니다. Raw Gemini가 있으면 우선 사용합니다. 손상된 일반 파일은 오류이며 Qwen 요약 누락을 영벡터로 대체하지 않습니다. 실제 사용 경로를 기록하고 Gemini 결과가 추가되면 embedding·추천 캐시를 갱신합니다.
 - BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata title만 영벡터를 사용합니다.
 

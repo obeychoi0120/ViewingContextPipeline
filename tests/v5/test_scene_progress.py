@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 import extraction.steps as steps
-from pipeline_runtime import read_jsonl, write_jsonl
+from extraction.scene_storage import read_scene_records
+from extraction.step_support import write_scene_checkpoint
 
 
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
@@ -48,21 +49,21 @@ def test_progress_counts_only_pending_scenes(
 
     paths = sorted(context.extraction_dir(representation, model, "scenes").glob("*.jsonl"))
     # Reuse one scene within a partially completed content.
-    rows = read_jsonl(paths[0])
+    rows = read_scene_records(paths[0])
     assert len(rows) == 2
-    write_jsonl(paths[0], rows[:1])
+    write_scene_checkpoint(paths[0], paths[0].parent / "failures" / paths[0].name, rows[:1], [])
     expected_total, expected_reused = 1, 4
     run()
-    assert [row["scene_idx"] for row in read_jsonl(paths[0])] == [0, 1]
+    assert [row["scene_idx"] for row in read_scene_records(paths[0])] == [0, 1]
 
     paths[1].unlink()
     run()
 
     # Existing output is still pending if its generation provenance is stale.
-    rows = read_jsonl(paths[1])
+    rows = read_scene_records(paths[1])
     rows[0]["provenance"] = {}
     rows[0]["generation"]["input_key"] = "stale"
-    write_jsonl(paths[1], rows)
+    write_scene_checkpoint(paths[1], paths[1].parent / "failures" / paths[1].name, rows, [])
     run()
 
     expected_total, expected_reused = 5, 0

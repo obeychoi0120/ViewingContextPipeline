@@ -16,13 +16,14 @@ from extraction.evidence import load_images
 from extraction.qwen_config import qwen_settings
 from extraction.qwen_runtime import result_hash
 from extraction.recovery import penalty_schedule
+from extraction.scene_storage import read_scene_records
 from extraction.structured_output import GRAPH_JSON_SCHEMA, validate_graph_structure
 from extraction.semantic_graph import graph_summary_prompt, parse_or_repair_graph, validate_summary
 from extraction.step_support import (
     minimal_description_records, minimal_graph_records, scene_generation_rows, visual_rows,
 )
 from extraction.steps import _summary_generation_settings
-from pipeline_runtime import RunContext, read_json, read_jsonl, write_json
+from pipeline_runtime import RunContext, read_json, write_json
 
 
 def file_hash(path):
@@ -41,7 +42,7 @@ def export_requests(context, stage, limit, schema):
             source = "gemini" if stage.endswith("gemini") else "qwen"
             scene_dir = context.description_scene_dir(source) if arm == "description" else context.graph_scene_dir(source)
             path = scene_dir / f"{visual['content_id']}.jsonl"
-            records = read_jsonl(path)
+            records = read_scene_records(path)
             if not records:
                 continue
             normalize = minimal_description_records if arm == "description" else minimal_graph_records

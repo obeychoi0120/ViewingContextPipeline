@@ -42,7 +42,9 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 `artifacts_root/resized_keyframes`는 모든 run이 공유합니다. 정상 PNG는 자동 덮어쓰지 않으며 콘텐츠별 디렉터리 잠금으로 동시 쓰기를 보호합니다. 프레임은 임시 공간에서 검증한 후 누락 파일만 원자적으로 게시합니다. 새 Run은 공유 PNG와 duration·timestamp를 함께 재사용합니다. 준비 정보가 이미 있으면 `prepare-input-data`를 다시 실행할 필요가 없습니다. 장면 추출은 준비된 assets를 신뢰하며 폴더 스캔·파일 존재 검사·이미지 해시 계산을 생략합니다. timestamp는 작업 구성에 필요한 입력으로 한 번 읽습니다. 이미지 내용 변경 후 재추론은 `--force`로 요청합니다. 준비 결과 통계는 콘솔로 출력합니다.
 
-Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 완료한 작업의 journal은 지우고 최종 artifact에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 중단 시 미완료 journal과 dirty/pending/checkpoint 표식을 보존하고 같은 명령으로 재개합니다. Gemini는 영상 경계 없이 scene을 병렬 처리하고, 콘텐츠별 장면이 모두 끝나면 해당 결과를 함께 게시합니다. 완료 순서가 뒤바뀌어도 저장 완료한 콘텐츠는 재사용하며, 중단 시 미완료 콘텐츠는 다시 처리합니다. `--force`는 해당 단계 생성을 새로 시작하지만 공유 이미지는 보존합니다.
+장면 JSONL은 `content_id`와 본문(`description` 또는 `scene_graph`)만 저장합니다. 장면 번호·keyframes·provenance·생성 이력은 `scenes/.metadata/{content_id}.json`에 같은 행 순서로 보존합니다. Raw Graph의 `scene_graph`는 원문 문자열입니다. 기존 JSONL도 읽을 수 있으며, `python -m extraction migrate-scene-schema --run-id "$RUN_ID"`로 본문과 메타데이터를 분리할 수 있습니다. 해당 Run의 장면 추출을 중지한 상태에서 실행하며, 형식만 바뀐 결과의 요약·임베딩은 재사용합니다.
+
+Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 완료한 작업의 journal은 지우고 장면 `.metadata` 또는 요약 문서에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 중단 시 미완료 journal과 dirty/pending/checkpoint 표식을 보존하고 같은 명령으로 재개합니다. 장면 본문과 메타데이터 저장 사이의 중단도 journal로 복구합니다. Gemini는 영상 경계 없이 scene을 병렬 처리하고, 콘텐츠별 장면이 모두 끝나면 해당 결과를 함께 게시합니다. 완료 순서가 뒤바뀌어도 저장 완료한 콘텐츠는 재사용하며, 중단 시 미완료 콘텐츠는 다시 처리합니다. `--force`는 해당 단계 생성을 새로 시작하지만 공유 이미지는 보존합니다.
 
 신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 길이·형식 교정은 한 번이며 교정 결과가 비어 있으면 첫 비어 있지 않은 초안을 Raw로 남깁니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
 
@@ -50,6 +52,6 @@ Qwen 응답은 journal에 먼저 저장하고 최종 결과를 게시합니다. 
 
 ## 환경 간 전달
 
-GPU와 Gemini 장비에서 같은 코드·run ID·설정을 사용합니다. `artifacts/runs/RUN_ID/cohort/`와 **공유** `artifacts/resized_keyframes/`, `artifacts/source_assets/`를 같은 상대 위치에 배치하고, Gemini 결과는 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 생성 provenance의 경로가 달라지면 재생성 명령의 캐시가 무효화될 수 있으므로 같은 저장소 경로를 사용합니다. 재개할 때 진행 중 journal·cursor도 함께 보존합니다.
+GPU와 Gemini 장비에서 같은 코드·run ID·설정을 사용합니다. `artifacts/runs/RUN_ID/cohort/`와 **공유** `artifacts/resized_keyframes/`, `artifacts/source_assets/`를 같은 상대 위치에 배치하고, Gemini 결과는 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. `scenes/.metadata` 숨김 폴더도 포함해야 합니다. 생성 provenance의 경로가 달라지면 재생성 명령의 캐시가 무효화될 수 있으므로 같은 저장소 경로를 사용합니다. 재개할 때 진행 중 journal·cursor도 함께 보존합니다.
 
-별도 migration, donor-run 옵션, manifest 또는 전체 config snapshot은 없습니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.
+Run 간 이동용 migration, donor-run 옵션, manifest 또는 전체 config snapshot은 없습니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.

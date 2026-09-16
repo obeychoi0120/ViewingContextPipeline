@@ -1,7 +1,7 @@
 """Compact generation history survives deletion of completed recovery journals."""
 from collections import Counter
 from arm_registry import select_arms
-from pipeline_runtime import read_jsonl
+from extraction.scene_storage import read_scene_records
 
 
 def recovery_report(context, *, branches=None):
@@ -14,7 +14,7 @@ def recovery_report(context, *, branches=None):
         attempt_count = unknown = 0
         directory = context.extraction_dir(arm.representation, arm.model, "scenes")
         for path in directory.glob("*.jsonl"):
-            for row in read_jsonl(path):
+            for row in read_scene_records(path):
                 history = row.get("generation", {})
                 unknown += not bool(history)
                 attempt_count += history.get("attempt_count", 0)

@@ -5,8 +5,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from extraction.scene_storage import read_scene_records
 from visual_sampling import truncate_timestamp, timestamp_filename
-
 
 from .diagnosis_support import (
     _bounded_examples,
@@ -195,6 +195,7 @@ def _scene_arm_contract(
             f"{arm} scene outcomes",
             errors,
             report_error=False,
+            reader=read_scene_records,
         )
         if not scene_loaded:
             issues["missing_or_invalid_scene_file"] += 1

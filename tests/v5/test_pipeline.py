@@ -222,7 +222,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
 ):
     import json
     from types import SimpleNamespace
-    from pipeline_runtime import read_jsonl
+    from extraction.scene_storage import read_scene_records
     from validation.diagnosis_scenes import _success_scene_row_issues
 
     context = ready_context
@@ -258,7 +258,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
             assert result["failure_count"] == 0
     assert len(generated) == len(set(generated)) == 4
     for path in context.graph_scene_dir(model).glob("*.jsonl"):
-        for row in read_jsonl(path):
+        for row in read_scene_records(path):
             assert row["graph"] == graph
             assert row["generation"]["attempt_count"] == 1
             assert row["semantic_warnings"] == []

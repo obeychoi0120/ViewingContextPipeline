@@ -8,6 +8,7 @@ import extraction.steps as steps
 from extraction.backends import GeminiGenerationOutcome
 from extraction.backends.qwen_workers import QwenGenerationTask
 from pipeline_runtime import read_jsonl, write_jsonl
+from extraction.scene_storage import read_scene_records
 from pipeline_fixtures import context as context
 
 
@@ -69,7 +70,7 @@ def test_qwen_graph_finishes_each_penalty_pass_before_retrying(
     ]
     assert opened == [True]
     records = {f"{cid}:{row['scene_idx']}": row for cid in ("a", "b")
-               for row in read_jsonl(context.graph_scene_dir("qwen") / f"{cid}.jsonl")}
+               for row in read_scene_records(context.graph_scene_dir("qwen") / f"{cid}.jsonl")}
     assert len(records) == 18
     assert records["a:0"]["generation"]["attempt_count"] == 2
     assert records["b:0"]["generation"]["attempt_count"] == 3
@@ -135,7 +136,7 @@ def test_qwen_scenes_resume_incomplete_pass_before_later_penalties(
     scene_dir = context.extraction_dir(representation, "qwen", "scenes")
     assert not (scene_dir / ".recovery").exists()
     for cid in ("a", "b"):
-        records = read_jsonl(scene_dir / f"{cid}.jsonl")
+        records = read_scene_records(scene_dir / f"{cid}.jsonl")
         assert [r["generation"]["attempt_count"] for r in records] == [3 if cid == "a" else 2, 1]
 
 

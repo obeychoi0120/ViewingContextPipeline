@@ -11,6 +11,7 @@ from extraction.errors import ExtractionStepError
 from extraction.evidence import build_scene_evidence
 from extraction.monitoring import video_names
 from extraction.raw_output import is_raw_graph, valid_raw_graph
+from extraction.scene_storage import read_scene_records, write_scene_records
 from pipeline_runtime import RunContext, read_json, read_jsonl, write_jsonl
 
 
@@ -39,16 +40,13 @@ def write_scene_checkpoint(
     """Atomically persist the completed subset of one content's scenes."""
     records.sort(key=lambda row: int(row["scene_idx"]))
     failures.sort(key=lambda row: int(row["scene_idx"]))
-    if not scene_path.exists() or read_jsonl(scene_path) != records:
+    journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
+    if journal.exists() or not scene_path.exists() or read_scene_records(scene_path) != records:
         from extraction.input_tracking import invalidate_inputs
         invalidate_inputs(scene_path.parent.parent / "summaries" / f"{scene_path.stem}.json")
-    journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
-    from artifact_io import atomic_write_json, atomic_write_jsonl
+    from artifact_io import atomic_write_json
     atomic_write_json(journal, {"records": records, "failures": failures}, durable=True)
-    if records:
-        atomic_write_jsonl(scene_path, records, durable=True)
-    else:
-        scene_path.unlink(missing_ok=True)
+    write_scene_records(scene_path, records)
     write_failure_jsonl(failure_path, failures)
     journal.unlink()
     if not any(journal.parent.iterdir()):

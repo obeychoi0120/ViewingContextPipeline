@@ -22,11 +22,12 @@ from extraction.recovery import (
     fingerprint,
     generate_with_recovery,
 )
+from extraction.scene_storage import read_scene_records
 from extraction.semantic_graph import graph_summary_prompt
 from extraction.step_support import minimal_description_records, minimal_graph_records, result
 from extraction.structured_output import OutputValidationError
 from extraction.summary_validation import SUMMARY_SCHEMA_VERSION, inspect_summary
-from pipeline_runtime import read_json, read_jsonl
+from pipeline_runtime import read_json
 
 GenerationFunction = Callable
 
@@ -102,7 +103,7 @@ def run_summary_stage(
                 failures[cid] = "missing Gemini scenes"
                 continue
             raise ExtractionStepError(f"missing scene input: {source}")
-        records = normalize(read_jsonl(source), source)
+        records = normalize(read_scene_records(source), source)
         if not records:
             failures[cid] = "empty scene input"
             continue

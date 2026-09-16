@@ -32,13 +32,14 @@ def _read_jsonl(
     *,
     required: bool = True,
     report_error: bool = True,
+    reader=read_jsonl,
 ) -> tuple[list[Any], bool]:
     if not path.is_file():
         if required and report_error:
             _error(errors, "missing_artifact", f"missing {label}", path=str(path))
         return [], not required
     try:
-        return list(read_jsonl(path)), True
+        return list(reader(path)), True
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         if report_error:
             _error(

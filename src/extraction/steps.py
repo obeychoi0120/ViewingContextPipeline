@@ -31,8 +31,9 @@ from extraction.step_support import (
     visual_rows,
 )
 from extraction.summary_executor import run_summary_stage, qwen_generator
+from extraction.scene_storage import read_scene_records, migrate_scene_schema
 from pipeline_logging import log_step_start
-from pipeline_runtime import RunContext, read_json, read_jsonl
+from pipeline_runtime import RunContext, read_json
 
 GRAPH_SOURCES = ("qwen", "gemini")
 
@@ -147,7 +148,7 @@ def _extract(context, *, representation, model, schema, force=False):
             failure_path = failure_dir / f"{cid}.jsonl"
             restore_scene_checkpoint(output, failure_path)
             rows = prepare_rows(visual)
-            cached = normalize(read_jsonl(output), output) if output.is_file() and not force else []
+            cached = normalize(read_scene_records(output), output) if output.is_file() and not force else []
             by_index = {r["scene_idx"]: r for r in cached}
             if len(by_index) != len(cached):
                 raise ExtractionStepError(f"duplicate cached scenes: {output}")
@@ -297,6 +298,7 @@ def summarize_description(context, *, source, schema, force=False):
 
 
 STEP_HANDLERS = {
+    "migrate-scene-schema": migrate_scene_schema,
     "extract-graph-scenes": extract_graph_scenes,
     "extract-description-scenes": extract_description_scenes,
     "summarize-graph": summarize_graph,
