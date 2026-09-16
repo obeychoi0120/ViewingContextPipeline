@@ -128,15 +128,21 @@ def test_fallback_missing_only_raw_precedence_and_identical_vectors(ready_contex
         embed_representations(context, target=["desc_gemini"])
 
 
-@pytest.mark.parametrize(
-    "length,expected_calls,status",
-    [(200, 1, "complete"), (201, 1, "raw_fallback"), (20, 1, "complete")],
-)
-def test_summary_length_failure_without_correction_and_cached_resume(
-    ready_context, fake_models, monkeypatch, length, expected_calls, status
+@pytest.mark.parametrize("source", ["qwen", "gemini"])
+@pytest.mark.parametrize("representation", ["graph", "description"])
+@pytest.mark.parametrize("length", [20, 200, 201])
+def test_summary_word_count_is_prompt_only_and_cached_resume(
+    ready_context, fake_models, monkeypatch, source, representation, length
 ):
+    import extraction.steps as steps
+
     context = ready_context
-    extract_graph_scenes(context, model="qwen", schema="prompts/graph_scene_v3.md")
+    extract = getattr(steps, f"extract_{representation}_scenes")
+    extract(context, model=source,
+            schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    summarize = getattr(steps, f"summarize_{representation}")
+    options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
+    directory = context.extraction_dir(representation, source, "summaries")
     calls = []
 
     @contextmanager
@@ -146,21 +152,24 @@ def test_summary_length_failure_without_correction_and_cached_resume(
             calls.append(tasks)
             for task in tasks:
                 assert task.structured_output is None and task.max_new_tokens == 512
-                callback(task.task_id, "word " * (length if len(calls) == 1 else 100))
+                callback(task.task_id, "word " * length)
             return {}
 
         yield generate
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert len(calls) == expected_calls
-    for path in context.graph_summary_dir("qwen").glob("*.json"):
+    assert summarize(context, **options)["failure_count"] == 0
+    assert len(calls) == 1
+    for path in directory.glob("*.json"):
         doc = read_json(path)
-        assert doc["status"] == status and doc["word_count"] == length
-        assert doc["correction_count"] == expected_calls - 1
-        assert "person" in calls[0][0].prompt and "relationship" in calls[0][0].prompt
-    summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert len(calls) == expected_calls
+        assert doc["status"] == "complete" and doc["word_count"] == length
+        assert doc["text"] == " ".join(["word"] * length)
+        assert doc["violations"] == [] and doc["correction_count"] == 0
+    assert not (directory / "failures.jsonl").exists()
+    assert summarize(context, **options)["failure_count"] == 0
+    assert len(calls) == 1
+    arm = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
+    assert embed_representations(context, target=[arm])["generated_arms"] == [arm]
 
 
 def test_summary_keeps_first_nonempty_raw_without_correction(ready_context, fake_models, monkeypatch):
@@ -174,7 +183,7 @@ def test_summary_keeps_first_nonempty_raw_without_correction(ready_context, fake
             tasks = list(tasks)
             calls.append(tasks)
             for task in tasks:
-                callback(task.task_id, "first " * 201)
+                callback(task.task_id, "first " * 100 + "\n\n" + "second " * 101)
             return {}
 
         yield generate
@@ -185,6 +194,7 @@ def test_summary_keeps_first_nonempty_raw_without_correction(ready_context, fake
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
     assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
     assert doc["word_count"] == 201
+    assert doc["violations"] == ["multiple_paragraphs"]
     assert doc["text"].startswith("first")
     embed_representations(context, target=["graph_qwen"])
 

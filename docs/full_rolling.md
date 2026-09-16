@@ -46,7 +46,7 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 즉시 저장합니다. 요청은 한 번만 생성하며, 실패는 Graph·Description의 `scenes/failures/{content_id}.jsonl`에 콘텐츠 ID·scene 번호·실패 이유·생성 원문을 기록합니다. 생성 journal이나 pending/checkpoint·진행 cursor는 저장하지 않습니다. 중단 후에는 정상 저장 결과와 실패 기록을 건너뛰고 미완료 항목을 다시 생성합니다. `--force`는 해당 단계의 실패 기록을 비우고 생성을 새로 시작하며 공유 이미지는 보존합니다.
 
-신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 한 번 생성한 결과의 길이·형식 위반은 즉시 `summaries/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 비어 있지 않은 출력은 Raw로 남깁니다. 자동 재시도나 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
+신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 200단어 상한은 프롬프트 지시로만 유지하며, 단어 수 초과만으로 실패나 Raw로 분류하지 않습니다. 한 번 생성한 결과의 형식 위반·토큰 제한으로 잘린 출력은 즉시 `summaries/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 비어 있지 않은 출력은 Raw로 남깁니다. 자동 재시도나 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
 
 추천은 `recommendations/{date}/seed_{seed}/{arm}/`에 사건별 결과, 학습 이력, `sasrec.pt`를 저장한 뒤 `complete.json`을 마지막으로 게시합니다. 완료 검증에 실패한 조합만 재실행합니다. `training.json`에 전체 아이템 빈도 사전을 중복 저장하지 않으며 검증에 쓰는 사건별 `refit_item_frequency`는 유지합니다.
 

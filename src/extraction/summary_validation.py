@@ -1,4 +1,4 @@
-"""One paragraph, up to 200 whitespace-delimited English words."""
+"""Validate paragraph format; word-count limits are prompt instructions only."""
 
 from __future__ import annotations
 import re
@@ -25,8 +25,6 @@ def inspect_summary(text: str) -> tuple[str, list[str]]:
     if re.search(r"\n\s*\n", text.strip()):
         violations.append("multiple_paragraphs")
     normalized = " ".join(text.split())
-    if len(normalized.split()) > 200:
-        violations.append("over_200_words")
     return normalized, violations
 
 
