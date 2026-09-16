@@ -20,7 +20,8 @@ context:
 - An array of strings for additional setting, presentation, or grounded interpretation, retaining uncertainty. Use it for information not already captured by entities and relations, including a shift between unrelated shots when relevant.
 - Merge equivalent observations. Do not repeat attributes, relations, or context entries, or add generic narrative conclusions. The on-screen wording restriction applies to every field.
 
-Illustrative example only, not evidence for the supplied frames: a person in a red jacket smiles while holding a white cup; another person in a blue shirt holds a blue cup and raises a free hand. An unrelated later shot shows a bird preening.
+Illustrative example: a person in a red jacket smiles while holding a white cup; another person in a blue shirt holds a blue cup and raises a free hand. An unrelated later shot shows a bird preening.
+
 {"entities":[{"id":"person1","name":"person","attributes":["red jacket","smiling"]},{"id":"person2","name":"person","attributes":["blue shirt","raising a hand"]},{"id":"cup1","name":"cup","attributes":["white"]},{"id":"cup2","name":"cup","attributes":["blue"]},{"id":"bird1","name":"bird","attributes":["preening"]}],"relations":[{"subject_id":"person1","predicate":"holding","object_id":"cup1"},{"subject_id":"person2","predicate":"holding","object_id":"cup2"}],"context":["The segment switches between unrelated shots."]}
 
 Before returning, check that every relation ID exists, its subject and target are correct, and equivalent observations appear only once. Empty arrays are allowed. Return the JSON object without Markdown or commentary, then stop.

@@ -1,15 +1,8 @@
-from dataclasses import replace
-import json
-
 import pytest
 
 from extraction.backends.qwen_workers import QwenGenerationTask
-from extraction.recovery import generate_with_recovery
-from extraction.structured_output import GRAPH_JSON_SCHEMA, OutputValidationError
-
-
-def graph():
-    return {"entities": [], "relations": [], "context": []}
+from extraction.generation import generate_once
+from extraction.structured_output import GRAPH_JSON_SCHEMA
 
 
 def task(name):
@@ -17,182 +10,77 @@ def task(name):
                               structured_output={"json": GRAPH_JSON_SCHEMA})
 
 
-def validate(task_id, text):
-    if not text.startswith("valid"):
-        raise OutputValidationError("invalid response")
-    return {"status": "complete", "text": text}, "native"
+def test_streaming_once_refills_before_completion_and_never_retries():
+    seen, outputs, calls = [], {}, []
 
+    def tasks():
+        for i in range(1000):
+            seen.append(str(i))
+            yield task(str(i))
 
-def run(tmp_path, generate, tasks=None, **kwargs):
-    outputs, failures = {}, {}
-    options = dict(penalties=[1, 1.05, 1.1, 1.15, 1.2], directory=tmp_path,
-                   identity={"model": "fixture"}, validate=validate,
-                   complete=lambda key, value: outputs.update({key: value}),
-                   failed=lambda key, value: failures.update({key: value}),
-                   raw_fallback=lambda key, raw: {"status": "raw_fallback", "text": raw})
-    options.update(kwargs)
-    generate_with_recovery(generate, tasks or [task("a")], **options)
-    return outputs, failures
-
-
-def cycles(tmp_path, name="a"):
-    return next(json.loads(path.read_text())["cycles"] for path in tmp_path.glob("*.json")
-                if json.loads(path.read_text())["task_id"] == name)
-
-
-def test_only_failed_tasks_retry_constraints_stay_enabled_and_raw_is_last_nonempty(tmp_path):
-    batches = []
-
-    def generate(tasks, callback):
-        tasks = list(tasks)
-        batches.append([(t.task_id, t.repetition_penalty) for t in tasks])
-        for t in tasks:
-            assert t.structured_output == {"json": GRAPH_JSON_SCHEMA}
-            text = ("valid first" if t.task_id == "b" else
-                    "" if t.repetition_penalty == 1.2 else f"bad {t.repetition_penalty}")
-            callback(t.task_id, text)
-            callback(t.task_id, text)  # Duplicate callbacks do not consume another attempt.
-        return {}
-
-    outputs, failures = run(tmp_path, generate, [task("a"), task("b")])
-    assert not failures
-    assert outputs["a"]["status"] == "raw_fallback" and outputs["a"]["text"] == "bad 1.15"
-    assert outputs["b"]["status"] == "complete"
-    assert len(batches) == 5 and all([name for name, _ in b] == ["a"] for b in batches[1:])
-    assert outputs["a"]["generation"]["attempt_count"] == 5
-    assert not list(tmp_path.glob("*.json"))
-
-
-def test_interrupt_resumes_next_penalty_and_failed_cycle_restarts(tmp_path):
-    def interrupted(tasks, callback):
-        callback("a", "")
-        raise KeyboardInterrupt
-
-    with pytest.raises(KeyboardInterrupt):
-        run(tmp_path, interrupted)
-    seen = []
-
-    def empty(tasks, callback):
-        seen.append(next(iter(tasks)).repetition_penalty)
-        return {"a": ""}
-
-    outputs, failures = run(tmp_path, empty)
-    assert not outputs and len(failures["a"]) == 5
-    assert seen == [1.05, 1.1, 1.15, 1.2]
-    outputs, _ = run(tmp_path, lambda tasks, _: {"a": "valid recovered"})
-    assert outputs["a"]["status"] == "complete"
-    assert outputs["a"]["generation"]["attempt_count"] == 1
-    assert not list(tmp_path.glob("*.json"))
-
-
-def test_publish_failure_replays_durable_response_and_force_starts_fresh(tmp_path):
-    def fault(*_):
-        raise OSError("disk unavailable")
-
-    with pytest.raises(OSError):
-        run(tmp_path, lambda *_: {"a": "valid saved"}, complete=fault)
-    assert cycles(tmp_path)[0]["status"] == "prepared"
-    outputs, _ = run(tmp_path, lambda *_: pytest.fail("must replay response"))
-    assert outputs["a"]["text"] == "valid saved"
-    run(tmp_path, lambda *_: {"a": "valid forced"}, force=True)
-    assert not list(tmp_path.glob("*.json"))
-
-
-def test_changed_input_does_not_use_previous_raw(tmp_path):
-    run(tmp_path, lambda *_: {"a": "old raw"}, penalties=1)
-    outputs, failures = run(tmp_path, lambda *_: {"a": ""},
-                            [replace(task("a"), prompt="changed")], penalties=1)
-    assert not outputs and failures["a"][0]["raw_response"] == ""
-
-
-def test_engine_error_does_not_become_raw_or_consume_budget(tmp_path):
-    def crash(*_):
-        raise RuntimeError("structured grammar compilation failed")
-
-    with pytest.raises(RuntimeError, match="compilation"):
-        run(tmp_path, crash)
-    assert not list(tmp_path.glob("*.json"))
-
-
-def test_scene_stream_prepares_only_admitted_tasks_and_refills_before_completion(tmp_path, monkeypatch):
-    import extraction.recovery as recovery
-    hashed = []
-    original_key = recovery.generation_key
-    def key(task, identity, penalties):
-        hashed.extend(task.image_paths)
-        return original_key(task, identity, penalties)
-    monkeypatch.setattr(recovery, "generation_key", key)
-    monkeypatch.setattr(recovery, "file_fingerprint", lambda *a: pytest.fail("prepared images must not be read"))
-    tasks = [replace(task(str(i)), image_paths=(str(i),)) for i in range(1000)]
-    calls = []
     def generate(stream, callback):
         calls.append(True)
-        assert hashed == ["0"]
-        assert not list(tmp_path.glob("*.json"))
+        assert seen == []
         iterator = iter(stream)
-        first, second, third = next(iterator), next(iterator), next(iterator)
-        assert hashed == ["0", "1", "2"]
-        callback(second.task_id, "valid")
-        fourth = next(iterator)  # The first scene is still running.
-        for item in (first, third, fourth):
-            callback(item.task_id, "valid")
+        first, second = next(iterator), next(iterator)
+        assert seen == ["0", "1"]
+        callback(second.task_id, "")
+        third = next(iterator)  # Refill while the first task is still running.
+        for item in (first, third):
+            assert item.structured_output == {"json": GRAPH_JSON_SCHEMA}
+            callback(item.task_id, "invalid output")
+            callback(item.task_id, "duplicate ignored")
         for item in iterator:
-            callback(item.task_id, "valid")
+            callback(item.task_id, "valid output")
         return {}
-    outputs, failures = run(tmp_path, generate, tasks)
-    assert len(calls) == 1 and len(outputs) == 1000 and not failures
+
+    generate_once(generate, tasks(), lambda key, value: outputs.update({key: value}))
+    assert calls == [True] and len(outputs) == 1000
+    assert outputs["0"] == "invalid output" and outputs["1"] == ""
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), OSError("disk unavailable"), RuntimeError("OOM")])
+def test_single_generation_propagates_execution_and_publication_errors(error, tmp_path):
+    def generate(tasks, callback):
+        for item in tasks:
+            callback(item.task_id, "response")
+        return {}
+
+    def publish(*_):
+        raise error
+
+    with pytest.raises(type(error)):
+        generate_once(generate, [task("a")], publish)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("case", ["missing", "unexpected", "duplicate"])
+def test_single_generation_rejects_invalid_backend_results(case):
+    def generate(tasks, callback):
+        list(tasks)
+        if case == "unexpected":
+            callback("other", "text")
+        return {}
+
+    tasks = [task("a"), task("a")] if case == "duplicate" else [task("a")]
+    with pytest.raises((ValueError, RuntimeError), match=case):
+        generate_once(generate, tasks, lambda *_: None)
+
+
+def test_returned_results_are_published_once():
+    outputs = {}
+    def generate(tasks, callback):
+        return {item.task_id: "text" for item in tasks}
+    generate_once(generate, [task("a")], lambda key, value: outputs.update({key: value}))
+    assert outputs == {"a": "text"}
 
 
 def test_graph_repair_never_invents_required_fields():
     from extraction.scene_executor import graph_scene_result
+    graph = {"entities": [], "relations": [], "context": []}
     row = {"scene_idx": 0, "keyframes": [5]}
-    repaired, failure = graph_scene_result(row, repr(graph()), strict=True)
+    repaired, failure = graph_scene_result(row, repr(graph), strict=True)
     assert failure is None and repaired["parse_mode"] == "repaired"
-    assert repaired["graph"] == graph()
+    assert repaired["graph"] == graph
     record, failure = graph_scene_result(row, '{"setting_context": "indoor",}', strict=True)
     assert record is None and failure
-
-
-def test_checkpoint_write_failure_preserves_last_durable_attempt(tmp_path, monkeypatch):
-    import extraction.recovery as recovery
-    original = recovery._save
-    def fail_second_response(path, document):
-        if len(document["cycles"][-1]["attempts"]) == 2:
-            raise OSError("disk unavailable")
-        original(path, document)
-    monkeypatch.setattr(recovery, "_save", fail_second_response)
-    with pytest.raises(OSError):
-        run(tmp_path, lambda *_: {"a": "invalid"})
-    assert len(cycles(tmp_path)[0]["attempts"]) == 1
-    monkeypatch.setattr(recovery, "_save", original)
-    seen = []
-    run(tmp_path, lambda tasks, _: (seen.append(next(iter(tasks)).repetition_penalty) or {"a": "valid replay"}))
-    assert seen == [1.05]
-
-
-def test_streaming_recovery_does_not_consume_future_inputs_before_generation(tmp_path):
-    completed = []
-
-    def tasks():
-        yield task("a")
-        assert completed == ["a"]
-        yield task("b")
-
-    def generate(tasks, callback):
-        for item in tasks:
-            callback(item.task_id, "valid")
-            completed.append(item.task_id)
-        return {}
-
-    outputs, failures = run(tmp_path, generate, tasks())
-    assert set(outputs) == {"a", "b"} and not failures
-
-
-def test_streaming_recovery_rejects_duplicate_after_first_task_completes(tmp_path):
-    def generate(tasks, callback):
-        for item in tasks:
-            callback(item.task_id, "valid")
-        return {}
-
-    with pytest.raises(ValueError, match="duplicate recovery task"):
-        run(tmp_path, generate, iter([task("a"), task("a")]))

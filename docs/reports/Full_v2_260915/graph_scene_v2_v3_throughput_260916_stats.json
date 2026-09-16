@@ -1,0 +1,1373 @@
+{
+  "full_archives": {
+    "2": {
+      "observed_requests": 317,
+      "published": 220,
+      "retry_pending": 97,
+      "published_rate": 0.69401,
+      "attempt_counts": {
+        "1": 317
+      },
+      "finish_reasons": {
+        "stop": 214,
+        "length": 103
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 81,
+        "JSON repair failed": 16
+      },
+      "pending_penalties": {
+        "1.0": 97
+      },
+      "pending_status": {
+        "running": 97
+      },
+      "output_tokens_all": {
+        "count": 317,
+        "sum": 171657,
+        "mean": 541.505,
+        "median": 427,
+        "p90": 1024,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 220,
+        "sum": 72329,
+        "mean": 328.768,
+        "median": 344.0,
+        "p90": 476,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 97,
+        "sum": 99328,
+        "mean": 1024,
+        "median": 1024,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 780.259,
+      "published_graphs": {
+        "entities": {
+          "count": 220,
+          "sum": 948,
+          "mean": 4.309,
+          "median": 5.5,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        },
+        "relations": {
+          "count": 220,
+          "sum": 642,
+          "mean": 2.918,
+          "median": 2.0,
+          "p90": 5,
+          "min": 1,
+          "max": 12
+        },
+        "context": {
+          "count": 220,
+          "sum": 876,
+          "mean": 3.982,
+          "median": 2.0,
+          "p90": 4,
+          "min": 1,
+          "max": 138
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "0": 84,
+        "1": 76,
+        "2": 78,
+        "3": 79
+      }
+    },
+    "3": {
+      "observed_requests": 433,
+      "published": 61,
+      "retry_pending": 372,
+      "published_rate": 0.14088,
+      "attempt_counts": {
+        "1": 433
+      },
+      "finish_reasons": {
+        "stop": 57,
+        "length": 376
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 333,
+        "JSON repair failed": 39
+      },
+      "pending_penalties": {
+        "1.0": 372
+      },
+      "pending_status": {
+        "running": 372
+      },
+      "output_tokens_all": {
+        "count": 433,
+        "sum": 417447,
+        "mean": 964.081,
+        "median": 1024,
+        "p90": 1024,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 61,
+        "sum": 36519,
+        "mean": 598.672,
+        "median": 575,
+        "p90": 924,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 372,
+        "sum": 380928,
+        "mean": 1024,
+        "median": 1024.0,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 6843.393,
+      "published_graphs": {
+        "entities": {
+          "count": 61,
+          "sum": 387,
+          "mean": 6.344,
+          "median": 6,
+          "p90": 10,
+          "min": 1,
+          "max": 13
+        },
+        "relations": {
+          "count": 61,
+          "sum": 455,
+          "mean": 7.459,
+          "median": 7,
+          "p90": 13,
+          "min": 1,
+          "max": 18
+        },
+        "context": {
+          "count": 61,
+          "sum": 251,
+          "mean": 4.115,
+          "median": 4,
+          "p90": 7,
+          "min": 1,
+          "max": 11
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "2": 115,
+        "3": 107,
+        "0": 108,
+        "1": 103
+      }
+    }
+  },
+  "matched_tasks": 312,
+  "matched_outcomes": {
+    "(True, False)": 181,
+    "(False, False)": 92,
+    "(True, True)": 34,
+    "(False, True)": 5
+  },
+  "matched": {
+    "2": {
+      "observed_requests": 312,
+      "published": 215,
+      "retry_pending": 97,
+      "published_rate": 0.6891,
+      "attempt_counts": {
+        "1": 312
+      },
+      "finish_reasons": {
+        "stop": 209,
+        "length": 103
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 81,
+        "JSON repair failed": 16
+      },
+      "pending_penalties": {
+        "1.0": 97
+      },
+      "pending_status": {
+        "running": 97
+      },
+      "output_tokens_all": {
+        "count": 312,
+        "sum": 170879,
+        "mean": 547.689,
+        "median": 430.5,
+        "p90": 1024,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 215,
+        "sum": 71551,
+        "mean": 332.795,
+        "median": 349,
+        "p90": 476,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 97,
+        "sum": 99328,
+        "mean": 1024,
+        "median": 1024,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 794.786,
+      "published_graphs": {
+        "entities": {
+          "count": 215,
+          "sum": 938,
+          "mean": 4.363,
+          "median": 6,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        },
+        "relations": {
+          "count": 215,
+          "sum": 637,
+          "mean": 2.963,
+          "median": 3,
+          "p90": 5,
+          "min": 1,
+          "max": 12
+        },
+        "context": {
+          "count": 215,
+          "sum": 864,
+          "mean": 4.019,
+          "median": 3,
+          "p90": 4,
+          "min": 1,
+          "max": 138
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "0": 83,
+        "1": 74,
+        "2": 77,
+        "3": 78
+      }
+    },
+    "3": {
+      "observed_requests": 312,
+      "published": 39,
+      "retry_pending": 273,
+      "published_rate": 0.125,
+      "attempt_counts": {
+        "1": 312
+      },
+      "finish_reasons": {
+        "length": 277,
+        "stop": 35
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 243,
+        "JSON repair failed": 30
+      },
+      "pending_penalties": {
+        "1.0": 273
+      },
+      "pending_status": {
+        "running": 273
+      },
+      "output_tokens_all": {
+        "count": 312,
+        "sum": 303739,
+        "mean": 973.522,
+        "median": 1024.0,
+        "p90": 1024,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 39,
+        "sum": 24187,
+        "mean": 620.179,
+        "median": 618,
+        "p90": 968,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 273,
+        "sum": 279552,
+        "mean": 1024,
+        "median": 1024,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 7788.179,
+      "published_graphs": {
+        "entities": {
+          "count": 39,
+          "sum": 261,
+          "mean": 6.692,
+          "median": 6,
+          "p90": 11,
+          "min": 1,
+          "max": 13
+        },
+        "relations": {
+          "count": 39,
+          "sum": 298,
+          "mean": 7.641,
+          "median": 7,
+          "p90": 14,
+          "min": 1,
+          "max": 18
+        },
+        "context": {
+          "count": 39,
+          "sum": 163,
+          "mean": 4.179,
+          "median": 4,
+          "p90": 7,
+          "min": 1,
+          "max": 9
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "0": 78,
+        "1": 70,
+        "2": 82,
+        "3": 82
+      }
+    }
+  },
+  "both_published": {
+    "2": {
+      "observed_requests": 34,
+      "published": 34,
+      "retry_pending": 0,
+      "published_rate": 1.0,
+      "attempt_counts": {
+        "1": 34
+      },
+      "finish_reasons": {
+        "stop": 32,
+        "length": 2
+      },
+      "pending_errors": {},
+      "pending_penalties": {},
+      "pending_status": {},
+      "output_tokens_all": {
+        "count": 34,
+        "sum": 10498,
+        "mean": 308.765,
+        "median": 239.0,
+        "p90": 443,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 34,
+        "sum": 10498,
+        "mean": 308.765,
+        "median": 239.0,
+        "p90": 443,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_pending": {},
+      "output_tokens_per_published_scene": 308.765,
+      "published_graphs": {
+        "entities": {
+          "count": 34,
+          "sum": 127,
+          "mean": 3.735,
+          "median": 3.0,
+          "p90": 6,
+          "min": 1,
+          "max": 8
+        },
+        "relations": {
+          "count": 34,
+          "sum": 71,
+          "mean": 2.088,
+          "median": 1.0,
+          "p90": 5,
+          "min": 1,
+          "max": 5
+        },
+        "context": {
+          "count": 34,
+          "sum": 230,
+          "mean": 6.765,
+          "median": 3.0,
+          "p90": 4,
+          "min": 1,
+          "max": 138
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "2": 13,
+        "1": 7,
+        "0": 8,
+        "3": 6
+      }
+    },
+    "3": {
+      "observed_requests": 34,
+      "published": 34,
+      "retry_pending": 0,
+      "published_rate": 1.0,
+      "attempt_counts": {
+        "1": 34
+      },
+      "finish_reasons": {
+        "stop": 30,
+        "length": 4
+      },
+      "pending_errors": {},
+      "pending_penalties": {},
+      "pending_status": {},
+      "output_tokens_all": {
+        "count": 34,
+        "sum": 20483,
+        "mean": 602.441,
+        "median": 561.5,
+        "p90": 968,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 34,
+        "sum": 20483,
+        "mean": 602.441,
+        "median": 561.5,
+        "p90": 968,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_pending": {},
+      "output_tokens_per_published_scene": 602.441,
+      "published_graphs": {
+        "entities": {
+          "count": 34,
+          "sum": 221,
+          "mean": 6.5,
+          "median": 6.0,
+          "p90": 11,
+          "min": 1,
+          "max": 13
+        },
+        "relations": {
+          "count": 34,
+          "sum": 250,
+          "mean": 7.353,
+          "median": 6.0,
+          "p90": 14,
+          "min": 1,
+          "max": 18
+        },
+        "context": {
+          "count": 34,
+          "sum": 144,
+          "mean": 4.235,
+          "median": 4.0,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "2": 15,
+        "1": 4,
+        "0": 8,
+        "3": 7
+      }
+    }
+  },
+  "provenance": {
+    "2": {
+      "arm": "graph_qwen",
+      "model": {
+        "files_signature": "6bc32ccd17dc9e174e947331183fe630df83e7ccdbb02520fd6bc66874f85407",
+        "path": "/home_nvme/shared/models/Qwen3-VL-2B-Instruct",
+        "signature_policy": "config/tokenizer text hashes; weight filenames, sizes and mtimes"
+      },
+      "prompt_hash": "832eda946a3cb8cd8d7678b06f4bb8f3751fbeb0980fd10342870668cc898e7b",
+      "prompt_path": "/home_nvme/junsu2.choi/workspace/ViewingContextPipeline/prompts/graph_scene_v2.md",
+      "representation": "graph",
+      "schema_contract": "graph/v3",
+      "settings": {
+        "backend": "vllm-0.28.0",
+        "max_new_tokens": 1024,
+        "qwen": {
+          "async_scheduling": null,
+          "enable_chunked_prefill": true,
+          "enable_prefix_caching": true,
+          "enforce_eager": false,
+          "gpu_memory_utilization": 0.9,
+          "max_model_len": "auto",
+          "max_num_batched_tokens": 16384,
+          "max_num_seqs": 32,
+          "renderer_num_workers": 4
+        },
+        "repetition_penalty": [
+          1.0,
+          1.05,
+          1.1,
+          1.15,
+          1.2
+        ],
+        "visual_evidence": {
+          "image_resolution": [
+            640,
+            352
+          ],
+          "num_keyframes": 6,
+          "scene_duration": 30
+        }
+      }
+    },
+    "3": {
+      "arm": "graph_qwen",
+      "model": {
+        "files_signature": "6bc32ccd17dc9e174e947331183fe630df83e7ccdbb02520fd6bc66874f85407",
+        "path": "/home_nvme/shared/models/Qwen3-VL-2B-Instruct",
+        "signature_policy": "config/tokenizer text hashes; weight filenames, sizes and mtimes"
+      },
+      "prompt_hash": "dbdc17a2c01093f3b7363e1875698bad36eda7c9f9da285a6b24f40d72aa9f04",
+      "prompt_path": "/home_nvme/junsu2.choi/workspace/ViewingContextPipeline/prompts/graph_scene_v3.md",
+      "representation": "graph",
+      "schema_contract": "graph/v3",
+      "settings": {
+        "backend": "vllm-0.28.0",
+        "max_new_tokens": 1024,
+        "qwen": {
+          "async_scheduling": null,
+          "enable_chunked_prefill": true,
+          "enable_prefix_caching": true,
+          "enforce_eager": false,
+          "gpu_memory_utilization": 0.9,
+          "max_model_len": "auto",
+          "max_num_batched_tokens": 16384,
+          "max_num_seqs": 32,
+          "renderer_num_workers": 4
+        },
+        "repetition_penalty": [
+          1.0,
+          1.05,
+          1.1,
+          1.15,
+          1.2
+        ],
+        "visual_evidence": {
+          "image_resolution": [
+            640,
+            352
+          ],
+          "num_keyframes": 6,
+          "scene_duration": 30
+        }
+      }
+    }
+  },
+  "actual_generation_settings": {
+    "2": {
+      "do_sample": false,
+      "max_new_tokens": 1024,
+      "repetition_penalty": 1.0,
+      "seed": null,
+      "structured_output": {
+        "json": {
+          "additionalProperties": false,
+          "properties": {
+            "context": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "entities": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "attributes": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "attributes"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "relations": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "object_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "predicate": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "subject_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "subject_id",
+                  "predicate",
+                  "object_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "entities",
+            "relations",
+            "context"
+          ],
+          "type": "object"
+        }
+      },
+      "temperature": null,
+      "top_k": null,
+      "top_p": null
+    },
+    "3": {
+      "do_sample": false,
+      "max_new_tokens": 1024,
+      "repetition_penalty": 1.0,
+      "seed": null,
+      "structured_output": {
+        "json": {
+          "additionalProperties": false,
+          "properties": {
+            "context": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "entities": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "attributes": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "attributes"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "relations": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "object_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "predicate": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "subject_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "subject_id",
+                  "predicate",
+                  "object_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "entities",
+            "relations",
+            "context"
+          ],
+          "type": "object"
+        }
+      },
+      "temperature": null,
+      "top_k": null,
+      "top_p": null
+    }
+  },
+  "actual_engine_settings": {
+    "2": {
+      "async_scheduling": true,
+      "dtype": "bfloat16",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": true,
+      "enforce_eager": false,
+      "generation_config": "vllm",
+      "gpu_memory_utilization": 0.9,
+      "image_limit": 6,
+      "kv_cache_dtype": "auto",
+      "logits_processors": [
+        "extraction.backends.qwen_logits:GeneratedTokenLogitsProcessor"
+      ],
+      "max_model_len": 262144,
+      "max_num_batched_tokens": 16384,
+      "max_num_seqs": 32,
+      "model_impl": "vllm",
+      "renderer_num_workers": 4,
+      "stop_token_ids": [
+        151645,
+        151643
+      ],
+      "structured_outputs_config": {
+        "backend": "xgrammar"
+      },
+      "tensor_parallel_size": 1
+    },
+    "3": {
+      "async_scheduling": true,
+      "dtype": "bfloat16",
+      "enable_chunked_prefill": true,
+      "enable_prefix_caching": true,
+      "enforce_eager": false,
+      "generation_config": "vllm",
+      "gpu_memory_utilization": 0.9,
+      "image_limit": 6,
+      "kv_cache_dtype": "auto",
+      "logits_processors": [
+        "extraction.backends.qwen_logits:GeneratedTokenLogitsProcessor"
+      ],
+      "max_model_len": 262144,
+      "max_num_batched_tokens": 16384,
+      "max_num_seqs": 32,
+      "model_impl": "vllm",
+      "renderer_num_workers": 4,
+      "stop_token_ids": [
+        151645,
+        151643
+      ],
+      "structured_outputs_config": {
+        "backend": "xgrammar"
+      },
+      "tensor_parallel_size": 1
+    }
+  },
+  "matched_pending_prompt_token_difference_v2_minus_v3": {
+    "count": 92,
+    "sum": 47380,
+    "mean": 515,
+    "median": 515.0,
+    "p90": 515,
+    "min": 515,
+    "max": 515
+  },
+  "archives": {
+    "v2": {
+      "path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/Full_v2_260915/extraction/graph/qwen/scenes_v2.tar",
+      "sha256": "62b8aefb6f0d83715db1c5e5633f24c23063ac76114d928b704db453f7465360"
+    },
+    "v3": {
+      "path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/Full_v2_260915/extraction/graph/qwen/scenes_v3.tar",
+      "sha256": "f68422dc88cf5e027b661008440fa0d3d2daeb4eb6799cebe08d8c2565833671"
+    }
+  },
+  "pending_repetition_inspection": {
+    "method": "Decode complete JSON object fragments from each truncated response. Compare entity name+attributes ignoring ID; count exact repeated relation objects. These are textual repetition indicators, not semantic validity judgments.",
+    "v2": {
+      "pending": 97,
+      "repeated_entity_features": 93,
+      "repeated_relation_objects": 0
+    },
+    "v3": {
+      "pending": 372,
+      "repeated_entity_features": 351,
+      "repeated_relation_objects": 33
+    }
+  },
+  "execution_info": {
+    "2": {
+      "current_execution_id": "90dd5a4c-35ff-4ef9-90c7-e15ca2241119",
+      "all_execution_counts": {
+        "90dd5a4c-35ff-4ef9-90c7-e15ca2241119": 243,
+        "d6c2c2c7-76e8-4336-828c-200a98a0abd6": 74
+      },
+      "older_execution_records_excluded": 74
+    },
+    "3": {
+      "current_execution_id": "31bd59fa-d725-4f8a-bdba-24a1e7e25dfd",
+      "all_execution_counts": {
+        "31bd59fa-d725-4f8a-bdba-24a1e7e25dfd": 433
+      },
+      "older_execution_records_excluded": 0
+    }
+  },
+  "current_execution": {
+    "2": {
+      "observed_requests": 243,
+      "published": 146,
+      "retry_pending": 97,
+      "published_rate": 0.60082,
+      "attempt_counts": {
+        "1": 243
+      },
+      "finish_reasons": {
+        "stop": 140,
+        "length": 103
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 81,
+        "JSON repair failed": 16
+      },
+      "pending_penalties": {
+        "1.0": 97
+      },
+      "pending_status": {
+        "running": 97
+      },
+      "output_tokens_all": {
+        "count": 243,
+        "sum": 150705,
+        "mean": 620.185,
+        "median": 466,
+        "p90": 1024,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 146,
+        "sum": 51377,
+        "mean": 351.897,
+        "median": 369.0,
+        "p90": 485,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 97,
+        "sum": 99328,
+        "mean": 1024,
+        "median": 1024,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 1032.226,
+      "published_graphs": {
+        "entities": {
+          "count": 146,
+          "sum": 659,
+          "mean": 4.514,
+          "median": 6.0,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        },
+        "relations": {
+          "count": 146,
+          "sum": 457,
+          "mean": 3.13,
+          "median": 3.0,
+          "p90": 5,
+          "min": 1,
+          "max": 12
+        },
+        "context": {
+          "count": 146,
+          "sum": 666,
+          "mean": 4.562,
+          "median": 2.0,
+          "p90": 4,
+          "min": 1,
+          "max": 138
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "0": 63,
+        "1": 60,
+        "2": 62,
+        "3": 58
+      }
+    },
+    "3": {
+      "observed_requests": 433,
+      "published": 61,
+      "retry_pending": 372,
+      "published_rate": 0.14088,
+      "attempt_counts": {
+        "1": 433
+      },
+      "finish_reasons": {
+        "stop": 57,
+        "length": 376
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 333,
+        "JSON repair failed": 39
+      },
+      "pending_penalties": {
+        "1.0": 372
+      },
+      "pending_status": {
+        "running": 372
+      },
+      "output_tokens_all": {
+        "count": 433,
+        "sum": 417447,
+        "mean": 964.081,
+        "median": 1024,
+        "p90": 1024,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 61,
+        "sum": 36519,
+        "mean": 598.672,
+        "median": 575,
+        "p90": 924,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 372,
+        "sum": 380928,
+        "mean": 1024,
+        "median": 1024.0,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 6843.393,
+      "published_graphs": {
+        "entities": {
+          "count": 61,
+          "sum": 387,
+          "mean": 6.344,
+          "median": 6,
+          "p90": 10,
+          "min": 1,
+          "max": 13
+        },
+        "relations": {
+          "count": 61,
+          "sum": 455,
+          "mean": 7.459,
+          "median": 7,
+          "p90": 13,
+          "min": 1,
+          "max": 18
+        },
+        "context": {
+          "count": 61,
+          "sum": 251,
+          "mean": 4.115,
+          "median": 4,
+          "p90": 7,
+          "min": 1,
+          "max": 11
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "2": 115,
+        "3": 107,
+        "0": 108,
+        "1": 103
+      }
+    }
+  },
+  "current_execution_matched_scene_count": 238,
+  "current_execution_matched": {
+    "2": {
+      "observed_requests": 238,
+      "published": 141,
+      "retry_pending": 97,
+      "published_rate": 0.59244,
+      "attempt_counts": {
+        "1": 238
+      },
+      "finish_reasons": {
+        "length": 103,
+        "stop": 135
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 81,
+        "JSON repair failed": 16
+      },
+      "pending_penalties": {
+        "1.0": 97
+      },
+      "pending_status": {
+        "running": 97
+      },
+      "output_tokens_all": {
+        "count": 238,
+        "sum": 149927,
+        "mean": 629.945,
+        "median": 469.0,
+        "p90": 1024,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 141,
+        "sum": 50599,
+        "mean": 358.858,
+        "median": 380,
+        "p90": 486,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 97,
+        "sum": 99328,
+        "mean": 1024,
+        "median": 1024,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 1063.312,
+      "published_graphs": {
+        "entities": {
+          "count": 141,
+          "sum": 649,
+          "mean": 4.603,
+          "median": 6,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        },
+        "relations": {
+          "count": 141,
+          "sum": 452,
+          "mean": 3.206,
+          "median": 3,
+          "p90": 5,
+          "min": 1,
+          "max": 12
+        },
+        "context": {
+          "count": 141,
+          "sum": 654,
+          "mean": 4.638,
+          "median": 3,
+          "p90": 4,
+          "min": 1,
+          "max": 138
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "1": 58,
+        "2": 61,
+        "0": 62,
+        "3": 57
+      }
+    },
+    "3": {
+      "observed_requests": 238,
+      "published": 27,
+      "retry_pending": 211,
+      "published_rate": 0.11345,
+      "attempt_counts": {
+        "1": 238
+      },
+      "finish_reasons": {
+        "length": 214,
+        "stop": 24
+      },
+      "pending_errors": {
+        "graph: missing or extra fields": 186,
+        "JSON repair failed": 25
+      },
+      "pending_penalties": {
+        "1.0": 211
+      },
+      "pending_status": {
+        "running": 211
+      },
+      "output_tokens_all": {
+        "count": 238,
+        "sum": 233329,
+        "mean": 980.374,
+        "median": 1024.0,
+        "p90": 1024,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 27,
+        "sum": 17265,
+        "mean": 639.444,
+        "median": 622,
+        "p90": 968,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_pending": {
+        "count": 211,
+        "sum": 216064,
+        "mean": 1024,
+        "median": 1024,
+        "p90": 1024,
+        "min": 1024,
+        "max": 1024
+      },
+      "output_tokens_per_published_scene": 8641.815,
+      "published_graphs": {
+        "entities": {
+          "count": 27,
+          "sum": 186,
+          "mean": 6.889,
+          "median": 7,
+          "p90": 10,
+          "min": 1,
+          "max": 13
+        },
+        "relations": {
+          "count": 27,
+          "sum": 219,
+          "mean": 8.111,
+          "median": 7,
+          "p90": 14,
+          "min": 1,
+          "max": 17
+        },
+        "context": {
+          "count": 27,
+          "sum": 110,
+          "mean": 4.074,
+          "median": 4,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "2": 66,
+        "0": 57,
+        "1": 54,
+        "3": 61
+      }
+    }
+  },
+  "current_execution_matched_outcomes": {
+    "(False, False)": 92,
+    "(True, False)": 119,
+    "(False, True)": 5,
+    "(True, True)": 22
+  },
+  "current_execution_both_published": {
+    "2": {
+      "observed_requests": 22,
+      "published": 22,
+      "retry_pending": 0,
+      "published_rate": 1.0,
+      "attempt_counts": {
+        "1": 22
+      },
+      "finish_reasons": {
+        "stop": 20,
+        "length": 2
+      },
+      "pending_errors": {},
+      "pending_penalties": {},
+      "pending_status": {},
+      "output_tokens_all": {
+        "count": 22,
+        "sum": 7392,
+        "mean": 336,
+        "median": 239.0,
+        "p90": 472,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 22,
+        "sum": 7392,
+        "mean": 336,
+        "median": 239.0,
+        "p90": 472,
+        "min": 93,
+        "max": 1024
+      },
+      "output_tokens_pending": {},
+      "output_tokens_per_published_scene": 336.0,
+      "published_graphs": {
+        "entities": {
+          "count": 22,
+          "sum": 82,
+          "mean": 3.727,
+          "median": 3.0,
+          "p90": 6,
+          "min": 1,
+          "max": 6
+        },
+        "relations": {
+          "count": 22,
+          "sum": 48,
+          "mean": 2.182,
+          "median": 1.0,
+          "p90": 5,
+          "min": 1,
+          "max": 5
+        },
+        "context": {
+          "count": 22,
+          "sum": 197,
+          "mean": 8.955,
+          "median": 3.0,
+          "p90": 4,
+          "min": 1,
+          "max": 138
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "1": 6,
+        "3": 5,
+        "2": 7,
+        "0": 4
+      }
+    },
+    "3": {
+      "observed_requests": 22,
+      "published": 22,
+      "retry_pending": 0,
+      "published_rate": 1.0,
+      "attempt_counts": {
+        "1": 22
+      },
+      "finish_reasons": {
+        "stop": 19,
+        "length": 3
+      },
+      "pending_errors": {},
+      "pending_penalties": {},
+      "pending_status": {},
+      "output_tokens_all": {
+        "count": 22,
+        "sum": 13561,
+        "mean": 616.409,
+        "median": 575.5,
+        "p90": 968,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_published": {
+        "count": 22,
+        "sum": 13561,
+        "mean": 616.409,
+        "median": 575.5,
+        "p90": 968,
+        "min": 107,
+        "max": 1024
+      },
+      "output_tokens_pending": {},
+      "output_tokens_per_published_scene": 616.409,
+      "published_graphs": {
+        "entities": {
+          "count": 22,
+          "sum": 146,
+          "mean": 6.636,
+          "median": 6.0,
+          "p90": 10,
+          "min": 1,
+          "max": 13
+        },
+        "relations": {
+          "count": 22,
+          "sum": 171,
+          "mean": 7.773,
+          "median": 6.5,
+          "p90": 14,
+          "min": 1,
+          "max": 17
+        },
+        "context": {
+          "count": 22,
+          "sum": 91,
+          "mean": 4.136,
+          "median": 4.0,
+          "p90": 6,
+          "min": 1,
+          "max": 9
+        }
+      },
+      "empty_published_graphs": 0,
+      "gpu_ids": {
+        "1": 3,
+        "2": 9,
+        "3": 6,
+        "0": 4
+      }
+    }
+  }
+}

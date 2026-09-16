@@ -4,7 +4,7 @@ import pytest
 
 from extraction.recovery import fingerprint
 from extraction.scene_storage import metadata_path, migrate_scene_schema, read_scene_records
-from extraction.step_support import write_scene_checkpoint
+from extraction.step_support import write_scene_results
 from pipeline_runtime import read_json, read_jsonl, write_jsonl
 
 
@@ -29,7 +29,7 @@ def test_public_scenes_have_only_content_id_and_body_with_lossless_metadata(tmp_
     path = tmp_path / "scenes/video.jsonl"
     records = [scene(kind, 0), scene(kind, 3)]
     original = deepcopy(records)
-    write_scene_checkpoint(path, path.parent / "failures/video.jsonl", records, [])
+    write_scene_results(path, records)
     payload = read_jsonl(path)
     field = "description" if kind == "description" else "scene_graph"
     assert all(set(row) == {"content_id", field} and row["content_id"] == "video"
@@ -44,12 +44,11 @@ def test_public_scenes_have_only_content_id_and_body_with_lossless_metadata(tmp_
                for row in saved["rows"])
 
 
-def test_scene_checkpoint_recovers_interrupted_payload_and_metadata_write(tmp_path, monkeypatch):
+def test_interrupted_scene_publication_has_no_journal_and_is_detectably_incomplete(tmp_path, monkeypatch):
     import extraction.scene_storage as storage
 
     path = tmp_path / "scenes/video.jsonl"
-    failure = path.parent / "failures/video.jsonl"
-    write_scene_checkpoint(path, failure, [scene("graph")], [])
+    write_scene_results(path, [scene("graph")])
     before = path.read_bytes()
     records = [scene("graph"), scene("raw", 1)]
 
@@ -59,16 +58,17 @@ def test_scene_checkpoint_recovers_interrupted_payload_and_metadata_write(tmp_pa
     with monkeypatch.context() as patch:
         patch.setattr(storage, "atomic_write_jsonl", fail)
         with pytest.raises(OSError, match="interrupted"):
-            write_scene_checkpoint(path, failure, records, [])
+            write_scene_results(path, records)
     assert path.read_bytes() == before
-    assert read_scene_records(path) == records
+    with pytest.raises(ValueError, match="metadata"):
+        read_scene_records(path)
     assert not (path.parent / ".checkpoints").exists()
 
 
 @pytest.mark.parametrize("damage", ["missing_metadata", "changed_payload"])
 def test_compact_scene_cannot_silently_use_missing_or_stale_metadata(tmp_path, damage):
     path = tmp_path / "scenes/video.jsonl"
-    write_scene_checkpoint(path, path.parent / "failures/video.jsonl", [scene("description")], [])
+    write_scene_results(path, [scene("description")])
     if damage == "missing_metadata":
         metadata_path(path).unlink()
     else:

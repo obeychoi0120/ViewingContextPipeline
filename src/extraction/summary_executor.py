@@ -1,12 +1,10 @@
-"""Durable summary drafts, one format correction, and final embedded provenance."""
+"""One summary request per content, with compact terminal failure records."""
 
 from __future__ import annotations
 
 from contextlib import contextmanager, ExitStack
-from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Iterator
-from uuid import uuid4
 from tqdm import tqdm
 from extraction.progress import InferenceProgress
 from extraction.qwen_runtime import QwenRuntime
@@ -16,16 +14,12 @@ from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
 from extraction.errors import ExtractionStepError
 from extraction.input_tracking import clear_dirty, input_state_path
-from extraction.recovery import (
-    active_force_run,
-    clear_recovery,
-    fingerprint,
-    generate_with_recovery,
-)
+from extraction.recovery import fingerprint
+from extraction.failures import FailureLog
+from extraction.generation import generate_once
 from extraction.scene_storage import read_scene_records
 from extraction.semantic_graph import graph_summary_prompt
 from extraction.step_support import minimal_description_records, minimal_graph_records, result
-from extraction.structured_output import OutputValidationError
 from extraction.summary_validation import SUMMARY_SCHEMA_VERSION, inspect_summary
 from pipeline_runtime import read_json
 
@@ -74,38 +68,37 @@ def run_summary_stage(
 ):
     output_dir = context.extraction_dir(arm.representation, arm.model, "summaries")
     scene_dir = context.extraction_dir(arm.representation, arm.model, "scenes")
-    recovery_dir = output_dir / ".recovery"
+    failures = FailureLog(output_dir)
+    content_ids = [str(item["content_id"]) for item in catalog]
     if force:
-        atomic_write_json(recovery_dir / ".force-run", {"force_run_id": str(uuid4())}, durable=True)
-    force_run = active_force_run(recovery_dir)
+        failures.clear_contents(content_ids)
     template = schema.read_text(encoding="utf-8")
     graph = arm.representation == "graph"
     normalize = minimal_graph_records if graph else minimal_description_records
     build_prompt = graph_summary_prompt if graph else description_summary_prompt
     settings = context.config["extraction"]
     max_tokens = settings["graph" if graph else "description"]["summary_max_new_tokens"]
-    tasks, pending, drafts, documents, failures = [], {}, {}, {}, {}
-
-    def save_final(cid, document):
-        output = output_dir / f"{cid}.json"
-        atomic_write_json(output, document, durable=True)
-        clear_dirty(output)
-        (output_dir / "failures" / f"{cid}.jsonl").unlink(missing_ok=True)
-        (output_dir / ".pending" / f"{cid}.json").unlink(missing_ok=True)
-        documents[cid] = document
-        progress.complete()
+    tasks, pending, documents = [], {}, {}
 
     for item in catalog:
         cid = str(item["content_id"])
         source = scene_dir / f"{cid}.jsonl"
+        output = output_dir / f"{cid}.json"
+        if failures.contains(cid, None) and not force:
+            if output.is_file():
+                try:
+                    documents[cid] = reuse_summary_document(output, content_id=cid, arm=arm.name)
+                except ExtractionStepError:
+                    pass
+            continue
         if not source.is_file():
-            if arm.model == "gemini" and not (output_dir / f"{cid}.json").exists():
-                failures[cid] = "missing Gemini scenes"
-                continue
-            raise ExtractionStepError(f"missing scene input: {source}")
+            output.unlink(missing_ok=True)
+            failures.record(cid, None, "missing scene input")
+            continue
         records = normalize(read_scene_records(source), source)
         if not records:
-            failures[cid] = "empty scene input"
+            output.unlink(missing_ok=True)
+            failures.record(cid, None, "empty scene input")
             continue
         if any(
             record.get("provenance", {}).get("arm") != arm.name
@@ -141,145 +134,60 @@ def run_summary_stage(
             except ExtractionStepError:
                 pass
             else:
-                if existing["provenance"] == prov and (
-                    not force_run or existing.get("generation", {}).get("force_run_id") == force_run
-                ):
+                if existing["provenance"] == prov:
                     documents[cid] = existing
-                    (output_dir / "failures" / f"{cid}.jsonl").unlink(missing_ok=True)
+                    if existing["status"] == "raw_fallback":
+                        failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary")
                     continue
-        draft_path = output_dir / ".pending" / f"{cid}.json"
-        if draft_path.is_file() and not force:
-            draft = read_json(draft_path)
-            if draft.get("provenance") == prov and (
-                not force_run or draft.get("generation", {}).get("force_run_id") == force_run
-            ):
-                drafts[cid] = draft
-                continue
         tasks.append(task)
-
-    def document(cid, text, *, corrected=False):
-        normalized, violations = inspect_summary(text)
-        if not normalized:
-            raise OutputValidationError("empty summary")
-        records, prov, _ = pending[cid]
-        return {
-            "schema_version": SUMMARY_SCHEMA_VERSION,
-            "content_id": cid,
-            "arm": arm.name,
-            "status": "raw_fallback" if violations else "complete",
-            "text": text.strip() if violations else normalized,
-            "scene_count": len(records),
-            "word_count": len(normalized.split()),
-            "violations": violations,
-            "correction_count": int(corrected),
-            "provenance": prov,
-        }
-
-    def draft_complete(cid, doc):
-        if doc["violations"]:
-            # Persist the first response before scheduling the separate correction pass.
-            atomic_write_json(output_dir / ".pending" / f"{cid}.json", doc, durable=True)
-            drafts[cid] = doc
-        else:
-            save_final(cid, doc)
-
-    def failed(cid, attempts):
-        from pipeline_runtime import write_jsonl
-
-        failures[cid] = attempts[-1]["error"]
-        progress.complete(failed=True)
-        write_jsonl(output_dir / "failures" / f"{cid}.jsonl", attempts)
 
     runtime = QwenRuntime()
     with ExitStack() as resources:
-        progress = resources.enter_context(
-            InferenceProgress(
-                total=len(tasks) + len(drafts),
-                reused=len(documents),
-                empty=len(failures),
-                desc=f"Summary {arm.name}",
-                unit="summary",
-                progress_factory=tqdm,
-            )
-        )
-        generate = resources.enter_context(
-            generator_factory(
-                model_path=context.path("models", "qwen"),
-                settings=settings.get("qwen"),
-                image_limit=settings["visual_evidence"]["num_keyframes"],
-                runtime=runtime,
-                on_progress=progress.update_stats,
-                log=lambda message: print(message, flush=True),
-            )
-        )
+        progress = resources.enter_context(InferenceProgress(
+            total=len(tasks), reused=len(documents), empty=failures.count(content_ids),
+            desc=f"Summary {arm.name}", unit="summary", progress_factory=tqdm,
+        ))
+
+        def receive(cid, text):
+            records, prov, _ = pending[cid]
+            normalized, violations = inspect_summary(text)
+            event = runtime.current_result or {}
+            if event.get("finish_reason") == "length":
+                violations.append("max_tokens")
+            output = output_dir / f"{cid}.json"
+            if normalized:
+                doc = {
+                    "schema_version": SUMMARY_SCHEMA_VERSION,
+                    "content_id": cid,
+                    "arm": arm.name,
+                    "status": "raw_fallback" if violations else "complete",
+                    "text": text.strip() if violations else normalized,
+                    "scene_count": len(records),
+                    "word_count": len(normalized.split()),
+                    "violations": violations,
+                    "correction_count": 0,
+                    "provenance": prov,
+                }
+                atomic_write_json(output, doc, durable=True)
+                clear_dirty(output)
+                documents[cid] = doc
+            else:
+                output.unlink(missing_ok=True)
+            if violations:
+                failures.record(cid, None, ", ".join(violations))
+            progress.complete(task_id=cid, failed=bool(violations),
+                              raw=bool(normalized and violations))
+
         if tasks:
-            generate_with_recovery(
-                generate,
-                tasks,
-                penalties=settings["summary_repetition_penalty"],
-                directory=recovery_dir,
-                identity=provenance,
-                validate=lambda cid, text: (document(cid, text), "native"),
-                complete=draft_complete,
-                failed=failed,
-                runtime=runtime,
-                log=lambda message: print(message, flush=True),
-            )
-        correction_tasks = [
-            replace(
-                pending[cid][2],
-                prompt=(
-                    pending[cid][2].prompt
-                    + "\n\nDraft to correct:\n"
-                    + doc["text"]
-                    + "\n\nRewrite once into one natural paragraph of at most 200 words, retaining only "
-                    "important information supported by the original observations. Return only the paragraph."
-                ),
-            )
-            for cid, doc in drafts.items()
-        ]
-
-        def correction_validate(cid, text):
-            if not isinstance(text, str) or not text.strip():
-                raw = {**drafts[cid], "status": "raw_fallback", "correction_count": 1}
-                raw["violations"] = [*raw["violations"], "empty_correction"]
-                return raw, "raw_fallback"
-            return document(cid, text, corrected=True), "corrected"
-
-        def correction_complete(cid, doc):
-            doc["generation"] = {
-                **doc.get("generation", {}),
-                "force_run_id": force_run,
-                "draft": drafts[cid].get("generation"),
-            }
-            save_final(cid, doc)
-
-        if correction_tasks:
-            generate_with_recovery(
-                generate,
-                correction_tasks,
-                penalties=[generation["repetition_penalty"]],
-                directory=recovery_dir / "correction",
-                identity=provenance,
-                validate=correction_validate,
-                complete=correction_complete,
-                failed=failed,
-                runtime=runtime,
-            )
-    if not failures:
-        clear_recovery(output_dir)
-    temporary = output_dir / ".pending"
-    if temporary.exists() and not any(temporary.iterdir()):
-        temporary.rmdir()
-    blocking = [
-        cid for cid in failures if arm.model != "gemini" or (output_dir / f"{cid}.json").exists()
-    ]
-    if blocking:
-        raise ExtractionStepError(f"summary failed: {blocking[:10]}")
-    print(f"[SUMMARY] {arm.name}: complete={len(documents)} missing={len(failures)}", flush=True)
-    return result(
-        f"summarize-{arm.name}", content_count=len(documents), failure_count=len(failures)
-    )
+            generate = resources.enter_context(generator_factory(
+                model_path=context.path("models", "qwen"), settings=settings.get("qwen"),
+                image_limit=settings["visual_evidence"]["num_keyframes"], runtime=runtime,
+                on_progress=progress.update_stats, log=lambda message: print(message, flush=True),
+            ))
+            generate_once(generate, tasks, receive)
+    failed_count = failures.count(content_ids)
+    print(f"[SUMMARY] {arm.name}: outputs={len(documents)} failed={failed_count}", flush=True)
+    return result(f"summarize-{arm.name}", content_count=len(documents), failure_count=failed_count)
 
 
 def qwen_progress(progress, stats):

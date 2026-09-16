@@ -1,4 +1,4 @@
-"""Small public scene records paired with lossless recovery metadata."""
+"""Small public scene records paired with lossless scene metadata."""
 
 from pathlib import Path
 
@@ -24,9 +24,6 @@ def is_compact_scene(row):
 def read_scene_records(path):
     """Reconstruct the original records, preserving existing input hashes exactly."""
     path = Path(path)
-    if (path.parent / ".checkpoints" / f"{path.stem}.json").is_file():
-        from extraction.step_support import restore_scene_checkpoint
-        restore_scene_checkpoint(path, path.parent / "failures" / path.name)
     rows = read_jsonl(path)
     if not rows or not any(is_compact_scene(row) for row in rows):
         return rows  # Existing full records remain readable without regeneration.
@@ -59,7 +56,7 @@ def read_scene_records(path):
 
 
 def write_scene_records(path, records):
-    """Publish metadata before payload; the caller's journal covers both writes."""
+    """Publish metadata and payload atomically per file; interrupted pairs are regenerated."""
     path = Path(path)
     sidecar = metadata_path(path)
     if not records:
@@ -83,19 +80,20 @@ def write_scene_records(path, records):
 
 def migrate_scene_schema(context, *, force=False):
     """Convert existing scene files without model calls or changing logical records."""
-    from extraction.step_support import write_scene_checkpoint
+    from extraction.failures import FailureLog
     converted = unchanged = 0
     for representation in ("description", "graph"):
         for model in ("qwen", "gemini"):
             directory = context.extraction_dir(representation, model, "scenes")
+            FailureLog(directory)
             for path in sorted(directory.glob("*.jsonl")):
+                if path.name == "failure.jsonl":
+                    continue
                 records = read_scene_records(path)
                 if all(is_compact_scene(row) for row in read_jsonl(path)):
                     unchanged += 1
                     continue
-                failure = directory / "failures" / path.name
-                write_scene_checkpoint(path, failure, records,
-                                       read_jsonl(failure) if failure.is_file() else [])
+                write_scene_records(path, records)
                 converted += 1
                 if converted % 1000 == 0:
                     print(f"[SCHEMA] converted={converted} unchanged={unchanged}", flush=True)

@@ -1,20 +1,13 @@
 from __future__ import annotations
 
 import io
-import json
 from dataclasses import dataclass
 from typing import Any, Sequence
-
-RETRYABLE_HTTP_STATUS_CODES = [408, 429, 500, 502, 503, 504]
-
 
 class GeminiEmptyResponseError(RuntimeError):
     def __init__(self, diagnostics: dict[str, Any]) -> None:
         self.diagnostics = diagnostics
-        super().__init__(
-            "Gemini returned an empty response; "
-            + json.dumps(diagnostics, ensure_ascii=False)
-        )
+        super().__init__("Gemini returned an empty response")
 
 
 @dataclass
@@ -38,14 +31,7 @@ class GeminiBackend:
         media_resolution: str | None = None,
     ) -> GeminiBackend:
         genai, types = _google_genai()
-        retry = types.HttpRetryOptions(
-            attempts=4,
-            initial_delay=1.0,
-            max_delay=8.0,
-            exp_base=2.0,
-            jitter=1.0,
-            http_status_codes=RETRYABLE_HTTP_STATUS_CODES,
-        )
+        retry = types.HttpRetryOptions(attempts=1)
         client = genai.Client(
             vertexai=True,
             project=project_id,

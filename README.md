@@ -126,7 +126,7 @@ artifacts/
 {"content_id":"123","scene_graph":{"entities":[],"relations":[],"context":[]}}
 ```
 
-장면 번호 순서로 저장하며, `scene_idx`, `keyframes`, `generation`, `provenance`, 파싱·Raw 상태는 `scenes/.metadata/{content_id}.json`의 같은 순서 행에 보관합니다. 재시도 후에도 파싱하지 못한 Graph는 `scene_graph`에 원문 문자열을 저장합니다. 요약·재개·진단에서는 본문과 메타데이터를 함께 읽으므로 장비 간 전달 시 숨김 폴더 `.metadata`도 포함합니다. 두 파일 저장 도중 중단되면 checkpoint journal로 복구합니다.
+장면 번호 순서로 저장하며, `scene_idx`, `keyframes`, `generation`, `provenance`, 파싱·Raw 상태는 `scenes/.metadata/{content_id}.json`의 같은 순서 행에 보관합니다. 첫 출력의 검증에 실패한 비어 있지 않은 Graph는 `scene_graph`에 원문 문자열을 저장합니다. 요약·재개·진단에서는 본문과 메타데이터를 함께 읽으므로 장비 간 전달 시 숨김 폴더 `.metadata`도 포함합니다. 별도 checkpoint journal은 만들지 않습니다. 두 파일 저장 도중 중단되어 본문과 메타데이터가 맞지 않으면 다음 실행에서 해당 콘텐츠의 미완료 결과를 다시 생성합니다.
 
 기존 메타데이터 포함 JSONL도 읽을 수 있습니다. 다음 명령은 기존 장면 파일을 두 필드 형식과 별도 메타데이터로 분리합니다. 본문·생성 이력을 보존하므로 형식 변환만으로 재추론하거나 기존 요약·임베딩을 다시 만들지 않습니다. 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
 
@@ -144,18 +144,27 @@ python -m extraction migrate-scene-schema --run-id "$RUN_ID"
 
 기존 Run은 `artifacts/runs/{RUN_ID}/`로, 기존 준비 정보는 `artifacts/source_assets/`로 직접 배치해야 합니다. 자동 Run 이동·삭제는 수행하지 않습니다.
 
-실패 파일은 실패가 있을 때만 생성합니다. 완료된 recovery journal과 임시 checkpoint·dirty·pending 표식은 정리하고, 장면의 provenance·생성 이력은 `.metadata`에, 요약의 provenance·생성 이력은 요약 문서에 남깁니다. 별도 migration manifest, 전체 설정 snapshot, 요약별 `.inputs` 및 `.changed`, run별 이미지, media preflight·metadata missing 문서는 만들지 않습니다. 준비 통계는 콘솔, 결측 title 진단은 최종 diagnosis에 포함합니다. embedding별 `.inputs`는 실제 입력·fallback·truncation 및 캐시 검증 상태이므로 보존합니다.
+Desc·Graph·Summary는 요청당 한 번만 생성합니다. 자동 재시도·Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면의 식별 정보와 캐시 provenance는 `.metadata`에, 요약의 provenance는 요약 문서에 남깁니다.
+
+실패가 있으면 각 `scenes/` 또는 `summaries/` 폴더의 `failure.jsonl`에 즉시 기록합니다. 장면 실패는 `content_id`, `scene_idx`, `error`만, Summary 실패는 `content_id`, `error`만 저장합니다. 원문·토큰 수·penalty·시도 이력은 실패 파일에 넣지 않습니다. 같은 Run을 재실행해도 기록된 실패는 건너뛰며, `--force`로 실행하면 대상 콘텐츠의 실패 기록을 비우고 다시 처리합니다. 실행 시작 시 기존 `failures/`를 이 형식으로 통합하고 이전 임시 복구 폴더와 cursor를 제거합니다.
+
+```json
+{"content_id":"123","scene_idx":2,"error":"model produced an empty description"}
+{"content_id":"123","error":"over_200_words"}
+```
+
+진행률의 `failed`는 첫 응답에서 확정된 실패 수이고, `raw`는 그중 비어 있지 않은 Graph·Summary 원문을 E2E 입력으로 보존한 수입니다. Qwen Graph와 Summary의 토큰 한도 종료는 실패로 기록합니다. `scene/s`는 이번 실행의 성공·실패 장면 수를 경과 시간으로 나눈 값입니다.
 
 각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.
 
 ## 생성 정책과 재사용
 
-- 기본 장면 상한은 1,024 tokens, 요약·교정 상한은 512 tokens입니다.
+- 기본 장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다.
 - 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
-- Qwen Graph·Description은 전체 scene을 `1.00`으로 생성한 뒤 검증 실패분만 `1.05 → 1.10 → 1.15 → 1.20` 순서로 재시도합니다. Qwen이 생성하는 Summary도 입력 출처와 무관하게 전체 초안 pass 후 빈 응답만 재시도하며, 길이·형식 교정은 마지막에 별도로 한 번 수행합니다.
+- Qwen Graph·Description·Summary의 기본 repetition penalty는 `1.00`입니다. 기존 목록 설정도 첫 값으로 한 번만 생성합니다.
 - Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 필수 필드·타입·빈 문자열 등 JSON 구조 검증은 유지합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
-- 신규 Summary는 자연스러운 영어 한 문단, 100–200단어 권장·최대 200단어입니다. 정보가 적으면 100단어 미만도 허용합니다. 필드별 할당과 summary grammar는 없습니다. 형식·길이 위반은 원본 장면 관찰을 포함해 한 번 교정하고, 여전히 실패하면 마지막 비어 있지 않은 결과를 명시적 Raw로 사용합니다. 빈 결과와 실행 오류는 구분합니다.
-- 프롬프트 경로·내용, 모델·설정·장면 timestamp가 바뀌면 생성 캐시를 재사용하지 않습니다. 준비된 이미지 내용의 변경은 자동 감지하지 않으므로 이미지를 교체한 뒤 재추론하려면 `--force`를 사용합니다. 기존 완료 결과도 프롬프트·모델·설정·장면 정보가 같으면 재사용합니다. 로컬 모델 서명은 설정·tokenizer 텍스트의 내용 hash와 가중치 파일명·크기·mtime으로 계산합니다. 완료 journal을 삭제해도 장면 `.metadata`와 요약 문서의 provenance로 재개합니다.
+- 신규 Summary는 자연스러운 영어 한 문단, 100–200단어 권장·최대 200단어입니다. 정보가 적으면 100단어 미만도 허용합니다. 필드별 할당과 summary grammar는 없습니다. 형식·길이 위반은 즉시 실패로 기록하고 비어 있지 않은 결과를 명시적 Raw로 사용합니다. 빈 결과와 실행 오류는 구분합니다.
+- 프롬프트 경로·내용, 모델·설정·장면 timestamp가 바뀌면 생성 캐시를 재사용하지 않습니다. 준비된 이미지 내용의 변경은 자동 감지하지 않으므로 이미지를 교체한 뒤 재추론하려면 `--force`를 사용합니다. 기존 완료 결과도 프롬프트·모델·설정·장면 정보가 같으면 재사용합니다. 로컬 모델 서명은 설정·tokenizer 텍스트의 내용 hash와 가중치 파일명·크기·mtime으로 계산합니다. 정상 완료 결과는 장면 `.metadata`와 요약 문서의 provenance로 재사용하며, 실패 기록은 `--force` 전까지 유지합니다.
 - Gemini Summary **파일이 없을 때만** 같은 Run·표현의 Qwen Summary로 fallback합니다. Raw Gemini가 있으면 우선 사용합니다. 손상된 일반 파일은 오류이며 Qwen 요약 누락을 영벡터로 대체하지 않습니다. 실제 사용 경로를 기록하고 Gemini 결과가 추가되면 embedding·추천 캐시를 갱신합니다.
 - BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata title만 영벡터를 사용합니다.
 
@@ -170,4 +179,4 @@ python -m pytest -q
 ruff check --config pyproject.toml src tests benchmarks
 ```
 
-v5 mock 전체 흐름, 작은 CPU 학습, backend·분할·통계·재시도 회귀 테스트를 사용합니다. 전체 MicroLens 추론·학습과 실제 GPU/API 출력 품질 평가는 별도 실험 실행 단계입니다.
+v5 mock 전체 흐름, 작은 CPU 학습, backend·분할·통계·실패 처리 회귀 테스트를 사용합니다. 전체 MicroLens 추론·학습과 실제 GPU/API 출력 품질 평가는 별도 실험 실행 단계입니다.

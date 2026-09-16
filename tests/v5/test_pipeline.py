@@ -130,9 +130,9 @@ def test_fallback_missing_only_raw_precedence_and_identical_vectors(ready_contex
 
 @pytest.mark.parametrize(
     "length,expected_calls,status",
-    [(200, 1, "complete"), (201, 2, "complete"), (20, 1, "complete")],
+    [(200, 1, "complete"), (201, 1, "raw_fallback"), (20, 1, "complete")],
 )
-def test_summary_length_correction_and_resume(
+def test_summary_length_failure_without_correction_and_cached_resume(
     ready_context, fake_models, monkeypatch, length, expected_calls, status
 ):
     context = ready_context
@@ -156,15 +156,14 @@ def test_summary_length_correction_and_resume(
     assert len(calls) == expected_calls
     for path in context.graph_summary_dir("qwen").glob("*.json"):
         doc = read_json(path)
-        assert doc["status"] == status and doc["word_count"] <= 200
+        assert doc["status"] == status and doc["word_count"] == length
         assert doc["correction_count"] == expected_calls - 1
         assert "person" in calls[0][0].prompt and "relationship" in calls[0][0].prompt
     summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
     assert len(calls) == expected_calls
 
 
-@pytest.mark.parametrize("correction", ["word " * 202, ""])
-def test_summary_keeps_last_nonempty_raw(ready_context, fake_models, monkeypatch, correction):
+def test_summary_keeps_first_nonempty_raw_without_correction(ready_context, fake_models, monkeypatch):
     context = ready_context
     extract_graph_scenes(context, model="qwen", schema="prompts/graph_scene_v3.md")
     calls = []
@@ -175,18 +174,18 @@ def test_summary_keeps_last_nonempty_raw(ready_context, fake_models, monkeypatch
             tasks = list(tasks)
             calls.append(tasks)
             for task in tasks:
-                callback(task.task_id, "first " * 201 if len(calls) == 1 else correction)
+                callback(task.task_id, "first " * 201)
             return {}
 
         yield generate
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert len(calls) == 2
+    assert len(calls) == 1
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
-    assert doc["status"] == "raw_fallback" and doc["correction_count"] == 1
-    assert doc["word_count"] == (202 if correction else 201)
-    assert doc["text"].startswith("word" if correction else "first")
+    assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
+    assert doc["word_count"] == 201
+    assert doc["text"].startswith("first")
     embed_representations(context, target=["graph_qwen"])
 
 
@@ -260,7 +259,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
     for path in context.graph_scene_dir(model).glob("*.jsonl"):
         for row in read_scene_records(path):
             assert row["graph"] == graph
-            assert row["generation"]["attempt_count"] == 1
+            assert set(row["generation"]) == {"input_key"}
             assert row["semantic_warnings"] == []
             assert _success_scene_row_issues(f"graph_{model}", row, path.stem) == []
     summarize_graph(context, source=model, schema="prompts/graph_summary_v4.md")

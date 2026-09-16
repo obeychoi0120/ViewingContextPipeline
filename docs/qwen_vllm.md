@@ -21,19 +21,21 @@ CUDA_VISIBLE_DEVICES=0 python -m extraction extract-graph-scenes --model qwen --
 CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source qwen --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md
 ```
 
-Qwen Graph와 Description은 영상 경계 없이 장면을 연속 공급합니다. 전체 대상에 같은 repetition penalty를 적용한 pass를 마친 뒤, 검증에 실패한 장면만 다음 penalty로 재시도합니다. Gemini 추출도 영상 경계 없이 장면을 공급하며 `extraction.gemini.threads`로 전체 동시성을 제한하고 콘텐츠 완료 시 결과를 게시합니다.
+Qwen Graph와 Description은 영상 경계 없이 장면을 연속 공급하고 각 요청을 한 번만 생성합니다. Gemini 추출도 영상 경계 없이 장면을 공급하며 `extraction.gemini.threads`로 전체 동시성을 제한하고 장면 완료 시 결과를 게시합니다. Gemini SDK의 HTTP 요청도 한 번만 시도합니다.
 
-고정 개수로 요청을 잘라 묶음 전체의 완료를 기다리는 처리는 추출·요약·교정 단계에 없습니다. GPU 메모리용 동시 요청 한도 안에서 완료할 때마다 다음 요청을 공급합니다. 전체 pass 간 대기는 repetition penalty를 올리기 전에만 적용합니다.
+고정 개수로 요청을 잘라 묶음 전체의 완료를 기다리는 처리는 추출·요약 단계에 없습니다. GPU 메모리용 동시 요청 한도 안에서 완료할 때마다 다음 요청을 공급합니다.
 
-## 생성과 복구
+## 생성과 실패 기록
 
-Graph에는 TOBE JSON Schema 제약을 적용합니다. JSON 구조만 검증하며 ID 중복·미해결 관계 참조는 허용합니다. 어휘 enum은 없습니다. Description과 Summary에는 구조 grammar를 적용하지 않습니다. 임의 프롬프트 파일을 선택해도 Python Graph 출력 계약은 TOBE로 고정됩니다.
+Graph에는 TOBE JSON Schema 제약을 적용합니다. JSON 구조만 검증하며 ID 중복·미해결 관계 참조는 허용합니다. Description과 Summary에는 구조 grammar를 적용하지 않습니다.
 
-장면 상한은 1,024 tokens, 요약·교정 상한은 512 tokens입니다. Qwen 반복 패널티는 생성 토큰에만 한 번 적용합니다. 기본 장면 재시도 순서는 전체 1.00 pass → 실패분 1.05 pass → 남은 실패분 1.10 → 1.15 → 1.20입니다. 성공한 장면은 즉시 저장하고 다음 pass에서 제외합니다. 중단 후에는 저장된 시도 기록에 따라 낮은 penalty의 미완료 작업부터 처리합니다. 실패 Graph는 마지막 비어 있지 않은 결과를 Raw로 남길 수 있으며 정상 coverage에서 제외합니다. Qwen이 생성하는 모든 Summary는 입력 출처(Qwen/Gemini)와 표현(Graph/Description)에 관계없이 전체 초안을 같은 penalty로 생성한 뒤 빈 응답만 다음 penalty로 재시도합니다. 길이·형식 교정은 초안 생성의 모든 penalty pass가 끝난 후 별도 pass에서 한 번만 수행하며, 교정 penalty는 설정 목록의 첫 값입니다. 교정 후에도 계약을 만족하지 못하면 마지막 비어 있지 않은 결과를 Raw로 사용합니다.
+장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다. Desc·Graph·Summary 모두 한 번 생성한 결과로 성공·실패를 확정합니다. 기본 repetition penalty는 `1.00`이고 기존 목록 설정은 첫 값만 사용합니다. Summary의 형식·길이 위반도 즉시 실패이며 별도 교정 요청은 하지 않습니다. Qwen Graph·Summary의 `finish_reason=length`는 토큰 한도 실패입니다. 실패한 Graph·Summary의 비어 있지 않은 원문은 E2E 입력용 Raw로 보존합니다.
 
-진행률은 재사용을 제외한 요청 수를 기준으로 하며 장면과 요약 단위를 구분합니다. 장면 추출은 timestamp와 캐시를 먼저 확인해 처리할 전체 scene 수를 확정합니다. 출력·저장·재시도까지 포함한 처리 속도와 ETA입니다. 요약 교정은 같은 요약 작업의 일부입니다.
+각 장면 출력 폴더의 `failure.jsonl`에는 `content_id`, `scene_idx`, `error`만 저장합니다. 각 Summary 출력 폴더의 같은 파일에는 `content_id`, `error`만 저장합니다. `failures/`, `.recovery`, `.pending`, `.checkpoints` 및 콘텐츠 진행 cursor는 생성하지 않습니다. 기존 `failures/`는 실행 시작 시 최소 필드로 통합하고 이전 임시 기록을 제거합니다.
 
-각 Qwen 응답을 durable journal에 먼저 저장한 후 최종 artifact를 게시합니다. 장면 JSONL은 `content_id`와 `description` 또는 `scene_graph`만 담으며, Raw Graph는 `scene_graph`에 원문 문자열을 담습니다. 장면 번호·keyframes·provenance·생성 이력은 `scenes/.metadata/{content_id}.json`에 보존합니다. 저장 오류나 중단 시 응답을 재추론하지 않고 본문과 메타데이터 게시를 재개합니다. 완료 journal은 삭제하고 장면 `.metadata` 또는 요약 문서에 입력 key·force 실행 ID·시도 수·repair mode를 보존합니다. 입력·프롬프트·설정 변경은 기존 캐시를 무효화합니다. 엔진/OOM/저장 오류는 그대로 중단하며 원인을 해결한 뒤 같은 명령으로 재개합니다.
+정상 결과와 실패 기록은 다음 실행에서 재사용합니다. 실패 항목을 다시 처리하려면 `--force`로 해당 단계를 실행합니다. 중단 후에는 저장된 장면·요약과 실패 기록을 건너뛰고 미완료 항목을 생성합니다. 저장 전에 유실된 응답은 다시 생성하며, 이전 시도나 교정 초안을 복구하지 않습니다. 엔진/OOM/저장 오류는 그대로 전파합니다.
+
+진행률은 이번 실행의 요청을 기준으로 하며 `failed`에 첫 응답 실패를 포함하고 `raw`는 그 부분집합입니다. 장면 `scene/s`에는 실패 결과도 포함합니다. Qwen과 Gemini 모두 장면별로 결과를 저장합니다. 장면 JSONL은 `content_id`와 `description` 또는 `scene_graph`만 담으며, 식별 정보와 캐시 provenance는 `scenes/.metadata/{content_id}.json`에 보존합니다.
 
 ## 선택적 처리량 측정
 
@@ -46,6 +48,6 @@ CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/q
 CUDA_VISIBLE_DEVICES=0 python -m benchmarks.qwen_benchmark run --requests /tmp/qwen-summaries.json --backend vllm --output /tmp/summaries-vllm.json
 ```
 
-처음 16개는 warmup, 나머지는 측정입니다. 요청이 적으면 `--warmup 1`처럼 조절합니다. 같은 고정 요청·이미지 hash를 사용하며 생성 1회 처리량을 측정합니다. 운영 단계의 전체 재시도·교정·Raw 게시 비용은 포함하지 않습니다. 실제 CUDA/API 호환성·속도·내용 품질은 CPU 및 mock 회귀 테스트와 별도로 검증해야 합니다.
+처음 16개는 warmup, 나머지는 측정입니다. 요청이 적으면 `--warmup 1`처럼 조절합니다. 같은 고정 요청·이미지 hash를 사용하며 생성 1회 처리량을 측정합니다. 운영 단계의 검증·결과 저장 비용은 포함하지 않습니다. 실제 CUDA/API 호환성·속도·내용 품질은 CPU 및 mock 회귀 테스트와 별도로 검증해야 합니다.
 
 벤치마크의 vLLM backend도 보이는 GPU를 모두 사용합니다. Transformers 비교용 backend는 단일 GPU 전용이므로 `CUDA_VISIBLE_DEVICES`로 하나만 지정합니다.

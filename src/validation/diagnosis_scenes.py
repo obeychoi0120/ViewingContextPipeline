@@ -19,7 +19,7 @@ from .diagnosis_support import (
 def scene_arms(config):
     from arm_registry import registry
     return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
-                   f"extraction/{arm.representation}/{arm.model}/scenes/failures")
+                   f"extraction/{arm.representation}/{arm.model}/scenes/failure.jsonl")
             for name, arm in registry(config).items() if arm.model}
 
 
@@ -160,7 +160,7 @@ def _scene_arm_contract(
 ) -> tuple[dict[str, Any], set[tuple[str, int]], bool]:
     scene_relative, failure_relative = paths[arm]
     scene_dir = run_root / scene_relative
-    failure_dir = run_root / failure_relative
+    failure_path = run_root / failure_relative
     catalog_contents = set(content_ids)
     success: set[tuple[str, int]] = set()
     failures: set[tuple[str, int]] = set()
@@ -172,7 +172,7 @@ def _scene_arm_contract(
 
     existing_scene_files = set()
     if scene_dir.is_dir():
-        existing_scene_files = {path.stem for path in scene_dir.glob("*.jsonl")}
+        existing_scene_files = {path.stem for path in scene_dir.glob("*.jsonl") if path.name != "failure.jsonl"}
     else:
         issues["missing_scene_directory"] += 1
         examples.append({"path": str(scene_dir)})
@@ -181,13 +181,22 @@ def _scene_arm_contract(
         issues["extra_scene_files"] += len(extra_scene_files)
         examples.extend({"content_id": value} for value in _bounded_examples(extra_scene_files))
 
-    existing_failure_files = (
-        {path.stem for path in failure_dir.glob("*.jsonl")} if failure_dir.is_dir() else set()
+    all_failures, failure_loaded = _read_jsonl(
+        failure_path, f"{arm} failure outcomes", errors, required=False, report_error=False,
     )
-    extra_failure_files = sorted(existing_failure_files - catalog_contents)
-    if extra_failure_files:
-        issues["extra_failure_files"] += len(extra_failure_files)
-        examples.extend({"content_id": value} for value in _bounded_examples(extra_failure_files))
+    if not failure_loaded:
+        issues["invalid_failure_file"] += 1
+    failures_by_content = {}
+    for row in all_failures:
+        cid = row.get("content_id")
+        if (set(row) != {"content_id", "scene_idx", "error"}
+                or not isinstance(row.get("error"), str) or not row["error"].strip()):
+            issues["invalid_failure_fields"] += 1
+            continue
+        if cid not in catalog_contents:
+            issues["unexpected_failure_content"] += 1
+            continue
+        failures_by_content.setdefault(cid, []).append(row)
 
     for content_id in content_ids:
         scene_rows, scene_loaded = _read_jsonl(
@@ -197,17 +206,9 @@ def _scene_arm_contract(
             report_error=False,
             reader=read_scene_records,
         )
-        if not scene_loaded:
+        if not scene_loaded and (scene_dir / f"{content_id}.jsonl").exists():
             issues["missing_or_invalid_scene_file"] += 1
-        failure_rows, failure_loaded = _read_jsonl(
-            failure_dir / f"{content_id}.jsonl",
-            f"{arm} failure outcomes",
-            errors,
-            required=False,
-            report_error=False,
-        )
-        if not failure_loaded:
-            issues["invalid_failure_file"] += 1
+        failure_rows = failures_by_content.get(content_id, [])
         for outcome, rows, destination in (
             ("success", scene_rows, success),
             ("failure", failure_rows, failures),
@@ -266,7 +267,8 @@ def _scene_arm_contract(
                     if warnings:
                         semantic_warning_scenes.add(key)
 
-    overlap = (success & failures) | (raw_scenes & (success | failures))
+    # A raw payload may have a matching explicit failure record; it is never success.
+    overlap = success & (failures | raw_scenes)
     missing = expected - (success | failures | raw_scenes)
     if overlap:
         issues["success_failure_overlap"] += len(overlap)
@@ -283,7 +285,7 @@ def _scene_arm_contract(
 
     denominator = len(expected)
     success_count = len(success)
-    failure_count = len(failures)
+    failure_count = len(failures | raw_scenes)
     outcome_count = len(success | failures | raw_scenes)
     document = {
         "expected_scene_count": denominator,

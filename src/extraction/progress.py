@@ -64,6 +64,8 @@ class InferenceProgress:
         self.reused = reused
         self.empty = empty
         self.success = self.failed = 0
+        self.raw = 0
+        self._outcomes = {}
         self.stats = {"phase": "initializing", "inflight": 0}
         self._clock = clock or time.monotonic
         self._started = None
@@ -109,12 +111,21 @@ class InferenceProgress:
             self.total = self.discovered
             self.bar.total = self.total
 
-    def complete(self, *, failed=False):
+    def complete(self, *, failed=False, task_id=None, raw=False):
         with self._lock:
+            if task_id is not None:
+                previous = self._outcomes.get(task_id)
+                if previous is not None:
+                    was_failed, was_raw = previous
+                    self.failed -= was_failed
+                    self.success -= not was_failed
+                    self.raw -= was_raw
+                self._outcomes[task_id] = (failed, raw)
             if failed:
                 self.failed += 1
             else:
                 self.success += 1
+            self.raw += raw
         # Counts are collected immediately; only the timer paints them.
 
     def update_stats(self, stats):
@@ -139,6 +150,7 @@ class InferenceProgress:
             else:
                 eta = "estimating"
             fields = f"ETA={eta} success={self.success} failed={self.failed}"
+            fields += f" raw={self.raw}"
             if self.unit == "scene":
                 scene_rate = f"{rate:.2f}" if elapsed > 0 else "--"
                 fields += f" scene/s={scene_rate}"

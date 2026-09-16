@@ -11,8 +11,8 @@ from extraction.errors import ExtractionStepError
 from extraction.evidence import build_scene_evidence
 from extraction.monitoring import video_names
 from extraction.raw_output import is_raw_graph, valid_raw_graph
-from extraction.scene_storage import read_scene_records, write_scene_records
-from pipeline_runtime import RunContext, read_json, read_jsonl, write_jsonl
+from extraction.scene_storage import write_scene_records
+from pipeline_runtime import RunContext, read_jsonl
 
 
 def write_progress(progress: tqdm, message: str) -> None:
@@ -24,40 +24,12 @@ def complete_content_progress(progress: tqdm) -> None:
     write_progress(progress, "")
 
 
-def write_failure_jsonl(path: Path, failures: list[dict[str, Any]]) -> None:
-    if failures:
-        write_jsonl(path, failures)
-    else:
-        path.unlink(missing_ok=True)
-
-
-def write_scene_checkpoint(
-    scene_path: Path,
-    failure_path: Path,
-    records: list[dict[str, Any]],
-    failures: list[dict[str, Any]],
-) -> None:
-    """Atomically persist the completed subset of one content's scenes."""
+def write_scene_results(scene_path: Path, records: list[dict[str, Any]]) -> None:
+    """Publish completed scene results without a recovery journal."""
+    from extraction.input_tracking import invalidate_inputs
     records.sort(key=lambda row: int(row["scene_idx"]))
-    failures.sort(key=lambda row: int(row["scene_idx"]))
-    journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
-    if journal.exists() or not scene_path.exists() or read_scene_records(scene_path) != records:
-        from extraction.input_tracking import invalidate_inputs
-        invalidate_inputs(scene_path.parent.parent / "summaries" / f"{scene_path.stem}.json")
-    from artifact_io import atomic_write_json
-    atomic_write_json(journal, {"records": records, "failures": failures}, durable=True)
+    invalidate_inputs(scene_path.parent.parent / "summaries" / f"{scene_path.stem}.json")
     write_scene_records(scene_path, records)
-    write_failure_jsonl(failure_path, failures)
-    journal.unlink()
-    if not any(journal.parent.iterdir()):
-        journal.parent.rmdir()
-
-
-def restore_scene_checkpoint(scene_path, failure_path):
-    journal = scene_path.parent / ".checkpoints" / f"{scene_path.stem}.json"
-    if journal.exists():
-        pending = read_json(journal)
-        write_scene_checkpoint(scene_path, failure_path, pending["records"], pending["failures"])
 
 
 def video_name_map(context: RunContext) -> dict[str, str]:

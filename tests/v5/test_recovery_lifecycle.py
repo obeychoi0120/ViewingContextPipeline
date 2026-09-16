@@ -1,226 +1,130 @@
 from contextlib import contextmanager
-from pathlib import Path
 
 import pytest
 
-from extraction.steps import extract_description_scenes, extract_graph_scenes, summarize_graph
+from extraction.steps import extract_description_scenes, extract_graph_scenes
+from pipeline_runtime import read_json, read_jsonl, write_jsonl
 
 
 @pytest.mark.parametrize("source", ["qwen", "gemini"])
 @pytest.mark.parametrize("representation", ["graph", "description"])
-def test_summary_retries_after_full_pass_then_corrects_once(
-    v5_context, source, representation,
+def test_summary_single_pass_records_first_failure_without_scene_or_correction(
+    ready_context, fake_models, monkeypatch, source, representation,
 ):
-    from arm_registry import select_arms
-    from extraction.descriptions import SCENE_SCHEMA_VERSION
-    from extraction.summary_executor import run_summary_stage
-    from pipeline_runtime import read_json, write_jsonl
-
-    context = v5_context
-    name = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
-    arm = select_arms(context.config)[name]
-    context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
-    # Cross the old 256-item retry boundary for every summary source and representation.
-    ids = [f"content_{i:03d}" for i in range(259)]
-    correction_ids = set(ids[1:-1])
-    scene_dir = context.extraction_dir(representation, source, "scenes")
-    for cid in ids:
-        record = {"scene_idx": 0, "keyframes": [5],
-                  "provenance": {"arm": name, "representation": representation}}
-        if representation == "graph":
-            record.update(graph={"entities": [], "relations": [], "context": []},
-                          parse_mode="native", semantic_warnings=[])
-        else:
-            record.update(schema_version=SCENE_SCHEMA_VERSION, content_id=cid,
-                          description="A person walks outdoors.")
-        write_jsonl(scene_dir / f"{cid}.jsonl", [record])
-    calls = []
-
-    @contextmanager
-    def generator(**kwargs):
-        def generate(tasks, callback):
-            tasks = list(tasks)
-            penalties = {task.repetition_penalty for task in tasks}
-            assert len(penalties) == 1
-            calls.append((penalties.pop(), {task.task_id for task in tasks}))
-            for task in tasks:
-                correction = "Draft to correct:" in task.prompt
-                if correction:
-                    assert task.task_id in correction_ids
-                    assert len(calls) == 4  # All draft penalty passes have finished.
-                threshold = {ids[0]: 1.1, ids[-1]: 1.05}.get(task.task_id, 1.0)
-                text = ("A person walks outdoors." if correction else
-                        "" if task.repetition_penalty < threshold else
-                        "word " * 201 if task.task_id in correction_ids else "A person walks outdoors.")
-                callback(task.task_id, text)
-            return {}
-        yield generate
-
-    assert run_summary_stage(
-        context, arm=arm, schema=context.prompt_path(f"prompts/{representation}_summary_v4.md"),
-        catalog=[{"content_id": cid} for cid in ids], provenance={"fixture": name},
-        generation={"repetition_penalty": 1.0}, generator_factory=generator,
-    )["failure_count"] == 0
-    assert calls == [(1.0, set(ids)), (1.05, {ids[0], ids[-1]}),
-                     (1.1, {ids[0]}), (1.0, correction_ids)]
-    output_dir = context.extraction_dir(representation, source, "summaries")
-    assert read_json(output_dir / f"{ids[0]}.json")["generation"]["attempt_count"] == 3
-    assert read_json(output_dir / f"{ids[1]}.json")["correction_count"] == 1
-
-
-@pytest.mark.parametrize("force", [False, True])
-@pytest.mark.parametrize("representation", ["graph", "description"])
-def test_completed_scene_journals_removed_and_interrupted_force_resumes(
-    ready_context, fake_models, monkeypatch, force, representation
-):
-    context = ready_context
-    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
-    extract = extract_graph_scenes if representation == "graph" else extract_description_scenes
-    scene_dir = context.extraction_dir(representation, "qwen", "scenes")
-    if force:
-        extract(context, model="qwen", schema=schema)
-    first = []
-
-    @contextmanager
-    def interrupted(**kwargs):
-        def generate(tasks, callback):
-            iterator = iter(tasks)
-            task = next(iterator)
-            first.append(task.task_id)
-            callback(task.task_id, '{"entities": [], "relations": [], "context": []}')
-            raise KeyboardInterrupt
-
-        yield generate
-
-    monkeypatch.setattr("extraction.steps.qwen_generator", interrupted)
-    with pytest.raises(KeyboardInterrupt):
-        extract(context, model="qwen", schema=schema, force=force)
-    assert not list((scene_dir / ".recovery").glob("*.json"))
-    resumed = []
-
-    @contextmanager
-    def generator(**kwargs):
-        def generate(tasks, callback):
-            for task in tasks:
-                resumed.append(task.task_id)
-                callback(task.task_id, '{"entities": [], "relations": [], "context": []}')
-            return {}
-
-        yield generate
-
-    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    extract(context, model="qwen", schema=schema)
-    assert first[0] not in resumed and len(resumed) == 3
-    extract(context, model="qwen", schema=schema)
-    assert len(resumed) == 3
-    assert not (scene_dir / ".recovery").exists()
-
-
-def test_summary_correction_resume_replays_response_after_publish_failure(
-    ready_context, fake_models, monkeypatch
-):
+    import extraction.steps as steps
     import extraction.summary_executor as executor
-
     context = ready_context
-    extract_graph_scenes(context, model="qwen", schema="prompts/graph_scene_v3.md")
-    calls = []
+    extract = extract_graph_scenes if representation == "graph" else extract_description_scenes
+    extract(context, model=source,
+            schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
+    summarize = getattr(steps, f"summarize_{representation}")
+    options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
+    directory = context.extraction_dir(representation, source, "summaries")
+    ids = [item["content_id"] for item in context.require_ready_cohort()["catalog"]]
+    calls, progress_instances = [], []
+    interrupt, succeed = True, False
+    original = executor.InferenceProgress
+
+    def progress_factory(**kwargs):
+        progress = original(**kwargs)
+        progress_instances.append(progress)
+        return progress
+    monkeypatch.setattr(executor, "InferenceProgress", progress_factory)
 
     @contextmanager
     def generator(**kwargs):
         def generate(tasks, callback):
-            tasks = list(tasks)
-            calls.append([t.task_id for t in tasks])
-            for task in tasks:
-                callback(
-                    task.task_id, "word " * (201 if "Draft to correct:" not in task.prompt else 100)
-                )
-            return {}
-
-        yield generate
-
-    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    original = executor.atomic_write_json
-
-    def write(path, doc, **kw):
-        if Path(path).parent == context.graph_summary_dir("qwen"):
-            raise OSError("disk full")
-        return original(path, doc, **kw)
-
-    monkeypatch.setattr(executor, "atomic_write_json", write)
-    with pytest.raises(OSError, match="disk full"):
-        summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md", force=True)
-    first = calls[-1][0]
-    monkeypatch.setattr(executor, "atomic_write_json", original)
-    calls.clear()
-    summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert all(first not in batch for batch in calls)
-    assert len(calls) == 1  # Remaining corrections only; no draft is regenerated.
-    assert not (context.graph_summary_dir("qwen") / ".pending").exists()
-    assert not (context.graph_summary_dir("qwen") / ".recovery").exists()
-
-
-def test_all_empty_summary_is_failure_and_gemini_missing_can_fall_back(
-    ready_context, fake_models, monkeypatch
-):
-    context = ready_context
-    for model in ("qwen", "gemini"):
-        extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
-
-    @contextmanager
-    def generator(**kwargs):
-        def generate(tasks, callback):
-            for task in tasks:
-                callback(task.task_id, "")
-            return {}
-
-        yield generate
-
-    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    with pytest.raises(RuntimeError, match="summary failed"):
-        summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert not list(context.graph_summary_dir("qwen").glob("*.json"))
-    assert len(list(context.graph_summary_failure_dir("qwen").glob("*.jsonl"))) == 4
-    assert (
-        summarize_graph(context, source="gemini", schema="prompts/graph_summary_v4.md")[
-            "failure_count"
-        ]
-        == 4
-    )
-
-
-def test_repeated_gemini_interrupt_keeps_unvisited_cached_contents(
-    ready_context, fake_models, monkeypatch,
-):
-    from extraction.backends import GeminiGenerationOutcome
-
-    context = ready_context
-    schema = "prompts/graph_scene_v3.md"
-    extract_graph_scenes(context, model="gemini", schema=schema)
-    paths = sorted(context.graph_scene_dir("gemini").glob("*.jsonl"))
-    missing = paths[1]
-    missing.unlink()
-    preserved = {path: path.read_bytes() for path in paths if path != missing}
-    calls = []
-    interrupt = True
-
-    class Pool:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def generate(self, tasks, callback, **kwargs):
             for task in tasks:
                 calls.append(task.task_id)
-                if interrupt:
+                assert task.repetition_penalty == 1.0 and "Draft to correct:" not in task.prompt
+                index = ids.index(task.task_id)
+                text = "A person walks outdoors." if succeed or index == 3 else "" if index == 0 else "word " * 201 if index == 1 else "A truncated sentence"
+                kwargs["runtime"].current_result = {"finish_reason": "length" if index == 2 and not succeed else "stop"}
+                callback(task.task_id, text)
+                if interrupt and index == 1:
+                    rows = read_jsonl(directory / "failure.jsonl")
+                    assert len(rows) == 2 and all(set(row) == {"content_id", "error"} for row in rows)
+                    assert progress_instances[-1].failed == 2
+                    for name in (".recovery", ".pending", "failures"):
+                        assert not (directory / name).exists()
                     raise KeyboardInterrupt
-                callback(GeminiGenerationOutcome(
-                    task.task_id, '{"entities": [], "relations": [], "context": []}',
-                ))
+            return {}
+        yield generate
 
-    monkeypatch.setattr("extraction.steps.GeminiWorkerPool", Pool)
-    for _ in range(2):
-        with pytest.raises(KeyboardInterrupt):
-            extract_graph_scenes(context, model="gemini", schema=schema)
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    with pytest.raises(KeyboardInterrupt):
+        summarize(context, **options)
     interrupt = False
-    extract_graph_scenes(context, model="gemini", schema=schema)
-    assert calls == [f"{missing.stem}:0"] * 3
-    assert all(path.read_bytes() == contents for path, contents in preserved.items())
+    assert summarize(context, **options)["failure_count"] == 3
+    assert calls == ids
+    rows = read_jsonl(directory / "failure.jsonl")
+    assert rows == [
+        {"content_id": ids[0], "error": "empty"},
+        {"content_id": ids[1], "error": "over_200_words"},
+        {"content_id": ids[2], "error": "max_tokens"},
+    ]
+    for cid in ids[1:3]:
+        doc = read_json(directory / f"{cid}.json")
+        assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
+    assert not (directory / f"{ids[0]}.json").exists()
+    assert summarize(context, **options)["failure_count"] == 3
+    assert calls == ids
+    succeed = True
+    assert summarize(context, **options, force=True)["failure_count"] == 0
+    assert calls == ids * 2
+    assert not (directory / "failure.jsonl").exists()
+
+
+@pytest.mark.parametrize("representation", ["graph", "description"])
+def test_summary_publish_error_requires_regeneration_without_journal(
+    ready_context, fake_models, monkeypatch, representation,
+):
+    import extraction.steps as steps
+    import extraction.summary_executor as executor
+    context = ready_context
+    extract = getattr(steps, f"extract_{representation}_scenes")
+    extract(context, model="qwen", schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    calls = []
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            for task in tasks:
+                calls.append(task.task_id)
+                callback(task.task_id, "A person walks outdoors.")
+            return {}
+        yield generate
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    original = executor.atomic_write_json
+    def fault(*args, **kwargs):
+        raise OSError("disk full")
+    monkeypatch.setattr(executor, "atomic_write_json", fault)
+    summarize = getattr(steps, f"summarize_{representation}")
+    options = {"source": "qwen", "schema": f"prompts/{representation}_summary_v4.md"}
+    with pytest.raises(OSError, match="disk full"):
+        summarize(context, **options)
+    directory = context.extraction_dir(representation, "qwen", "summaries")
+    assert not list(directory.rglob("*.json"))
+    monkeypatch.setattr(executor, "atomic_write_json", original)
+    assert summarize(context, **options)["failure_count"] == 0
+    assert calls[0] == calls[1] and len(calls) == 5
+
+
+def test_legacy_failure_records_are_compacted_and_temporary_state_removed(tmp_path):
+    from extraction.failures import FailureLog
+    write_jsonl(tmp_path / "failures/a.jsonl", [{
+        "scene_idx": 2, "error": "invalid JSON", "raw_response": "discard me",
+        "attempt_count": 5, "status": "retry_pending", "keyframes": [5],
+    }])
+    for name in (".recovery", ".pending", ".checkpoints"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "old.json").write_text("unfinished")
+    (tmp_path / ".pending-contents.json").write_text("old cursor")
+    log = FailureLog(tmp_path)
+    assert read_jsonl(log.path) == [{"content_id": "a", "scene_idx": 2, "error": "invalid JSON"}]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["failure.jsonl"]
+    log.record("b", 0, "empty")
+    log.record("b", 0, "empty")
+    assert len(read_jsonl(log.path)) == 2
+    log.clear_contents(["a"])
+    assert read_jsonl(log.path) == [{"content_id": "b", "scene_idx": 0, "error": "empty"}]

@@ -5,7 +5,7 @@ import pytest
 
 import extraction.steps as steps
 from extraction.scene_storage import read_scene_records
-from extraction.step_support import write_scene_checkpoint
+from extraction.step_support import write_scene_results
 
 
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
@@ -51,7 +51,7 @@ def test_progress_counts_only_pending_scenes(
     # Reuse one scene within a partially completed content.
     rows = read_scene_records(paths[0])
     assert len(rows) == 2
-    write_scene_checkpoint(paths[0], paths[0].parent / "failures" / paths[0].name, rows[:1], [])
+    write_scene_results(paths[0], rows[:1])
     expected_total, expected_reused = 1, 4
     run()
     assert [row["scene_idx"] for row in read_scene_records(paths[0])] == [0, 1]
@@ -63,7 +63,7 @@ def test_progress_counts_only_pending_scenes(
     rows = read_scene_records(paths[1])
     rows[0]["provenance"] = {}
     rows[0]["generation"]["input_key"] = "stale"
-    write_scene_checkpoint(paths[1], paths[1].parent / "failures" / paths[1].name, rows, [])
+    write_scene_results(paths[1], rows)
     run()
 
     expected_total, expected_reused = 5, 0

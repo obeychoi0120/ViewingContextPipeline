@@ -1,4 +1,4 @@
-"""Compact generation history survives deletion of completed recovery journals."""
+"""Read existing scene metadata without treating failure.jsonl as scene payloads."""
 from collections import Counter
 from arm_registry import select_arms
 from extraction.scene_storage import read_scene_records
@@ -14,11 +14,13 @@ def recovery_report(context, *, branches=None):
         attempt_count = unknown = 0
         directory = context.extraction_dir(arm.representation, arm.model, "scenes")
         for path in directory.glob("*.jsonl"):
+            if path.name == "failure.jsonl":
+                continue
             for row in read_scene_records(path):
                 history = row.get("generation", {})
                 unknown += not bool(history)
-                attempt_count += history.get("attempt_count", 0)
-                modes[row.get("status", history.get("repair_mode", "unknown"))] += 1
+                attempt_count += history.get("attempt_count", int(bool(history.get("input_key"))))
+                modes[row.get("status", row.get("parse_mode", history.get("repair_mode", "unknown")))] += 1
         report[name] = {"scene_modes": dict(modes), "scene_attempt_count": attempt_count,
                         "unknown_history_count": unknown}
     return report
