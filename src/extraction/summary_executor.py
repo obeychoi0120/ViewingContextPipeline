@@ -222,7 +222,7 @@ def run_summary_stage(
                 complete=draft_complete,
                 failed=failed,
                 runtime=runtime,
-                rounds_across_batches=arm.model == "gemini",
+                log=lambda message: print(message, flush=True),
             )
         correction_tasks = [
             replace(

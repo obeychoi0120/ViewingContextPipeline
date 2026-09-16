@@ -11,80 +11,132 @@ from pipeline_runtime import read_jsonl, write_jsonl
 from pipeline_fixtures import context as context
 
 
-@pytest.mark.parametrize(("model", "threads", "limit"), [
-    ("qwen", 16, 8),
-])
-def test_graph_scenes_finish_content_before_next(
-    context, monkeypatch, capsys, model, threads, limit,
+def test_qwen_graph_finishes_each_penalty_pass_before_retrying(
+    context, monkeypatch, capsys,
 ):
     visuals = [{"content_id": cid} for cid in ("a", "b")]
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
     monkeypatch.setattr(steps, "video_name_map", lambda _: {})
-    context.config["extraction"]["graph_repetition_penalty"] = [1.0, 1.05]
-
-    context.config["extraction"]["gemini"]["threads"] = threads
+    penalties = [1.0, 1.05, 1.1, 1.15, 1.2]
+    context.config["extraction"]["graph_repetition_penalty"] = penalties
 
     def rows(visual, **kwargs):
         cid = visual["content_id"]
         return [{"task": QwenGenerationTask(f"{cid}:{i}", (), "prompt", 32),
                  "scene_idx": i, "keyframes": [i * 30 + 5]}
-                for i in range(limit + 2 if cid == "a" else limit + 1)]
+                for i in (range(10 if cid == "a" else 9) if kwargs.get("scenes") is None
+                          else (scene["scene_idx"] for scene in kwargs["scenes"]))]
 
     monkeypatch.setattr(steps, "scene_generation_rows", rows)
-    graph = json.dumps({
-        "entities": [], "relations": [], "context": [],
-    })
+    graph = json.dumps({"entities": [], "relations": [], "context": []})
     submissions = []
+    opened = []
 
     def generate(tasks, callback):
         tasks = list(tasks)
-        submissions.append([task.task_id for task in tasks])
-        if model == "qwen":
-            assert 1 <= len(tasks) <= limit
-        assert len({task.task_id.split(":")[0] for task in tasks}) == 1
-        if tasks[0].task_id.startswith("b:"):
-            assert len(read_jsonl(context.graph_scene_dir(model) / "a.jsonl")) == limit + 2
+        penalty = penalties[len(submissions)]
+        assert {task.repetition_penalty for task in tasks} == {penalty}
+        submissions.append({task.task_id for task in tasks})
         for task in reversed(tasks):
-            text = "" if task.task_id == f"b:{limit}" or (
-                model == "qwen" and task.task_id == "a:0" and task.repetition_penalty == 1.0
-            ) else graph
+            assert task.structured_output is not None
+            text = graph
+            if task.task_id == "b:8":
+                text = ""  # Exhaust the budget without any raw output.
+            elif task.task_id == "a:1":
+                text = '{"context": []}'  # Exhaust the budget and retain raw output.
+            elif task.task_id == "a:0" and penalty < 1.05:
+                text = ""
+            elif task.task_id == "b:0" and penalty < 1.1:
+                text = ""
             callback(task.task_id, text)
         return {}
 
     @contextmanager
     def generator(**kwargs):
+        opened.append(True)
         yield generate
 
-    class Pool:
-        def __init__(self, concurrency, **kwargs):
-            assert concurrency == threads
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    assert steps.extract_graph_scenes(
+        context, schema="prompts/graph_scene_v3.md", model="qwen",
+    )["failure_count"] == 1
+    assert submissions == [
+        {f"{cid}:{i}" for cid, count in (("a", 10), ("b", 9)) for i in range(count)},
+        {"a:0", "a:1", "b:0", "b:8"},
+        {"a:1", "b:0", "b:8"},
+        {"a:1", "b:8"},
+        {"a:1", "b:8"},
+    ]
+    assert opened == [True]
+    records = {f"{cid}:{row['scene_idx']}": row for cid in ("a", "b")
+               for row in read_jsonl(context.graph_scene_dir("qwen") / f"{cid}.jsonl")}
+    assert len(records) == 18
+    assert records["a:0"]["generation"]["attempt_count"] == 2
+    assert records["b:0"]["generation"]["attempt_count"] == 3
+    assert records["a:1"]["generation"]["attempt_count"] == 5
+    assert records["a:1"]["status"] == "raw_fallback"
+    assert records["a:2"]["generation"]["attempt_count"] == 1
+    failures = read_jsonl(context.graph_failure_dir("qwen") / "b.jsonl")
+    assert [row["scene_idx"] for row in failures] == [8]
+    output = capsys.readouterr()
+    assert "[Graph_skip_qwen] b.mp4 | scene #008" in output.err
+    for index, penalty in enumerate(penalties):
+        assert f"[RECOVERY] pass={index + 1}/5 repetition_penalty={penalty}" in output.err
 
-        def generate(self, tasks, callback, **kwargs):
-            return generate(tasks, lambda task_id, text: callback(
-                GeminiGenerationOutcome(task_id, text)))
+
+@pytest.mark.parametrize("interrupt_after", [(1.0, "a:1"), (1.05, "a:0")])
+@pytest.mark.parametrize("representation", ["graph", "description"])
+def test_qwen_scenes_resume_incomplete_pass_before_later_penalties(
+    context, monkeypatch, interrupt_after, representation,
+):
+    visuals = [{"content_id": cid} for cid in ("a", "b")]
+    monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
+    monkeypatch.setattr(steps, "video_name_map", lambda _: {})
+    context.config["extraction"][f"{representation}_repetition_penalty"] = [1.0, 1.05, 1.1]
+
+    def rows(visual, **kwargs):
+        cid = visual["content_id"]
+        return [{"task": QwenGenerationTask(f"{cid}:{i}", (), "prompt", 32),
+                 "scene_idx": i, "keyframes": [i * 30 + 5]}
+                for i in (range(2) if kwargs.get("scenes") is None
+                          else (scene["scene_idx"] for scene in kwargs["scenes"]))]
+
+    monkeypatch.setattr(steps, "scene_generation_rows", rows)
+    graph = json.dumps({"entities": [], "relations": [], "context": []})
+    interrupt = True
+    calls = []
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            for task in tasks:
+                event = (task.repetition_penalty, task.task_id)
+                calls.append(event)
+                threshold = {"a:0": 1.1, "b:0": 1.05}.get(task.task_id, 1.0)
+                callback(task.task_id, graph if task.repetition_penalty >= threshold else "")
+                if interrupt and event == interrupt_after:
+                    raise KeyboardInterrupt
+            return {}
+        yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
-    monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
-    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model=model)["failure_count"] == 1
-    expected = [[f"a:{i}" for i in range(limit)]]
-    if model == "qwen":
-        expected.append(["a:0"])
-    expected += [[f"a:{i}" for i in range(start, min(start + limit, limit + 2))]
-                 for start in range(limit, limit + 2, limit)]
-    expected += [[f"b:{i}" for i in range(limit)], [f"b:{limit}"]]
-    if model == "qwen":
-        expected.append([f"b:{limit}"])
+    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    extract = getattr(steps, f"extract_{representation}_scenes")
+    with pytest.raises(KeyboardInterrupt):
+        extract(context, model="qwen", schema=schema)
+    interrupt = False
+    calls.clear()
+    assert extract(context, model="qwen", schema=schema)["failure_count"] == 0
+    if interrupt_after[0] == 1.0:
+        assert calls == [(1.0, "b:0"), (1.0, "b:1"), (1.05, "a:0"),
+                         (1.05, "b:0"), (1.1, "a:0")]
     else:
-        expected = [[f"a:{i}" for i in range(limit + 2)],
-                    [f"b:{i}" for i in range(limit + 1)]]
-    assert submissions == expected
-    assert len(read_jsonl(context.graph_scene_dir(model) / "b.jsonl")) == limit
-    failures = read_jsonl(context.graph_failure_dir(model) / "b.jsonl")
-    assert [row["scene_idx"] for row in failures] == [limit]
-    output = capsys.readouterr()
-    assert f"[Graph_skip_{model}] b.mp4 | scene #{limit:03d}" in output.err
-    assert f"[Graph_{model}]" not in output.err + output.out
-    assert "setting_context" not in output.err + output.out
+        assert calls == [(1.05, "b:0"), (1.1, "a:0")]
+    scene_dir = context.extraction_dir(representation, "qwen", "scenes")
+    assert not (scene_dir / ".recovery").exists()
+    for cid in ("a", "b"):
+        records = read_jsonl(scene_dir / f"{cid}.jsonl")
+        assert [r["generation"]["attempt_count"] for r in records] == [3 if cid == "a" else 2, 1]
 
 
 @pytest.mark.parametrize("threads", [2, 8, 16])

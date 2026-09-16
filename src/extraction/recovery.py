@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
-from itertools import chain, groupby
+from itertools import chain
 import hashlib
 import json
 import math
@@ -91,68 +91,32 @@ def generation_key(task, identity, penalties):
 
 def generate_with_recovery(generate, tasks, *, penalties, directory, identity, validate,
                            complete, failed, raw_fallback=None, force=False,
-                           runtime=None, attempt_metadata=None, log=lambda message: None,
-                           batch_size=256, rounds_across_batches=False, batch_key=None):
-    """Bound input hashing/checkpoint IO before inference; keep one caller-owned model pool.
-
-    With batch_key, contiguous task groups are completed sequentially, including retries.
-    Batches never cross a group boundary and contain at most batch_size tasks.
-    With rounds_across_batches, stream the entire pass with lazy preparation and
-    retry only after all requests at the current penalty have finished.
-    """
-    if not rounds_across_batches:
-        tasks = list(tasks)
-        if len({task.task_id for task in tasks}) != len(tasks):
-            raise ValueError("duplicate recovery task")
-    if type(batch_size) is not int or batch_size <= 0:
-        raise ValueError("recovery batch size must be a positive integer")
-    if batch_key is not None and rounds_across_batches:
-        raise ValueError("grouped recovery requires completing retries within each batch")
+                           runtime=None, attempt_metadata=None, log=lambda message: None):
+    """Stream a full pass at one penalty, then retry only its validation failures."""
     penalties = penalty_schedule(penalties)
     force_run_id = active_force_run(directory)
     if force:
-        # One intent marker covers tasks in later batches, including existing good outputs.
         force_run_id = start_force_run(directory)
-    if rounds_across_batches:
-        for attempt_index in range(len(penalties)):
-            count = len(tasks) if hasattr(tasks, "__len__") else "streaming"
-            log(f"[RECOVERY] pass={attempt_index + 1}/{len(penalties)} "
-                f"repetition_penalty={penalties[attempt_index]} pending={count}")
-            tasks = _generate_recovery_batch(
-                generate, tasks, penalties=penalties, directory=directory, identity=identity,
-                validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
-                force=force and attempt_index == 0, force_run_id=force_run_id,
-                runtime=runtime, attempt_metadata=attempt_metadata, log=log,
-                attempt_index=attempt_index,
-            )
-            if not tasks:
-                break
-        return
-    groups = (group for _, group in groupby(tasks, key=batch_key)) if batch_key else [tasks]
-    offset = 0
-    for group in groups:
-        group = list(group)
-        for start in range(0, len(group), batch_size):
-            batch = group[start:start + batch_size]
-            log(f"[RECOVERY] preparing tasks {offset + 1}-{offset + len(batch)}/{len(tasks)} "
-                "(input hashes and checkpoints)")
-            _generate_recovery_batch(
-                generate, batch, penalties=penalties, directory=directory, identity=identity,
-                validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
-                force=force, force_run_id=force_run_id, runtime=runtime,
-                attempt_metadata=attempt_metadata, log=log, attempt_index=None,
-            )
-            offset += len(batch)
+    for attempt_index in range(len(penalties)):
+        count = len(tasks) if hasattr(tasks, "__len__") else "streaming"
+        log(f"[RECOVERY] pass={attempt_index + 1}/{len(penalties)} "
+            f"repetition_penalty={penalties[attempt_index]} pending={count}")
+        tasks = _generate_recovery_pass(
+            generate, tasks, penalties=penalties, directory=directory, identity=identity,
+            validate=validate, complete=complete, failed=failed, raw_fallback=raw_fallback,
+            force=force and attempt_index == 0, force_run_id=force_run_id,
+            runtime=runtime, attempt_metadata=attempt_metadata, attempt_index=attempt_index,
+        )
+        if not tasks:
+            break
 
 
-def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity, validate,
-                             complete, failed, raw_fallback, force, force_run_id,
-                             runtime, attempt_metadata, log, attempt_index):
+def _generate_recovery_pass(generate, tasks, *, penalties, directory, identity, validate,
+                            complete, failed, raw_fallback, force, force_run_id,
+                            runtime, attempt_metadata, attempt_index):
     """Only validation failures retry. Callbacks and engine errors propagate unchanged."""
-    penalties = penalty_schedule(penalties)
     states = {}
     admitted = set()
-    streaming = attempt_index is not None
     remaining = []
 
     def prepare(task):
@@ -176,10 +140,6 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             if force_run_id:
                 cycles[-1]["force_run_id"] = force_run_id
         states[task.task_id] = (task, path, document, cycles[-1])
-
-    if not streaming:
-        for task in tasks:
-            prepare(task)
 
     done = set()
 
@@ -212,96 +172,76 @@ def _generate_recovery_batch(generate, tasks, *, penalties, directory, identity,
             path.unlink(missing_ok=True)
         done.add(task_id)
 
-    for task_id in states:
-        commit(task_id)
+    index = attempt_index
+    handled = set()
+    request_ids = set()
 
-    while streaming or len(done) < len(states):
-        index = attempt_index if streaming else min(
-            len(state[3]["attempts"]) for key, state in states.items() if key not in done)
-        if index >= len(penalties):
-            raise ValueError("recovery checkpoint exceeds configured generation budget")
-        handled = set()
-        batch_ids = set()
+    def admit():
+        for task in tasks:
+            prepare(task)
+            commit(task.task_id)
+            count = len(states[task.task_id][3]["attempts"])
+            if task.task_id in done:
+                del states[task.task_id]
+            elif count == index:
+                request_ids.add(task.task_id)
+                yield replace(task, repetition_penalty=penalties[index])
+            else:
+                if count >= len(penalties) or count < index:
+                    raise ValueError("recovery checkpoint has an invalid generation budget")
+                remaining.append(task)
+                del states[task.task_id]
 
-        def admit():
-            for task in tasks:
-                prepare(task)
-                commit(task.task_id)
-                count = len(states[task.task_id][3]["attempts"])
-                if task.task_id in done:
-                    del states[task.task_id]
-                elif count == index:
-                    batch_ids.add(task.task_id)
-                    yield replace(task, repetition_penalty=penalties[index])
-                else:
-                    if count >= len(penalties) or count < index:
-                        raise ValueError("recovery checkpoint has an invalid generation budget")
-                    remaining.append(task)
-                    del states[task.task_id]
-
-        if streaming:
-            iterator = admit()
-            first = next(iterator, None)
-            if first is None:
-                break
-            batch = chain((first,), iterator)
-        else:
-            batch = [replace(state[0], repetition_penalty=penalties[index])
-                     for key, state in states.items()
-                     if key not in done and len(state[3]["attempts"]) == index]
-            batch_ids = {task.task_id for task in batch}
-            log(f"[RETRY] attempt={index + 1}/{len(penalties)} "
-                f"repetition_penalty={penalties[index]} pending={len(batch)}")
-
-        def handle(task_id, text):
-            if task_id not in batch_ids:
-                raise RuntimeError(f"unexpected recovery result: {task_id}")
-            if task_id in handled:
-                return
-            handled.add(task_id)
-            task, path, document, cycle = states[task_id]
-            event = runtime.current_result if runtime and runtime.current_result else {}
-            attempt = {"attempt": index + 1, "penalty": penalties[index], "seed": task.seed,
-                       "raw_response": text, "error": None, "repair_mode": None,
-                       "origin": runtime.checkpoint_origin() if runtime else None,
-                       **{key: event.get(key) for key in
-                          ("output_tokens", "finish_reason", "stop_reason")}}
-            if attempt_metadata is not None:
-                attempt.update(attempt_metadata(task_id))
-            try:
-                output, mode = validate(task_id, text)
-                attempt["repair_mode"] = mode
-            except OutputValidationError as exc:
-                output = None
-                attempt["error"] = str(exc)
-                attempt["repair_mode"] = "failed"
-            cycle["attempts"].append(attempt)
-            selected = attempt
-            if output is None and index + 1 == len(penalties):
-                selected = next((row for row in reversed(cycle["attempts"])
-                                 if row["raw_response"].strip()), None)
-                if selected is not None and raw_fallback is not None:
-                    output = raw_fallback(task_id, selected["raw_response"])
-                if output is None:
-                    cycle["status"] = "prepared_failure"
-            if output is not None:
-                cycle.update(status="prepared", output=output,
-                             selected_attempt=selected["attempt"], origin=selected["origin"])
-            # A response is durable before publishing it; replay never needs another generation.
-            _save(path, document)
-            commit(task_id, live=True)
-            if streaming:
-                if task_id not in done:
-                    remaining.append(task)
-                del states[task_id]
-
-        returned = generate(batch, handle)
-        for task_id in batch_ids - handled:
-            if task_id not in returned:
-                raise RuntimeError(f"missing generation result: {task_id}")
-            handle(task_id, returned[task_id])
-        if streaming:
-            break
-    if streaming:
+    iterator = admit()
+    first = next(iterator, None)
+    if first is None:
         return remaining
-    return [state[0] for key, state in states.items() if key not in done]
+    requests = chain((first,), iterator)
+
+    def handle(task_id, text):
+        if task_id not in request_ids:
+            raise RuntimeError(f"unexpected recovery result: {task_id}")
+        if task_id in handled:
+            return
+        handled.add(task_id)
+        task, path, document, cycle = states[task_id]
+        event = runtime.current_result if runtime and runtime.current_result else {}
+        attempt = {"attempt": index + 1, "penalty": penalties[index], "seed": task.seed,
+                   "raw_response": text, "error": None, "repair_mode": None,
+                   "origin": runtime.checkpoint_origin() if runtime else None,
+                   **{key: event.get(key) for key in
+                      ("output_tokens", "finish_reason", "stop_reason")}}
+        if attempt_metadata is not None:
+            attempt.update(attempt_metadata(task_id))
+        try:
+            output, mode = validate(task_id, text)
+            attempt["repair_mode"] = mode
+        except OutputValidationError as exc:
+            output = None
+            attempt["error"] = str(exc)
+            attempt["repair_mode"] = "failed"
+        cycle["attempts"].append(attempt)
+        selected = attempt
+        if output is None and index + 1 == len(penalties):
+            selected = next((row for row in reversed(cycle["attempts"])
+                             if row["raw_response"].strip()), None)
+            if selected is not None and raw_fallback is not None:
+                output = raw_fallback(task_id, selected["raw_response"])
+            if output is None:
+                cycle["status"] = "prepared_failure"
+        if output is not None:
+            cycle.update(status="prepared", output=output,
+                         selected_attempt=selected["attempt"], origin=selected["origin"])
+        # A response is durable before publishing it; replay never needs another generation.
+        _save(path, document)
+        commit(task_id, live=True)
+        if task_id not in done:
+            remaining.append(task)
+        del states[task_id]
+
+    returned = generate(requests, handle)
+    for task_id in request_ids - handled:
+        if task_id not in returned:
+            raise RuntimeError(f"missing generation result: {task_id}")
+        handle(task_id, returned[task_id])
+    return remaining

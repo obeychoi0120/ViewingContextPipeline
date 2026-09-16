@@ -6,6 +6,68 @@ import pytest
 from extraction.steps import extract_description_scenes, extract_graph_scenes, summarize_graph
 
 
+@pytest.mark.parametrize("source", ["qwen", "gemini"])
+@pytest.mark.parametrize("representation", ["graph", "description"])
+def test_summary_retries_after_full_pass_then_corrects_once(
+    v5_context, source, representation,
+):
+    from arm_registry import select_arms
+    from extraction.descriptions import SCENE_SCHEMA_VERSION
+    from extraction.summary_executor import run_summary_stage
+    from pipeline_runtime import read_json, write_jsonl
+
+    context = v5_context
+    name = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
+    arm = select_arms(context.config)[name]
+    context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
+    # Cross the old 256-item retry boundary for every summary source and representation.
+    ids = [f"content_{i:03d}" for i in range(259)]
+    correction_ids = set(ids[1:-1])
+    scene_dir = context.extraction_dir(representation, source, "scenes")
+    for cid in ids:
+        record = {"scene_idx": 0, "keyframes": [5],
+                  "provenance": {"arm": name, "representation": representation}}
+        if representation == "graph":
+            record.update(graph={"entities": [], "relations": [], "context": []},
+                          parse_mode="native", semantic_warnings=[])
+        else:
+            record.update(schema_version=SCENE_SCHEMA_VERSION, content_id=cid,
+                          description="A person walks outdoors.")
+        write_jsonl(scene_dir / f"{cid}.jsonl", [record])
+    calls = []
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            tasks = list(tasks)
+            penalties = {task.repetition_penalty for task in tasks}
+            assert len(penalties) == 1
+            calls.append((penalties.pop(), {task.task_id for task in tasks}))
+            for task in tasks:
+                correction = "Draft to correct:" in task.prompt
+                if correction:
+                    assert task.task_id in correction_ids
+                    assert len(calls) == 4  # All draft penalty passes have finished.
+                threshold = {ids[0]: 1.1, ids[-1]: 1.05}.get(task.task_id, 1.0)
+                text = ("A person walks outdoors." if correction else
+                        "" if task.repetition_penalty < threshold else
+                        "word " * 201 if task.task_id in correction_ids else "A person walks outdoors.")
+                callback(task.task_id, text)
+            return {}
+        yield generate
+
+    assert run_summary_stage(
+        context, arm=arm, schema=context.prompt_path(f"prompts/{representation}_summary_v4.md"),
+        catalog=[{"content_id": cid} for cid in ids], provenance={"fixture": name},
+        generation={"repetition_penalty": 1.0}, generator_factory=generator,
+    )["failure_count"] == 0
+    assert calls == [(1.0, set(ids)), (1.05, {ids[0], ids[-1]}),
+                     (1.1, {ids[0]}), (1.0, correction_ids)]
+    output_dir = context.extraction_dir(representation, source, "summaries")
+    assert read_json(output_dir / f"{ids[0]}.json")["generation"]["attempt_count"] == 3
+    assert read_json(output_dir / f"{ids[1]}.json")["correction_count"] == 1
+
+
 @pytest.mark.parametrize("force", [False, True])
 @pytest.mark.parametrize("representation", ["graph", "description"])
 def test_completed_scene_journals_removed_and_interrupted_force_resumes(

@@ -44,6 +44,7 @@ def test_only_failed_tasks_retry_constraints_stay_enabled_and_raw_is_last_nonemp
     batches = []
 
     def generate(tasks, callback):
+        tasks = list(tasks)
         batches.append([(t.task_id, t.repetition_penalty) for t in tasks])
         for t in tasks:
             assert t.structured_output == {"json": GRAPH_JSON_SCHEMA}
@@ -72,7 +73,7 @@ def test_interrupt_resumes_next_penalty_and_failed_cycle_restarts(tmp_path):
     seen = []
 
     def empty(tasks, callback):
-        seen.append(tasks[0].repetition_penalty)
+        seen.append(next(iter(tasks)).repetition_penalty)
         return {"a": ""}
 
     outputs, failures = run(tmp_path, empty)
@@ -138,7 +139,7 @@ def test_scene_stream_prepares_only_admitted_tasks_and_refills_before_completion
         for item in iterator:
             callback(item.task_id, "valid")
         return {}
-    outputs, failures = run(tmp_path, generate, tasks, rounds_across_batches=True)
+    outputs, failures = run(tmp_path, generate, tasks)
     assert len(calls) == 1 and len(outputs) == 1000 and not failures
 
 
@@ -165,7 +166,7 @@ def test_checkpoint_write_failure_preserves_last_durable_attempt(tmp_path, monke
     assert len(cycles(tmp_path)[0]["attempts"]) == 1
     monkeypatch.setattr(recovery, "_save", original)
     seen = []
-    run(tmp_path, lambda tasks, _: (seen.append(tasks[0].repetition_penalty) or {"a": "valid replay"}))
+    run(tmp_path, lambda tasks, _: (seen.append(next(iter(tasks)).repetition_penalty) or {"a": "valid replay"}))
     assert seen == [1.05]
 
 
@@ -183,7 +184,7 @@ def test_streaming_recovery_does_not_consume_future_inputs_before_generation(tmp
             completed.append(item.task_id)
         return {}
 
-    outputs, failures = run(tmp_path, generate, tasks(), rounds_across_batches=True)
+    outputs, failures = run(tmp_path, generate, tasks())
     assert set(outputs) == {"a", "b"} and not failures
 
 
@@ -194,4 +195,4 @@ def test_streaming_recovery_rejects_duplicate_after_first_task_completes(tmp_pat
         return {}
 
     with pytest.raises(ValueError, match="duplicate recovery task"):
-        run(tmp_path, generate, iter([task("a"), task("a")]), rounds_across_batches=True)
+        run(tmp_path, generate, iter([task("a"), task("a")]))

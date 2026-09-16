@@ -119,8 +119,8 @@ class InferenceProgress:
 
     def update_stats(self, stats):
         with self._lock:
-            # Backend request statistics may reset for each content or retry
-            # batch. They must not reset the step's displayed rate or ETA.
+            # Backend request statistics may reset for each generation pass.
+            # They must not reset the step's displayed rate or ETA.
             self.stats = dict(stats)
 
     def _render(self, *, refresh):

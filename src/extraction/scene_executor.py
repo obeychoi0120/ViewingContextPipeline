@@ -16,9 +16,6 @@ from extraction.step_support import (
 )
 
 
-QWEN_GRAPH_SCENE_CONCURRENCY = 8
-
-
 def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
     """Convert one response without changing artifacts or the raw graph."""
     parsed = parse_or_repair_graph(text) if error is None else None
@@ -111,12 +108,8 @@ def run_qwen_scenes(
         for visual, scene_rows in pending:
             yield from register_content(visual, scene_rows)
 
-    write_progress(progress, (
-        "[Qwen] processing contents sequentially with up to 8 concurrent scenes; "
-        "each completed scene is checkpointed immediately"
-        if arm == "graph" else
-        "[Qwen] streaming scenes continuously; each completed scene is checkpointed immediately"
-    ))
+    write_progress(progress, "[Qwen] streaming scenes across contents at one repetition penalty; "
+                   "retry failed scenes after the full pass; checkpoint each completed scene")
 
     def validate(task_id, text):
         content_id, row = rows_by_task[task_id]
@@ -170,28 +163,19 @@ def run_qwen_scenes(
         image_limit=image_limit, runtime=runtime, log=lambda message: write_progress(progress, message),
         on_progress=lambda stats: qwen_progress(progress, stats),
     ) as generate:
-        def run(tasks):
-            generate_with_recovery(
-                generate, tasks,
-                penalties=penalties, directory=scene_dir / ".recovery",
-                identity=identity or {
-                    "model": str(model_path), "settings": qwen_options, "backend": "vllm-0.28.0",
-                },
-                validate=validate, complete=lambda task_id, record: publish(task_id, record, None),
-                failed=failed,
-                raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
-                if arm == "graph" else None,
-                runtime=runtime,
-                log=lambda message: write_progress(progress, message) if arm != "graph" else None,
-                rounds_across_batches=arm != "graph",
-                batch_size=QWEN_GRAPH_SCENE_CONCURRENCY if arm == "graph" else 256,
-            )
-
-        if arm == "graph":
-            for visual, scene_rows in pending:
-                run(register_content(visual, scene_rows))
-        else:
-            run(stream_tasks())
+        generate_with_recovery(
+            generate, stream_tasks(),
+            penalties=penalties, directory=scene_dir / ".recovery",
+            identity=identity or {
+                "model": str(model_path), "settings": qwen_options, "backend": "vllm-0.28.0",
+            },
+            validate=validate, complete=lambda task_id, record: publish(task_id, record, None),
+            failed=failed,
+            raw_fallback=(lambda task_id, raw: raw_graph_record(rows_by_task[task_id][1], raw))
+            if arm == "graph" else None,
+            runtime=runtime,
+            log=lambda message: write_progress(progress, message),
+        )
     return records_by_content, failures_by_content
 
 
