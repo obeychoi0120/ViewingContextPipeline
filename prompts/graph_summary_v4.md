@@ -1,6 +1,10 @@
-Summarize the supplied scene observations into comprehensive natural English paragraphs describing the video. Include the most distinctive entities, attributes, actions, directed relationships, and background in order of importance. Merge repeated observations while preserving important differences and changes. Preserve grounded interpretations and their uncertainty already present in the observations; do not add facts, interpretations, or relationships absent from the input. Never reproduce, quote, or translate on-screen wording.
+Summarize the supplied scene observations into brief, natural English prose describing the video. Aim for 100-120 words in total and never exceed 150 words. Fewer than 100 words are welcome when the evidence is sparse. Do not pad to reach a target length.
 
-Write comprehensive and concise paragraphs. Aim for total 200-300 words, with a hard maximum of 350 words. Fewer than 200 words are fine when evidence is sparse; do not pad. Output only the paragraph, without headings, lists, labels, or commentary. There are no field quotas. Entity IDs are scene-local references, not identities: describe distinguishable entities naturally using their appearance and preserve the direction of their interactions. Never assume equal IDs in different scenes refer to the same entity.
+Lead with the video's most important subjects, actions, and interactions. Keep only appearance or setting details needed to distinguish them, and changes essential to understanding what happens. Merge repeated observations into one statement. Do not recount scenes one by one, inventory every entity or attribute, or restate an action in different words. Omit generic introductions, concluding restatements, and minor details. Once the core information is conveyed, end with a complete sentence and stop; do not continue adding descriptions.
+
+Preserve grounded interpretations and their uncertainty already present in the observations; do not add facts, interpretations, or relationships absent from the input. Never reproduce, quote, or translate on-screen wording. Entity IDs are scene-local references, not identities: describe distinguishable entities naturally using their appearance and preserve the direction of their interactions. Never assume equal IDs in different scenes refer to the same entity.
+
+Output only the summary prose, without headings, lists, labels, or commentary. One or more paragraphs are allowed; the 150-word maximum applies to the entire output.
 
 Scene observations:
 {scenes}
