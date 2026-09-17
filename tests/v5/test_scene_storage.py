@@ -194,7 +194,7 @@ def test_changed_settings_retry_only_explicit_scene_and_summary_failures(
     assert len(fake_models) == count + 1
     assert all(path.read_bytes() == saved for path, saved in summaries.items())
     summary_failures = FailureLog(summary_dir)
-    summary_failures.record(selected, None, "previous failure", "")
+    summary_failures.record(selected, None, "previous failure", "", repetition_penalty=1.0)
     summarize(context, source=model, schema=summary_schema)
     assert len(fake_models) == count + 2
     assert [task.task_id for task in fake_models[-1]] == [selected]

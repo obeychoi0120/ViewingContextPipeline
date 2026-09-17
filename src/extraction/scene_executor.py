@@ -164,7 +164,11 @@ def run_qwen_scenes(
         log=lambda message: write_progress(progress, message),
     ) as generate:
         generate_penalty_passes(generate, chain((first,), tasks), list(penalties), receive,
-                                log=lambda message: write_progress(progress, message))
+                                log=lambda message: write_progress(progress, message),
+                                on_pass=lambda index, count, total: progress.begin_pass(
+                                    progress.total if total is None else total,
+                                    index=index, count=count,
+                                ))
 
 
 def run_gemini_scenes(

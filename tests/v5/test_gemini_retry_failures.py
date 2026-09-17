@@ -77,7 +77,7 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
-def test_gemini_summary_retries_legacy_failures_and_clears_only_published_successes(
+def test_gemini_summary_restores_legacy_failures_without_generation(
     ready_context, fake_models, monkeypatch, representation,
 ):
     context = ready_context
@@ -108,17 +108,17 @@ def test_gemini_summary_retries_legacy_failures_and_clears_only_published_succes
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     assert summarize(context, **options)["failure_count"] == 2
-    # Older per-content Summary failure artifacts are also admitted for retry.
+    # Missing penalty in legacy files means retries were exhausted.
     for row in read_jsonl(failure_path):
+        row.pop("repetition_penalty")
         write_jsonl(directory / "failures" / f"{row['content_id']}.jsonl", [row])
+        (directory / f"{row['content_id']}.json").unlink()
     failure_path.unlink()
     phase = 1
-    with pytest.raises(KeyboardInterrupt):
-        summarize(context, **options)
+    assert summarize(context, **options)["failure_count"] == 2
     assert not (directory / "failures").exists()
-    phase = 2
-    assert summarize(context, **options)["failure_count"] == 0
-    assert not failure_path.exists()
-    assert calls == [(0, cid) for cid in ids] + [(1, ids[0]), (2, ids[1])]
-    assert summarize(context, **options)["failure_count"] == 0
-    assert len(calls) == 6
+    assert all("repetition_penalty" not in row for row in read_jsonl(failure_path))
+    assert calls == [(0, cid) for cid in ids]
+    assert all((directory / f"{cid}.json").exists() for cid in ids)
+    assert summarize(context, **options)["failure_count"] == 2
+    assert len(calls) == len(ids)

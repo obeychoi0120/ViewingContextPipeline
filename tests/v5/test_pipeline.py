@@ -172,7 +172,7 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
     assert embed_representations(context, target=[arm])["generated_arms"] == [arm]
 
 
-def test_summary_keeps_final_nonempty_raw_without_correction(ready_context, fake_models, monkeypatch):
+def test_summary_accepts_multiple_paragraphs_without_correction(ready_context, fake_models, monkeypatch):
     context = ready_context
     extract_graph_scenes(context, model="qwen", schema="prompts/graph_scene_v3.md")
     calls = []
@@ -190,11 +190,12 @@ def test_summary_keeps_final_nonempty_raw_without_correction(ready_context, fake
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
-    assert len(calls) == len(context.config["extraction"]["summary_repetition_penalty"])
+    assert len(calls) == 1
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
-    assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
+    assert doc["status"] == "complete" and doc["correction_count"] == 0
     assert doc["word_count"] == 201
-    assert doc["violations"] == ["multiple_paragraphs"]
+    assert doc["violations"] == []
+    assert "\n\n" in doc["text"]
     assert doc["text"].startswith("first")
     embed_representations(context, target=["graph_qwen"])
 
@@ -222,7 +223,7 @@ def test_graph_preserves_ids_and_only_validates_json_shape():
         with pytest.raises(OutputValidationError):
             validate_graph_structure(value)
     assert inspect_summary("A person walks.\nAnother waves.")[1] == []
-    assert inspect_summary("A person walks.\n\nAnother waves.")[1] == ["multiple_paragraphs"]
+    assert inspect_summary("A person walks.\n\nAnother waves.")[1] == []
 
 
 @pytest.mark.parametrize("model", ["qwen", "gemini"])

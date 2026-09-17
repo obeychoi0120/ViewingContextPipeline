@@ -10,13 +10,17 @@ from extraction.backends.qwen_workers import QwenGenerationTask
 from extraction.errors import ExtractionStepError
 from extraction.evidence import build_scene_evidence
 from extraction.monitoring import video_names
+from extraction.progress import InferenceProgress
 from extraction.raw_output import is_raw_graph, valid_raw_graph
 from extraction.scene_storage import write_scene_records
 from pipeline_runtime import RunContext, read_jsonl
 
 
-def write_progress(progress: tqdm, message: str) -> None:
-    tqdm.write(message, file=progress.fp)
+def write_progress(progress: tqdm | InferenceProgress, message: str) -> None:
+    if isinstance(progress, InferenceProgress):
+        progress.write_log(message)
+    else:
+        tqdm.write(message, file=progress.fp)
 
 
 def complete_content_progress(progress: tqdm) -> None:

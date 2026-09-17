@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, ExitStack
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Iterator
 from tqdm import tqdm
@@ -14,9 +15,9 @@ from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
 from extraction.errors import ExtractionStepError
 from extraction.input_tracking import clear_dirty
-from extraction.recovery import fingerprint
+from extraction.recovery import fingerprint, penalty_schedule
 from extraction.failures import FailureLog
-from extraction.generation import generate_penalty_passes
+from extraction.generation import generate_once
 from extraction.scene_storage import read_scene_records
 from extraction.semantic_graph import graph_summary_prompt
 from extraction.step_support import minimal_description_records, minimal_graph_records, result
@@ -47,7 +48,7 @@ def reuse_summary_document(
         if not text or doc.get("word_count") != len(text.split()):
             raise ValueError("empty summary or incorrect word count")
         if doc["status"] == "complete" and (violations or doc.get("violations") != []):
-            raise ValueError("normal summary violates the paragraph contract")
+            raise ValueError("normal summary violates the summary contract")
         if doc["status"] == "raw_fallback" and not isinstance(doc.get("violations"), list):
             raise ValueError("raw summary requires recorded violations")
         return doc
@@ -78,7 +79,38 @@ def run_summary_stage(
     build_prompt = graph_summary_prompt if graph else description_summary_prompt
     settings = context.config["extraction"]
     max_tokens = settings["graph" if graph else "description"]["summary_max_new_tokens"]
-    tasks, pending, documents = [], {}, {}
+    schedule = penalty_schedule(settings["summary_repetition_penalty"])
+    if any(left >= right for left, right in zip(schedule, schedule[1:])):
+        raise ExtractionStepError("summary repetition penalties must be strictly increasing")
+    pending, documents, next_penalties = {}, {}, {}
+
+    def publish(cid, text, violations, *, raw=False):
+        records, prov, _ = pending[cid]
+        if not text.strip():
+            text = build_prompt("{scenes}", records)
+            prov = {**prov, "summary_fallback": "scene_observations"}
+        doc = {
+            "schema_version": SUMMARY_SCHEMA_VERSION,
+            "content_id": cid,
+            "arm": arm.name,
+            "status": "raw_fallback" if raw else "complete",
+            "text": text,
+            "scene_count": len(records),
+            "word_count": len(text.split()),
+            "violations": violations,
+            "correction_count": 0,
+            "provenance": prov,
+        }
+        output = output_dir / f"{cid}.json"
+        # Reopening a terminal failure should not rewrite its published artifact.
+        try:
+            unchanged = output.is_file() and read_json(output) == doc
+        except (ValueError, OSError):
+            unchanged = False
+        if not unchanged:
+            atomic_write_json(output, doc, durable=True)
+        clear_dirty(output)
+        documents[cid] = doc
 
     for item in catalog:
         cid = str(item["content_id"])
@@ -90,21 +122,17 @@ def run_summary_stage(
             except ExtractionStepError:
                 pass
             else:
-                if existing["status"] == "complete":
-                    clear_dirty(output)
-                    documents[cid] = existing
-                    continue
-                failures.record(cid, None, ", ".join(existing["violations"]) or "invalid summary",
-                                existing["text"])
+                clear_dirty(output)
+                documents[cid] = existing
+                continue
         if not source.is_file():
-            output.unlink(missing_ok=True)
-            failures.record(cid, None, "missing scene input")
-            continue
-        records = normalize(read_scene_records(source), source)
+            raise ExtractionStepError(f"missing scene input: {source}")
+        try:
+            records = normalize(read_scene_records(source), source)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ExtractionStepError(f"invalid scene input {source}: {exc}") from exc
         if not records:
-            output.unlink(missing_ok=True)
-            failures.record(cid, None, "empty scene input")
-            continue
+            raise ExtractionStepError(f"empty scene input: {source}")
         raw_count = sum(r.get("status") == "raw_fallback" for r in records)
         prov = {
             **provenance,
@@ -122,57 +150,64 @@ def run_summary_stage(
             **generation,
         )
         pending[cid] = (records, prov, task)
-        tasks.append(task)
+        failed = failures.rows.get((cid, None))
+        if failed is None:
+            next_penalties[cid] = schedule[0]
+        else:
+            last = failed.get("repetition_penalty")
+            if last is not None and (type(last) not in (int, float)
+                                     or not 1 <= last <= 2):
+                raise ExtractionStepError(f"invalid summary repetition_penalty for {cid}: {last}")
+            next_penalty = next((value for value in schedule if last is not None and value > last), None)
+            if next_penalty is None:
+                publish(cid, failed["raw_output"], failed["error"].split(", "), raw=True)
+            else:
+                next_penalties[cid] = next_penalty
 
     runtime = QwenRuntime()
     with ExitStack() as resources:
         progress = resources.enter_context(InferenceProgress(
-            total=len(tasks), reused=len(documents), empty=failures.count(content_ids),
+            total=len(next_penalties), reused=len(documents), empty=failures.count(content_ids),
             desc=f"Summary {arm.name}", unit="summary", progress_factory=tqdm,
         ))
 
-        def receive(cid, text, *, final):
-            records, prov, _ = pending[cid]
+        def receive(cid, text):
             normalized, violations = inspect_summary(text)
             event = runtime.current_result or {}
             if event.get("finish_reason") == "length":
                 violations.append("max_tokens")
-            output = output_dir / f"{cid}.json"
-            if normalized and (not violations or final):
-                doc = {
-                    "schema_version": SUMMARY_SCHEMA_VERSION,
-                    "content_id": cid,
-                    "arm": arm.name,
-                    "status": "raw_fallback" if violations else "complete",
-                    "text": text if violations else normalized,
-                    "scene_count": len(records),
-                    "word_count": len(normalized.split()),
-                    "violations": violations,
-                    "correction_count": 0,
-                    "provenance": prov,
-                }
-                atomic_write_json(output, doc, durable=True)
-                clear_dirty(output)
-                documents[cid] = doc
-            else:
-                output.unlink(missing_ok=True)
-                documents.pop(cid, None)
+            final = penalty == schedule[-1]
             if violations:
-                failures.record(cid, None, ", ".join(violations), text)
+                # Persist the completed attempt before publishing its terminal artifact.
+                failures.record(cid, None, ", ".join(violations), text,
+                                repetition_penalty=penalty)
+                if final:
+                    publish(cid, text, violations, raw=True)
+                    del next_penalties[cid]
+                else:
+                    (output_dir / f"{cid}.json").unlink(missing_ok=True)
+                    next_penalties[cid] = schedule[schedule.index(penalty) + 1]
             else:
+                publish(cid, normalized, [])
                 failures.remove(cid, None)
+                del next_penalties[cid]
             progress.complete(task_id=cid, failed=bool(violations),
-                              raw=bool(final and normalized and violations))
-            return bool(violations)
+                              raw=bool(final and violations))
 
-        if tasks:
+        if next_penalties:
             generate = resources.enter_context(generator_factory(
                 model_path=context.path("models", "qwen"), settings=settings.get("qwen"),
                 image_limit=settings["visual_evidence"]["num_keyframes"], runtime=runtime,
-                on_progress=progress.update_stats, log=lambda message: print(message, flush=True),
+                on_progress=progress.update_stats, log=progress.write_log,
             ))
-            generate_penalty_passes(generate, tasks, settings["summary_repetition_penalty"], receive,
-                                    log=lambda message: print(message, flush=True))
+            for index, penalty in enumerate(schedule, start=1):
+                tasks = [replace(pending[cid][2], repetition_penalty=penalty)
+                         for cid, value in next_penalties.items() if value == penalty]
+                if tasks:
+                    progress.begin_pass(len(tasks), index=index, count=len(schedule))
+                    progress.write_log(f"[Qwen] repetition_penalty={penalty:.2f} "
+                                       f"pass={index}/{len(schedule)} tasks={len(tasks)}")
+                    generate_once(generate, tasks, receive)
     failed_count = failures.count(content_ids)
     print(f"[SUMMARY] {arm.name}: outputs={len(documents)} failed={failed_count}", flush=True)
     return result(f"summarize-{arm.name}", content_count=len(documents), failure_count=failed_count)

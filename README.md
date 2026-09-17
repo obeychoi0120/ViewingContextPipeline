@@ -146,14 +146,14 @@ python -m extraction migrate-scene-schema --run-id "$RUN_ID"
 
 Qwen Desc·Graph와 모든 Summary는 설정된 repetition penalty별로 전체 pass를 완료하고 실패 항목만 다음 pass에서 재생성합니다. 기본 순서는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20`이며 성공 항목은 제외합니다. Vertex Gemini의 `429 RESOURCE_EXHAUSTED`만 30초 뒤 한 번 재시도하며, Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면 번호는 본문 파일의 `scene_idx`에, 요약의 생성 당시 provenance는 요약 문서에 남깁니다.
 
-장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`을 저장합니다. `raw_output`은 생성 원문이며 공백·줄바꿈도 보존합니다. 응답이 없으면 빈 문자열입니다. 토큰 수·penalty·시도 이력은 실패 파일에 넣지 않습니다. 같은 Run을 재실행하면 Graph·Desc·Summary의 기존 실패를 다시 처리하며 Qwen 생성은 첫 penalty부터 시작합니다. 재시도 성공 결과를 저장한 뒤 해당 실패 행을 제거하고, 파일에 남은 실패가 없으면 파일도 삭제합니다. 다시 실패하면 오류와 원문을 갱신합니다. `--force`는 대상 콘텐츠 전체를 다시 처리합니다. 실행 시작 시 기존 `failure.jsonl`·`failures.jsonl`과 예전 콘텐츠별 실패 파일을 새 형식으로 옮깁니다. 예전 기록에 원문이 없으면 `raw_output`은 빈 문자열로 남습니다.
+장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 생성 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`, `repetition_penalty`를 저장합니다. `raw_output`은 공백·줄바꿈까지 보존하며 응답이 없으면 빈 문자열입니다. 장면 생성은 재실행 시 첫 penalty부터 실패 항목을 처리합니다. Summary는 아직 처리하지 않은 콘텐츠를 먼저 초기 penalty로 처리한 뒤, 실패별 마지막 penalty보다 큰 다음 설정값부터 이어갑니다. 마지막 penalty까지 완료했거나 penalty 필드가 없는 기존 실패는 재생성 없이 콘텐츠별 `.json`의 `text`로 복구합니다. 원문이 비어 있으면 Scene 관측 내용을 대신 저장하고 provenance에 `summary_fallback=scene_observations`를 기록합니다. 최종 실패 기록은 유지하며 `--force`로 전체 재생성을 요청할 수 있습니다. 재시도 성공 결과를 저장한 뒤 해당 실패 행을 제거하고, 남은 실패가 없으면 파일도 삭제합니다. 실행 시작 시 이전 실패 파일을 현재 형식으로 옮기며 기존 penalty와 원문을 보존합니다.
 
 ```json
 {"content_id":"123","scene_idx":2,"error":"model produced an empty description","raw_output":""}
-{"content_id":"123","error":"multiple_paragraphs","raw_output":"First paragraph.\n\nSecond paragraph."}
+{"content_id":"123","error":"max_tokens","raw_output":"Truncated output...","repetition_penalty":1.2}
 ```
 
-진행률의 `failed`는 첫 응답에서 확정된 실패 수이고, `raw`는 그중 비어 있지 않은 Graph·Summary 원문을 E2E 입력으로 보존한 수입니다. Qwen·Gemini Graph와 Qwen Summary의 토큰 한도 종료는 실패로 기록합니다. 장면 추출의 `scene/s`와 요약의 `summary/s`는 이번 실행의 성공·실패 완료 건수를 해당 단계의 경과 시간으로 나눈 값이며, 재사용 결과는 제외합니다.
+진행률의 `success`와 `failed`는 현재 패스에서 완료된 성공·실패 수이고, `raw`는 그중 fallback 결과를 보존한 수입니다. Qwen 재시도는 실패 항목만 다음 패스로 넘기며, 매 패스 시작 시 분모를 실제 처리 대상 수로 바꾸고 완료 건수·경과 시간을 초기화합니다. `pass=N/M`은 설정된 penalty 순서를 나타내며, `scene/s`와 `summary/s` 및 ETA는 현재 패스 기준입니다. 재사용 결과는 집계에서 제외하고 전체 최종 결과는 단계 종료 로그에 표시합니다. Qwen·Gemini Graph와 Qwen Summary의 토큰 한도 종료는 실패로 기록합니다.
 
 각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.
 
@@ -161,11 +161,11 @@ Qwen Desc·Graph와 모든 Summary는 설정된 repetition penalty별로 전체 
 
 - 기본 장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다.
 - 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
-- Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 최종 원문을 Raw로 사용하며, 빈 원문은 실패 기록만 남깁니다. 성공한 항목은 재생성하지 않습니다.
+- Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 최종 원문을 Raw로 사용하며, 빈 장면 원문은 실패 기록만 남기며, 빈 Summary 원문은 Scene 관측 내용으로 대체합니다. 성공한 항목은 재생성하지 않습니다.
 - Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 필수 필드·타입·빈 문자열 등 JSON 구조 검증은 유지합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
 - Graph 생성에는 JSON Schema를 강제하지 않습니다. `graph_scene_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행·토큰 잘림은 원문과 실패 기록을 보존합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
-- 신규 Summary는 프롬프트에서 자연스러운 영어 한 문단, 100–200단어 권장·최대 200단어를 요청합니다. 정보가 적으면 100단어 미만도 허용합니다. 단어 수는 기록만 하며 200단어 초과만으로 실패 처리하지 않습니다. 필드별 할당과 summary grammar는 없습니다. 형식 위반·토큰 제한으로 잘린 출력은 실패로 기록하고 다음 penalty에서 재생성합니다. 마지막까지 실패하면 비어 있지 않은 최종 결과를 명시적 Raw로 사용합니다. 빈 결과와 실행 오류는 구분합니다.
-- Qwen·Gemini Graph·Desc 및 모든 Summary는 설정·프롬프트·경로가 달라도 기존 성공 결과를 그대로 재사용합니다. 일반 실행은 실패 및 결과가 없는 항목만 생성합니다. 장면을 갱신해도 이미 성공한 Summary는 보존하며, 성공 결과까지 다시 만들려면 해당 단계에 `--force`를 지정합니다. 실패 기록은 재생성 성공 후 제거합니다. 다른 run ID의 결과를 자동으로 가져오지는 않습니다.
+- 신규 Summary는 문단·목록·마크업·구조화 필드를 허용하며 줄바꿈을 보존합니다. 단어 수는 기록만 하고 실패 조건으로 사용하지 않습니다. 빈 출력과 `finish_reason=length`만 실패로 기록하고 다음 penalty에서 재생성합니다. 마지막 실패 원문은 `raw_fallback`으로 저장하며, 원문이 비어 있으면 프롬프트 지시문을 제외한 Scene 관측 내용을 저장합니다. 유효한 Scene 입력이 없으면 명시적인 입력 오류로 보고합니다.
+- Qwen·Gemini Graph·Desc 및 모든 Summary는 설정·프롬프트·경로가 달라도 기존 성공 결과를 그대로 재사용합니다. 일반 실행은 결과가 없는 항목과 재시도가 남은 실패만 생성합니다. 장면을 갱신해도 이미 성공한 Summary는 보존하며, 성공 결과까지 다시 만들려면 해당 단계에 `--force`를 지정합니다. 실패 기록은 재생성 성공 후 제거합니다. 다른 run ID의 결과를 자동으로 가져오지는 않습니다.
 - Gemini Summary **파일이 없을 때만** 같은 Run·표현의 Qwen Summary로 fallback합니다. Raw Gemini가 있으면 우선 사용합니다. 손상된 일반 파일은 오류이며 Qwen 요약 누락을 영벡터로 대체하지 않습니다. 실제 사용 경로를 기록하고 Gemini 결과가 추가되면 embedding·추천 캐시를 갱신합니다.
 - BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata title만 영벡터를 사용합니다.
 

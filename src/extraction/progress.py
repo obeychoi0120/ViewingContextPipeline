@@ -46,7 +46,7 @@ class RecentThroughput:
 
 
 class InferenceProgress:
-    """Refresh a consistent step-wide completion/rate/ETA snapshot every five seconds."""
+    """Refresh completion/rate/ETA for the current pass every five seconds."""
 
     REFRESH_SECONDS = 5.0
 
@@ -72,6 +72,7 @@ class InferenceProgress:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._ticker = None
+        self._log_line_cleared = False
 
     def __enter__(self):
         self.bar.__enter__()
@@ -128,11 +129,33 @@ class InferenceProgress:
             self.raw += raw
         # Counts are collected immediately; only the timer paints them.
 
+    def begin_pass(self, total, *, index, count):
+        """Start a fresh progress snapshot for the actual requests in this pass."""
+        with self._lock, tqdm.get_lock():
+            if self._outcomes:
+                self._render(refresh=True)
+            self.total = self.discovered = total
+            self.success = self.failed = self.raw = 0
+            self._outcomes.clear()
+            self.stats = {"phase": "initializing", "inflight": 0}
+            self._started = self._clock()
+            self.bar.set_postfix_str("", refresh=False)
+            self.bar.reset(total=total)
+            self.pass_label = f"pass={index}/{count}"
+            self._render(refresh=True)
+
     def update_stats(self, stats):
         with self._lock:
-            # Backend request statistics may reset for each generation pass.
-            # They must not reset the step's displayed rate or ETA.
+            # Backend statistics must not reset the current pass's rate or ETA.
             self.stats = dict(stats)
+
+    def write_log(self, message):
+        """Print immediately without tqdm.write's automatic bar redraw."""
+        with self._lock, tqdm.get_lock():
+            if not self._log_line_cleared:
+                self.bar.clear(nolock=True)
+                self._log_line_cleared = True
+            print(message, file=self.fp, flush=True)
 
     def _render(self, *, refresh):
         with self._lock, tqdm.get_lock():
@@ -150,8 +173,12 @@ class InferenceProgress:
             else:
                 eta = "estimating"
             fields = f"ETA={eta} success={self.success} failed={self.failed}"
+            if hasattr(self, "pass_label"):
+                fields = f"{self.pass_label} {fields}"
             fields += f" raw={self.raw}"
             formatted_rate = f"{rate:.2f}" if elapsed > 0 else "--"
             fields += f" {self.unit}/s={formatted_rate}"
             self.bar.n = completed
             self.bar.set_postfix_str(fields, refresh=refresh)
+            if refresh:
+                self._log_line_cleared = False

@@ -28,7 +28,8 @@ class FailureLog:
             for row in existing[path]:
                 self._remember(row.get("content_id", path.stem), row.get("scene_idx"),
                                row.get("error") or "generation failed",
-                               row.get("raw_output", row.get("raw_response", "")))
+                               row.get("raw_output", row.get("raw_response", "")),
+                               repetition_penalty=row.get("repetition_penalty"))
         targets = ({self.path_for(cid): list(rows.values()) for cid, rows in self.by_content.items()}
                    if scenes else {self.path: list(self.rows.values())})
         for path, rows in targets.items():
@@ -51,7 +52,7 @@ class FailureLog:
     def path_for(self, content_id):
         return self.path / f"{content_id}.jsonl" if self.scenes else self.path
 
-    def _remember(self, content_id, scene_idx, error, raw_output):
+    def _remember(self, content_id, scene_idx, error, raw_output, *, repetition_penalty=None):
         cid = str(content_id)
         row = {"content_id": cid}
         if self.scenes:
@@ -61,6 +62,8 @@ class FailureLog:
         else:
             scene_idx = None
         row.update(error=str(error), raw_output=raw_output if raw_output is not None else "")
+        if repetition_penalty is not None:
+            row["repetition_penalty"] = repetition_penalty
         self.rows[(cid, scene_idx)] = row
         self.by_content.setdefault(cid, {})[scene_idx] = row
         return row
@@ -89,10 +92,13 @@ class FailureLog:
         if not self.by_content[cid]:
             del self.by_content[cid]
 
-    def record(self, content_id, scene_idx, error, raw_output=""):
+    def record(self, content_id, scene_idx, error, raw_output="", *, repetition_penalty=None):
         cid = str(content_id)
         previous = self.rows.get((cid, scene_idx))
-        row = self._remember(cid, scene_idx, error, raw_output)
+        if repetition_penalty is None and previous is not None:
+            repetition_penalty = previous.get("repetition_penalty")
+        row = self._remember(cid, scene_idx, error, raw_output,
+                             repetition_penalty=repetition_penalty)
         if previous == row:
             return
         path = self.path_for(cid)

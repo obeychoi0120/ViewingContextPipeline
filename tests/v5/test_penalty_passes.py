@@ -21,6 +21,10 @@ def test_scene_passes_retry_only_failures_and_keep_final_raw(ready_context, monk
         engines.append(True)
 
         def generate(tasks, callback):
+            progress = kwargs["on_progress"].__self__
+            expected_total = 1 if succeed else [4, 3, 2][len(set(p for _, p in calls))]
+            assert progress.total == expected_total
+            assert progress.success == progress.failed == 0
             for task in tasks:
                 index = ids.index(task.task_id.rsplit(":", 1)[0])
                 penalty = task.repetition_penalty
@@ -88,12 +92,15 @@ def test_summary_passes_retry_only_failures_and_keep_final_raw(
         engines.append(True)
 
         def generate(tasks, callback):
+            progress = kwargs["on_progress"].__self__
+            assert progress.total == [4, 3, 2][len(set(p for _, p in calls))]
+            assert progress.success == progress.failed == 0
             for task in tasks:
                 index = ids.index(task.task_id)
                 penalty = task.repetition_penalty
                 calls.append((index, penalty))
                 failed = penalty < [1.0, 1.05, 1.1, 2.0][index]
-                kwargs["runtime"].current_result = {"finish_reason": "stop"}
+                kwargs["runtime"].current_result = {"finish_reason": "length" if failed else "stop"}
                 callback(task.task_id, f"  - failed {penalty}\n" if failed else "A person walks.")
                 if failed and penalty < 1.1:
                     directory = context.extraction_dir(representation, source, "summaries")
@@ -111,5 +118,5 @@ def test_summary_passes_retry_only_failures_and_keep_final_raw(
     raw = read_json(directory / f"{ids[3]}.json")
     assert raw["status"] == "raw_fallback" and raw["text"] == "  - failed 1.1\n"
     assert read_jsonl(directory / "failures.jsonl") == [{
-        "content_id": ids[3], "error": "list_or_markup", "raw_output": raw["text"],
+        "content_id": ids[3], "error": "max_tokens", "raw_output": raw["text"], "repetition_penalty": 1.1,
     }]
