@@ -4,7 +4,7 @@ Lead with the video's most important subjects, actions, and interactions. Keep o
 
 Preserve grounded interpretations and their uncertainty already present in the observations; do not add facts, interpretations, or relationships absent from the input. Never reproduce, quote, or translate on-screen wording. Entity IDs are scene-local references, not identities: describe distinguishable entities naturally using their appearance and preserve the direction of their interactions. Never assume equal IDs in different scenes refer to the same entity.
 
-Output only the summary prose, without headings, lists, labels, or commentary. One or more paragraphs are allowed; the 150-word maximum applies to the entire output.
-
 Scene observations:
 {scenes}
+
+Output only the summary prose, without headings, lists, labels, or commentary. One or more paragraphs are allowed; the 150-word maximum applies to the entire output.
