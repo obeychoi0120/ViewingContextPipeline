@@ -79,10 +79,10 @@ extraction:
     top_k: 20
   graph:
     scene_max_new_tokens: 1024
-    summary_max_new_tokens: 1024
+    summary_max_new_tokens: 512
   description:
     scene_max_new_tokens: 1024
-    summary_max_new_tokens: 1024
+    summary_max_new_tokens: 512
 validation:
   cohort:
     mode: full_rolling
