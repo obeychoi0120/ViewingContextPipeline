@@ -1,5 +1,7 @@
 # ViewingContextPipeline v5
 
+![ViewingContextPipeline 구성도](docs/design/Diagram_preview.png)
+
 MicroLens-100K 영상의 Description, Scene Graph, 영문 title 표현을 BGE로 임베딩하고 동일한 SASRec 구조로 추천 성능을 비교하는 PoC입니다. 시각 표현이 title을 대체했을 때의 효과를 측정합니다.
 
 ## 비교 Arm
