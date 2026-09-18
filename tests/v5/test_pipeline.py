@@ -41,7 +41,7 @@ def test_default_flow_and_artifact_lifecycle(ready_context, fake_models):
     assert set(result["generated_arms"]) == set(select_arms(context.config))
     assert len(result["generated_arms"]) == 5
     assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation"}
-    assert context.keyframes_dir.parent == context.run_root.parent.parent / "preperation"
+    assert context.keyframes_dir.parent == context.run_root.parent.parent / "preparatation"
     for pattern in (
         ".recovery",
         ".pending",

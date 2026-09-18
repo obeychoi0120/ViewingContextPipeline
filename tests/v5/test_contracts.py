@@ -57,9 +57,9 @@ def test_dynamic_targets_and_custom_artifact_root(v5_context):
     assert set(select_arms(config, ["graph_qwen"])) == {"graph_qwen"}
     with pytest.raises(ValueError):
         select_arms(config, ["GRAPH_V8_QWEN"])
-    assert context.keyframes_dir == v5_context.root / "custom/preperation/resized_keyframes"
-    assert context.source_assets_dir == v5_context.root / "custom/preperation/source_assets"
-    assert context.cohort_dir == v5_context.root / "custom/preperation/cohort"
+    assert context.keyframes_dir == v5_context.root / "custom/preparatation/resized_keyframes"
+    assert context.source_assets_dir == v5_context.root / "custom/preparatation/source_assets"
+    assert context.cohort_dir == v5_context.root / "custom/preparatation/cohort"
     assert context.run_root == v5_context.root / "custom/runs/new"
     assert context.prompt_path("prompts/graph_scene_v3.md").is_file()
 

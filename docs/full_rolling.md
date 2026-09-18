@@ -52,6 +52,6 @@ Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 �
 
 ## 환경 간 전달
 
-GPU와 Gemini 장비에서는 공유 `artifacts/preperation/cohort/`, `artifacts/preperation/resized_keyframes/`, `artifacts/preperation/source_assets/`를 배치하고 Gemini 결과를 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
+GPU와 Gemini 장비에서는 공유 `artifacts/preparatation/cohort/`, `artifacts/preparatation/resized_keyframes/`, `artifacts/preparatation/source_assets/`를 배치하고 Gemini 결과를 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
 
 Run 간 이동용 migration, donor-run 옵션, manifest 또는 전체 config snapshot은 없습니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.

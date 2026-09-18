@@ -10,7 +10,7 @@ from validation.steps import embed_representations
 def test_new_run_consumes_preparation_without_rebuilding(ready_context, fake_models):
     first = ready_context
     second = RunContext.load("second_run", root=first.root)
-    shared = first.root / "artifacts" / "preperation"
+    shared = first.root / "artifacts" / "preparatation"
     assert first.preparation_dir == second.preparation_dir == shared
     assert first.cohort_dir == second.cohort_dir == shared / "cohort"
     assert first.keyframes_dir == second.keyframes_dir == shared / "resized_keyframes"
