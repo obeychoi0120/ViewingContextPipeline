@@ -1,4 +1,5 @@
 from __future__ import annotations
+from extraction.summary_prompt import render_summary_prompt
 from extraction.summary_validation import (
     SUMMARY_SCHEMA_VERSION as SUMMARY_SCHEMA_VERSION,
     validate_summary as validate_summary,
@@ -11,7 +12,7 @@ class DescriptionError(ValueError):
     pass
 
 
-def description_summary_prompt(template, records):
+def description_summary_prompt(template, records, *, english_title=None):
     if not records:
         raise DescriptionError("description summary requires scene records")
     lines = []
@@ -22,4 +23,4 @@ def description_summary_prompt(template, records):
         ):
             raise DescriptionError("invalid description observation")
         lines.append(f"Scene {record['scene_idx']}: {record['description']}")
-    return template.replace("{scenes}", "\n".join(lines))
+    return render_summary_prompt(template, "\n".join(lines), english_title=english_title)

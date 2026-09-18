@@ -28,8 +28,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Independent combination processes per GPU (run-recommendation only; default: one).",
     )
     parser.add_argument("--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only).")
+    parser.add_argument("--summary-source", choices=("qwen", "gemini"),
+                        help="Required summary model for embed-representations.")
     args = parser.parse_args(argv)
     try:
+        if args.step == "embed-representations" and args.summary_source is None:
+            raise ValueError("embed-representations requires --summary-source qwen|gemini")
+        if args.summary_source is not None and args.step != "embed-representations":
+            raise ValueError("--summary-source is only supported by embed-representations")
         if args.compare_run_id is not None and args.step != "run-diagnosis":
             raise ValueError("--compare-run-id is only supported by run-diagnosis")
         if args.target is not None and args.step not in {"embed-representations", "run-recommendation", "run-diagnosis"}:
@@ -38,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")
         context = RunContext.load(args.run_id)
         kwargs = {"force": args.force}
+        if args.step == "embed-representations":
+            kwargs["summary_source"] = args.summary_source
         if args.compare_run_id is not None:
             kwargs["compare_run_id"] = args.compare_run_id
         if args.target is not None:

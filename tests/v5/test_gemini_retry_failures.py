@@ -87,7 +87,7 @@ def test_gemini_summary_restores_legacy_failures_without_generation(
     summarize = getattr(steps, f"summarize_{representation}")
     options = dict(source="gemini", schema=f"prompts/{representation}_summary_v4.md")
     ids = [row["content_id"] for row in context.require_ready_cohort()["catalog"]]
-    directory = context.extraction_dir(representation, "gemini", "summaries")
+    directory = context.summary_dir(representation, "gemini", "qwen")
     failure_path = directory / "failures.jsonl"
     phase, calls = 0, []
 
@@ -107,7 +107,7 @@ def test_gemini_summary_restores_legacy_failures_without_generation(
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
-    assert summarize(context, **options)["failure_count"] == 2
+    assert summarize(context, model="qwen", **options)["failure_count"] == 2
     # Missing penalty in legacy files means retries were exhausted.
     for row in read_jsonl(failure_path):
         row.pop("repetition_penalty")
@@ -115,10 +115,10 @@ def test_gemini_summary_restores_legacy_failures_without_generation(
         (directory / f"{row['content_id']}.json").unlink()
     failure_path.unlink()
     phase = 1
-    assert summarize(context, **options)["failure_count"] == 2
+    assert summarize(context, model="qwen", **options)["failure_count"] == 2
     assert not (directory / "failures").exists()
     assert all("repetition_penalty" not in row for row in read_jsonl(failure_path))
     assert calls == [(0, cid) for cid in ids]
     assert all((directory / f"{cid}.json").exists() for cid in ids)
-    assert summarize(context, **options)["failure_count"] == 2
+    assert summarize(context, model="qwen", **options)["failure_count"] == 2
     assert len(calls) == len(ids)

@@ -19,6 +19,7 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     v5_context, monkeypatch, fake_models
 ):
     context = v5_context
+    context.config["protocol"]["arms"] = ["metadata"]
     primary, supplement = configure_titles(context)
     originals = {p: p.read_bytes() for p in (primary, supplement)}
     monkeypatch.setattr("preparation.cli.RunContext.load", lambda _: context)
@@ -38,8 +39,8 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     assert all(p.read_bytes() == data for p, data in originals.items())
     assert not list(context.root.rglob("*.report.json"))
     assert not list(context.root.rglob("*completed.csv"))
-    assert {p.name for p in context.run_root.iterdir()} == {"cohort", "extraction", "validation"}
-    embed_representations(context, target=["metadata"])
+    assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation"}
+    embed_representations(context, summary_source="qwen", target=["metadata"])
     with np.load(context.representations_dir / "metadata_embeddings.npz") as arrays:
         assert np.all(arrays["values"][3] == 0)
         assert np.any(arrays["values"][1] != 0)
@@ -47,7 +48,7 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     assert main(["prepare-cohort", "--run-id", context.run_id]) == 0
     titles = read_jsonl(context.cohort_dir / "metadata_titles.jsonl")
     assert titles[1]["title"] == "Updated title" and titles[3]["title"] == "Fourth title"
-    assert embed_representations(context, target=["metadata"])["generated_arms"] == ["metadata"]
+    assert embed_representations(context, summary_source="qwen", target=["metadata"])["generated_arms"] == ["metadata"]
 
 
 @pytest.mark.parametrize("broken", ["missing", "duplicate"])

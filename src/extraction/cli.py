@@ -16,8 +16,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Regenerate all outputs for this step, including completed summaries.",
     )
     parser.add_argument("--schema", help="Path to one Markdown prompt (required for generation).")
-    parser.add_argument("--model", choices=GRAPH_SOURCES)
-    parser.add_argument("--source", choices=GRAPH_SOURCES)
+    parser.add_argument("--model", choices=GRAPH_SOURCES,
+                        help="Required generation model for extraction and summarization.")
+    parser.add_argument("--source", choices=GRAPH_SOURCES,
+                        help="Required scene extraction source for summarization.")
     args = parser.parse_args(argv)
     try:
         extract = args.step.startswith("extract-")
@@ -27,8 +29,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError(f"{args.step} requires --schema PATH.md")
             if extract and (args.model is None or args.source is not None):
                 raise ValueError("extraction requires --model qwen|gemini and does not accept --source")
-            if summary and (args.source is None or args.model is not None):
-                raise ValueError("summary requires --source qwen|gemini and does not accept --model")
+            if summary and (args.source is None or args.model is None):
+                raise ValueError("summary requires --source qwen|gemini and --model qwen|gemini")
         elif args.schema is not None or args.model is not None or args.source is not None:
             raise ValueError("--schema/--model/--source are only supported for generation")
         context = RunContext.load(args.run_id)
@@ -36,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         if extract or summary:
             kwargs["schema"] = context.prompt_path(args.schema)
             kwargs["model" if extract else "source"] = args.model if extract else args.source
+        if summary:
+            kwargs["model"] = args.model
         STEP_HANDLERS[args.step](context, **kwargs)
     except KeyboardInterrupt:
         print(f"[INTERRUPTED] {args.step}", file=sys.stderr)

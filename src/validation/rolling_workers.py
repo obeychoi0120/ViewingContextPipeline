@@ -46,7 +46,8 @@ def _consume_combinations(context, device_name, jobs, results):
     identity = None
     try:
         from validation.model import torch
-        from validation.rolling_data import EventTable, iter_jsonl
+        from validation.rolling_data import EventTable
+        from validation.selection import load_validation_cohort, training_signature
         from validation.rolling_recommendation import prepare_split, run_combination
         from validation.steps import validation_config
 
@@ -55,10 +56,14 @@ def _consume_combinations(context, device_name, jobs, results):
         if device.type == "cuda":
             torch.cuda.set_device(device)
         config = validation_config(context)
-        table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
+        cohort = load_validation_cohort(context, verify_current=False)
+        table = EventTable(cohort["events"])
+        expected_training_hash = training_signature(context, cohort, config)
         previous_date, prepared = None, None
         while (job := jobs.get()) is not None:
             split, identity, branch = job
+            if identity["training_input_hash"] != expected_training_hash:
+                raise ValueError("validation selection changed during worker startup")
             if split["evaluation_date"] != previous_date:
                 prepared = prepare_split(table, split)
                 previous_date = split["evaluation_date"]

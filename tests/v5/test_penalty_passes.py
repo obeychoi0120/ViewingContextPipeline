@@ -103,20 +103,20 @@ def test_summary_passes_retry_only_failures_and_keep_final_raw(
                 kwargs["runtime"].current_result = {"finish_reason": "length" if failed else "stop"}
                 callback(task.task_id, f"  - failed {penalty}\n" if failed else "A person walks.")
                 if failed and penalty < 1.1:
-                    directory = context.extraction_dir(representation, source, "summaries")
+                    directory = context.summary_dir(representation, source, "qwen")
                     assert not (directory / f"{ids[index]}.json").exists()
             return {}
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     summarize = getattr(steps, f"summarize_{representation}")
-    assert summarize(context, source=source, schema=f"prompts/{representation}_summary_v4.md")["failure_count"] == 1
+    assert summarize(context, model="qwen", source=source, schema=f"prompts/{representation}_summary_v4.md")["failure_count"] == 1
     assert calls == ([(i, 1.0) for i in range(4)] + [(i, 1.05) for i in (1, 2, 3)]
                      + [(i, 1.1) for i in (2, 3)])
     assert len(engines) == 1
-    directory = context.extraction_dir(representation, source, "summaries")
+    directory = context.summary_dir(representation, source, "qwen")
     raw = read_json(directory / f"{ids[3]}.json")
     assert raw["status"] == "raw_fallback" and raw["text"] == "  - failed 1.1\n"
     assert read_jsonl(directory / "failures.jsonl") == [{
-        "content_id": ids[3], "error": "max_tokens", "raw_output": raw["text"], "repetition_penalty": 1.1,
+        "content_id": ids[3], "error": "max_tokens", "raw_output": raw["text"], "repetition_penalty": 1.1, "summary_model": "qwen",
     }]

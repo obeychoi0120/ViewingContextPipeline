@@ -109,15 +109,19 @@ class RunContext:
 
     def require_ready_cohort(self) -> dict[str, Any]:
         from validation.rolling_data import load_cohort
-        return load_cohort(self.cohort_dir, self.run_id)
+        return load_cohort(self.cohort_dir)
+
+    @property
+    def preparation_dir(self) -> Path:
+        return self.run_root.parent.parent / "preperation"
 
     @property
     def cohort_dir(self) -> Path:
-        return self.run_root / "cohort"
+        return self.preparation_dir / "cohort"
 
     @property
     def evidence_dir(self) -> Path:
-        return self.run_root.parent.parent
+        return self.preparation_dir
 
     @property
     def keyframes_dir(self) -> Path:
@@ -146,17 +150,22 @@ class RunContext:
     def description_failure_path(self, source: str, content_id: str) -> Path:
         return self.description_scene_dir(source) / "failures" / f"{content_id}.jsonl"
 
-    def graph_summary_dir(self, source: str) -> Path:
-        return self.extraction_dir("graph", source, "summaries")
+    def summary_dir(self, representation: str, source: str, model: str) -> Path:
+        if model not in {"qwen", "gemini"}:
+            raise ValueError("summary model must be qwen or gemini")
+        return self.extraction_dir(representation, source, "summaries") / model
 
-    def graph_summary_failure_path(self, source: str) -> Path:
-        return self.graph_summary_dir(source) / "failures.jsonl"
+    def graph_summary_dir(self, source: str, model: str = "qwen") -> Path:
+        return self.summary_dir("graph", source, model)
 
-    def description_summary_dir(self, source: str) -> Path:
-        return self.extraction_dir("description", source, "summaries")
+    def graph_summary_failure_path(self, source: str, model: str = "qwen") -> Path:
+        return self.graph_summary_dir(source, model) / "failures.jsonl"
 
-    def description_summary_failure_path(self, source: str) -> Path:
-        return self.description_summary_dir(source) / "failures.jsonl"
+    def description_summary_dir(self, source: str, model: str = "qwen") -> Path:
+        return self.summary_dir("description", source, model)
+
+    def description_summary_failure_path(self, source: str, model: str = "qwen") -> Path:
+        return self.description_summary_dir(source, model) / "failures.jsonl"
 
     def prompt_path(self, schema: str | Path) -> Path:
         path = _resolve(self.root, str(schema), "--schema")
@@ -217,11 +226,13 @@ def _validate_protocol(value: dict[str, Any]) -> None:
     expected = {
         "dataset": "microlens_100k", "modality": "visual_only", "sampling": "fixed_windows",
         "cohort_sampling": "full_rolling", "catalog_scope": "full_source_catalog",
-        "graph_extractors": ["qwen", "gemini"], "graph_summarizer": "qwen",
+        "graph_extractors": ["qwen", "gemini"],
         "description_extractors": ["qwen", "gemini"],
     }
-    if set(protocol) != set(expected) | {"arms"}:
+    if set(protocol) - {"graph_summarizer"} != set(expected) | {"arms"}:
         raise ConfigError("invalid protocol keys")
+    if "graph_summarizer" in protocol and protocol["graph_summarizer"] not in {"qwen", "gemini"}:
+        raise ConfigError("protocol.graph_summarizer must be qwen or gemini (legacy, ignored)")
     for key, setting in expected.items():
         if protocol.get(key) != setting:
             raise ConfigError(f"protocol.{key} must be {setting!r}")

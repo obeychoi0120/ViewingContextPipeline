@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 
 from pipeline_runtime import read_json, write_json
-from extraction.recovery import fingerprint
 from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
@@ -15,6 +14,7 @@ from validation.recommendation_contracts import (
 from arm_registry import registry
 from validation.representation_checks import verify_representations
 from validation.rolling_data import EventTable, iter_jsonl
+from validation.selection import load_validation_cohort, recount_splits, training_signature
 from validation.rolling_recommendation import (
     combination_complete,
     combination_dir,
@@ -134,17 +134,17 @@ def diagnosis_training(directory, identity, expected_count, *, architecture_vers
 
 def collect_metrics(context, config, cohort, *, arms=None):
     selected = resolve_target_arms(config=context.config) if arms is None else arms
-    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
-    training_input_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
-                                       "cutoffs": config.evaluation.cutoffs})
+    cohort = load_validation_cohort(context)
+    table = EventTable(cohort["events"])
+    training_input_hash = training_signature(context, cohort, config)
     users = {user: i for i, user in enumerate(table.users)}
     splits = cohort["plan"]["splits"]
     if (len(table.users), len(table.rows), len(table.items)) != (
-        config.cohort.user_count,
-        config.cohort.interaction_count,
-        config.cohort.item_count,
-    ) or splits != table.splits():
-        raise ValueError("full source cardinality or rolling split manifest mismatch")
+        cohort["plan"]["user_count"],
+        cohort["plan"]["interaction_count"],
+        cohort["plan"]["item_count"],
+    ) or splits != recount_splits(table, splits):
+        raise ValueError("validation cohort cardinality or rolling split manifest mismatch")
     arms = list(selected)
     verify_representations(context, cohort, arms=selected)
     sums = np.zeros((len(users), len(splits), len(arms)))
@@ -263,8 +263,11 @@ def diagnose(context, *, target=None, compare_run_id=None):
         "statistics": {"status": "not_computed"},
     }
     try:
-        cohort = context.require_ready_cohort()
+        cohort = load_validation_cohort(context)
         document["cohort"] = cohort["plan"]
+        document["selection"] = {key: value for key, value in cohort["manifest"].items()
+                                 if key != "included_item_ids"}
+        document["selection"]["manifest_path"] = "validation/cohort/manifest.json"
         from validation.metadata import verify_missing_metadata
         if "metadata" in arms.values():
             document["metadata_missing"] = verify_missing_metadata(context, cohort)
@@ -277,10 +280,14 @@ def diagnose(context, *, target=None, compare_run_id=None):
             True,
             True,
             branches=set(arms.values()), config=context.config,
+            excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
+            source_assets_dir=context.source_assets_dir,
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
-        document["generation_recovery"] = recovery_report(context, branches=arms)
+        document["generation_recovery"] = recovery_report(
+            context, branches=arms, content_ids=[r["content_id"] for r in cohort["catalog"]]
+        )
         from validation.diagnosis_representations import representation_report
         document["representations"], document["gemini_summary_fallbacks"] = (
             representation_report(context, arms)

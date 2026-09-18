@@ -31,9 +31,9 @@ from pipeline_runtime import RunContext
 GRAPH_SOURCES = ("qwen", "gemini")
 
 
-def prompt_provenance(context, schema, arm, *, summary=False):
+def prompt_provenance(context, schema, arm, *, summary=False, model=None):
     path = context.prompt_path(schema)
-    source = "qwen" if summary else arm.model
+    source = model if summary else arm.model
     model = (
         local_model_identity(context.path("models", "qwen"))
         if source == "qwen"
@@ -60,11 +60,11 @@ def prompt_provenance(context, schema, arm, *, summary=False):
         )
     else:
         settings["backend"] = "gemini"
-    if summary:
+    if summary and source == "qwen":
         settings["greedy_decoding"] = extraction["greedy_decoding"]
         if not extraction["greedy_decoding"]:
             settings["sampling"] = dict(extraction["summary_sampling"])
-    else:
+    elif not summary:
         settings["visual_evidence"] = dict(extraction["visual_evidence"])
         if arm.representation == "graph":
             settings["response_parser"] = GRAPH_PARSER_VERSION
@@ -75,6 +75,7 @@ def prompt_provenance(context, schema, arm, *, summary=False):
         "prompt_hash": file_fingerprint(path),
         "model": model,
         "settings": settings,
+        **({"summary_model": source} if summary else {}),
         "schema_contract": "summary/v4"
         if summary
         else ("graph/v3" if arm.representation == "graph" else "description/v2"),
@@ -210,11 +211,13 @@ def _extract(context, *, representation, model, schema, force=False):
                   failure_count=failures.count(content_ids))
 
 
-def _summarize(context, *, representation, source, schema, force=False):
+def _summarize(context, *, representation, source, model, schema, force=False):
+    if model not in GRAPH_SOURCES:
+        raise ValueError("summary model must be qwen or gemini")
     arm = generated_arm(context.config, representation, source)
     path = context.prompt_path(schema)
     stage = f"summarize-{representation}"
-    log_step_start(context, stage, source=source, schema=path, force=force)
+    log_step_start(context, stage, source=source, model=model, schema=path, force=force)
     context.initialize()
     cohort = context.require_ready_cohort()
     return run_summary_stage(
@@ -222,8 +225,11 @@ def _summarize(context, *, representation, source, schema, force=False):
         arm=arm,
         schema=path,
         catalog=cohort["catalog"],
-        provenance=prompt_provenance(context, path, arm, summary=True),
-        generation=_summary_generation_settings(context),
+        metadata_titles=cohort["metadata_titles"],
+        provenance=prompt_provenance(context, path, arm, summary=True, model=model),
+        generation=_summary_generation_settings(context) if model == "qwen" else {},
+        model=model,
+        gemini_pool_factory=GeminiWorkerPool,
         force=force,
         generator_factory=qwen_generator,
     )
@@ -241,15 +247,15 @@ def extract_description_scenes(context, *, model, schema, force=False):
     )
 
 
-def summarize_graph(context, *, source, schema, force=False):
+def summarize_graph(context, *, source, model, schema, force=False):
     return _summarize(
-        context, representation="graph", source=source, schema=schema, force=force
+        context, representation="graph", source=source, model=model, schema=schema, force=force
     )
 
 
-def summarize_description(context, *, source, schema, force=False):
+def summarize_description(context, *, source, model, schema, force=False):
     return _summarize(
-        context, representation="description", source=source, schema=schema, force=force
+        context, representation="description", source=source, model=model, schema=schema, force=force
     )
 
 

@@ -52,7 +52,7 @@ def test_105_combinations_real_small_training_resume_and_diagnosis(
     torch.set_num_threads(1)
     context = ready_context
     generate_all(context)
-    embed_representations(context)
+    embed_representations(context, summary_source="qwen")
 
     def tiny(config, *, item_count, branch, features, device):
         return SASRec(item_count, 10, 8, 1, 2, 0, arm="metadata", item_features=features).to(device)

@@ -8,7 +8,6 @@ protocol:
   graph_extractors:
   - qwen
   - gemini
-  graph_summarizer: qwen
   arms:
   - desc_gemini
   - desc_qwen

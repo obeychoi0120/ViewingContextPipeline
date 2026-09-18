@@ -20,7 +20,7 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     context.config["extraction"]["summary_repetition_penalty"] = [1.0]
     summarize = getattr(steps, f"summarize_{representation}")
     options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
-    directory = context.extraction_dir(representation, source, "summaries")
+    directory = context.summary_dir(representation, source, "qwen")
     ids = [item["content_id"] for item in context.require_ready_cohort()["catalog"]]
     calls, progress_instances = [], []
     interrupt, succeed = True, False
@@ -44,7 +44,7 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
                 callback(task.task_id, text)
                 if interrupt and index == 1:
                     rows = read_jsonl(directory / "failures.jsonl")
-                    assert len(rows) == 1 and all(set(row) == {"content_id", "error", "raw_output", "repetition_penalty"} for row in rows)
+                    assert len(rows) == 1 and all(set(row) == {"content_id", "error", "raw_output", "repetition_penalty", "summary_model"} for row in rows)
                     assert progress_instances[-1].failed == 1
                     assert progress_instances[-1].success == 1
                     for name in (".recovery", ".pending", "failures"):
@@ -55,15 +55,15 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     with pytest.raises(KeyboardInterrupt):
-        summarize(context, **options)
+        summarize(context, model="qwen", **options)
     interrupt = False
-    assert summarize(context, **options)["failure_count"] == 2
+    assert summarize(context, model="qwen", **options)["failure_count"] == 2
     expected = ids
     assert calls == expected
     rows = read_jsonl(directory / "failures.jsonl")
     assert rows == [
-        {"content_id": ids[0], "error": "empty", "raw_output": "", "repetition_penalty": 1.0},
-        {"content_id": ids[2], "error": "max_tokens", "raw_output": "A truncated sentence", "repetition_penalty": 1.0},
+        {"content_id": ids[0], "error": "empty", "raw_output": "", "repetition_penalty": 1.0, "summary_model": "qwen"},
+        {"content_id": ids[2], "error": "max_tokens", "raw_output": "A truncated sentence", "repetition_penalty": 1.0, "summary_model": "qwen"},
     ]
     doc = read_json(directory / f"{ids[1]}.json")
     assert doc["status"] == "complete" and doc["word_count"] == 201
@@ -71,10 +71,10 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     doc = read_json(directory / f"{ids[2]}.json")
     assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
     assert read_json(directory / f"{ids[0]}.json")["provenance"]["summary_fallback"] == "scene_observations"
-    assert summarize(context, **options)["failure_count"] == 2
+    assert summarize(context, model="qwen", **options)["failure_count"] == 2
     assert calls == expected
     succeed = True
-    assert summarize(context, **options, force=True)["failure_count"] == 0
+    assert summarize(context, model="qwen", **options, force=True)["failure_count"] == 0
     assert calls == expected + ids
     assert not (directory / "failures.jsonl").exists()
 
@@ -105,11 +105,11 @@ def test_summary_publish_error_requires_regeneration_without_journal(
     summarize = getattr(steps, f"summarize_{representation}")
     options = {"source": "qwen", "schema": f"prompts/{representation}_summary_v4.md"}
     with pytest.raises(OSError, match="disk full"):
-        summarize(context, **options)
-    directory = context.extraction_dir(representation, "qwen", "summaries")
+        summarize(context, model="qwen", **options)
+    directory = context.summary_dir(representation, "qwen", "qwen")
     assert not list(directory.rglob("*.json"))
     monkeypatch.setattr(executor, "atomic_write_json", original)
-    assert summarize(context, **options)["failure_count"] == 0
+    assert summarize(context, model="qwen", **options)["failure_count"] == 0
     assert calls[0] == calls[1] and len(calls) == 5
 
 

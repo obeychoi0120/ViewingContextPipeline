@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import numpy as np
 
-from arm_registry import select_arms
+from validation.selection import prepare_validation_cohort, validation_arms
 from pipeline_logging import log_step_start
 from pipeline_runtime import read_json, read_jsonl, write_json
 from validation.config import build_validation_config
@@ -86,22 +86,26 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def embed_representations(context, *, force=False, target=None):
+def embed_representations(context, *, summary_source, force=False, target=None):
+    if summary_source not in {"qwen", "gemini"}:
+        raise ValueError("summary_source must be qwen or gemini")
     from validation.features import BGETextEncoder
     from validation.representation_checks import verify_representations
 
-    log_step_start(context, "embed-representations", force=force, target=target)
+    log_step_start(context, "embed-representations", force=force, target=target,
+                   summary_source=summary_source)
     context.initialize()
-    cohort = context.require_ready_cohort()
+    arms = validation_arms(context, target)
+    cohort = prepare_validation_cohort(context, summary_source)
     config = validation_config(context)
-    arms = select_arms(context.config, target)
     catalog = cohort["catalog"]
     pending = []
     # Validate all selected input documents before loading the encoder or writing results.
     inputs = {}
     for name, arm in arms.items():
-        docs = documents_for_arm(context, cohort, arm)
-        signature = representation_signature(context, catalog, arm, docs)
+        docs = documents_for_arm(context, cohort, arm, summary_source=summary_source, strict=True)
+        signature = representation_signature(context, catalog, arm, docs,
+                                             selection_hash=cohort["manifest"]["selection_hash"])
         inputs[name] = (docs, signature)
         state = read_state(context, name)
         path = _embedding_path(context, name)
@@ -115,6 +119,7 @@ def embed_representations(context, *, force=False, target=None):
             force
             or not matches
             or not state
+            or state.get("selection_hash") != cohort["manifest"]["selection_hash"]
             or pending_write(context, name).exists()
             or state.get("input_hash") != signature
             or state.get("embedding_hash") != matrix_hash(path)
@@ -150,6 +155,8 @@ def embed_representations(context, *, force=False, target=None):
                 signature,
                 previous,
                 sources=sources,
+                selection_hash=cohort["manifest"]["selection_hash"],
+                summary_source=summary_source if name != "metadata" else None,
                 truncation=getattr(encoder, "last_truncation", None)
                 if indices
                 else {"text_count": 0, "truncated_count": 0},

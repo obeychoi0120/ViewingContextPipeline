@@ -4,8 +4,9 @@ from arm_registry import select_arms
 from extraction.scene_storage import read_scene_records
 
 
-def recovery_report(context, *, branches=None):
+def recovery_report(context, *, branches=None, content_ids=None):
     selected = select_arms(context.config, list(branches) if branches is not None else None)
+    contents = set(content_ids) if content_ids is not None else None
     report = {}
     for name, arm in selected.items():
         if arm.model is None:
@@ -15,6 +16,8 @@ def recovery_report(context, *, branches=None):
         directory = context.extraction_dir(arm.representation, arm.model, "scenes")
         for path in directory.glob("*.jsonl"):
             if path.name in {"failure.jsonl", "failures.jsonl"}:
+                continue
+            if contents is not None and path.stem not in contents:
                 continue
             for row in read_scene_records(path):
                 history = row.get("generation", {})

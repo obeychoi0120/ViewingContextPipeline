@@ -46,12 +46,12 @@ Gemini 요약 파일 부재에만 같은 Run·표현의 Qwen 요약으로 대체
 
 Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 즉시 저장합니다. Qwen은 각 repetition penalty pass를 완료한 뒤 실패 항목만 다음 값으로 재생성합니다. 실패는 Graph·Description의 `scenes/failures/{content_id}.jsonl`에 콘텐츠 ID·scene 번호·실패 이유·생성 원문을 기록합니다. 생성 journal이나 pending/checkpoint·진행 cursor는 저장하지 않습니다. 설정·프롬프트·경로가 달라도 정상 저장 결과를 재사용하며, Graph·Desc·Summary의 기존 실패는 다시 처리하며 Qwen은 첫 penalty부터 시작합니다. 정상 결과 저장 후 해당 실패 행을 제거하고 남은 실패가 없으면 파일도 삭제합니다. `--force`는 해당 단계의 실패 기록을 비우고 생성을 새로 시작하며 공유 이미지는 보존합니다.
 
-성공한 Summary도 설정 변경이나 장면 갱신으로 재생성하지 않습니다. 일반 실행은 실패 및 결과가 없는 Summary만 처리하며, 전체 재생성은 `--force`로 요청합니다. 신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 200단어 상한은 프롬프트 지시로만 유지하며, 단어 수 초과만으로 실패나 Raw로 분류하지 않습니다. 형식 위반·토큰 제한으로 잘린 출력은 `summaries/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 다음 penalty로 재생성합니다. 마지막까지 실패한 비어 있지 않은 최종 출력은 Raw로 남깁니다. 재생성 대기열은 메모리에만 보관하며 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
+성공한 Summary도 설정 변경이나 장면 갱신으로 재생성하지 않습니다. 일반 실행은 실패 및 결과가 없는 Summary만 처리하며, 전체 재생성은 `--force`로 요청합니다. 신규 Summary는 `video-summary/v4` 문서 하나에 `text`, `status`, `word_count`, `violations`, `correction_count`, 입력·프롬프트·모델·생성 설정 provenance를 담습니다. 200단어 상한은 프롬프트 지시로만 유지하며, 단어 수 초과만으로 실패나 Raw로 분류하지 않습니다. 형식 위반·토큰 제한으로 잘린 출력은 `summaries/qwen/failures.jsonl`에 콘텐츠 ID·실패 이유·생성 원문을 기록하고 다음 penalty로 재생성합니다. 마지막까지 실패한 비어 있지 않은 최종 출력은 Raw로 남깁니다. 재생성 대기열은 메모리에만 보관하며 교정·임시 복구 기록은 만들지 않습니다. 엔진/OOM/저장 오류는 Raw로 숨기지 않고 전파합니다.
 
 추천은 `recommendations/{date}/seed_{seed}/{arm}/`에 사건별 결과, 학습 이력, `sasrec.pt`를 저장한 뒤 `complete.json`을 마지막으로 게시합니다. 완료 검증에 실패한 조합만 재실행합니다. `training.json`에 전체 아이템 빈도 사전을 중복 저장하지 않으며 검증에 쓰는 사건별 `refit_item_frequency`는 유지합니다.
 
 ## 환경 간 전달
 
-GPU와 Gemini 장비에서는 같은 run ID의 `artifacts/runs/RUN_ID/cohort/`와 공유 `artifacts/resized_keyframes/`, `artifacts/source_assets/`를 배치하고 Gemini 결과를 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
+GPU와 Gemini 장비에서는 공유 `artifacts/preperation/cohort/`, `artifacts/preperation/resized_keyframes/`, `artifacts/preperation/source_assets/`를 배치하고 Gemini 결과를 `extraction/description/gemini`와 `extraction/graph/gemini`로 돌려보냅니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
 
 Run 간 이동용 migration, donor-run 옵션, manifest 또는 전체 config snapshot은 없습니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.

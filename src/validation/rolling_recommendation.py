@@ -12,13 +12,13 @@ import numpy as np
 from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
-from extraction.recovery import fingerprint
 from validation.metrics import metrics_from_rank
 from validation.model import pad_sequences, require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
 from validation.recommendation_contracts import ARCHITECTURE_VERSION, resolve_target_arms
 from validation.rolling_data import EventTable, iter_jsonl
+from validation.selection import load_validation_cohort, training_signature
 from validation.scoring import mask_history, rank_of_target
 
 SCHEMA = "sasrec-rolling-combination/v1"
@@ -307,11 +307,10 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
     require_torch()
     devices = worker_devices(workers_per_gpu)
     config = validation_config(context)
-    cohort = context.require_ready_cohort()
-    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
+    cohort = load_validation_cohort(context)
+    table = EventTable(cohort["events"])
     verify_representations(context, cohort, arms=arms)
-    training_input_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
-                                       "cutoffs": config.evaluation.cutoffs})
+    training_input_hash = training_signature(context, cohort, config)
     completed = skipped = 0
     jobs = []
     for split in cohort["plan"]["splits"]:

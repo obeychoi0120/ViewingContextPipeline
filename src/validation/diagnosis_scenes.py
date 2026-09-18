@@ -29,14 +29,14 @@ def _expected_scenes(
     errors: list[dict[str, Any]],
     scene_duration: int = 30,
     num_keyframes: int = 6,
+    *, source_assets_dir=None,
 ) -> tuple[set[tuple[str, int]], bool]:
     expected: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
     examples: list[dict[str, Any]] = []
     for content_id in content_ids:
         path = (
-            run_root.parent.parent
-            / "source_assets"
+            (source_assets_dir or run_root.parent.parent / "source_assets")
             / content_id
             / timestamp_filename(scene_duration, num_keyframes)
         )
@@ -159,6 +159,7 @@ def _scene_arm_contract(
     expected: set[tuple[str, int]],
     errors: list[dict[str, Any]],
     paths,
+    *, excluded_content_ids=(),
 ) -> tuple[dict[str, Any], set[tuple[str, int]], bool]:
     scene_relative, failure_relative = paths[arm]
     scene_dir = run_root / scene_relative
@@ -178,13 +179,16 @@ def _scene_arm_contract(
     else:
         issues["missing_scene_directory"] += 1
         examples.append({"path": str(scene_dir)})
-    extra_scene_files = sorted(existing_scene_files - catalog_contents)
+    excluded_contents = set(excluded_content_ids)
+    extra_scene_files = sorted(existing_scene_files - catalog_contents - excluded_contents)
     if extra_scene_files:
         issues["extra_scene_files"] += len(extra_scene_files)
         examples.extend({"content_id": value} for value in _bounded_examples(extra_scene_files))
 
     failures_by_content = {}
     for failure_path in sorted(failure_dir.glob("*.jsonl")):
+        if failure_path.stem in excluded_contents:
+            continue
         rows, failure_loaded = _read_jsonl(
             failure_path, f"{arm} failure outcomes", errors, report_error=False,
         )
@@ -335,7 +339,7 @@ def _scene_coverage(
     settings,
     decision_config_valid,
     runtime_paths_valid,
-    *, branches=None, config=None,
+    *, branches=None, config=None, excluded_content_ids=(), source_assets_dir=None,
 ):
     from validation.recommendation_contracts import DEFAULT_PROTOCOL
     paths = scene_arms(config or DEFAULT_PROTOCOL)
@@ -348,13 +352,15 @@ def _scene_coverage(
         errors,
         scene_duration,
         config["extraction"]["visual_evidence"]["num_keyframes"] if config else 6,
+        source_assets_dir=source_assets_dir,
     )
     scene_documents: dict[str, Any] = {}
     successful_scenes: dict[str, set[tuple[str, int]]] = {}
     scene_arm_valid: dict[str, bool] = {}
     for arm in selected:
         document, success, valid = _scene_arm_contract(
-            arm, run_root, content_ids, expected_scenes, errors, paths
+            arm, run_root, content_ids, expected_scenes, errors, paths,
+            excluded_content_ids=excluded_content_ids,
         )
         scene_documents[arm] = document
         successful_scenes[arm] = success

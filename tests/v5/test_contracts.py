@@ -27,6 +27,8 @@ def test_required_generation_options_and_prompt_paths(
         lambda context, **kw: calls.append(kw),
     )
     prefix = [step, "--run-id", "run"]
+    if step.startswith("summarize-"):
+        prefix += ["--model", "qwen"]
     assert extract(prefix + [selector, model]) == 1
     assert extract(prefix + ["--schema", "prompts/graph_scene_v3.md"]) == 1
     assert extract(prefix + [selector, model, "--schema", "prompts/missing.md"]) == 1
@@ -35,10 +37,9 @@ def test_required_generation_options_and_prompt_paths(
     assert extract(prefix + [selector, model, "--schema", "prompts/graph_scene_v3.md"]) == 0
     assert calls[-1][selector[2:]] == model
     assert calls[-1]["schema"].is_absolute()
-    wrong = "--source" if selector == "--model" else "--model"
-    assert (
-        extract(prefix + [selector, model, wrong, model, "--schema", str(calls[-1]["schema"])]) == 1
-    )
+    if step.startswith("extract-"):
+        assert extract(prefix + [selector, model, "--source", model,
+                                 "--schema", str(calls[-1]["schema"])]) == 1
     assert "gpus" not in calls[-1]
     with pytest.raises(SystemExit):
         extract(prefix + [selector, model, "--schema", "prompts/graph_scene_v3.md", "--gpus", "1"])
@@ -56,8 +57,9 @@ def test_dynamic_targets_and_custom_artifact_root(v5_context):
     assert set(select_arms(config, ["graph_qwen"])) == {"graph_qwen"}
     with pytest.raises(ValueError):
         select_arms(config, ["GRAPH_V8_QWEN"])
-    assert context.keyframes_dir == v5_context.root / "custom/resized_keyframes"
-    assert context.source_assets_dir == v5_context.root / "custom/source_assets"
+    assert context.keyframes_dir == v5_context.root / "custom/preperation/resized_keyframes"
+    assert context.source_assets_dir == v5_context.root / "custom/preperation/source_assets"
+    assert context.cohort_dir == v5_context.root / "custom/preperation/cohort"
     assert context.run_root == v5_context.root / "custom/runs/new"
     assert context.prompt_path("prompts/graph_scene_v3.md").is_file()
 

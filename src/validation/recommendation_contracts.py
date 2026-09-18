@@ -1,5 +1,5 @@
 from __future__ import annotations
-from arm_registry import registry, select_arms
+from arm_registry import registry, select_arms, active_arms
 
 ARCHITECTURE_VERSION = "sasrec-content-v3"
 # Both versions use the same persisted event/rank and rolling training contracts.
@@ -14,7 +14,10 @@ TARGET_SOURCES = dict(RECOMMENDATION_ARMS)
 
 
 def resolve_target_arms(target=None, *, config=None):
-    return {name: name for name in select_arms(config or DEFAULT_PROTOCOL, target)}
+    configured = config or DEFAULT_PROTOCOL
+    if target is not None and set(target) - set(active_arms(configured)):
+        raise ValueError("--target must be a subset of protocol.arms")
+    return {name: name for name in select_arms(configured, target)}
 
 
 def target_scope(arms, *, config=None):

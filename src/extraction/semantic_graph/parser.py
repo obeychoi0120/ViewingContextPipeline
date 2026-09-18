@@ -9,7 +9,8 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v1"
+GRAPH_PARSER_VERSION = "graph-text/v2"
+# Context is accepted only for compatibility with earlier prompts and saved outputs.
 _SECTIONS = ("Entities", "Relations", "Context", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -74,7 +75,7 @@ def _relation(line, *, repair):
 
 
 def _parse_lines(text, *, repair):
-    sections = {name: [] for name in _SECTIONS[:-1]}
+    sections = {}
     current = None
     seen = 0
     for number, source in enumerate(text.splitlines(), 1):
@@ -89,9 +90,13 @@ def _parse_lines(text, *, repair):
             line = _BULLET.sub("", line, count=1)
         header = _header(line, repair=repair)
         if header:
+            if header == "End" and _SECTIONS[seen] == "Context":
+                seen += 1
             if header != _SECTIONS[seen]:
                 raise GraphTextError(f"line {number}: duplicate or out-of-order section {header}")
             current = header
+            if header != "End":
+                sections[header] = []
             seen += 1
             continue
         if (_header(line, repair=True) or (re.fullmatch(r"\[.*\]", line) and line != "[]")

@@ -21,11 +21,12 @@ def step_settings(context, step, **options):
         phase = "summaries" if summary else "scenes"
         values.update(
             arm=arm.name,
-            model="qwen" if summary else source,
-            model_settings=context.config["models"]["qwen" if summary else source],
+            model=options["model"] if summary else source,
+            model_settings=context.config["models"][options["model"] if summary else source],
             source=source,
             prompt=context.prompt_path(options["schema"]),
-            output_dir=context.extraction_dir(arm.representation, source, phase),
+            output_dir=(context.summary_dir(arm.representation, source, options["model"])
+                        if summary else context.extraction_dir(arm.representation, source, phase)),
             max_new_tokens=context.config["extraction"][kind][
                 "summary_max_new_tokens" if summary else "scene_max_new_tokens"
             ],

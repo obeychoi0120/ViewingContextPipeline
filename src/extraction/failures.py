@@ -29,7 +29,8 @@ class FailureLog:
                 self._remember(row.get("content_id", path.stem), row.get("scene_idx"),
                                row.get("error") or "generation failed",
                                row.get("raw_output", row.get("raw_response", "")),
-                               repetition_penalty=row.get("repetition_penalty"))
+                               repetition_penalty=row.get("repetition_penalty"),
+                               summary_model=row.get("summary_model"))
         targets = ({self.path_for(cid): list(rows.values()) for cid, rows in self.by_content.items()}
                    if scenes else {self.path: list(self.rows.values())})
         for path, rows in targets.items():
@@ -52,7 +53,7 @@ class FailureLog:
     def path_for(self, content_id):
         return self.path / f"{content_id}.jsonl" if self.scenes else self.path
 
-    def _remember(self, content_id, scene_idx, error, raw_output, *, repetition_penalty=None):
+    def _remember(self, content_id, scene_idx, error, raw_output, *, repetition_penalty=None, summary_model=None):
         cid = str(content_id)
         row = {"content_id": cid}
         if self.scenes:
@@ -62,6 +63,8 @@ class FailureLog:
         else:
             scene_idx = None
         row.update(error=str(error), raw_output=raw_output if raw_output is not None else "")
+        if summary_model is not None:
+            row["summary_model"] = summary_model
         if repetition_penalty is not None:
             row["repetition_penalty"] = repetition_penalty
         self.rows[(cid, scene_idx)] = row
@@ -92,13 +95,15 @@ class FailureLog:
         if not self.by_content[cid]:
             del self.by_content[cid]
 
-    def record(self, content_id, scene_idx, error, raw_output="", *, repetition_penalty=None):
+    def record(self, content_id, scene_idx, error, raw_output="", *, repetition_penalty=None, summary_model=None):
         cid = str(content_id)
         previous = self.rows.get((cid, scene_idx))
         if repetition_penalty is None and previous is not None:
             repetition_penalty = previous.get("repetition_penalty")
+        if summary_model is None and previous is not None:
+            summary_model = previous.get("summary_model")
         row = self._remember(cid, scene_idx, error, raw_output,
-                             repetition_penalty=repetition_penalty)
+                             repetition_penalty=repetition_penalty, summary_model=summary_model)
         if previous == row:
             return
         path = self.path_for(cid)

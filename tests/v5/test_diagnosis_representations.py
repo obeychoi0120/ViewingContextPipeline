@@ -76,6 +76,9 @@ def test_diagnose_writes_compact_v3_with_statistics(ready_context, monkeypatch):
     from validation import rolling_diagnosis
 
     context = ready_context
+    from validation.selection import prepare_validation_cohort
+    context.config["protocol"]["arms"] = ["metadata"]
+    prepare_validation_cohort(context, "qwen")
     # Enough repeated rows to detect accidentally copying the entire state again.
     write_json(state_path(context, "metadata"), {"sources": [
         {"content_id": str(i), "source_path": "/metadata.jsonl"} for i in range(20000)

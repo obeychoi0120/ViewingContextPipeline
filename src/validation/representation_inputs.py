@@ -7,11 +7,13 @@ from dataclasses import asdict
 from arm_registry import registry
 from model_provenance import local_model_identity
 from extraction.recovery import fingerprint
-from extraction.summary_executor import reuse_summary_document
+from extraction.summary_executor import reuse_summary_document, summary_failure_rows, summary_model_from_document
 from pipeline_runtime import read_json
 
 
-def documents_for_arm(context, cohort, arm):
+def documents_for_arm(context, cohort, arm, *, summary_source="qwen", strict=False, failure_rows=None):
+    if summary_source not in {"qwen", "gemini"}:
+        raise ValueError("summary_source must be qwen or gemini")
     catalog = cohort["catalog"]
     if arm.name == "metadata":
         titles = cohort["metadata_titles"]
@@ -26,23 +28,37 @@ def documents_for_arm(context, cohort, arm):
             {
                 "content_id": str(t["content_id"]),
                 "text": t["title"],
-                "source_path": str(context.cohort_dir / "metadata_titles.jsonl"),
+                "source_path": str((context.run_root / "validation" / "cohort"
+                                    if "manifest" in cohort else context.cohort_dir) / "metadata_titles.jsonl"),
             }
             for t in titles
         ]
     registered = registry(context.config)
     documents = []
+    summary_failures = {}
+
+    def check_failed_summary(selected, cid):
+        directory = context.summary_dir(selected.representation, selected.model, summary_source)
+        if directory not in summary_failures:
+            summary_failures[directory] = (failure_rows if failure_rows is not None
+                                           else summary_failure_rows(directory))
+        failure = summary_failures[directory].get(cid)
+        if failure and (strict or failure.get("summary_model") == "gemini"):
+            raise ValueError(f"unresolved {summary_source.capitalize()} summary failure for {cid} in {directory}")
+
     for row in catalog:
         cid = str(row["content_id"])
         actual = arm
+        check_failed_summary(actual, cid)
         path = (
-            context.extraction_dir(actual.representation, actual.model, "summaries") / f"{cid}.json"
+            context.summary_dir(actual.representation, actual.model, summary_source) / f"{cid}.json"
         )
         # A malformed file is an error. Only absence permits fallback.
-        if not path.exists() and arm.fallback:
+        if not strict and not path.exists() and arm.fallback:
             actual = registered[arm.fallback]
+            check_failed_summary(actual, cid)
             path = (
-                context.extraction_dir(actual.representation, actual.model, "summaries")
+                context.summary_dir(actual.representation, actual.model, summary_source)
                 / f"{cid}.json"
             )
         if not path.is_file():
@@ -55,6 +71,10 @@ def documents_for_arm(context, cohort, arm):
         ):
             raise ValueError(f"invalid summary identity or text: {path}")
         doc = reuse_summary_document(path, content_id=cid, arm=actual.name)
+        if strict and doc["status"] != "complete":
+            raise ValueError(f"summary is not complete: {path}")
+        if summary_model_from_document(doc) != summary_source:
+            raise ValueError(f"summary model provenance mismatch: {path}")
         prov = doc["provenance"]
         if prov.get("arm") != actual.name or prov.get("representation") != actual.representation:
             raise ValueError(f"summary source provenance mismatch: {path}")
@@ -91,10 +111,11 @@ def documents_for_arm(context, cohort, arm):
     return documents
 
 
-def representation_signature(context, catalog, arm, documents):
+def representation_signature(context, catalog, arm, documents, *, selection_hash=None):
     return fingerprint(
         {
             "arm": asdict(arm),
+            "selection_hash": selection_hash,
             "catalog": catalog,
             "encoder": context.config["validation"]["encoder"],
             "model": local_model_identity(context.path("models", "bge")),

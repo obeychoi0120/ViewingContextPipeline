@@ -23,8 +23,10 @@ GRAPH_JSON_SCHEMA = _object(
         "relations": _array(
             _object({"subject_id": STRING, "predicate": STRING, "object_id": STRING})
         ),
-        "context": _array(STRING),
     }
+)
+_LEGACY_GRAPH_JSON_SCHEMA = _object(
+    {**GRAPH_JSON_SCHEMA["properties"], "context": _array(STRING)}
 )
 
 
@@ -34,6 +36,8 @@ class OutputValidationError(ValueError):
 
 def validate_graph_structure(value, schema=GRAPH_JSON_SCHEMA, path="graph"):
     """Validate JSON shape only; preserve duplicate IDs and unresolved references."""
+    if schema is GRAPH_JSON_SCHEMA and isinstance(value, dict) and "context" in value:
+        schema = _LEGACY_GRAPH_JSON_SCHEMA
     kind = schema["type"]
     expected = {"object": dict, "array": list, "string": str}[kind]
     if not isinstance(value, expected):

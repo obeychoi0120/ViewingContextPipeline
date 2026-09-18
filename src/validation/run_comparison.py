@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from extraction.recovery import fingerprint
-from pipeline_runtime import RunContext, read_jsonl
+from pipeline_runtime import RunContext
+from validation.selection import load_validation_cohort
 from validation.representation_provenance import read_state
 
 
@@ -20,11 +21,9 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     if not names:
         raise ValueError("run comparison requires at least one Graph target")
     arms = {name: name for name in names}
-    cohorts = [ctx.require_ready_cohort() for ctx in (context, reference)]
-    for filename in ("events.jsonl", "catalog.jsonl"):
-        if fingerprint(read_jsonl(context.cohort_dir / filename)) != fingerprint(
-            read_jsonl(reference.cohort_dir / filename)
-        ):
+    cohorts = [load_validation_cohort(ctx) for ctx in (context, reference)]
+    for filename in ("events", "catalog"):
+        if fingerprint(cohorts[0][filename]) != fingerprint(cohorts[1][filename]):
             raise ValueError(f"run comparison requires identical {filename}")
     if cohorts[0]["plan"]["splits"] != cohorts[1]["plan"]["splits"]:
         raise ValueError("run comparison requires identical evaluation dates")

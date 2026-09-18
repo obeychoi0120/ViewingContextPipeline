@@ -1,6 +1,7 @@
 from dataclasses import replace
 import io
 import multiprocessing as mp
+import shutil
 
 import numpy as np
 import pytest
@@ -8,7 +9,8 @@ from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
 from validation.recommendation_contracts import RECOMMENDATION_ARMS
-from validation.rolling_data import EventTable, iter_jsonl
+from validation.rolling_data import EventTable
+from validation.selection import load_validation_cohort, prepare_validation_cohort, training_signature
 from validation.rolling_recommendation import (
     combination_dir, prepare_split, run_combination, run_rolling,
 )
@@ -17,7 +19,16 @@ from validation.steps import validation_config
 
 
 @pytest.fixture
-def full_context(ready_context):
+def full_context(ready_context, fake_models):
+    import extraction.steps as steps
+    for source in ("qwen", "gemini"):
+        for kind in ("description", "graph"):
+            getattr(steps, f"extract_{kind}_scenes")(
+                ready_context, model=source,
+                schema=f"prompts/{kind}_scene_v{'3' if kind == 'graph' else '2'}.md")
+            getattr(steps, f"summarize_{kind}")(
+                ready_context, source=source, model="qwen", schema=f"prompts/{kind}_summary_v4.md")
+    prepare_validation_cohort(ready_context, "qwen")
     return ready_context
 
 
@@ -46,11 +57,9 @@ def prepare_embeddings(context):
 
 
 def two_jobs(context):
-    split = context.require_ready_cohort()["plan"]["splits"][0]
-    from extraction.recovery import fingerprint
-    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
-    training_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
-                                 "cutoffs": context.config["validation"]["evaluation"]["cutoffs"]})
+    cohort = load_validation_cohort(context)
+    split = cohort["plan"]["splits"][0]
+    training_hash = training_signature(context, cohort, validation_config(context))
     return [(split, {
         "run_id": context.run_id, "evaluation_date": split["evaluation_date"],
         "seed": seed, "arm": "metadata", "training_input_hash": training_hash,
@@ -83,9 +92,11 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
     assert "refit epochs=" in stream.getvalue() and "test device=" in stream.getvalue()
     assert {child.pid for child in mp.active_children()} == children_before
 
-    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
+    table = EventTable(load_validation_cohort(context)["events"])
     config = validation_config(context)
-    serial = replace(context, run_root=context.run_root / "serial")
+    serial = replace(context, run_root=context.run_root.parent / "serial")
+    shutil.copytree(context.run_root / "extraction", serial.run_root / "extraction")
+    prepare_validation_cohort(serial, "qwen")
     prepare_embeddings(serial)
     original_threads = torch.get_num_threads()
     torch.set_num_threads(1)
@@ -167,6 +178,7 @@ def test_abrupt_worker_exit_does_not_hang(full_context, monkeypatch):
 
 
 def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
+    monkeypatch.setattr("validation.rolling_recommendation.require_torch", lambda: None)
     context = full_context
     prepare_embeddings(context)
     monkeypatch.setattr("validation.rolling_recommendation.worker_devices",
