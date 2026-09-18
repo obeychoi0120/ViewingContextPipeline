@@ -78,7 +78,7 @@ def test_qwen_graph_finishes_each_penalty_pass_before_retrying_failures(
     assert next(row for row in failures if row["content_id"] == "a" and row["scene_idx"] == 1)["raw_output"] == '{"context": []}'
     assert all(row["raw_output"] == "" for row in failures if (row["content_id"], row["scene_idx"]) != ("a", 1))
     output = capsys.readouterr()
-    assert "[Graph_skip_qwen] b.mp4 | scene #008" in output.err
+    assert "[Graph_skip_qwen]" not in output.err
     assert "[RECOVERY]" not in output.err
 
 

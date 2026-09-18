@@ -3,7 +3,6 @@ from __future__ import annotations
 from itertools import chain
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
-from extraction.monitoring import graph_skip_message, scene_messages
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.raw_output import raw_graph_record
@@ -56,19 +55,6 @@ def description_scene_result(row, text, *, content_id, error=None):
         "failure_kind": "generation" if error else "empty_response",
         "error": error or "model produced an empty description",
     }
-
-
-def _report_scene(progress, name, record, failure, *, arm, source):
-    if record is not None:
-        write_progress(progress, scene_messages(name, [record], arm=arm, source=source)[0])
-    elif arm == "graph":
-        write_progress(progress, graph_skip_message(name, failure, source=source))
-    else:
-        write_progress(
-            progress,
-            f"[SKIPPED] {name} | description scene "
-            f"#{int(failure['scene_idx']):03d} | {failure['error']}",
-        )
 
 
 class SceneResults:
@@ -129,9 +115,6 @@ class SceneResults:
         self.records[cid] = records
         if failure is not None:
             self.failures.record(cid, int(row["scene_idx"]), failure["error"], text)
-            if record is None:
-                _report_scene(self.progress, self.names.get(cid, f"{cid}.mp4"),
-                              record, failure, arm=self.arm, source=self.source)
         else:
             self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)

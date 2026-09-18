@@ -12,7 +12,7 @@ from pipeline_runtime import read_jsonl
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
 @pytest.mark.parametrize("representation", ["description", "graph"])
 def test_scene_failures_are_retried_on_resume(
-    ready_context, monkeypatch, model, representation,
+    ready_context, monkeypatch, model, representation, capsys,
 ):
     context = ready_context
     context.config["extraction"]["graph_repetition_penalty"] = [1.0]
@@ -73,6 +73,9 @@ def test_scene_failures_are_retried_on_resume(
     assert extract(context, **options)["failure_count"] == 1
     expected = [(first_id, 1.0)] * 2 + [(other_id, 1.0)]
     assert calls == expected
+    output = capsys.readouterr()
+    assert "[Graph_skip" not in output.err and "[SKIPPED]" not in output.err
+    assert read_jsonl(failure_path)[0]["error"] not in output.err
     assert extract(context, **options)["failure_count"] == 1
     expected.append((first_id, 1.0))
     assert calls == expected
