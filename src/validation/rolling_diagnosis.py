@@ -9,7 +9,9 @@ from extraction.recovery import fingerprint
 from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
-from validation.recommendation_contracts import resolve_target_arms, target_scope
+from validation.recommendation_contracts import (
+    DIAGNOSIS_ARCHITECTURE_VERSIONS, resolve_target_arms, target_scope,
+)
 from arm_registry import registry
 from validation.representation_checks import verify_representations
 from validation.rolling_data import EventTable, iter_jsonl
@@ -112,6 +114,24 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
     return result
 
 
+def diagnosis_training(directory, identity, expected_count, *, architecture_version=None):
+    """Validate historical results without making them eligible for training resume."""
+    training = read_json(directory / "training.json")
+    recorded = training.get("architecture_version")
+    if recorded not in DIAGNOSIS_ARCHITECTURE_VERSIONS:
+        raise ValueError(f"unsupported diagnosis architecture {recorded!r}: {directory}")
+    if architecture_version is not None and recorded != architecture_version:
+        raise ValueError(
+            f"mixed recommendation architectures: expected {architecture_version}, "
+            f"found {recorded}: {directory}"
+        )
+    if not combination_complete(
+        directory, identity, expected_count, architecture_version=recorded
+    ):
+        raise ValueError(f"incomplete/corrupt combination: {directory}")
+    return training
+
+
 def collect_metrics(context, config, cohort, *, arms=None):
     selected = resolve_target_arms(config=context.config) if arms is None else arms
     table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
@@ -132,6 +152,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
     metrics = list(metrics_from_rank(1, config.evaluation.cutoffs))
     daily = []
     total = 0
+    architecture_version = None
     for day, split in enumerate(splits):
         ids = phase_ids(table, split, "test")
         expected = set(ids.tolist())
@@ -151,9 +172,10 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 from validation.representation_provenance import recommendation_identity
                 identity.update(recommendation_identity(context, selected[arm]))
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
-                if not combination_complete(directory, identity, len(ids)):
-                    raise ValueError(f"incomplete/corrupt combination: {directory}")
-                training = read_json(directory / "training.json")
+                training = diagnosis_training(
+                    directory, identity, len(ids), architecture_version=architecture_version
+                )
+                architecture_version = training["architecture_version"]
                 best = training["best_epoch"]
                 if training["split"] != split or len(training["refit"]) != best:
                     raise ValueError("training split/refit epoch mismatch")
@@ -217,6 +239,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
         sums,
         counts,
         {
+            "architecture_version": architecture_version,
             "expected_event_count": expected_total,
             "actual_event_count": total,
             "combination_count": len(daily),

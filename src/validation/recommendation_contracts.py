@@ -2,6 +2,8 @@ from __future__ import annotations
 from arm_registry import registry, select_arms
 
 ARCHITECTURE_VERSION = "sasrec-content-v3"
+# Both versions use the same persisted event/rank and rolling training contracts.
+DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v2", "sasrec-content-v3"})
 DEFAULT_PROTOCOL = {
     "protocol": {
         "arms": ["desc_gemini", "desc_qwen", "graph_gemini", "graph_qwen", "metadata"],

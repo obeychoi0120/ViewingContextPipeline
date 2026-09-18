@@ -100,7 +100,11 @@ def combination_dir(context, date, seed, arm):
     return context.recommendations_dir / date / f"seed_{seed}" / arm.lower()
 
 
-def combination_complete(directory, identity, expected_count):
+def combination_complete(directory, identity, expected_count, *, architecture_version=None):
+    # Resume always requires the current architecture unless a read-only caller
+    # explicitly selects a supported historical version.
+    if architecture_version is None:
+        architecture_version = ARCHITECTURE_VERSION
     try:
         complete = read_json(directory / "complete.json")
         if complete.get("schema_version") != SCHEMA or any(
@@ -113,7 +117,7 @@ def combination_complete(directory, identity, expected_count):
         if not all((directory / name).is_file() and (directory / name).stat().st_size for name in names):
             return False
         training = read_json(directory / "training.json")
-        if training.get("architecture_version") != ARCHITECTURE_VERSION:
+        if training.get("architecture_version") != architecture_version:
             return False
         if training.get("schema_version") != SCHEMA or any(
             training.get(key) != value for key, value in identity.items()

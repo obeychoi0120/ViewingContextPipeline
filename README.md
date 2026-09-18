@@ -92,6 +92,8 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --target desc_qwen graph_q
 
 `diagnosis.json`의 `rolling-diagnosis/v3`는 아이템별 출처 전체 대신 arm별 해시·truncation·출처 분포·단어 수 요약을 저장합니다. 예외와 Gemini fallback 예시는 각각 최대 10개이며 전체 건수와 생략 건수를 함께 기록합니다. 출처 분포도 빈도순 최대 10개 값과 생략된 레코드 수를 기록합니다. `details_path`는 run 디렉터리 기준 상대경로이며, 상세 기록은 `validation/representations/.inputs/{arm}.json`의 `sources`에 보존됩니다. 결과를 옮길 때 상세 추적이 필요하면 이 숨김 디렉터리도 함께 복사하세요. v2의 `representations.*.sources`는 `sources_summary`와 `details_path`로, `gemini_summary_fallbacks.*` 배열은 `count`·`examples`·`omitted_count`·`details_path` 객체로 변경되었습니다.
 
+진단은 저장된 `sasrec-content-v2`와 `sasrec-content-v3` 추천 결과를 지원하며, 실제 버전을 `recommendations.architecture_version`에 기록합니다. 선택한 날짜·seed·arm에 서로 다른 버전이 섞이면 집계하지 않습니다. 추천 학습 재개는 현재 코드의 모델 버전만 재사용하므로, 과거 버전의 결과를 진단할 때는 `run-diagnosis`만 실행하면 됩니다.
+
 ## Graph 프롬프트 비교: Run 분리
 
 비교할 프롬프트마다 별도의 Run을 사용하고 동일한 cohort·catalog·평가 날짜·학습 설정·seed를 유지합니다. 각 Run에서 장면 추출 → 요약 → embedding → 추천을 완료한 뒤 비교합니다.
