@@ -76,9 +76,9 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 `prepare-cohort` 한 번으로 required items 생성 → 원본·보완 CSV의 제목 병합 → 영상·제목 검증을 완료합니다. 원본의 비어 있지 않은 제목을 우선하고, 필요한 아이템의 빈 제목·누락 행만 보완합니다. 끝내 찾지 못한 제목은 빈 값으로 저장해 Metadata embedding에서 영벡터로 처리합니다. 보완 CSV 자체가 없거나 손상된 경우에는 실패합니다.
 
-병합 결과는 `artifacts/preparatation/cohort/metadata_titles.jsonl`, 출처·보완 통계는 같은 폴더의 `cohort_plan.json`에 저장합니다. 원본 CSV를 변경하거나 별도 completed CSV·report 파일을 만들지 않습니다. `--plan-only`나 별도 `validation.complete_titles` 실행은 필요하지 않습니다. 재실행하면 최신 CSV를 다시 읽습니다. 이미 완성된 제목 CSV를 사용할 때는 `data.titles_csv`에 지정하고 `data.titles_supplement_csv`를 생략하면 됩니다(이 경우 누락 행은 오류).
+병합 결과는 `artifacts/preparation/cohort/metadata_titles.jsonl`, 출처·보완 통계는 같은 폴더의 `cohort_plan.json`에 저장합니다. 원본 CSV를 변경하거나 별도 completed CSV·report 파일을 만들지 않습니다. `--plan-only`나 별도 `validation.complete_titles` 실행은 필요하지 않습니다. 재실행하면 최신 CSV를 다시 읽습니다. 이미 완성된 제목 CSV를 사용할 때는 `data.titles_csv`에 지정하고 `data.titles_supplement_csv`를 생략하면 됩니다(이 경우 누락 행은 오류).
 
-기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/preparatation/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
+기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/preparation/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
 
 `--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용합니다. 와일드카드 문자열은 허용하지 않습니다. 네 생성 명령에서 필수이며, 추출은 `--model`, 요약은 `--source`도 필수입니다. 요약 모델은 항상 Qwen이고 `--source`는 입력 장면을 만든 모델입니다. Graph 명령은 항상 `graph`에 쓰며 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
 
@@ -126,7 +126,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference
 
 ```text
 artifacts/
-├── preparatation/
+├── preparation/
 │   ├── cohort/
 │   ├── resized_keyframes/{content_id}/{timestamp}.png
 │   └── source_assets/{content_id}/
@@ -162,15 +162,15 @@ artifacts/
 python -m extraction migrate-scene-schema --run-id "$RUN_ID"
 ```
 
-준비 산출물은 `<artifacts_root>/preparatation/`의 `cohort`, `resized_keyframes`, `source_assets`에 저장하며 모든 Run이 공유합니다. Cohort의 준비 상태와 평가 계획은 run ID에 종속되지 않습니다. Preparation CLI의 `--run-id`는 기존 호출 호환을 위해 유지하지만 저장 위치를 나누지 않습니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 cohort·timestamp·프레임이 준비되어 있으면 새 Run은 preparation을 다시 실행하지 않고 extraction·validation을 실행할 수 있습니다. 장면 추출은 `prepare-input-data`가 정상 완료됐다고 가정합니다. 이미지·asset 존재 검사, 폴더 스캔, duration·샘플링 재검증 및 이미지 내용 해시 계산을 하지 않습니다. timestamp JSON으로 scene 수와 재사용 여부를 확인하고, 추론 입력을 공급할 때 필요한 경로를 준비 단계의 PNG 파일명 규칙으로 구성합니다. 이미지는 실제 추론 시 읽으며, 필요한 파일이 없으면 해당 입력을 읽는 시점에 실패합니다. 자동 준비 호출은 하지 않습니다.
+준비 산출물은 `<artifacts_root>/preparation/`의 `cohort`, `resized_keyframes`, `source_assets`에 저장하며 모든 Run이 공유합니다. Cohort의 준비 상태와 평가 계획은 run ID에 종속되지 않습니다. Preparation CLI의 `--run-id`는 기존 호출 호환을 위해 유지하지만 저장 위치를 나누지 않습니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 cohort·timestamp·프레임이 준비되어 있으면 새 Run은 preparation을 다시 실행하지 않고 extraction·validation을 실행할 수 있습니다. 장면 추출은 `prepare-input-data`가 정상 완료됐다고 가정합니다. 이미지·asset 존재 검사, 폴더 스캔, duration·샘플링 재검증 및 이미지 내용 해시 계산을 하지 않습니다. timestamp JSON으로 scene 수와 재사용 여부를 확인하고, 추론 입력을 공급할 때 필요한 경로를 준비 단계의 PNG 파일명 규칙으로 구성합니다. 이미지는 실제 추론 시 읽으며, 필요한 파일이 없으면 해당 입력을 읽는 시점에 실패합니다. 자동 준비 호출은 하지 않습니다.
 
 장면 추출은 추론 전에 timestamp와 저장 결과를 확인해 처리할 전체 scene 수를 계산합니다. 추론용 task와 이미지는 요청을 공급하면서 읽습니다. Gemini는 제한된 수의 scene을 미리 공급하고 빈 worker가 영상 경계 없이 다음 scene을 바로 처리합니다. 처리 속도와 ETA는 추론 단계의 완료 건수와 경과 시간을 기준으로 표시합니다.
 
 기본 6개 keyframe 정책은 `timestamp_fixed_{scene_duration}s.json`, 다른 개수는 `timestamp_fixed_{scene_duration}s_{num_keyframes}kf.json`을 사용하므로 서로 다른 정책이 공유 timestamp를 덮어쓰지 않습니다. 콘텐츠별 잠금과 원자적 저장으로 동시 준비를 보호합니다. `--force`도 정상 이미지를 덮어쓰지 않습니다. `prepare-input-data`를 명시적으로 실행할 때는 공유 duration의 원본 식별 정보가 달라지면 재사용을 거부하므로 변경된 영상은 별도 `artifacts_root`로 분리합니다.
 
-`prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 공유 duration과 timestamp가 유효하면 영상 길이를 재확인하거나 timestamp를 다시 만들지 않습니다. 준비 실패 보고서는 공유 `preparatation/cohort/preparation_failures.jsonl`에 저장합니다.
+`prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 공유 duration과 timestamp가 유효하면 영상 길이를 재확인하거나 timestamp를 다시 만들지 않습니다. 준비 실패 보고서는 공유 `preparation/cohort/preparation_failures.jsonl`에 저장합니다.
 
-기존 산출물은 자동 이동·삭제하지 않습니다. 이전 데이터를 재사용하려면 사용할 cohort 하나를 `artifacts/preparatation/cohort/`에, 기존 프레임과 source assets를 각각 `artifacts/preparatation/resized_keyframes/`, `artifacts/preparatation/source_assets/`에 배치합니다. 과거 cohort에 기록된 run ID는 로드 시 사용하지 않습니다. `prepare-cohort`를 재실행하면 공유 cohort가 갱신되므로 서로 다른 데이터셋·평가 구성을 유지하려면 `artifacts_root`를 분리합니다. `--plan-only` 실행 후에는 전체 `prepare-cohort`가 성공해야 다음 단계에서 사용할 수 있습니다.
+기존 산출물은 자동 이동·삭제하지 않습니다. 이전 데이터를 재사용하려면 사용할 cohort 하나를 `artifacts/preparation/cohort/`에, 기존 프레임과 source assets를 각각 `artifacts/preparation/resized_keyframes/`, `artifacts/preparation/source_assets/`에 배치합니다. 과거 cohort에 기록된 run ID는 로드 시 사용하지 않습니다. `prepare-cohort`를 재실행하면 공유 cohort가 갱신되므로 서로 다른 데이터셋·평가 구성을 유지하려면 `artifacts_root`를 분리합니다. `--plan-only` 실행 후에는 전체 `prepare-cohort`가 성공해야 다음 단계에서 사용할 수 있습니다.
 
 Qwen Desc·Graph·Summary는 설정된 repetition penalty별로 전체 pass를 완료하고 실패 항목만 다음 pass에서 재생성합니다. 기본 순서는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20`이며 성공 항목은 제외합니다. Vertex Gemini의 `429 RESOURCE_EXHAUSTED`만 30초 뒤 한 번 재시도하며, Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면 번호는 본문 파일의 `scene_idx`에, 요약의 생성 당시 provenance는 요약 문서에 남깁니다.
 

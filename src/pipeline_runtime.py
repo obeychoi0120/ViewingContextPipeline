@@ -113,7 +113,7 @@ class RunContext:
 
     @property
     def preparation_dir(self) -> Path:
-        return self.run_root.parent.parent / "preparatation"
+        return self.run_root.parent.parent / "preparation"
 
     @property
     def cohort_dir(self) -> Path:
