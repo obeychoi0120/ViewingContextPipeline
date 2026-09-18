@@ -60,6 +60,15 @@ def test_105_combinations_real_small_training_resume_and_diagnosis(
     monkeypatch.setattr("validation.rolling_recommendation._new_model", tiny)
     assert run_rolling(context)["completed"] == 105
     assert run_rolling(context)["skipped"] == 105
+    # A structurally incompatible checkpoint must be retrained, not resumed.
+    from pipeline_runtime import write_json
+
+    old_training_path = next(context.recommendations_dir.rglob("training.json"))
+    old_training = read_json(old_training_path)
+    old_training["architecture_version"] = "sasrec-content-v2"
+    write_json(old_training_path, old_training)
+    result = run_rolling(context)
+    assert result["completed"] == 1 and result["skipped"] == 104
     assert len(list(context.recommendations_dir.rglob("sasrec.pt"))) == 105
     for path in context.recommendations_dir.rglob("training.json"):
         assert "refit_item_frequency" not in read_json(path)

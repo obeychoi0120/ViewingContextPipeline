@@ -10,7 +10,7 @@
 
 각 날짜·seed·Arm은 독립 모델입니다. 평가 전날 이전 사건으로 학습하고 전날 validation NDCG@10으로 epoch를 선택합니다. 동일 seed의 새 모델을 평가일 이전 사건으로 선택 epoch 수만큼 refit하고 평가일을 test합니다. Test 중 파라미터를 갱신하지 않으며 당일의 앞선 사건도 이력에 반영합니다. 전체 catalog를 점수화하고 과거 관측 아이템은 정답을 제외하고 마스킹합니다.
 
-BGE 1,024차원 특징은 고정하고 projection과 SASRec을 학습합니다. 별도 item ID embedding을 더하지 않습니다. SASRec은 hidden 512, 2 blocks, 2 heads, sequence 10, batch 256, 기본 seeds 42·43·44입니다. 5개 고정 Arm은 105개 조합입니다. `--target`은 embedding·추천·진단에서 동일하게 지원합니다.
+BGE 1,024차원 특징은 고정하고 projection과 SASRec을 학습합니다. 별도 item ID embedding을 더하지 않습니다. SASRec은 hidden 512, 2 blocks, 2 heads, sequence 10, batch 256, 기본 seeds 42·43·44입니다. Item/User residual MLP는 모두 512→512→512이며 활성화는 각각 ReLU/GELU입니다. Transformer 내부 FFN은 512→2048→512입니다. 모델 버전은 `sasrec-content-v3`이며 이전 구조의 추천 결과는 재사용하지 않습니다. 5개 고정 Arm은 105개 조합입니다. `--target`은 embedding·추천·진단에서 동일하게 지원합니다.
 
 추천도 `CUDA_VISIBLE_DEVICES`에서 보이는 모든 GPU를 자동으로 사용하며 `--gpus`는 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m validation run-recommendation --run-id "$RUN_ID"`는 물리 GPU 0·2에서 날짜 × seed × Arm 조합을 병렬 학습합니다. 환경 변수를 생략하면 CUDA에서 보이는 모든 GPU를 사용합니다. 기본 GPU당 동시 작업은 1개이며 `--workers-per-gpu 2`이면 각 GPU에 2개씩 배치합니다. 남은 작업이 적으면 필요한 수의 워커만 실행합니다. GPU가 없으면 기본 설정에서 CPU로 실행하고, 이때 `--workers-per-gpu`가 1보다 크면 오류를 냅니다.
 

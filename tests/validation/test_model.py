@@ -66,8 +66,8 @@ def test_all_item_towers_use_frozen_features_and_trainable_projection(arm) -> No
     assert model.user_mlp.fc1.weight.grad is not None
     assert model.item_mlp.activation == "relu"
     assert model.user_mlp.activation == "gelu"
-    assert model.item_mlp.fc1.out_features == 32
-    assert model.user_mlp.fc1.out_features == 32
+    assert model.item_mlp.fc1.out_features == 8
+    assert model.user_mlp.fc1.out_features == 8
 
 
 def test_causal_right_padding_and_last_valid_user_position() -> None:

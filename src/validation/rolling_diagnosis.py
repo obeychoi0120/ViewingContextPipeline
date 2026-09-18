@@ -234,7 +234,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
     config = validation_config(context)
     errors = []
     document = {
-        "schema_version": "rolling-diagnosis/v2",
+        "schema_version": "rolling-diagnosis/v3",
         "run_id": context.run_id,
         **target_scope(arms, config=context.config),
         "statistics": {"status": "not_computed"},
@@ -258,15 +258,10 @@ def diagnose(context, *, target=None, compare_run_id=None):
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
         document["generation_recovery"] = recovery_report(context, branches=arms)
-        from validation.representation_provenance import read_state
-        registered = registry(context.config)
-        evidence = {name: read_state(context, name) for name in arms}
-        document["representations"] = evidence
-        document["gemini_summary_fallbacks"] = {
-            name: [row for row in evidence[name].get("sources", [])
-                   if row.get("actual_arm") and row["actual_arm"] != name]
-            for name in arms if registered[name].model == "gemini"
-        }
+        from validation.diagnosis_representations import representation_report
+        document["representations"], document["gemini_summary_fallbacks"] = (
+            representation_report(context, arms)
+        )
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
         if not errors:

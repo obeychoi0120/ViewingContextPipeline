@@ -37,8 +37,8 @@ if nn is not None:
         ) -> None:
             super().__init__()
             self.norm = nn.LayerNorm(dimension)
-            self.fc1 = nn.Linear(dimension, dimension * 4)
-            self.fc2 = nn.Linear(dimension * 4, dimension)
+            self.fc1 = nn.Linear(dimension, dimension)
+            self.fc2 = nn.Linear(dimension, dimension)
             self.activation = activation
 
         def forward(self, values: "torch.Tensor") -> "torch.Tensor":

@@ -113,6 +113,8 @@ def combination_complete(directory, identity, expected_count):
         if not all((directory / name).is_file() and (directory / name).stat().st_size for name in names):
             return False
         training = read_json(directory / "training.json")
+        if training.get("architecture_version") != ARCHITECTURE_VERSION:
+            return False
         if training.get("schema_version") != SCHEMA or any(
             training.get(key) != value for key, value in identity.items()
         ):

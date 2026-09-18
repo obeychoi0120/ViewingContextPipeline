@@ -1,7 +1,7 @@
 from __future__ import annotations
 from arm_registry import registry, select_arms
 
-ARCHITECTURE_VERSION = "sasrec-content-v2"
+ARCHITECTURE_VERSION = "sasrec-content-v3"
 DEFAULT_PROTOCOL = {
     "protocol": {
         "arms": ["desc_gemini", "desc_qwen", "graph_gemini", "graph_qwen", "metadata"],
