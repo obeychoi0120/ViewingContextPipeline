@@ -83,4 +83,33 @@ def test_graph_repair_never_invents_required_fields():
     assert failure is None and repaired["parse_mode"] == "repaired"
     assert repaired["graph"] == graph
     record, failure = graph_scene_result(row, '{"setting_context": "indoor",}', strict=True)
-    assert record is None and failure
+    assert failure is None
+    assert record["graph"] == '{"setting_context": "indoor",}'
+    assert record["parse_mode"] == "text"
+
+
+@pytest.mark.parametrize('text', [
+    '[Entities]\nperson1: person\n[Relations]\nperson1 -> waving ->',
+    '{"entities": [',
+    '{"unexpected": "unstructured model output"}',
+    'A person gestures toward another person.',
+    '',
+])
+def test_graph_format_never_fails_generation_and_survives_summary_roundtrip(tmp_path, text):
+    import json
+    from extraction.scene_executor import graph_scene_result
+    from extraction.scene_storage import read_scene_records, write_scene_records
+    from extraction.step_support import minimal_graph_records
+    from extraction.semantic_graph import graph_summary_prompt
+    from validation.diagnosis_scenes import _success_scene_row_issues
+    row = {'scene_idx': 0, 'keyframes': []}
+    record, failure = graph_scene_result(row, text)
+    assert failure is None and record['graph'] == text and record['parse_mode'] == 'text'
+    path = tmp_path / 'video.jsonl'
+    write_scene_records(path, [record])
+    records = minimal_graph_records(read_scene_records(path), path)
+    assert records[0]['parse_mode'] == 'text'
+    assert not _success_scene_row_issues('graph_qwen', records[0], 'video')
+    assert json.loads(graph_summary_prompt('{scenes}', records))[0]['observation'] == text
+    failed, error = graph_scene_result(row, text, error='graph: output truncated at token limit')
+    assert failed is None and error['error'] == 'graph: output truncated at token limit'

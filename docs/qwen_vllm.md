@@ -27,9 +27,9 @@ Qwen Graph와 Description은 영상 경계 없이 장면을 연속 공급합니�
 
 ## 생성과 실패 기록
 
-Graph는 JSON Schema 강제 생성 없이 `[Entities]`, `[Relations]`, `[End]` 줄 형식을 요청합니다. Qwen과 Gemini가 공통 파서로 `entities / relations` JSON 객체를 구성한 뒤 필드·타입을 검증합니다. 완전한 JSON 응답도 계속 지원합니다. ID 중복·미해결 관계 참조는 허용하며 개체·관계 개수 제한은 프롬프트 지침입니다. Description과 Summary에도 구조 grammar를 적용하지 않습니다.
+Graph는 JSON Schema 강제 생성 없이 `[Entities]`, `[Relations]`, `[End]` 줄 형식을 요청합니다. Qwen과 Gemini가 공통 파서로 `entities / relations` JSON 객체를 구성합니다. 파싱이나 구조 검증이 불가능하면 원문을 정상 Scene 텍스트로 저장하여 Summary에 전달합니다. 완전한 JSON 응답도 계속 지원합니다. ID 중복·미해결 관계 참조는 허용하며 개체·관계 개수 제한은 프롬프트 지침입니다. Description과 Summary에도 구조 grammar를 적용하지 않습니다.
 
-Repair는 화살표 변형(`→`, `⇒`, `-->`, `=>`), 공백으로 구분된 하이픈·대시, 헤더 대소문자·콜론·Markdown 제목, 항목 앞 bullet·번호, 전각 구분자, 마지막 세미콜론, 응답 전체 코드 펜스를 처리합니다. 관계는 주체·관계·대상이 유일하게 분리될 때만 변환하며 ID·속성·관계 문구 안의 하이픈은 보존합니다. 빈 섹션은 `none` 또는 `[]`를 명시해야 합니다. 필수 데이터 섹션 누락, 역방향·모호한 관계, 중복 섹션, 종료 후 추가 내용은 실패입니다. JSON의 작은따옴표·구문 따옴표·마지막 쉼표는 복구할 수 있지만 잘린 괄호를 닫거나 여러 객체 중 하나를 선택하지 않습니다. `[End]`는 생략할 수 있으며 응답 끝에서 파싱을 마칩니다. 출력 잘림은 종료 표식 유무 대신 Qwen의 `finish_reason=length`, Gemini의 `MAX_TOKENS`로 판단합니다. 이전 `[Context]` 출력은 호환용으로 허용합니다. Parser 버전은 Graph 생성 provenance에 포함합니다.
+Repair는 화살표 변형(`→`, `⇒`, `-->`, `=>`), 공백으로 구분된 하이픈·대시, 헤더 대소문자·콜론·Markdown 제목, 항목 앞 bullet·번호, 전각 구분자, 마지막 세미콜론, 응답 전체 코드 펜스를 처리합니다. 관계는 주체·관계·대상이 유일하게 분리될 때만 변환하며 ID·속성·관계 문구 안의 하이픈은 보존합니다. 빈 섹션은 `none` 또는 `[]`를 명시해야 합니다. 필수 데이터 섹션 누락, 역방향·모호한 관계, 중복 섹션 등으로 구조화할 수 없는 출력도 생성 실패로 처리하지 않고 원문을 보존합니다. JSON의 작은따옴표·구문 따옴표·마지막 쉼표는 복구할 수 있지만 잘린 괄호를 닫거나 여러 객체 중 하나를 선택하지 않습니다. `[End]`는 생략할 수 있으며 응답 끝에서 파싱을 마칩니다. 출력 잘림은 종료 표식 유무 대신 Qwen의 `finish_reason=length`, Gemini의 `MAX_TOKENS`로 판단합니다. 이전 `[Context]` 출력은 호환용으로 허용합니다. 정상 종료한 비정형 출력은 `scene_graph` 문자열과 `graph_format="text"`로 저장하며 과거 실패 원문과 구분합니다. API·엔진 오류는 계속 오류로 처리합니다. Parser 버전은 Graph 생성 provenance에 포함합니다.
 
 장면·요약의 기본 상한은 각각 1,024 tokens와 512 tokens입니다. Qwen Graph·Desc 및 모든 Summary는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20` 순서로 각 pass의 실패 항목만 재생성합니다(설정 목록 사용). 프롬프트는 그대로 사용하며 별도 교정 프롬프트는 만들지 않습니다. Qwen Graph·Desc·Summary의 `finish_reason=length`와 Gemini Graph·Desc의 `MAX_TOKENS`는 완전해 보이는 본문이라도 토큰 한도 실패입니다. 최종 실패 장면은 Summary 입력에서 제외하며, 성공 장면이 없거나 Summary가 최종 실패하면 빈 Summary를 저장합니다. 실패 원문으로 내용을 채우지 않습니다.
 

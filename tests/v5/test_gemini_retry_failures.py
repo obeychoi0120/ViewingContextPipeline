@@ -47,7 +47,7 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
                     error, text = "429 RESOURCE_EXHAUSTED", ""
                 if phase < 3 and idx == 1:
                     text = f"failed output {phase}"
-                    error = "429 RESOURCE_EXHAUSTED" if representation == "description" else None
+                    error = "429 RESOURCE_EXHAUSTED"
                 callback(GeminiGenerationOutcome(task.task_id, text, error=error))
                 if phase == 2 and idx == 0:
                     assert [row["scene_idx"] for row in read_jsonl(failure_path)] == [1]

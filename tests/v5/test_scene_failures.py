@@ -36,10 +36,14 @@ def test_scene_failures_are_retried_on_resume(
     calls = []
     good = json.dumps({"entities": [], "relations": [], "context": []})
 
+    runtime = None
+
     def generate(tasks, callback):
         for task in tasks:
             calls.append((task.task_id, task.repetition_penalty))
             text = good if succeed or task.task_id == other_id else " \n\t"
+            if runtime is not None:
+                runtime.current_result = {"finish_reason": "length" if not succeed and task.task_id == first_id else "stop"}
             callback(task.task_id, text)
             if interrupt:
                 assert read_jsonl(failure_path) == [{
@@ -55,13 +59,15 @@ def test_scene_failures_are_retried_on_resume(
 
     @contextmanager
     def generator(**kwargs):
+        nonlocal runtime
+        runtime = kwargs["runtime"]
         yield generate
 
     class Pool:
         def __init__(self, *args, **kwargs):
             pass
         def generate(self, tasks, callback, **kwargs):
-            return generate(tasks, lambda key, text: callback(GeminiGenerationOutcome(key, text)))
+            return generate(tasks, lambda key, text: callback(GeminiGenerationOutcome(key, text, response_diagnostics={"candidates": [{"finish_reason": "MAX_TOKENS" if not succeed and key == first_id else "STOP"}]})))
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
@@ -266,20 +272,22 @@ An indoor gathering.
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     options = {"model": model, "schema": "prompts/graph_scene_v3.md"}
-    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 3
+    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 2
     assert calls == [f"{cid}:{i}" for i in range(len(responses))]
-    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (4, 3, 0)
+    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (5, 2, 0)
     directory = context.graph_scene_dir(model)
     records = read_scene_records(directory / f"{cid}.jsonl")
     by_scene = {row["scene_idx"]: row for row in records}
     assert by_scene[0]["graph"] == by_scene[1]["graph"] == by_scene[2]["graph"]
+    assert by_scene[3]["graph"] == responses[3]
+    assert by_scene[3]["parse_mode"] == "text"
     assert by_scene[0]["parse_mode"] == "unknown"
     assert by_scene[1]["parse_mode"] == "unknown"
     assert by_scene[0]["provenance"]["prompt_hash"]
     assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
     assert by_scene[6]["graph"] == {"entities": [], "relations": [], "context": []}
     failures = read_jsonl(directory / "failures" / f"{cid}.jsonl")
-    assert {row["scene_idx"] for row in failures} == {3, 4, 5}
+    assert {row["scene_idx"] for row in failures} == {4, 5}
     for failure in failures:
         index = failure["scene_idx"]
         assert failure["raw_output"] == ""
@@ -288,9 +296,9 @@ An indoor gathering.
             assert failure["error"] == "graph: output truncated at token limit"
     observations = json.loads(graph_summary_prompt("{scenes}", records))
     assert observations[0]["observation"] == by_scene[0]["graph"]
-    assert len(observations) == 4
-    assert observations[3]["observation"] == by_scene[6]["graph"]
-    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 3
+    assert len(observations) == 5
+    assert observations[4]["observation"] == by_scene[6]["graph"]
+    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 2
     expected = [f"{cid}:{i}" for i in range(len(responses))]
-    expected.extend(f"{cid}:{i}" for i in (3, 4, 5))
+    expected.extend(f"{cid}:{i}" for i in (4, 5))
     assert calls == expected

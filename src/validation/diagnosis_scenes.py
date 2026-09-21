@@ -129,10 +129,11 @@ def _success_scene_row_issues(
             invalid.append("invalid_graph_scene_fields")
         from extraction.structured_output import validate_graph_structure, OutputValidationError
         try:
-            validate_graph_structure(row.get("graph"))
+            if not (row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)):
+                validate_graph_structure(row.get("graph"))
         except OutputValidationError:
             invalid.append("invalid_graph")
-        if row.get("parse_mode") not in {"native", "repaired", "unknown"}:
+        if row.get("parse_mode") not in {"native", "repaired", "unknown", "text"}:
             invalid.append("invalid_parse_mode")
         if not isinstance(row.get("semantic_warnings"), list):
             invalid.append("invalid_semantic_warnings")

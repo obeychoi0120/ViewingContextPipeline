@@ -77,7 +77,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/preparation/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
 
-`--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용하며 와일드카드 문자열은 허용하지 않습니다. Graph 추출은 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
+`--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용하며 와일드카드 문자열은 허용하지 않습니다. Graph 추출은 구조화 가능한 출력을 `entities / relations`로 저장하고, 그 외 출력은 원문 텍스트로 보존해 Summary에 전달합니다.
 
 생성에는 `--schema`, `--model`, `--arm`이 필수입니다. Scene 명령은 4개 Scene Arm만 받고 Arm의 추출 모델과 `--model`이 같아야 합니다. Summary 명령은 8개 시각 Arm을 받으며, Arm 정의에 따라 공유 Scene을 찾습니다. `--source`는 제거했습니다. 제목 placeholder와 Arm의 제목 정책이 다르거나 `{scenes}`가 없으면 생성 전에 오류를 냅니다.
 
@@ -196,8 +196,8 @@ Qwen Desc·Graph·Summary는 설정된 repetition penalty별로 전체 pass를 �
 - 기본 장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다.
 - 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
 - Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 빈 표현으로 처리하고 실패 기록을 남깁니다. 성공한 항목은 재생성하지 않습니다.
-- Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 필수 필드·타입·빈 문자열 등 JSON 구조 검증은 유지합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
-- Graph 생성에는 JSON Schema를 강제하지 않습니다. `graph_scene_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행·토큰 잘림은 실패 이유와 생성 provenance를 보존하며 새 실패 원문은 빈 문자열로 기록합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
+- Graph의 구조화 필드는 `entities`, `relations`이며 과거 `context`도 허용합니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 구조 검증에 맞지 않는 응답은 `scene_graph` 문자열과 `graph_format="text"`로 정상 저장합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
+- Graph 생성에는 JSON Schema를 강제하지 않습니다. `graph_scene_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행 등 형식 문제는 실패로 처리하지 않고 원문으로 저장합니다. `[End]` 생략을 허용하며 출력 잘림은 실제 backend의 토큰 한도 종료로만 판단합니다. 토큰 한도 종료와 API 오류는 실패로 기록합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
 - 신규 Summary는 문단·목록·마크업·구조화 필드를 허용하며 줄바꿈을 보존합니다. 단어 수는 기록만 하고 실패 조건으로 사용하지 않습니다. Qwen은 빈 출력과 `finish_reason=length`를 실패로 기록하고 다음 penalty에서 재생성합니다. 최종 실패 Summary는 빈 텍스트이며 사용할 성공 Scene이 없으면 `scene_count=0`을 허용합니다.
 - Qwen·Gemini Graph·Desc는 설정·프롬프트·경로가 달라도 기존 성공 결과를 그대로 재사용합니다. Summary도 동일한 요약 모델(qwen/gemini) 안에서는 같은 정책을 따릅니다. 일반 실행은 결과가 없는 항목과 재시도가 남은 실패만 생성합니다. 장면을 갱신해도 이미 성공한 Summary는 보존하며, 성공 결과까지 다시 만들려면 해당 단계에 `--force`를 지정합니다. 실패 기록은 재생성 성공 후 제거합니다. 다른 run ID의 결과를 자동으로 가져오지는 않습니다.
 - Validation은 각 Arm의 자체 Summary를 읽습니다. 다른 Arm·요약 모델로 대체하지 않습니다. 실패·누락은 해당 표현만 영벡터로 처리합니다.

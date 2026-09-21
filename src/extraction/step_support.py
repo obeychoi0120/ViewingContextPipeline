@@ -121,7 +121,7 @@ def minimal_graph_records(
         )
     from extraction.structured_output import validate_graph_structure, OutputValidationError
     for row in records:
-        if not is_raw_graph(row):
+        if not is_raw_graph(row) and not (row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)):
             try:
                 validate_graph_structure(row["graph"])
             except OutputValidationError as exc:

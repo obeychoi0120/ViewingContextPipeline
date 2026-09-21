@@ -300,3 +300,27 @@ def test_new_config_diagnoses_historical_metadata_without_reinterpreting(nine, m
     adapted = diagnosis_context(nine)
     assert registry(adapted.config)['graph_qwen'].uses_title
     assert diagnose(nine, target=['metadata'])['status'] == 'pass'
+
+
+def test_unstructured_graph_is_successful_summary_input(nine, monkeypatch):
+    from contextlib import contextmanager
+    from extraction.scene_storage import read_scene_records
+    text = '[Entities]\nperson1: person\n[Relations]\nperson1 -> waving ->'
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            for task in tasks:
+                kwargs['runtime'].current_result = {'finish_reason': 'stop'}
+                callback(task.task_id, text)
+            return {}
+        yield generate
+    monkeypatch.setattr(steps, 'qwen_generator', generator)
+    assert scenes(nine, 'graph_qwen')['failure_count'] == 0
+    assert not list((nine.scene_arm_dir('graph_qwen') / 'failures').glob('*.jsonl'))
+    for path in nine.scene_arm_dir('graph_qwen').glob('*.jsonl'):
+        assert all(row['graph'] == text and row['parse_mode'] == 'text' for row in read_scene_records(path))
+    for name in ('graph_qwen', 'graph_meta_qwen'):
+        assert summary(nine, name, model='gemini')['failure_count'] == 0
+        assert all(read_json(path)['scene_count'] > 0 for path in nine.summary_arm_dir(name).glob('*.json'))
+    embed_representations(nine, target=['graph_qwen', 'graph_meta_qwen'])
+    assert read_state(nine, 'graph_qwen')['zero_vector_count'] == 0

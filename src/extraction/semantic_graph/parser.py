@@ -9,7 +9,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v4"
+GRAPH_PARSER_VERSION = "graph-text/v5"
 _REQUIRED_SECTIONS = ("Entities", "Relations", "End")
 # Context is accepted only for compatibility with earlier prompts and saved outputs.
 _SECTIONS = (*_REQUIRED_SECTIONS, "Context")

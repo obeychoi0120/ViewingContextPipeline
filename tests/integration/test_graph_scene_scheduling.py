@@ -32,6 +32,7 @@ def test_qwen_graph_finishes_each_penalty_pass_before_retrying_failures(
     graph = json.dumps({"entities": [], "relations": [], "context": []})
     submissions = []
     opened = []
+    runtime = None
 
     def generate(tasks, callback):
         tasks = list(tasks)
@@ -49,11 +50,14 @@ def test_qwen_graph_finishes_each_penalty_pass_before_retrying_failures(
                 text = ""
             elif task.task_id == "b:0" and penalty < 1.1:
                 text = ""
+            runtime.current_result = {"finish_reason": "length" if text != graph else "stop"}
             callback(task.task_id, text)
         return {}
 
     @contextmanager
     def generator(**kwargs):
+        nonlocal runtime
+        runtime = kwargs["runtime"]
         opened.append(True)
         yield generate
 
@@ -110,6 +114,7 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
                 event = (task.repetition_penalty, task.task_id)
                 calls.append(event)
                 threshold = {"a:0": 1.1, "b:0": 1.05}.get(task.task_id, 1.0)
+                kwargs["runtime"].current_result = {"finish_reason": "stop" if task.repetition_penalty >= threshold else "length"}
                 callback(task.task_id, graph if task.repetition_penalty >= threshold else "")
                 if interrupt and event == (1.0, "a:1"):
                     raise KeyboardInterrupt

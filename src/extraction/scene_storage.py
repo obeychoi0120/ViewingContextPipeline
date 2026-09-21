@@ -15,7 +15,7 @@ def metadata_path(path):
 
 
 def is_compact_scene(row):
-    return isinstance(row, dict) and (set(row) - {"provenance"}) in (
+    return isinstance(row, dict) and (set(row) - {"provenance", "graph_format"}) in (
         {"content_id", "description"}, {"content_id", "scene_graph"},
         {"content_id", "scene_idx", "description"}, {"content_id", "scene_idx", "scene_graph"},
     )
@@ -31,6 +31,8 @@ def _payload(path, record):
     field = fields.pop()
     public_field = "description" if field == "description" else "scene_graph"
     return {"content_id": path.stem, "scene_idx": index, public_field: record[field],
+            **({"graph_format": "text"} if isinstance(record.get("graph"), str)
+               or record.get("graph_format") == "text" else {}),
             **({"provenance": record["provenance"]} if "provenance" in record else {})}
 
 
@@ -70,6 +72,10 @@ def read_scene_records(path):
             failed = failures.get(row["scene_idx"])
             if failed and failed.get("raw_output") == row["description"]:
                 record["status"] = "raw_fallback"
+        elif row.get("graph_format") == "text":
+            if not isinstance(row["scene_graph"], str):
+                raise ValueError(f"invalid text graph: {path}")
+            record = {**common, "graph": row["scene_graph"], "parse_mode": "text", "semantic_warnings": []}
         elif isinstance(row["scene_graph"], str):
             record = {"schema_version": "graph-scene-raw/v1", "status": "raw_fallback",
                       **common, "raw_response": row["scene_graph"]}
