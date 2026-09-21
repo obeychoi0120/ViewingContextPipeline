@@ -76,7 +76,7 @@ def _legacy_documents_for_arm(context, cohort, arm, *, summary_source="qwen", st
         if summary_model_from_document(doc) != summary_source:
             raise ValueError(f"summary model provenance mismatch: {path}")
         prov = doc["provenance"]
-        if prov.get("arm") != actual.name or prov.get("representation") != actual.representation:
+        if prov.get("representation") != actual.representation:
             raise ValueError(f"summary source provenance mismatch: {path}")
         source_provenance = doc.get("provenance")
         if not isinstance(source_provenance, dict):
@@ -158,8 +158,7 @@ def documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False
             if model not in {"qwen", "gemini"} or (old and model != summary_source):
                 raise ValueError(f"summary model provenance mismatch: {path}")
             binding = doc.get("migration", {})
-            expected_arm = arm.scene_arm if binding.get("schema_version") == "arm-layout-migration/v1" else arm.name
-            if prov.get("arm") != expected_arm or prov.get("representation") != arm.representation:
+            if prov.get("representation") != arm.representation:
                 raise ValueError(f"summary source provenance mismatch: {path}")
             if not old:
                 if binding:
@@ -188,9 +187,7 @@ def documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False
             failure_prov = failure.get("provenance", {})
             if not isinstance(failure_prov, dict):
                 raise ValueError(f"invalid summary failure provenance: {path}")
-            binding = failure.get("migration") or doc.get("migration", {})
-            expected_arm = arm.scene_arm if binding.get("schema_version") == "arm-layout-migration/v1" else arm.name
-            for key, expected in (("arm", expected_arm), ("representation", arm.representation),
+            for key, expected in (("representation", arm.representation),
                                   ("summary_model", failure_model)):
                 if key in failure_prov and failure_prov[key] != expected:
                     raise ValueError(f"summary failure provenance mismatch: {path}")
@@ -208,7 +205,7 @@ def documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False
                 raise ValueError(f"summary failure model mismatch: {path}")
             _check_model_source(prov, model, path)
         for scene in prov.get("scene_provenance", []):
-            if (not isinstance(scene, dict) or scene.get("arm", arm.scene_arm) != arm.scene_arm
+            if (not isinstance(scene, dict) or scene.get("scene_arm", arm.scene_arm) != arm.scene_arm
                     or scene.get("representation", arm.representation) != arm.representation):
                 raise ValueError(f"scene source provenance mismatch: {path}")
             _check_model_source(scene, arm.model, path)

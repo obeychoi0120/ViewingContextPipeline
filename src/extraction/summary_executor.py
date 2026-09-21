@@ -17,7 +17,7 @@ from extraction.descriptions import description_summary_prompt
 from extraction.errors import ExtractionStepError
 from extraction.input_tracking import clear_dirty
 from extraction.recovery import fingerprint, penalty_schedule
-from validation.cache_identity import canonical
+from validation.cache_identity import canonical, without_provenance_arm
 from extraction.failures import FailureLog
 from extraction.generation import generate_once
 from extraction.scene_storage import read_scene_records
@@ -177,7 +177,7 @@ def run_summary_stage(
             "word_count": len(text.split()),
             "violations": violations,
             "correction_count": 0,
-            "provenance": prov,
+            "provenance": without_provenance_arm(prov),
         }
         output = output_dir / f"{cid}.json"
         # Reopening a terminal failure should not rewrite its published artifact.
@@ -214,9 +214,9 @@ def run_summary_stage(
         except (ValueError, KeyError, TypeError) as exc:
             raise ExtractionStepError(f"invalid scene input {source}: {exc}") from exc
         raw_count = len(all_records) - len(records)
-        scene_provenance = [r.get("provenance", {}) for r in records]
+        scene_provenance = [without_provenance_arm(r.get("provenance", {})) for r in records]
         if not records:
-            scene_provenance = [r.get("provenance", {}) for r in scene_failures]
+            scene_provenance = [without_provenance_arm(r.get("provenance", {})) for r in scene_failures]
         prov = {
             **provenance,
             **({"english_title": titles[cid]} if arm.uses_title else {}),
@@ -253,7 +253,7 @@ def run_summary_stage(
             next_penalty = next((value for value in schedule if last is not None and value > last), None)
             if next_penalty is None:
                 pending[cid] = (records, failed.get("provenance", {
-                    "arm": arm.name, "representation": arm.representation, "summary_model": model
+                    "representation": arm.representation, "summary_model": model
                 }), task)
                 publish(cid, failed["raw_output"], failed["error"].split(", "), raw=True)
             else:

@@ -9,6 +9,7 @@ from extraction.recovery import file_fingerprint
 from extraction.scene_storage import read_scene_records, _payload
 from extraction.summary_executor import check_summary_model, reuse_summary_document, summary_failure_rows, summary_model_from_document
 from pipeline_runtime import read_json, read_jsonl
+from validation.cache_identity import without_provenance_arm
 
 SCHEMA = "arm-layout-migration/v1"
 
@@ -85,12 +86,13 @@ def migrate_arm_layout(context, *, summary_model):
                     skipped.append({'source': str(path.relative_to(context.run_root)),
                                     'reason': 'title input is not verified by stored provenance'})
                     continue
-                if prov.get('arm') != arm.scene_arm or prov.get('representation') != arm.representation:
+                if prov.get('representation') != arm.representation:
                     raise ValueError(f'Summary source provenance mismatch: {path}')
                 migration = {'schema_version': SCHEMA, 'source_arm': arm.scene_arm,
                              'target_arm': arm.name, 'source_path': str(path.relative_to(context.run_root)),
                              'source_hash': file_fingerprint(path)}
-                copied = {**doc, 'arm': arm.name, 'migration': migration}
+                prov = without_provenance_arm(prov)
+                copied = {**doc, 'arm': arm.name, 'migration': migration, 'provenance': prov}
                 failure = failures.get(path.stem)
                 if failure and failure.get('summary_model', 'qwen') != summary_model:
                     raise ValueError(f'Summary failure model provenance mismatch: {path}')
@@ -122,4 +124,25 @@ def migrate_arm_layout(context, *, summary_model):
         atomic_write_json(manifest_path, manifest, durable=True)
     result = {'stage': 'migrate-arm-layout', 'file_count': len(writes), 'skipped': skipped}
     print(json.dumps(result, ensure_ascii=False), flush=True)
+    return result
+
+
+def normalize_summary_arm(document, arm, *, source_path, source_hash):
+    """Explicitly bind a relocated Summary to its verified destination Arm."""
+    original_arm = document.get('arm')
+    if original_arm not in {arm.name, arm.scene_arm}:
+        raise ValueError(f'unexpected source Arm: {original_arm} -> {arm.name}')
+    prov = document['provenance']
+    if prov.get('representation') != arm.representation:
+        raise ValueError('Summary representation does not match destination')
+    for key, expected in (('uses_title', arm.uses_title), ('scene_arm', arm.scene_arm)):
+        if key in prov and prov[key] != expected:
+            raise ValueError(f'Summary {key} does not match destination')
+    result = {**document, 'arm': arm.name, 'provenance': without_provenance_arm(prov)}
+    if not document.get('migration') and (original_arm != arm.name or 'uses_title' not in prov):
+        if not arm.uses_title or not isinstance(prov.get('english_title'), str) or prov.get('uses_title') is False:
+            raise ValueError('legacy Summary title input is not verified')
+        result['migration'] = {'schema_version': SCHEMA, 'source_arm': arm.scene_arm,
+                               'target_arm': arm.name, 'source_path': str(source_path),
+                               'source_hash': source_hash, 'operation': 'normalize-relocated-summary'}
     return result

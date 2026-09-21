@@ -65,6 +65,8 @@ def test_nine_arms_share_four_scene_sources(nine, fake_models):
         if arm.model:
             for doc in state['sources']:
                 prov = doc['source_provenance']
+                assert 'arm' not in prov
+                assert all('arm' not in scene for scene in prov.get('scene_provenance', []))
                 assert prov['scene_arm'] == arm.scene_arm
                 assert ('english_title' in prov) == arm.uses_title
     titles = [r['title'] for r in nine.require_ready_cohort()['metadata_titles'] if r['title']]
@@ -257,7 +259,7 @@ def test_nine_arm_training_reuse_partial_diagnosis_and_run_comparison(nine, monk
 
 
 @pytest.mark.parametrize('provenance', [
-    {'arm': 'desc_qwen'}, {'summary_model': 'gemini'}, {'uses_title': True},
+    {'representation': 'description'}, {'summary_model': 'gemini'}, {'uses_title': True},
     {'scene_arm': 'graph_gemini'}, {'english_title': 'unexpected title'},
 ])
 def test_failure_only_wrong_provenance_is_not_treated_as_missing(nine, provenance):
@@ -324,3 +326,50 @@ def test_unstructured_graph_is_successful_summary_input(nine, monkeypatch):
         assert all(read_json(path)['scene_count'] > 0 for path in nine.summary_arm_dir(name).glob('*.json'))
     embed_representations(nine, target=['graph_qwen', 'graph_meta_qwen'])
     assert read_state(nine, 'graph_qwen')['zero_vector_count'] == 0
+
+
+def test_relocated_summary_normalization_preserves_generation_evidence(nine):
+    from extraction.arm_migration import normalize_summary_arm
+    from validation.cache_identity import generation_identity
+    from validation.representation_inputs import documents_for_arm
+    old = legacy_generation(nine)
+    source = next(old.graph_summary_dir('qwen').glob('*.json'))
+    original = read_json(source)
+    original['provenance']['arm'] = 'graph_qwen'
+    original['provenance'].pop('uses_title', None)
+    original['provenance'].pop('scene_arm', None)
+    original['provenance']['scene_provenance'][0]['arm'] = 'graph_qwen'
+    arm = registry(nine.config)['graph_meta_qwen']
+    result = normalize_summary_arm(original, arm, source_path=str(source), source_hash='original-hash')
+    assert result['arm'] == arm.name
+    assert 'arm' not in result['provenance']
+    assert 'arm' not in result['provenance']['scene_provenance'][0]
+    assert result['text'] == original['text']
+    assert result['provenance']['model'] == original['provenance']['model']
+    assert result['provenance']['prompt_hash'] == original['provenance']['prompt_hash']
+    assert 'uses_title' not in result['provenance']
+    assert generation_identity(result['provenance']) == generation_identity(original['provenance'])
+    assert normalize_summary_arm(result, arm, source_path=str(source), source_hash='new-hash') == result
+    write_json(nine.summary_arm_dir(arm.name) / source.name, result)
+    docs = documents_for_arm(nine, nine.require_ready_cohort(), arm)
+    assert next(d for d in docs if d['content_id'] == source.stem)['text'] == original['text']
+
+
+def test_normalization_command_backs_up_and_is_idempotent(nine, monkeypatch):
+    import tarfile
+    from extraction.normalize_summary_arms import main
+    old = legacy_generation(nine)
+    dest = nine.summary_arm_dir('graph_meta_qwen')
+    shutil.copytree(old.graph_summary_dir('qwen'), dest)
+    before = {p.name: p.read_bytes() for p in dest.glob('*.json')}
+    monkeypatch.setattr('extraction.normalize_summary_arms.RunContext.load', lambda _: nine)
+    assert main(['--run-id', nine.run_id]) == 0
+    backup = next((nine.run_root.parents[1] / 'backups' / nine.run_id).glob('summary-arm-normalization-*'))
+    assert read_json(backup / 'manifest.json')['state'] == 'complete'
+    with tarfile.open(backup / 'originals.tar.gz') as archive:
+        for name, data in before.items():
+            assert archive.extractfile(f'extraction/summaries/graph_meta_qwen/{name}').read() == data
+    after = {p.name: p.read_bytes() for p in dest.glob('*.json')}
+    assert all(read_json(dest / name)['arm'] == 'graph_meta_qwen' for name in after)
+    assert main(['--run-id', nine.run_id]) == 0
+    assert {p.name: p.read_bytes() for p in dest.glob('*.json')} == after

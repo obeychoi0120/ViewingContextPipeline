@@ -15,9 +15,9 @@ def canonical(value):
 
 
 def generation_identity(provenance):
-    keys = ("arm", "representation", "prompt_hash", "model", "settings", "summary_model",
+    keys = ("representation", "prompt_hash", "model", "settings", "summary_model",
             "schema_contract", "uses_title", "scene_arm", "scene_provenance", "english_title", "scene_input_hash")
-    return canonical({k: provenance[k] for k in keys if k in provenance})
+    return canonical(without_provenance_arm({k: provenance[k] for k in keys if k in provenance}))
 
 
 def verified_generation(prov):
@@ -39,3 +39,12 @@ def semantic_documents(docs):
 
 def semantic_document_hash(doc):
     return fingerprint(semantic_documents([doc])[0])
+
+
+def without_provenance_arm(value):
+    """Remove the retired duplicate identity, including nested Scene provenance."""
+    if isinstance(value, dict):
+        return {key: without_provenance_arm(child) for key, child in value.items() if key != "arm"}
+    if isinstance(value, list):
+        return [without_provenance_arm(child) for child in value]
+    return value

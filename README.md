@@ -81,7 +81,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 생성에는 `--schema`, `--model`, `--arm`이 필수입니다. Scene 명령은 4개 Scene Arm만 받고 Arm의 추출 모델과 `--model`이 같아야 합니다. Summary 명령은 8개 시각 Arm을 받으며, Arm 정의에 따라 공유 Scene을 찾습니다. `--source`는 제거했습니다. 제목 placeholder와 Arm의 제목 정책이 다르거나 `{scenes}`가 없으면 생성 전에 오류를 냅니다.
 
-Validation은 각 `summaries/{arm}`의 자체 JSON을 읽고 실제 Summary 모델을 provenance에서 확인합니다. `--summary-source`는 제거했습니다. 다른 Arm·모델로 대체하지 않습니다. `meta`를 포함하지 않는 부분 실행도 지원합니다.
+Validation은 각 `summaries/{arm}`의 자체 JSON을 읽고 실제 Summary 모델을 provenance에서 확인합니다. Summary의 소속은 최상위 `arm`으로만 기록하며 중복된 `provenance.arm`은 저장·검증·캐시 키에서 제외합니다. 입력 Scene은 `provenance.scene_arm`으로 식별합니다. `--summary-source`는 제거했습니다. 다른 Arm·모델로 대체하지 않습니다. `meta`를 포함하지 않는 부분 실행도 지원합니다.
 
 Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용하며 `--gpus` 인자를 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --arm graph_gemini --model qwen --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md`는 두 GPU를 사용합니다. 환경 변수를 설정하지 않으면 CUDA에서 보이는 모든 GPU를 사용하고, 보이는 GPU가 없으면 오류를 냅니다. 추천도 보이는 GPU를 모두 사용하며 `--gpus`를 받지 않습니다. 기본 GPU당 한 작업을 실행하고 `--workers-per-gpu N`으로 GPU당 동시 작업 수를 조절합니다. 추천은 GPU가 없으면 기본 설정에서 CPU로 실행합니다. Gemini는 영상 구분 없이 scene 큐를 공유하며, 전체 장면 동시 실행 수는 `extraction.gemini.threads`입니다.
 
@@ -130,6 +130,12 @@ python -m extraction migrate-arm-layout --run-id "$RUN_ID" --summary-model qwen
 ```
 
 기존 Scene 4종과 선택한 Summary 모델의 제목 포함 결과를 새 경로로 복사하며 원본은 보존합니다. 제목 사용을 저장된 provenance로 확인할 수 없으면 건너뛰고 사유를 보고합니다. 대상에 다른 파일이 있으면 충돌로 중단하며 동일한 입력으로 재실행할 수 있습니다. `extraction/arm-layout-migration.json`에 변환 출처를 기록합니다. 과거 원문 fallback은 복사본에서 빈 실패 표현으로 처리하고 원본 생성 provenance는 유지합니다.
+
+이미 Summary를 새 `summaries/{arm}` 경로로 옮겼지만 내부 Arm이 과거 이름인 경우에는 다음 보정 명령을 사용합니다. 전체 사전 검증과 원본 백업 후 최상위 `arm`을 디렉터리에 맞추고 `provenance.arm`을 제거합니다. 과거 생성 조건은 그대로 두고 명시적인 변환 이력을 추가하며, 재실행은 변경이 없는 파일을 건너뜁니다.
+
+```bash
+python -m extraction.normalize_summary_arms --run-id "$RUN_ID"
+```
 
 제목 없는 Summary는 공유 Scene에서 새로 생성합니다. Validation 파일은 변환하지 않으며 embedding부터 다시 실행합니다. 기존 5개 Arm의 캐시는 새 공유 캐시에 자동 승격하지 않습니다. 기존 계약의 진단은 원래 Arm 이름과 경로로 읽습니다.
 

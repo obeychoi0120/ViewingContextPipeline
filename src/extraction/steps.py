@@ -70,8 +70,7 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         if arm.representation == "graph":
             settings["response_parser"] = GRAPH_PARSER_VERSION
     return {
-        "arm": arm.name,
-        **({"uses_title": arm.uses_title, "scene_arm": arm.scene_arm} if summary else {}),
+        **({"uses_title": arm.uses_title, "scene_arm": arm.scene_arm} if summary else {"scene_arm": arm.name}),
         "representation": arm.representation,
         "prompt_path": str(path),
         "prompt_hash": file_fingerprint(path),
