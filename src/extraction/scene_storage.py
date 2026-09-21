@@ -15,7 +15,7 @@ def metadata_path(path):
 
 
 def is_compact_scene(row):
-    return isinstance(row, dict) and set(row) in (
+    return isinstance(row, dict) and (set(row) - {"provenance"}) in (
         {"content_id", "description"}, {"content_id", "scene_graph"},
         {"content_id", "scene_idx", "description"}, {"content_id", "scene_idx", "scene_graph"},
     )
@@ -30,7 +30,8 @@ def _payload(path, record):
         raise ValueError(f"invalid scene index: {path}")
     field = fields.pop()
     public_field = "description" if field == "description" else "scene_graph"
-    return {"content_id": path.stem, "scene_idx": index, public_field: record[field]}
+    return {"content_id": path.stem, "scene_idx": index, public_field: record[field],
+            **({"provenance": record["provenance"]} if "provenance" in record else {})}
 
 
 def read_scene_records(path):
@@ -51,7 +52,9 @@ def read_scene_records(path):
                 or not isinstance(metadata.get("rows"), list)
                 or len(metadata["rows"]) != len(rows)):
             raise ValueError(f"scene metadata does not match legacy payload: {path}")
-        rows = [{**row, "scene_idx": saved["record"]["scene_idx"]}
+        rows = [{**row, "scene_idx": saved["record"]["scene_idx"],
+                 **({"provenance": saved["record"]["provenance"]}
+                    if "provenance" not in row and "provenance" in saved["record"] else {})}
                 for row, saved in zip(rows, metadata["rows"])]
     payload = [_payload(path, row) for row in rows]
     if len({row["scene_idx"] for row in payload}) != len(payload):
@@ -72,6 +75,8 @@ def read_scene_records(path):
                       **common, "raw_response": row["scene_graph"]}
         else:
             record = {**common, "graph": row["scene_graph"], "parse_mode": "unknown", "semantic_warnings": []}
+        if "provenance" in row:
+            record["provenance"] = row["provenance"]
         records.append(record)
     return records
 

@@ -6,7 +6,8 @@ ARCHITECTURE_VERSION = "sasrec-content-v3"
 DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v2", "sasrec-content-v3"})
 DEFAULT_PROTOCOL = {
     "protocol": {
-        "arms": ["desc_gemini", "desc_qwen", "graph_gemini", "graph_qwen", "metadata"],
+        "arms": ["meta", "graph_qwen", "graph_gemini", "desc_qwen", "desc_gemini",
+                 "graph_meta_qwen", "graph_meta_gemini", "desc_meta_qwen", "desc_meta_gemini"],
     }
 }
 RECOMMENDATION_ARMS = {name: name for name in registry(DEFAULT_PROTOCOL)}
@@ -28,3 +29,6 @@ def target_scope(arms, *, config=None):
             name for name in registry(config or DEFAULT_PROTOCOL) if name not in arms
         ],
     }
+
+# Bump for changes to selection/refit, loss, masking, ranking, or metric semantics.
+TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-training-evaluation/v3"

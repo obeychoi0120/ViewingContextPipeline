@@ -10,7 +10,8 @@ from extraction.summary_executor import summary_failure_rows
 from pipeline_runtime import read_json, read_jsonl
 from validation.rolling_data import EventTable
 
-POLICY = "complete-summary-intersection/v1"
+LEGACY_POLICY = "complete-summary-intersection/v1"
+POLICY = "full-catalog-zero-vector/v2"
 
 
 def cohort_directory(context):
@@ -35,7 +36,7 @@ def recount_splits(table, splits):
     return result
 
 
-def build_selection(context, summary_source):
+def _build_legacy_selection(context, summary_source):
     from validation.representation_inputs import documents_for_arm
 
     if summary_source not in {"qwen", "gemini"}:
@@ -77,7 +78,7 @@ def build_selection(context, summary_source):
                             {"catalog": [item]},
                             arm,
                             summary_source=summary_source,
-                            strict=True,
+                            strict=True, legacy=True,
                             failure_rows=failures[name],
                         )
                         evidence.append([name, cid, docs[0]["document_hash"]])
@@ -113,7 +114,7 @@ def build_selection(context, summary_source):
                 lost_history += 1
     plan = {
         **source["plan"],
-        "schema_version": POLICY,
+        "schema_version": LEGACY_POLICY,
         "user_count": len(table.users),
         "interaction_count": len(retained),
         "item_count": len(included),
@@ -137,7 +138,7 @@ def build_selection(context, summary_source):
         "excluded": excluded,
     }
     manifest = {
-        "policy": POLICY,
+        "policy": LEGACY_POLICY,
         "arms": list(arms),
         "summary_source": summary_source,
         "included_item_ids": [r["item_id"] for r in included],
@@ -158,7 +159,38 @@ def build_selection(context, summary_source):
     return {**payload, "manifest": manifest}
 
 
-def prepare_validation_cohort(context, summary_source):
+def data_identity(cohort):
+    return {"policy": POLICY, "catalog": [{k: row[k] for k in ("item_id", "content_id")}
+                                       for row in cohort["catalog"]], "events": cohort["events"],
+            "splits": cohort["plan"]["splits"]}
+
+
+def build_selection(context, summary_source=None):
+    if summary_source not in {None, "qwen", "gemini"}:
+        raise ValueError("summary_source must be qwen or gemini")
+    source = context.require_ready_cohort()
+    events = read_jsonl(context.cohort_dir / "events.jsonl")
+    table = EventTable(events)
+    if [str(r["item_id"]) for r in source["catalog"]] != table.items:
+        raise ValueError("catalog must match the ordered event item universe")
+    plan = {**source["plan"], "schema_version": POLICY,
+            "splits": recount_splits(table, source["plan"]["splits"])}
+    plan["eligible_test_count"] = sum(s["phases"]["test"]["eligible_count"] for s in plan["splits"])
+    payload = {"catalog": source["catalog"], "metadata_titles": source["metadata_titles"],
+               "events": events, "plan": plan, "excluded": []}
+    count = len(source["catalog"])
+    from arm_registry import legacy_layout, ARM_CONTRACT
+    manifest = {**({"arm_contract": ARM_CONTRACT} if not legacy_layout(context.config) else {}),
+                "policy": POLICY, "data_hash": fingerprint(payload),
+                "selection_hash": fingerprint(data_identity(payload)),
+                "included_item_ids": [r["item_id"] for r in source["catalog"]],
+                "statistics": {"original_item_count": count, "included_item_count": count,
+                               "excluded_item_count": 0, "removed_event_count": 0,
+                               "lost_history_test_event_count": 0, "excluded_by_arm": {}}}
+    return {**payload, "manifest": manifest}
+
+
+def prepare_validation_cohort(context, summary_source=None):
     cohort = build_selection(context, summary_source)
     directory = cohort_directory(context)
     directory.mkdir(parents=True, exist_ok=True)
@@ -184,18 +216,18 @@ def load_validation_cohort(context, *, verify_current=True):
             for key in ("catalog", "metadata_titles", "events", "excluded")
         }
         cohort["plan"] = read_json(directory / "plan.json")
-        if (
-            manifest["policy"] != POLICY
-            or fingerprint(cohort) != manifest["data_hash"]
-            or fingerprint({k: v for k, v in manifest.items() if k != "selection_hash"})
-            != manifest["selection_hash"]
-        ):
+        legacy = manifest["policy"] == LEGACY_POLICY
+        if manifest["policy"] not in {POLICY, LEGACY_POLICY} or fingerprint(cohort) != manifest["data_hash"]:
             raise ValueError("invalid selection manifest")
-        if (
-            verify_current
-            and build_selection(context, manifest["summary_source"])["manifest"] != manifest
-        ):
-            raise ValueError("selection inputs changed")
+        expected = (fingerprint({k: v for k, v in manifest.items() if k != "selection_hash"})
+                    if legacy else fingerprint(data_identity(cohort)))
+        if expected != manifest["selection_hash"]:
+            raise ValueError("invalid selection manifest")
+        if verify_current:
+            current = (_build_legacy_selection(context, manifest["summary_source"]) if legacy
+                       else build_selection(context, "qwen"))
+            if current["manifest"] != manifest:
+                raise ValueError("selection inputs changed")
         return {**cohort, "manifest": manifest}
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         raise RuntimeError(
@@ -204,11 +236,32 @@ def load_validation_cohort(context, *, verify_current=True):
 
 
 def training_signature(context, cohort, config):
+    from validation.recommendation_contracts import TRAINING_IMPLEMENTATION_VERSION
     return fingerprint(
         {
+            **({"implementation": TRAINING_IMPLEMENTATION_VERSION if cohort["manifest"].get("arm_contract")
+               else "full-catalog-training-evaluation/v2"}
+               if cohort["manifest"]["policy"] != LEGACY_POLICY else {}),
             "events": cohort["events"],
             "selection_hash": cohort["manifest"]["selection_hash"],
-            "model": context.config["validation"]["model"],
+            "model": (context.config["validation"]["model"] if cohort["manifest"]["policy"] == LEGACY_POLICY
+                      else {k: v for k, v in context.config["validation"]["model"].items() if k != "seeds"}),
             "cutoffs": config.evaluation.cutoffs,
         }
     )
+
+
+def diagnosis_context(context):
+    """Bind historical artifacts to their original vocabulary without rewriting them."""
+    from dataclasses import replace
+    manifest_path = cohort_directory(context) / "manifest.json"
+    if not manifest_path.is_file():
+        return context
+    manifest = read_json(manifest_path)
+    if manifest.get("arm_contract"):
+        return context
+    settings = deepcopy(context.config)
+    settings["schema_version"] = "viewing-context-config/v5"
+    names = manifest.get("arms") or [p.stem for p in (context.representations_dir / ".inputs").glob("*.json")]
+    settings["protocol"]["arms"] = list(names) or ["metadata"]
+    return replace(context, config=settings)

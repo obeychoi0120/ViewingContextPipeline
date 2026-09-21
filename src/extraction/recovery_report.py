@@ -13,7 +13,7 @@ def recovery_report(context, *, branches=None, content_ids=None):
             continue
         modes = Counter()
         attempt_count = unknown = 0
-        directory = context.extraction_dir(arm.representation, arm.model, "scenes")
+        directory = context.scene_arm_dir(arm.scene_arm)
         for path in directory.glob("*.jsonl"):
             if path.name in {"failure.jsonl", "failures.jsonl"}:
                 continue

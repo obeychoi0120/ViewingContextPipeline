@@ -23,9 +23,7 @@ def test_title_rendering_preserves_input_literals(build, records, title):
     expected = f"English Title: {displayed}\n\nScene observations:\n{observations}"
     assert build("English Title: {english_title}\n\nScene observations:\n{scenes}",
                  records, english_title=title) == expected
-    assert build("{scenes}", records, english_title=title) == (
-        f"English Title: {displayed}\n\n{observations}"
-    )
+    assert build("{scenes}", records, english_title=title) == observations
 
 
 @pytest.mark.parametrize("representation", ["description", "graph"])
@@ -45,7 +43,7 @@ def test_titles_reach_every_summary_and_input_hash(
     original_loader = context.require_ready_cohort
     shuffled = {**cohort, "metadata_titles": list(reversed(cohort["metadata_titles"]))}
     run = getattr(steps, f"summarize_{representation}")
-    kwargs = dict(source=source, model=model, schema=f"prompts/{representation}_summary_v4.md")
+    kwargs = dict(source=source, model=model, schema=f"prompts/{representation}_summary_v4_meta.md")
     fake_models.clear()
     with patch.object(type(context), "require_ready_cohort", return_value=shuffled):
         run(context, **kwargs)
@@ -74,7 +72,7 @@ def test_titles_reach_every_summary_and_input_hash(
 
 @pytest.mark.parametrize("representation", ["description", "graph"])
 @pytest.mark.parametrize("source", ["qwen", "gemini"])
-def test_empty_terminal_fallback_includes_title(ready_context, fake_models, representation, source):
+def test_legacy_terminal_failure_stays_empty_without_invented_provenance(ready_context, fake_models, representation, source):
     from extraction.failures import FailureLog
 
     context = ready_context
@@ -90,11 +88,10 @@ def test_empty_terminal_fallback_includes_title(ready_context, fake_models, repr
                         summary_model="qwen", repetition_penalty=2.0)
     fake_models.clear()
     getattr(steps, f"summarize_{representation}")(
-        context, source=source, model="qwen", schema=f"prompts/{representation}_summary_v4.md",
+        context, source=source, model="qwen", schema=f"prompts/{representation}_summary_v4_meta.md",
     )
     assert not fake_models
     for row in titles:
         doc = read_json(directory / f"{row['content_id']}.json")
-        assert doc["status"] == "raw_fallback"
-        assert doc["text"].startswith(f"English Title: {row['title'] or '(unavailable)'}\n\n")
-        assert doc["provenance"]["english_title"] == row["title"]
+        assert doc["status"] == "failed" and doc["text"] == ""
+        assert "prompt_hash" not in doc["provenance"]

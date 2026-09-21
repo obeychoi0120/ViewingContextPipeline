@@ -44,7 +44,7 @@ def test_scene_failures_are_retried_on_resume(
             if interrupt:
                 assert read_jsonl(failure_path) == [{
                     "content_id": visuals[0]["content_id"], "scene_idx": 0,
-                    "error": read_jsonl(failure_path)[0]["error"], "raw_output": text,
+                    "error": read_jsonl(failure_path)[0]["error"], "raw_output": "", "provenance": read_jsonl(failure_path)[0]["provenance"],
                 }]
                 progress = instances[-1]
                 assert (progress.success, progress.failed) == (0, 1)
@@ -133,14 +133,10 @@ def test_description_cutoff_is_saved_only_as_failure(ready_context, monkeypatch,
     directory = context.extraction_dir("description", model, "scenes")
     failure_path = directory / "failures" / f"{cid}.jsonl"
     if truncated:
-        if model == "qwen":
-            record = read_scene_records(directory / f"{cid}.jsonl")[0]
-            assert record["status"] == "raw_fallback" and record["description"] == text
-        else:
-            assert not (directory / f"{cid}.jsonl").exists()
+        assert not (directory / f"{cid}.jsonl").exists()
         assert read_jsonl(failure_path) == [{
             "content_id": cid, "scene_idx": 0,
-            "error": "description: output truncated at token limit", "raw_output": text,
+            "error": "description: output truncated at token limit", "raw_output": "", "provenance": read_jsonl(failure_path)[0]["provenance"],
         }]
     else:
         assert not failure_path.exists()
@@ -173,10 +169,9 @@ def test_graph_length_cutoff_logs_identity_reason_and_raw_output(ready_context, 
     assert steps.extract_graph_scenes(context, **options)["failure_count"] == 1
     cid = visuals[0]["content_id"]
     assert read_jsonl(scene_dir / "failures" / f"{visuals[0]['content_id']}.jsonl") == [{
-        "content_id": cid, "scene_idx": 0, "error": "graph: output truncated at token limit", "raw_output": text,
+        "content_id": cid, "scene_idx": 0, "error": "graph: output truncated at token limit", "raw_output": "", "provenance": read_jsonl(scene_dir / "failures" / f"{cid}.jsonl")[0]["provenance"],
     }]
-    raw = read_scene_records(scene_dir / f"{cid}.jsonl")[0]
-    assert raw["raw_response"] == text and raw["status"] == "raw_fallback"
+    assert not (scene_dir / f"{cid}.jsonl").exists()
     assert steps.extract_graph_scenes(context, **options)["failure_count"] == 1
     assert len(calls) == 2
 
@@ -213,7 +208,7 @@ An indoor gathering.
         text.removesuffix("[End]"),
         text.replace("person1 ->", "person1 <-"),
         text,  # Even a complete-looking response fails when the backend reports truncation.
-        text,
+        text.removesuffix("[End]"),  # Missing End does not hide a backend token cutoff.
         json.dumps({"entities": [], "relations": [], "context": []}),
     ]
 
@@ -271,30 +266,31 @@ An indoor gathering.
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     options = {"model": model, "schema": "prompts/graph_scene_v3.md"}
-    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 4
+    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 3
     assert calls == [f"{cid}:{i}" for i in range(len(responses))]
-    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (3, 4, 4)
+    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (4, 3, 0)
     directory = context.graph_scene_dir(model)
     records = read_scene_records(directory / f"{cid}.jsonl")
     by_scene = {row["scene_idx"]: row for row in records}
-    assert by_scene[0]["graph"] == by_scene[1]["graph"]
+    assert by_scene[0]["graph"] == by_scene[1]["graph"] == by_scene[2]["graph"]
     assert by_scene[0]["parse_mode"] == "unknown"
     assert by_scene[1]["parse_mode"] == "unknown"
-    assert "provenance" not in by_scene[0]
+    assert by_scene[0]["provenance"]["prompt_hash"]
     assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
     assert by_scene[6]["graph"] == {"entities": [], "relations": [], "context": []}
     failures = read_jsonl(directory / "failures" / f"{cid}.jsonl")
-    assert {row["scene_idx"] for row in failures} == {2, 3, 4, 5}
+    assert {row["scene_idx"] for row in failures} == {3, 4, 5}
     for failure in failures:
         index = failure["scene_idx"]
-        assert failure["raw_output"] == by_scene[index]["raw_response"] == responses[index]
-        assert by_scene[index]["status"] == "raw_fallback"
+        assert failure["raw_output"] == ""
+        assert index not in by_scene
         if index in (4, 5):
             assert failure["error"] == "graph: output truncated at token limit"
     observations = json.loads(graph_summary_prompt("{scenes}", records))
     assert observations[0]["observation"] == by_scene[0]["graph"]
-    assert observations[2]["observation"] == responses[2]
-    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 4
+    assert len(observations) == 4
+    assert observations[3]["observation"] == by_scene[6]["graph"]
+    assert steps.extract_graph_scenes(context, **options)["failure_count"] == 3
     expected = [f"{cid}:{i}" for i in range(len(responses))]
-    expected.extend(f"{cid}:{i}" for i in (2, 3, 4, 5))
+    expected.extend(f"{cid}:{i}" for i in (3, 4, 5))
     assert calls == expected

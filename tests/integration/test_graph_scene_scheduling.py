@@ -67,15 +67,15 @@ def test_qwen_graph_finishes_each_penalty_pass_before_retrying_failures(
     assert opened == [True]
     records = {f"{cid}:{row['scene_idx']}": row for cid in ("a", "b")
                for row in read_scene_records(context.graph_scene_dir("qwen") / f"{cid}.jsonl")}
-    assert len(records) == 18
-    assert records["a:1"]["status"] == "raw_fallback"
+    assert len(records) == 17
+    assert "a:1" not in records
     failures = [row for cid in ("a", "b")
                 for row in read_jsonl(context.graph_failure_path("qwen", cid))]
     assert {(row["content_id"], row["scene_idx"]) for row in failures} == {
         ("a", 1), ("b", 8),
     }
-    assert all(set(row) == {"content_id", "scene_idx", "error", "raw_output"} for row in failures)
-    assert next(row for row in failures if row["content_id"] == "a" and row["scene_idx"] == 1)["raw_output"] == '{"context": []}'
+    assert all(set(row) == {"content_id", "scene_idx", "error", "raw_output", "provenance"} for row in failures)
+    assert next(row for row in failures if row["content_id"] == "a" and row["scene_idx"] == 1)["raw_output"] == ""
     assert all(row["raw_output"] == "" for row in failures if (row["content_id"], row["scene_idx"]) != ("a", 1))
     output = capsys.readouterr()
     assert "[Graph_skip_qwen]" not in output.err

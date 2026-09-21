@@ -17,6 +17,7 @@ def paired_runs(tmp_path, monkeypatch):
             write_jsonl(directory / filename, [{"id": 1}, {"id": 2}])
         contexts.append(
             SimpleNamespace(
+                config={"protocol": {"arms": ["metadata", "graph_qwen", "graph_gemini"]}},
                 root=tmp_path,
                 run_id=name,
                 cohort_dir=directory,

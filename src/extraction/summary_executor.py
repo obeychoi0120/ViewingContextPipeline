@@ -11,11 +11,13 @@ from extraction.progress import InferenceProgress
 from extraction.qwen_runtime import QwenRuntime
 
 from artifact_io import atomic_write_json
+from arm_registry import legacy_layout
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
 from extraction.errors import ExtractionStepError
 from extraction.input_tracking import clear_dirty
 from extraction.recovery import fingerprint, penalty_schedule
+from validation.cache_identity import canonical
 from extraction.failures import FailureLog
 from extraction.generation import generate_once
 from extraction.scene_storage import read_scene_records
@@ -33,17 +35,23 @@ def reuse_summary_document(
     try:
         doc = read_json(output_path)
         if (
-            doc.get("schema_version") != schema_version
+            doc.get("schema_version") not in {schema_version, "video-summary/v4"}
             or doc.get("content_id") != content_id
             or doc.get("arm") != arm
             or type(doc.get("scene_count")) is not int
-            or doc["scene_count"] <= 0
+            or doc["scene_count"] < 0
             or scene_count is not None
             and doc["scene_count"] != scene_count
-            or doc.get("status") not in {"complete", "raw_fallback"}
+            or doc.get("status") not in {"complete", "raw_fallback", "failed"}
             or not isinstance(doc.get("provenance"), dict)
         ):
             raise ValueError("summary identity, provenance, status, or scene count mismatch")
+        if doc["status"] == "failed":
+            if doc.get("text") != "" or doc.get("word_count") != 0 or not doc.get("violations"):
+                raise ValueError("failed summary requires empty text and a failure reason")
+            return doc
+        if doc["scene_count"] == 0:
+            raise ValueError("successful summary requires scenes")
         text, violations = inspect_summary(doc.get("text"))
         if not text or doc.get("word_count") != len(text.split()):
             raise ValueError("empty summary or incorrect word count")
@@ -124,10 +132,11 @@ def run_summary_stage(
         if cid in titles or not isinstance(row.get("title"), str):
             raise ExtractionStepError(f"invalid metadata title for {cid}")
         titles[cid] = row["title"].strip()
-    if set(titles) != {str(item["content_id"]) for item in catalog}:
+    if arm.uses_title and set(titles) != {str(item["content_id"]) for item in catalog}:
         raise ExtractionStepError("metadata titles do not match catalog")
-    output_dir = context.summary_dir(arm.representation, arm.model, model)
-    scene_dir = context.extraction_dir(arm.representation, arm.model, "scenes")
+    output_dir = (context.summary_dir(arm.representation, arm.model, model)
+                  if legacy_layout(context.config) else context.summary_arm_dir(arm.name))
+    scene_dir = context.scene_arm_dir(arm.scene_arm)
     if not force:
         check_summary_model(output_dir, model)
     failures = FailureLog(output_dir)
@@ -139,6 +148,11 @@ def run_summary_stage(
             clear_dirty(path)
         failures.clear_contents(list(failures.by_content))
     template = schema.read_text(encoding="utf-8")
+    if not legacy_layout(context.config):
+        from extraction.summary_prompt import validate_summary_template
+        validate_summary_template(template, arm.uses_title)
+    elif arm.uses_title and "{english_title}" not in template:
+        template = "English Title: {english_title}\n\n" + template
     graph = arm.representation == "graph"
     normalize = minimal_graph_records if graph else minimal_description_records
     build_prompt = graph_summary_prompt if graph else description_summary_prompt
@@ -151,14 +165,13 @@ def run_summary_stage(
 
     def publish(cid, text, violations, *, raw=False):
         records, prov, _ = pending[cid]
-        if not text.strip():
-            text = build_prompt("{scenes}", records, english_title=titles[cid])
-            prov = {**prov, "summary_fallback": "scene_observations"}
+        if raw:
+            text = ""
         doc = {
             "schema_version": SUMMARY_SCHEMA_VERSION,
             "content_id": cid,
             "arm": arm.name,
-            "status": "raw_fallback" if raw else "complete",
+            "status": "failed" if raw else "complete",
             "text": text,
             "scene_count": len(records),
             "word_count": len(text.split()),
@@ -187,37 +200,50 @@ def run_summary_stage(
             except ExtractionStepError:
                 pass
             else:
-                clear_dirty(output)
-                documents[cid] = existing
-                continue
-        if not source.is_file():
-            raise ExtractionStepError(f"missing scene input: {source}")
+                if existing["status"] == "complete":
+                    clear_dirty(output)
+                    documents[cid] = existing
+                    continue
         try:
-            records = normalize(read_scene_records(source), source)
+            all_records = normalize(read_scene_records(source), source) if source.is_file() else []
+            scene_failure_path = scene_dir / "failures" / f"{cid}.jsonl"
+            scene_failures = read_jsonl(scene_failure_path) if scene_failure_path.is_file() else []
+            failed_indices = {r["scene_idx"] for r in scene_failures}
+            records = [r for r in all_records if r.get("status") not in {"failed", "raw_fallback"}
+                       and r["scene_idx"] not in failed_indices]
         except (ValueError, KeyError, TypeError) as exc:
             raise ExtractionStepError(f"invalid scene input {source}: {exc}") from exc
+        raw_count = len(all_records) - len(records)
+        scene_provenance = [r.get("provenance", {}) for r in records]
         if not records:
-            raise ExtractionStepError(f"empty scene input: {source}")
-        raw_count = sum(r.get("status") == "raw_fallback" for r in records)
+            scene_provenance = [r.get("provenance", {}) for r in scene_failures]
         prov = {
             **provenance,
-            "english_title": titles[cid],
-            "scene_input_hash": fingerprint(records),
+            **({"english_title": titles[cid]} if arm.uses_title else {}),
+            "scene_provenance": scene_provenance,
+            "scene_input_hash": fingerprint(canonical(records)),
             "scene_path": str(source),
-            "normal_scene_count": len(records) - raw_count,
+            "normal_scene_count": len(records),
             "raw_scene_count": raw_count,
         }
         prov["input_hash"] = fingerprint(prov)
+        if not records:
+            pending[cid] = (records, prov, None)
+            failures.record(cid, None, "no successful scenes", "", summary_model=model, provenance=prov)
+            publish(cid, "", ["no successful scenes"], raw=True)
+            continue
         task = QwenGenerationTask(
             task_id=cid,
             image_paths=(),
-            prompt=build_prompt(template, records, english_title=titles[cid]),
+            prompt=build_prompt(template, records, english_title=titles.get(cid) if arm.uses_title else None),
             max_new_tokens=max_tokens,
             **generation,
         )
         pending[cid] = (records, prov, task)
         failed = failures.rows.get((cid, None))
-        if failed is None or model == "gemini":
+        input_changed = (failed and failed.get("provenance", {}).get("scene_input_hash")
+                         and failed["provenance"]["scene_input_hash"] != prov["scene_input_hash"])
+        if failed is None or model == "gemini" or input_changed:
             next_penalties[cid] = schedule[0]
         else:
             last = failed.get("repetition_penalty")
@@ -226,6 +252,9 @@ def run_summary_stage(
                 raise ExtractionStepError(f"invalid summary repetition_penalty for {cid}: {last}")
             next_penalty = next((value for value in schedule if last is not None and value > last), None)
             if next_penalty is None:
+                pending[cid] = (records, failed.get("provenance", {
+                    "arm": arm.name, "representation": arm.representation, "summary_model": model
+                }), task)
                 publish(cid, failed["raw_output"], failed["error"].split(", "), raw=True)
             else:
                 next_penalties[cid] = next_penalty
@@ -239,14 +268,18 @@ def run_summary_stage(
 
         def receive(cid, text):
             normalized, violations = inspect_summary(text)
+            records, prov, task = pending[cid]
+            prov = {**prov, "settings": {**prov["settings"], "actual_repetition_penalty": penalty}}
+            prov["input_hash"] = fingerprint({k: v for k, v in prov.items() if k != "input_hash"})
+            pending[cid] = (records, prov, task)
             event = runtime.current_result or {}
             if event.get("finish_reason") == "length":
                 violations.append("max_tokens")
             final = penalty == schedule[-1]
             if violations:
                 # Persist the completed attempt before publishing its terminal artifact.
-                failures.record(cid, None, ", ".join(violations), text,
-                                repetition_penalty=penalty, summary_model=model)
+                failures.record(cid, None, ", ".join(violations), "",
+                                repetition_penalty=penalty, summary_model=model, provenance=pending[cid][1])
                 if final:
                     publish(cid, text, violations, raw=True)
                     del next_penalties[cid]
@@ -258,7 +291,7 @@ def run_summary_stage(
                 failures.remove(cid, None)
                 del next_penalties[cid]
             progress.complete(task_id=cid, failed=bool(violations),
-                              raw=bool(final and violations))
+                              raw=False)
 
         if next_penalties and model == "gemini":
             pool = gemini_pool_factory(settings["gemini"]["threads"],
@@ -278,9 +311,9 @@ def run_summary_stage(
                        .rsplit(".", 1)[-1].upper() == "MAX_TOKENS" for c in candidates):
                     violations.append("max_tokens")
                 if violations:
-                    failures.record(cid, None, ", ".join(violations), outcome.text,
-                                    summary_model=model)
-                    (output_dir / f"{cid}.json").unlink(missing_ok=True)
+                    failures.record(cid, None, ", ".join(violations), "",
+                                    summary_model=model, provenance=pending[cid][1])
+                    publish(cid, "", violations, raw=True)
                 else:
                     publish(cid, normalized, [])
                     failures.remove(cid, None)

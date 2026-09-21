@@ -49,13 +49,15 @@ def begin_write(context, branch, previous_hash):
     return previous_hash
 
 
-def finish_write(context, branch, signature, previous_hash, *, sources=None, truncation=None, summary_source=None, selection_hash=None):
+def finish_write(context, branch, signature, previous_hash, *, sources=None, truncation=None, summary_source=None, selection_hash=None, cache=None, shareable=False):
     current = matrix_hash(context.representations_dir / f"{branch}_embeddings.npz")
     atomic_write_json(state_path(context, branch), {
         "input_hash": signature, "embedding_hash": current,
         "selection_hash": selection_hash,
         "recommendation_hash": fingerprint({"input_hash": signature, "embedding_hash": current}),
         "sources": sources or [], "truncation": truncation,
+        "cache": cache, "shareable": shareable,
+        "zero_vector_count": sum(bool(row.get("empty")) for row in (sources or [])),
         **({"summary_source": summary_source} if summary_source is not None else {}),
     }, durable=True)
     pending_write(context, branch).unlink(missing_ok=True)

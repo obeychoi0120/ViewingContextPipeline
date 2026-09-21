@@ -97,16 +97,19 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
                 "relative_difference": (float((observed[a] - observed[b]) / observed[b])
                                         if observed[b] > 0 else None),
             }
-    by_kind = {(arm.representation, arm.model): name for name, arm in configured.items()}
-    for control in ("description",):
-        terms = [by_kind["graph", "gemini"], by_kind[control, "gemini"],
-                 by_kind["graph", "qwen"], by_kind[control, "qwen"]]
+    from arm_registry import legacy_layout
+    old = legacy_layout(config or DEFAULT_PROTOCOL)
+    by_kind = {(arm.representation, arm.model, arm.uses_title): name for name, arm in configured.items()}
+    for title in ((True,) if old else (False, True)):
+        terms = [by_kind[kind, model, title] for model in ("gemini", "qwen")
+                 for kind in ("graph", "description")]
         if not set(terms) <= indices.keys():
             continue
         a, b, c, d = [indices[name] for name in terms]
         delta = draws[:, a] - draws[:, b] - draws[:, c] + draws[:, d]
         lo, hi = np.quantile(delta, [0.025, 0.975])
-        result[f"interaction_graph_vs_{control}"] = {
+        name = "interaction_graph_vs_description" + ("" if old else "_meta" if title else "_no_meta")
+        result[name] = {
             "family": "interaction", "role": "exploratory", "arms": terms,
             "difference": float(observed[a] - observed[b] - observed[c] + observed[d]),
             "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
@@ -252,6 +255,8 @@ def collect_metrics(context, config, cohort, *, arms=None):
 def diagnose(context, *, target=None, compare_run_id=None):
     from validation.steps import validation_config
 
+    from validation.selection import diagnosis_context
+    context = diagnosis_context(context)
     arms = resolve_target_arms(target, config=context.config)
     context.initialize()
     config = validation_config(context)
@@ -269,7 +274,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
                                  if key != "included_item_ids"}
         document["selection"]["manifest_path"] = "validation/cohort/manifest.json"
         from validation.metadata import verify_missing_metadata
-        if "metadata" in arms.values():
+        if any(name in arms for name in ("meta", "metadata")):
             document["metadata_missing"] = verify_missing_metadata(context, cohort)
         scene = _scene_coverage(
             context.run_root,
@@ -282,6 +287,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
             branches=set(arms.values()), config=context.config,
             excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
             source_assets_dir=context.source_assets_dir,
+            informational=cohort["manifest"]["policy"] == "full-catalog-zero-vector/v2",
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
@@ -294,6 +300,9 @@ def diagnose(context, *, target=None, compare_run_id=None):
         )
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
+        reuse_path = context.recommendations_dir / "reuse.json"
+        if reuse_path.is_file():
+            document["recommendations"]["reuse"] = read_json(reuse_path)
         if not errors:
             observed, draws, bootstrap = cluster_bootstrap(
                 sums, counts, samples=config.evaluation.bootstrap_samples
@@ -316,8 +325,9 @@ def diagnose(context, *, target=None, compare_run_id=None):
         "metadata_hr10": 0.046,
         "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
     }
-    if "recommendations" in document and "metadata" in arms:
-        value = document["recommendations"]["means"]["metadata"]["HR@10"]
+    baseline = "meta" if "meta" in arms else "metadata"
+    if "recommendations" in document and baseline in arms:
+        value = document["recommendations"]["means"][baseline]["HR@10"]
         document["paper_reference"]["hr10_difference"] = value - 0.046
     write_json(context.diagnosis_path, document)
     if errors or document["statistics"]["status"] != "computed":

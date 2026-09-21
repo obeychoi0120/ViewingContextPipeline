@@ -24,7 +24,8 @@ def test_new_run_consumes_preparation_without_rebuilding(ready_context, fake_mod
         extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
         summarize_description(context, source="qwen", model="gemini",
                               schema="prompts/description_summary_v4.md")
-        assert embed_representations(context, target=["desc_qwen", "metadata"], summary_source="gemini")["generated_arms"] == ["desc_qwen", "metadata"]
+        result = embed_representations(context, target=["desc_qwen", "metadata"], summary_source="gemini")
+        assert result["generated_arms"] == (["desc_qwen", "metadata"] if context == first else [])
         assert not (context.run_root / "cohort").exists()
         docs = list(context.description_summary_dir("qwen", "gemini").glob("*.json"))
         assert docs and context.representations_dir.is_dir()

@@ -1,4 +1,4 @@
-"""One complete-summary cohort for all validation arms and execution paths."""
+"""One full cohort for all validation arms, irrespective of generation outcomes."""
 
 from copy import deepcopy
 from queue import Queue
@@ -61,7 +61,7 @@ def summary_path(ctx, arm_name, index, model="gemini"):
     return ctx.summary_dir(arm.representation, arm.model, model) / f"{cid}.json"
 
 
-def test_intersection_applies_to_all_targets_and_preserves_shared_data(summaries):
+def test_full_catalog_applies_to_all_targets_and_preserves_shared_data(summaries):
     ctx = summaries
     original = {p: p.read_bytes() for p in ctx.cohort_dir.iterdir() if p.is_file()}
     summary_path(ctx, "desc_gemini", 0).unlink()
@@ -69,22 +69,18 @@ def test_intersection_applies_to_all_targets_and_preserves_shared_data(summaries
     write_json(path, {**read_json(path), "status": "raw_fallback", "violations": ["max_tokens"]})
     embed_representations(ctx, summary_source="gemini", target=["metadata"])
     cohort = load_validation_cohort(ctx)
-    assert [r["item_id"] for r in cohort["catalog"]] == ["2", "4"]
-    assert len(cohort["excluded"]) == 2
-    assert cohort["manifest"]["statistics"]["removed_event_count"] == 36
-    assert {r["source_event_id"] for r in cohort["events"]} == {
-        r["event_id"]
-        for r in read_jsonl(ctx.cohort_dir / "events.jsonl")
-        if r["item_id"] in {"2", "4"}
-    }
+    assert [r["item_id"] for r in cohort["catalog"]] == ["1", "2", "3", "4"]
+    assert len(cohort["excluded"]) == 0
+    assert cohort["manifest"]["statistics"]["removed_event_count"] == 0
+    assert cohort["events"] == read_jsonl(ctx.cohort_dir / "events.jsonl")
     table = EventTable(cohort["events"])
-    assert table.items == ["2", "4"]
+    assert table.items == ["1", "2", "3", "4"]
     assert all(r["event_id"] == i for i, r in enumerate(table.rows))
     for i in range(len(table.rows)):
-        assert all(1 <= item <= 2 for item in table.history(i))
+        assert all(1 <= item <= 4 for item in table.history(i))
     with np.load(ctx.representations_dir / "metadata_embeddings.npz") as arrays:
-        assert arrays["values"].shape == (2, 1024)
-        assert not arrays["values"][0].any()
+        assert arrays["values"].shape == (4, 1024)
+        assert not arrays["values"][1].any()
     embed_representations(ctx, summary_source="gemini", target=["desc_qwen"])
     assert load_validation_cohort(ctx)["manifest"] == cohort["manifest"]
     verify_representations(ctx, arms=["metadata", "desc_qwen"])
@@ -101,7 +97,7 @@ def test_intersection_applies_to_all_targets_and_preserves_shared_data(summaries
         ("wrong_model", "invalid"),
     ],
 )
-def test_exclusion_reasons_and_no_cross_arm_fallback(summaries, damage, reason):
+def test_empty_representations_and_no_cross_arm_fallback(summaries, damage, reason):
     path = summary_path(summaries, "graph_gemini", 0)
     if damage == "missing":
         path.unlink()
@@ -126,8 +122,17 @@ def test_exclusion_reasons_and_no_cross_arm_fallback(summaries, damage, reason):
             ],
         )
     cohort = build_selection(summaries, "gemini")
-    assert len(cohort["catalog"]) == 3
-    assert cohort["excluded"][0]["reasons"] == [{"arm": "graph_gemini", "reason": reason}]
+    assert len(cohort["catalog"]) == 4 and not cohort["excluded"]
+    from validation.representation_inputs import documents_for_arm
+    arm = select_arms(summaries.config)["graph_gemini"]
+    if damage in {"invalid", "wrong_model"}:
+        with pytest.raises((ValueError, RuntimeError)):
+            documents_for_arm(summaries, cohort, arm, summary_source="gemini")
+    else:
+        docs = documents_for_arm(summaries, cohort, arm, summary_source="gemini")
+        assert docs[0]["text"] == ""
+        assert docs[0]["status"] == ("missing" if damage == "missing" else "failed")
+        assert all(d["text"] for d in docs[1:])
     assert summary_path(summaries, "graph_qwen", 0).is_file()
 
 
@@ -139,21 +144,17 @@ def test_recovery_deletion_source_changes_and_partial_cache_invalidation(summari
     embed_representations(ctx, summary_source="gemini")
     old = load_validation_cohort(ctx)["manifest"]["selection_hash"]
     write_json(path, saved)
-    with pytest.raises(RuntimeError, match="rerun embed"):
-        load_validation_cohort(ctx)
-    embed_representations(ctx, summary_source="gemini", target=["metadata"])
-    assert load_validation_cohort(ctx)["manifest"]["selection_hash"] != old
-    with pytest.raises(RuntimeError):
-        verify_representations(ctx, arms=["desc_qwen"])
-    embed_representations(ctx, summary_source="gemini")
+    assert load_validation_cohort(ctx)["manifest"]["selection_hash"] == old
+    with pytest.raises(RuntimeError, match="stale representation inputs"):
+        verify_representations(ctx, arms=["desc_gemini"])
+    verify_representations(ctx, arms=["metadata", "desc_qwen", "graph_qwen", "graph_gemini"])
+    result = embed_representations(ctx, summary_source="gemini")
+    assert result["generated_arms"] == ["desc_gemini"]
     embed_representations(ctx, summary_source="qwen", target=["metadata"])
-    # Even identical vectors/catalogs may not mix summary model selections.
-    with pytest.raises(RuntimeError, match="stale representation"):
-        verify_representations(ctx, arms=["desc_qwen"])
+    verify_representations(ctx, arms=["desc_qwen"])
     embed_representations(ctx, summary_source="qwen")
     summary_path(ctx, "graph_qwen", 0, "qwen").unlink()
-    with pytest.raises(RuntimeError, match="stale"):
-        verify_representations(ctx, arms=["metadata"])
+    verify_representations(ctx, arms=["metadata"])
 
 
 def test_missing_manifest_metadata_only_and_outside_target(ready_context, fake_models):
@@ -168,7 +169,7 @@ def test_missing_manifest_metadata_only_and_outside_target(ready_context, fake_m
     assert not load_validation_cohort(ctx)["excluded"]
 
 
-def test_fixed_dates_and_lost_history_after_filtering(summaries, monkeypatch):
+def test_fixed_dates_and_history_survive_generation_failures(summaries, monkeypatch):
     ctx = summaries
     source = deepcopy(ctx.require_ready_cohort())
     events = [
@@ -199,24 +200,25 @@ def test_fixed_dates_and_lost_history_after_filtering(summaries, monkeypatch):
     source["metadata_titles"] = [r for r in source["metadata_titles"] if r["item_id"] != "3"]
     cohort = build_selection(ctx, "gemini")
     assert cohort["plan"]["splits"][0]["evaluation_date"] == "fixed-date"
-    assert cohort["plan"]["eligible_test_count"] == 1
-    assert cohort["manifest"]["statistics"]["lost_history_test_event_count"] == 1
+    assert cohort["plan"]["eligible_test_count"] == 2
+    assert cohort["manifest"]["statistics"]["lost_history_test_event_count"] == 0
     assert cohort["plan"]["splits"][0]["phases"]["test"]["end_ms"] == 20
 
 
-def test_empty_intersection_and_empty_partition_fail(summaries):
+def test_all_missing_summaries_preserve_the_full_cohort(summaries):
     ctx = summaries
     for index in (0, 1):
         summary_path(ctx, "graph_gemini", index).unlink()
-    with pytest.raises(ValueError, match="partition"):
-        build_selection(ctx, "gemini")
+    assert len(build_selection(ctx, "gemini")["catalog"]) == 4
     for index in (2, 3):
         summary_path(ctx, "graph_gemini", index).unlink()
-    with pytest.raises(ValueError, match="intersection is empty"):
-        build_selection(ctx, "gemini")
+    assert len(build_selection(ctx, "gemini")["catalog"]) == 4
+    embed_representations(ctx, summary_source="gemini", target=["graph_gemini"])
+    with np.load(ctx.representations_dir / "graph_gemini_embeddings.npz") as data:
+        assert not data["values"].any()
 
 
-def test_worker_uses_same_filtered_table_and_rejects_changed_selection(summaries, monkeypatch):
+def test_worker_uses_same_full_table_and_rejects_changed_selection(summaries, monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(
@@ -258,7 +260,7 @@ def test_worker_uses_same_filtered_table_and_rejects_changed_selection(summaries
     assert status == "error" and "selection changed" in error
 
 
-def test_diagnosis_ignores_excluded_scene_artifacts_but_reports_selection(
+def test_diagnosis_reports_full_selection_and_rejects_corrupt_scenes(
     ready_context, fake_models, monkeypatch
 ):
     from test_pipeline import generate_all
@@ -268,8 +270,7 @@ def test_diagnosis_ignores_excluded_scene_artifacts_but_reports_selection(
     generate_all(ctx)
     path = summary_path(ctx, "desc_gemini", 0, "qwen")
     path.unlink()
-    # Excluded content can have malformed scene and failure artifacts; neither
-    # should break coverage or the recovery report for the selected catalog.
+    # Missing representations do not hide malformed scene artifacts from diagnosis.
     (ctx.description_scene_dir("gemini") / f"{path.stem}.jsonl").write_text("broken")
     write_jsonl(
         ctx.description_scene_dir("gemini") / "failures" / f"{path.stem}.jsonl", [{"bad": True}]
@@ -283,11 +284,12 @@ def test_diagnosis_ignores_excluded_scene_artifacts_but_reports_selection(
             {"means": {"metadata": {"HR@10": 0.1}}},
         ),
     )
-    assert diagnose(ctx)["status"] == "pass"
+    with pytest.raises(RuntimeError, match="diagnosis failed"):
+        diagnose(ctx)
     doc = read_json(ctx.diagnosis_path)
-    assert doc["selection"]["statistics"]["excluded_item_count"] == 1
+    assert doc["selection"]["statistics"]["excluded_item_count"] == 0
     assert "included_item_ids" not in doc["selection"]
-    assert all(a["success_coverage"] == 1 for a in doc["scene_coverage"]["arms"].values())
+    assert doc["runtime_decision"]["errors"]
 
 
 def test_tampered_or_interrupted_selection_is_not_readable(summaries, monkeypatch):
@@ -300,7 +302,9 @@ def test_tampered_or_interrupted_selection_is_not_readable(summaries, monkeypatc
     with pytest.raises(RuntimeError, match="invalid"):
         load_validation_cohort(ctx, verify_current=False)
     prepare_validation_cohort(ctx, "gemini")
-    summary_path(ctx, "desc_gemini", 0).unlink()
+    events = read_jsonl(ctx.cohort_dir / "events.jsonl")
+    events[0]["timestamp"] += 1
+    write_jsonl(ctx.cohort_dir / "events.jsonl", events)
     original = __import__("validation.selection", fromlist=["atomic_write_json"]).atomic_write_json
 
     def interrupt(path, value, **kwargs):

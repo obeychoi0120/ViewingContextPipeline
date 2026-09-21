@@ -12,7 +12,7 @@ from visual_sampling import validate_sampling
 
 
 CONFIG_PATH = Path("config.yaml")
-CONFIG_SCHEMA = "viewing-context-config/v5"
+CONFIG_SCHEMA = "viewing-context-config/v6"
 
 
 class ConfigError(RuntimeError):
@@ -136,7 +136,25 @@ class RunContext:
             raise ValueError(f"invalid representation: {representation}")
         if model not in {"qwen", "gemini"} or phase not in {"scenes", "summaries"}:
             raise ValueError("invalid extraction model or phase")
+        from arm_registry import legacy_layout, generated_arm
+        if not legacy_layout(self.config) and phase == "scenes":
+            return self.scene_arm_dir(generated_arm(self.config, representation, model).name)
         return self.run_root / "extraction" / representation / model / phase
+
+    def scene_arm_dir(self, arm):
+        from arm_registry import registry, legacy_layout
+        selected = registry(self.config)[arm]
+        if selected.model is None or selected.name != selected.scene_arm:
+            raise ValueError(f"not a Scene arm: {arm}")
+        if legacy_layout(self.config):
+            return self.extraction_dir(selected.representation, selected.model, "scenes")
+        return self.run_root / "extraction" / "scenes" / arm
+
+    def summary_arm_dir(self, arm):
+        from arm_registry import registry
+        if registry(self.config)[arm].model is None:
+            raise ValueError("Meta has no Summary artifacts")
+        return self.run_root / "extraction" / "summaries" / arm
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("graph", source, "scenes")
@@ -212,7 +230,7 @@ def _validate_config(value: dict[str, Any]) -> None:
     }
     if set(value) != expected_keys:
         raise ConfigError(f"pipeline config must contain exactly {sorted(expected_keys)}")
-    if value.get("schema_version") != CONFIG_SCHEMA:
+    if value.get("schema_version") not in {CONFIG_SCHEMA, "viewing-context-config/v5"}:
         raise ConfigError(f"schema_version must be {CONFIG_SCHEMA}")
     _validate_protocol(value)
     _validate_extraction(value)
@@ -346,7 +364,7 @@ def _validate_models(value: dict[str, Any]) -> None:
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
     data_keys = {"videos_dir", "pairs_tsv", "titles_csv"}
-    if value["schema_version"] == CONFIG_SCHEMA:
+    if value["schema_version"] in {CONFIG_SCHEMA, "viewing-context-config/v5"}:
         data_keys.add("pairs_csv")
     if not data_keys <= set(data) or set(data) - data_keys - {"titles_supplement_csv"}:
         raise ConfigError(f"data must contain {sorted(data_keys)} and optionally titles_supplement_csv")

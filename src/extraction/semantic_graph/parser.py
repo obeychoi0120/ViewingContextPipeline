@@ -9,9 +9,10 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v2"
+GRAPH_PARSER_VERSION = "graph-text/v4"
+_REQUIRED_SECTIONS = ("Entities", "Relations", "End")
 # Context is accepted only for compatibility with earlier prompts and saved outputs.
-_SECTIONS = ("Entities", "Relations", "Context", "End")
+_SECTIONS = (*_REQUIRED_SECTIONS, "Context")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
 _DELIMITER = re.compile(r"-+>|=+>|→|⇒|－＞|(?<=\s)[-–—](?=\s)")
@@ -90,14 +91,14 @@ def _parse_lines(text, *, repair):
             line = _BULLET.sub("", line, count=1)
         header = _header(line, repair=repair)
         if header:
-            if header == "End" and _SECTIONS[seen] == "Context":
-                seen += 1
-            if header != _SECTIONS[seen]:
+            legacy_context = header == "Context" and current == "Relations"
+            if not legacy_context and header != _REQUIRED_SECTIONS[seen]:
                 raise GraphTextError(f"line {number}: duplicate or out-of-order section {header}")
             current = header
             if header != "End":
                 sections[header] = []
-            seen += 1
+            if not legacy_context:
+                seen += 1
             continue
         if (_header(line, repair=True) or (re.fullmatch(r"\[.*\]", line) and line != "[]")
                 or line.startswith(("```", "#"))):
@@ -105,8 +106,10 @@ def _parse_lines(text, *, repair):
         if current is None:
             raise GraphTextError(f"line {number}: expected [Entities]")
         sections[current].append((number, line))
-    if seen != len(_SECTIONS):
-        raise GraphTextError(f"missing [{_SECTIONS[seen]}] section or terminator")
+    # EOF after Relations (or legacy Context) is a valid terminator. Token-limit
+    # truncation is detected from backend finish reasons by the scene executor.
+    if seen < len(_REQUIRED_SECTIONS) - 1:
+        raise GraphTextError(f"missing [{_REQUIRED_SECTIONS[seen]}] section or terminator")
 
     graph = {}
     for section, rows in sections.items():

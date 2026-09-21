@@ -25,7 +25,7 @@ def popularity_probabilities(
 
 
 def _arm_kind(branch: str) -> str:
-    if branch == "metadata":
+    if branch in {"meta", "metadata"}:
         return "metadata"
     if branch.startswith("graph_"):
         return "graph"

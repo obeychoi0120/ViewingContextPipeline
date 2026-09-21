@@ -18,8 +18,13 @@ from .diagnosis_support import (
 
 def scene_arms(config):
     from arm_registry import registry
-    return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
-                   f"extraction/{arm.representation}/{arm.model}/scenes/failures")
+    from arm_registry import legacy_layout
+    if legacy_layout(config):
+        return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
+                       f"extraction/{arm.representation}/{arm.model}/scenes/failures")
+                for name, arm in registry(config).items() if arm.model}
+    return {name: (f"extraction/scenes/{arm.scene_arm}",
+                   f"extraction/scenes/{arm.scene_arm}/failures")
             for name, arm in registry(config).items() if arm.model}
 
 
@@ -196,7 +201,7 @@ def _scene_arm_contract(
             issues["invalid_failure_file"] += 1
         for row in rows:
             cid = row.get("content_id")
-            if (set(row) != {"content_id", "scene_idx", "error", "raw_output"}
+            if (set(row) - {"provenance"} != {"content_id", "scene_idx", "error", "raw_output"}
                     or not isinstance(row.get("error"), str) or not row["error"].strip()
                     or not isinstance(row.get("raw_output"), str)):
                 issues["invalid_failure_fields"] += 1
@@ -339,9 +344,12 @@ def _scene_coverage(
     settings,
     decision_config_valid,
     runtime_paths_valid,
-    *, branches=None, config=None, excluded_content_ids=(), source_assets_dir=None,
+    *, branches=None, config=None, excluded_content_ids=(), source_assets_dir=None, informational=False,
 ):
     from validation.recommendation_contracts import DEFAULT_PROTOCOL
+    original_errors = errors
+    if informational:
+        errors = []
     paths = scene_arms(config or DEFAULT_PROTOCOL)
     selected = [arm for arm in paths if branches is None or arm in branches]
     if not selected:
@@ -378,7 +386,7 @@ def _scene_coverage(
         and scene_denominator_valid
         and observed_gap <= float(settings["max_arm_coverage_gap"])
     )
-    if not minimum_scene_coverage_met:
+    if not minimum_scene_coverage_met and not informational:
         _error(
             errors,
             "minimum_scene_coverage_not_met",
@@ -386,7 +394,7 @@ def _scene_coverage(
             minimum=settings.get("min_scene_coverage"),
             observed={arm: value["success_coverage"] for arm, value in scene_documents.items()},
         )
-    if not coverage_gap_within_limit:
+    if not coverage_gap_within_limit and not informational:
         _error(
             errors,
             "arm_scene_coverage_gap_exceeded",
@@ -412,6 +420,12 @@ def _scene_coverage(
         "arms": scene_documents,
     }
 
+    if informational:
+        scene_coverage["informational_errors"] = errors
+        for error in errors:
+            issues = error.get("issue_counts", {})
+            if error.get("code") == "invalid_scene_outcomes" and set(issues) - {"missing_scene_outcome", "missing_scene_directory"}:
+                original_errors.append(error)
     return (
         scene_coverage,
         scene_outcomes_complete,

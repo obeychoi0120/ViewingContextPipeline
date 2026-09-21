@@ -64,7 +64,7 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
     phase = 2
     assert extract(context, **options)["failure_count"] == 1
     rows = read_jsonl(failure_path)
-    assert len(rows) == 1 and rows[0]["raw_output"] == "failed output 2"
+    assert len(rows) == 1 and rows[0]["raw_output"] == ""
     phase = 3
     assert extract(context, **options)["failure_count"] == 0
     assert not failure_path.exists()

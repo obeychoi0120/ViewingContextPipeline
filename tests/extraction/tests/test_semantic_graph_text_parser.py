@@ -69,7 +69,6 @@ def test_explicit_empty_sections(marker):
 
 
 @pytest.mark.parametrize("text", [
-    TEXT.replace("[End]", ""),
     TEXT.replace("[Relations]", "[Entities]"),
     TEXT.replace("[Context]", "[context]\n[Context]"),
     TEXT + "\n[Entities]\nnone",
@@ -154,7 +153,6 @@ def test_v4_example_passes_scene_validation_and_summary():
 
 @pytest.mark.parametrize("text", [
     "[Entities]\nnone\n[End]",
-    "[Entities]\nnone\n[Relations]\nnone",
     "[Entities]\nnone\n[Relations]\nnone\n[Relations]\nnone\n[End]",
     "[Entities]\nnone\n[Relations]\nnone\n[End]\nextra",
 ])
@@ -171,3 +169,30 @@ def test_empty_contextless_graph_and_invalid_legacy_context():
     assert "context" not in GRAPH_JSON_SCHEMA["properties"]
     with pytest.raises(OutputValidationError):
         validate_graph_structure({**result.graph, "context": "invalid"})
+
+
+@pytest.mark.parametrize('legacy_context', [False, True])
+def test_missing_end_is_accepted_without_inventing_context(legacy_context):
+    text = '[Entities]\nperson1: person; blue hair\n[Relations]\nnone'
+    if legacy_context:
+        text += '\n[Context]\nA room.'
+    result = parse_or_repair_graph(text)
+    assert result.error is None
+    assert result.graph['entities'][0]['id'] == 'person1'
+    assert result.graph['relations'] == []
+    assert ('context' in result.graph) == legacy_context
+    validate_graph_structure(result.graph)
+
+
+@pytest.mark.parametrize('text, missing', [
+    ('', None),
+    ('[Entities]\nnone', 'Relations'),
+    ('[Entities]\nnone\n[Context]\nnone\n[End]', None),
+])
+def test_optional_context_does_not_replace_required_sections(text, missing):
+    result = parse_or_repair_graph(text)
+    assert result.graph is None
+    if missing:
+        assert f'missing [{missing}]' in result.error
+    else:
+        assert result.error

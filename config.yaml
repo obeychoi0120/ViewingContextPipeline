@@ -1,4 +1,4 @@
-schema_version: viewing-context-config/v5
+schema_version: viewing-context-config/v6
 protocol:
   dataset: microlens_100k
   modality: visual_only
@@ -9,11 +9,15 @@ protocol:
   - qwen
   - gemini
   arms:
-  - desc_gemini
-  - desc_qwen
-  - graph_gemini
+  - meta
   - graph_qwen
-  - metadata
+  - graph_gemini
+  - desc_qwen
+  - desc_gemini
+  - graph_meta_qwen
+  - graph_meta_gemini
+  - desc_meta_qwen
+  - desc_meta_gemini
   description_extractors:
   - qwen
   - gemini

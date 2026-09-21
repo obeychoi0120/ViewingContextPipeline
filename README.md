@@ -1,31 +1,24 @@
-# ViewingContextPipeline v5
+# ViewingContextPipeline v6
 
 ![ViewingContextPipeline 구성도](docs/design/Diagram_preview.png)
 
-MicroLens-100K 영상의 Description, Scene Graph, 영문 title 표현을 BGE로 임베딩하고 동일한 SASRec 구조로 추천 성능을 비교하는 PoC입니다. 영문 title에 Description 또는 Scene Graph 정보를 추가했을 때의 효과를 title 단독 기준선과 비교합니다.
+MicroLens-100K 영상의 Description, Scene Graph, 영문 title 표현을 BGE로 임베딩하고 동일한 SASRec 구조로 추천 성능을 비교하는 PoC입니다. 시각 표현의 효과와 Summary에 제목을 제공하는 효과를 title 단독 기준선 및 서로 대응하는 Arm끼리 비교합니다.
 
-요약 입력은 `English Title → Scene observations` 순서로 구성하며, 준비된 cohort의 `metadata_titles.jsonl`에서 콘텐츠별 제목을 가져옵니다. 제목이 비어 있으면 `(unavailable)`로 표시하고 장면만 요약합니다. 두 v4 요약 프롬프트는 제목과 장면을 함께 요약하되 충돌 시 장면을 우선합니다. 제목은 요약 provenance와 입력 해시에 포함됩니다. 기존 요약의 자동 무효화는 수행하지 않으므로 변경을 적용하려면 새 Run을 사용하거나 요약 명령에 `--force`를 지정하세요.
+Scene 추출 모델(Q/G), 표현 방식(Graph/Description), Summary에 제목을 제공하는지를 구분해 비교합니다. 제목 포함 Schema는 `{english_title}`과 `{scenes}`를, 제목 없는 Schema는 `{scenes}`만 사용합니다. 제목을 코드에서 자동으로 추가하지 않습니다. `*_v4_meta.md`는 제목 포함, `*_v4.md`는 제목 없는 프롬프트입니다.
 
 ## 비교 Arm
 
-각 Run은 선택한 프롬프트로 하나의 Graph 표현을 평가합니다. ASIS·TOBE 전용 설정이나 버전별 Arm은 없으며, 프롬프트 경로·내용 해시와 생성 provenance로 실험을 구분합니다.
+| 입력 표현 | Arm / CLI target | 공유 Scene Arm |
+| --- | --- | --- |
+| 영문 title 직접 임베딩 | `meta` | 없음 |
+| Qwen / Gemini Graph → Summary | `graph_qwen`, `graph_gemini` | 동일 이름 |
+| Qwen / Gemini Description → Summary | `desc_qwen`, `desc_gemini` | 동일 이름 |
+| English Title + Qwen / Gemini Graph → Summary | `graph_meta_qwen`, `graph_meta_gemini` | `graph_qwen`, `graph_gemini` |
+| English Title + Qwen / Gemini Description → Summary | `desc_meta_qwen`, `desc_meta_gemini` | `desc_qwen`, `desc_gemini` |
 
-| 입력 표현 | Arm / CLI target |
-| --- | --- |
-| English Title + Gemini Description → Qwen/Gemini Summary | `desc_gemini` |
-| English Title + Qwen Description → Qwen/Gemini Summary | `desc_qwen` |
-| English Title + Gemini Graph → Qwen/Gemini Summary | `graph_gemini` |
-| English Title + Qwen Graph → Qwen/Gemini Summary | `graph_qwen` |
-| 영문 title | `metadata` |
+Q/G는 Scene 추출 모델입니다. Summary의 `--model`은 별도로 선택합니다. 한 Run의 한 Summary Arm에는 한 Summary 모델 결과만 저장합니다. 다른 모델로 바꾸려면 새 Run 또는 해당 Summary Arm의 `--force`를 사용합니다.
 
-```yaml
-protocol:
-  arms: [desc_gemini, desc_qwen, graph_gemini, graph_qwen, metadata]
-```
-
-`protocol.arms`는 실행할 Arm 목록이자 Validation 교집합의 기준입니다. Validation의 `--target`은 이 목록의 부분집합이어야 합니다. embedding·추천·진단에서 `--target`을 생략하면 이 목록을 사용합니다. CLI, 저장 문서의 `arm`, embedding 파일명, 추천 디렉터리와 진단은 위의 고정 이름을 사용합니다. 프롬프트 파일명의 버전을 바꿔도 Arm 이름은 바뀌지 않습니다.
-
-Run 내부에서는 표현 방식(Description–Graph), 추출 모델(Gemini–Qwen), 컨텍스트 제공(시각 표현–Metadata)을 비교합니다. Graph 프롬프트 간 비교는 Run을 나누어 수행합니다. 모델 비교는 현재 프롬프트·fallback을 포함한 파이프라인 비교로 해석합니다.
+`protocol.arms`는 Validation에서 실행할 Arm 목록이고 기본값은 9개 전체입니다. `--target`은 등록된 Arm 중 명시한 대상만 처리하며, 선택하지 않은 Arm의 산출물은 요구하지 않습니다. 제목 포함·미포함 Summary는 동일한 Scene을 사용하므로 Scene 추출은 4종, Summary는 8종입니다. 프롬프트 파일명의 버전을 바꿔도 Arm 이름은 바뀌지 않습니다.
 
 ## 실행 준비
 
@@ -54,22 +47,26 @@ Gemini 전용 환경은 `.[gemini,dev]`로 설치할 수 있습니다. Vertex AD
 ## 전체 실행
 
 ```bash
-RUN_ID=experiment_v5
+RUN_ID=experiment_v6
 
 python -m preparation prepare-cohort --run-id "$RUN_ID"
 python -m preparation prepare-input-data --run-id "$RUN_ID"
 
-python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model qwen
-python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model gemini
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/graph_scene_v3.md --model qwen
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/graph_scene_v3.md --model gemini
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model qwen --arm desc_qwen
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model gemini --arm desc_gemini
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/graph_scene_v4.md --model qwen --arm graph_qwen
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/graph_scene_v4.md --model gemini --arm graph_gemini
 
-python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4.md --source qwen --model qwen
-python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4.md --source gemini --model qwen
-python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --source qwen --model qwen
-python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --source gemini --model qwen
+python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4.md --model qwen --arm desc_qwen
+python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4.md --model qwen --arm desc_gemini
+python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --model qwen --arm graph_qwen
+python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --model qwen --arm graph_gemini
+python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4_meta.md --model qwen --arm desc_meta_qwen
+python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4_meta.md --model qwen --arm desc_meta_gemini
+python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4_meta.md --model qwen --arm graph_meta_qwen
+python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4_meta.md --model qwen --arm graph_meta_gemini
 
-python -m validation embed-representations --run-id "$RUN_ID" --summary-source qwen
+python -m validation embed-representations --run-id "$RUN_ID"
 python -m validation run-recommendation --run-id "$RUN_ID"
 python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
@@ -80,31 +77,33 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/preparation/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
 
-`--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용합니다. 와일드카드 문자열은 허용하지 않습니다. 네 생성 명령에서 필수이며, 추출은 `--model`, 요약은 `--source`도 필수입니다. 요약 모델은 항상 Qwen이고 `--source`는 입력 장면을 만든 모델입니다. Graph 명령은 항상 `graph`에 쓰며 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
+`--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용하며 와일드카드 문자열은 허용하지 않습니다. Graph 추출은 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
 
-요약 명령에는 `--source qwen|gemini`(장면 추출 모델)와 `--model qwen|gemini`(요약 생성 모델)가 모두 필수입니다. 예: `python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --source qwen --model gemini`. Description도 같은 조합을 지원합니다. `protocol.graph_summarizer`는 이전 설정 호환용으로만 허용하며 실행에는 사용하지 않습니다.
+생성에는 `--schema`, `--model`, `--arm`이 필수입니다. Scene 명령은 4개 Scene Arm만 받고 Arm의 추출 모델과 `--model`이 같아야 합니다. Summary 명령은 8개 시각 Arm을 받으며, Arm 정의에 따라 공유 Scene을 찾습니다. `--source`는 제거했습니다. 제목 placeholder와 Arm의 제목 정책이 다르거나 `{scenes}`가 없으면 생성 전에 오류를 냅니다.
 
-Gemini 요약은 이미지 없이 `models.gemini`, `extraction.gemini.threads`와 표현별 `summary_max_new_tokens`를 사용하며 GPU가 필요하지 않습니다. Qwen 전용 penalty·sampling은 적용하지 않습니다. 빈 응답·토큰 한도 종료·API 오류는 실패 기록만 남기고 요약 파일을 저장하지 않습니다. 성공 항목은 보존하고 명령은 실패로 종료하며, 재실행하면 실패 항목을 다시 처리합니다. 429 오류만 기존 정책대로 30초 후 1회 재시도합니다.
+Validation은 각 `summaries/{arm}`의 자체 JSON을 읽고 실제 Summary 모델을 provenance에서 확인합니다. `--summary-source`는 제거했습니다. 다른 Arm·모델로 대체하지 않습니다. `meta`를 포함하지 않는 부분 실행도 지원합니다.
 
-요약 결과와 실패 기록은 `extraction/{description|graph}/{추출 모델}/summaries/{요약 모델}/`에 저장합니다. 예를 들어 `--source qwen --model gemini`로 만든 Description 요약은 `extraction/description/qwen/summaries/gemini/{content_id}.json`입니다. 같은 Run에 두 요약 모델을 함께 저장할 수 있으며 `--force`는 선택한 요약 모델 디렉터리만 초기화합니다. 기존의 `summaries/` 바로 아래 파일은 자동 이동하거나 읽지 않습니다. 재사용하려면 provenance의 실제 요약 모델에 맞는 하위 디렉터리에 결과와 실패 기록을 함께 배치해야 합니다. 모델 표기가 없는 과거 실패는 Qwen으로 해석합니다.
-
-`embed-representations`에는 `--summary-source qwen|gemini`가 필수입니다. 예: `python -m validation embed-representations --run-id "$RUN_ID" --summary-source gemini`. Metadata만 선택해도 인자는 필수지만 제목 임베딩 내용에는 영향을 주지 않습니다. 선택한 요약 모델이 없다고 다른 요약 모델로 대체하지 않습니다. 선택은 arm별 임베딩 provenance에 저장되며 추천·진단은 그 선택을 따라 입력을 검증합니다. 임베딩·추천 경로는 기존 arm별 구조를 유지하므로 다른 summary source로 임베딩하면 해당 arm의 캐시가 갱신됩니다.
-
-Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용하며 `--gpus` 인자를 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source gemini --model qwen --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md`는 두 GPU를 사용합니다. 환경 변수를 설정하지 않으면 CUDA에서 보이는 모든 GPU를 사용하고, 보이는 GPU가 없으면 오류를 냅니다. 추천도 보이는 GPU를 모두 사용하며 `--gpus`를 받지 않습니다. 기본 GPU당 한 작업을 실행하고 `--workers-per-gpu N`으로 GPU당 동시 작업 수를 조절합니다. 추천은 GPU가 없으면 기본 설정에서 CPU로 실행합니다. Gemini는 영상 구분 없이 scene 큐를 공유하며, 전체 장면 동시 실행 수는 `extraction.gemini.threads`입니다.
+Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용하며 `--gpus` 인자를 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --arm graph_gemini --model qwen --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md`는 두 GPU를 사용합니다. 환경 변수를 설정하지 않으면 CUDA에서 보이는 모든 GPU를 사용하고, 보이는 GPU가 없으면 오류를 냅니다. 추천도 보이는 GPU를 모두 사용하며 `--gpus`를 받지 않습니다. 기본 GPU당 한 작업을 실행하고 `--workers-per-gpu N`으로 GPU당 동시 작업 수를 조절합니다. 추천은 GPU가 없으면 기본 설정에서 CPU로 실행합니다. Gemini는 영상 구분 없이 scene 큐를 공유하며, 전체 장면 동시 실행 수는 `extraction.gemini.threads`입니다.
 
 일부 Arm만 실행하는 예:
 
 ```bash
-python -m validation embed-representations --run-id "$RUN_ID" --summary-source qwen --target desc_qwen graph_qwen metadata
-python -m validation run-recommendation --run-id "$RUN_ID" --target desc_qwen graph_qwen metadata
-python -m validation run-diagnosis --run-id "$RUN_ID" --target desc_qwen graph_qwen metadata
+python -m validation embed-representations --run-id "$RUN_ID" --target desc_qwen graph_qwen meta
+python -m validation run-recommendation --run-id "$RUN_ID" --target desc_qwen graph_qwen meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --target desc_qwen graph_qwen meta
 ```
 
-Validation 대상은 embedding 시작 시 Run별 `validation/cohort/`에 저장합니다. `catalog.jsonl`, `metadata_titles.jsonl`, `events.jsonl`, `plan.json`과 `manifest.json`을 생성하며 공유 preparation·추출 결과는 수정하지 않습니다. `--target`으로 일부 Arm만 실행해도 `protocol.arms` 전체의 교집합을 사용합니다. Metadata만 설정한 실험은 전체 카탈로그를 사용하고 빈 제목은 기존대로 영벡터로 처리합니다.
+Validation은 preparation의 전체 catalog·item 순서·events·평가 구간을 Run별 `validation/cohort/`에 저장합니다. Summary 실패나 누락으로 아이템·interaction을 삭제하지 않습니다. 기존 이력 마스킹과 평가 이벤트 자격 규칙을 유지합니다. `--target`은 처리 Arm만 제한합니다.
 
-제외 아이템은 학습 이벤트·사용자 이력·추천 후보·평가 정답에서 모두 빠집니다. 내부 `event_id`를 다시 부여하고 원본 ID는 `source_event_id`로 보존합니다. 원본 rolling 평가 날짜와 시간 경계를 유지하면서 이력과 구간별 분모를 재계산하며, 이력이 없어진 평가 이벤트도 제외합니다. 교집합 또는 필수 구간이 비면 중단합니다.
+일부 Scene이 실패하면 성공 장면만 Summary에 사용합니다. 성공 장면이 없거나 Summary가 최종 실패하면 `status="failed", text="", word_count=0`을 저장합니다. 실패 로그의 새 `raw_output`은 빈 문자열입니다. 기존 `raw_fallback`은 빈 표현으로 읽고 기존 파일은 일괄 변경하지 않습니다. Summary 파일 부재는 `missing`, 손상·잘못된 Arm/모델 provenance는 오류입니다. 빈 표현은 인코더에 보내지 않고 영벡터로 유지하며 고유 item ID와 추천 후보 자격을 보존합니다.
 
-`manifest.json`에는 적용 Arm·요약 모델·대상 아이템·입력 해시와 제외 통계를 저장합니다. 아이템별 제외 사유(`missing`, `failed`, `invalid`, `raw_fallback`)는 `excluded.jsonl`, 요약 통계와 상세 경로는 diagnosis의 `selection`에 기록합니다. 요약 복구·삭제나 설정 변경 시 `embedding → 추천 → 진단` 순서로 다시 실행하세요. 기존 Run도 같은 순서로 전환하며, 일부 Arm만 embedding한 뒤 나머지 Arm의 이전 캐시를 사용하려 하면 오류로 안내합니다. 요약 실패를 모두 복구할 필요는 없습니다.
+모든 Arm의 embedding과 완료된 추천 결과는 **현재 Run → 공유 캐시 → 새 계산** 순서로 처리합니다. 공유 캐시는 `<artifacts_root>/shared_cache/v2/{embeddings,recommendations}/`에 저장하며 다른 Run 지정이 필요 없습니다. Scene·Summary를 다른 Run에서 자동으로 가져오지는 않습니다. `--force`는 선택한 단계의 로컬·공유 읽기를 우회하고 기존 공유 엔트리를 덮어쓰지 않습니다.
+
+공통 데이터 키는 순서가 있는 item/content 매핑·전체 events·평가 구간입니다. Embedding 키는 해당 Arm의 실제 입력 텍스트·빈 위치, 인코더/토크나이저 식별자·설정, 표현 계약과 생성 provenance입니다. 시각 표현의 두 프롬프트는 파일명이 아닌 본문 해시로 기록합니다. 과거 생성 결과에 현재 설정을 소급하지 않으며, 생성 provenance가 부족한 시각 산출물은 Run 내부에서만 사용할 수 있습니다. Metadata 제목·인코더가 같으면 시각 Arm의 변경과 무관하게 embedding을 재사용합니다.
+
+추천 키는 공통 데이터·embedding 키와 실제 행렬 해시·날짜·seed·학습 설정·모델/학습/평가 계약입니다. 재사용 단위는 날짜 × seed × Arm의 완료 결과이며 epoch 중간 재개는 없습니다. 데이터나 학습 조건이 바뀌면 해당 추천 결과를 다시 계산하고, `graph_gemini` 표현만 바뀌면 해당 Arm만 무효화합니다. checkpoint·학습 기록·이벤트별 지표·완료 manifest를 체크섬과 이벤트 대응까지 검증하고 독립 파일로 복사합니다. 현재 Run ID로 metadata를 갱신하며 `reused_from`으로 원본 출처를 남깁니다. 키별 파일 잠금과 임시 디렉터리의 원자적 게시로 공유 엔트리를 보호합니다. 모든 결과가 재사용되면 BGE/GPU 학습 초기화를 하지 않습니다.
+
+새 계약은 `full-catalog-zero-vector/v2`, `shared-scenes-representation/v3`, `sasrec-rolling-combination/v3`입니다. 기존 교집합 실험은 읽기 전용 진단을 지원하지만 새 공유 캐시로 소급 승격하지 않습니다. 기존 실험을 보존하려면 새 Run에서 첫 전체 데이터 결과를 만든 뒤 후속 Run에서 재사용하세요. Arm별 정상·실패·누락·영벡터 수와 embedding 재사용 출처는 `.inputs/{arm}.json` 및 진단에, 추천의 최근 실행 재사용 건수는 `recommendations/reuse.json`에 기록합니다.
 
 `diagnosis.json`의 `rolling-diagnosis/v3`는 아이템별 출처 전체 대신 arm별 해시·truncation·출처 분포·단어 수 요약을 저장합니다. 예외와 Gemini fallback 예시는 각각 최대 10개이며 전체 건수와 생략 건수를 함께 기록합니다. 출처 분포도 빈도순 최대 10개 값과 생략된 레코드 수를 기록합니다. `details_path`는 run 디렉터리 기준 상대경로이며, 상세 기록은 `validation/representations/.inputs/{arm}.json`의 `sources`에 보존됩니다. 결과를 옮길 때 상세 추적이 필요하면 이 숨김 디렉터리도 함께 복사하세요. v2의 `representations.*.sources`는 `sources_summary`와 `details_path`로, `gemini_summary_fallbacks.*` 배열은 `count`·`examples`·`omitted_count`·`details_path` 객체로 변경되었습니다.
 
@@ -118,45 +117,52 @@ Validation 대상은 embedding 시작 시 Run별 `validation/cohort/`에 저장�
 python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference_run --target graph_gemini graph_qwen
 ```
 
-현재 Run에서 reference Run을 뺀 NDCG@10 차이를 `validation/diagnosis/diagnosis.json`의 `run_comparison`에 기록합니다. Run별 필터링된 사건·catalog·평가 날짜·seed와 사건 수가 일치해야 하며 두 Run의 추천 캐시도 검증합니다. 모델별 두 비교는 Bonferroni 보정, 개선 폭의 모델 간 차이는 탐색적 95% 구간을 사용합니다. 프롬프트·모델·요약 정책·fallback의 차이가 함께 포함될 수 있으므로 출처를 확인합니다.
+현재 Run에서 reference Run을 뺀 NDCG@10 차이를 `validation/diagnosis/diagnosis.json`의 `run_comparison`에 기록합니다. Run별 사건·catalog·평가 날짜·seed와 사건 수가 일치해야 하며 두 Run의 추천 캐시도 검증합니다. 새 Graph 4개 Arm 비교는 Bonferroni 보정, 개선 폭의 모델 간 차이는 탐색적 95% 구간을 사용합니다. 프롬프트·모델·요약 정책·fallback의 차이가 함께 포함될 수 있으므로 출처를 확인합니다.
 
 `--schema`는 프롬프트 선택이며 Python 출력 검증 계약을 바꾸지 않습니다. 다른 본문 구조의 과거 Graph나 Summary를 그대로 입력하는 ASIS 전용 경로·본문 자동 변환은 제공하지 않습니다. 기존 artifact를 수동 재사용하려면 현재 계약과 provenance를 충족해야 합니다.
+
+## 기존 생성 결과 변환
+
+기존 제목 포함 Summary는 새 `*_meta_*` Arm에 해당합니다. `config.yaml`을 v6 계약으로 설정한 뒤 다음 명령으로 명시적으로 복사합니다.
+
+```bash
+python -m extraction migrate-arm-layout --run-id "$RUN_ID" --summary-model qwen
+```
+
+기존 Scene 4종과 선택한 Summary 모델의 제목 포함 결과를 새 경로로 복사하며 원본은 보존합니다. 제목 사용을 저장된 provenance로 확인할 수 없으면 건너뛰고 사유를 보고합니다. 대상에 다른 파일이 있으면 충돌로 중단하며 동일한 입력으로 재실행할 수 있습니다. `extraction/arm-layout-migration.json`에 변환 출처를 기록합니다. 과거 원문 fallback은 복사본에서 빈 실패 표현으로 처리하고 원본 생성 provenance는 유지합니다.
+
+제목 없는 Summary는 공유 Scene에서 새로 생성합니다. Validation 파일은 변환하지 않으며 embedding부터 다시 실행합니다. 기존 5개 Arm의 캐시는 새 공유 캐시에 자동 승격하지 않습니다. 기존 계약의 진단은 원래 Arm 이름과 경로로 읽습니다.
 
 ## Artifact 구조
 
 ```text
 artifacts/
-├── preparation/
-│   ├── cohort/
-│   ├── resized_keyframes/{content_id}/{timestamp}.png
-│   └── source_assets/{content_id}/
-│       ├── video_duration.json
-│       └── timestamp_fixed_30s.json
+├── preparation/{cohort,resized_keyframes,source_assets}/
+├── shared_cache/v2/{embeddings,recommendations}/
 └── runs/{RUN_ID}/
     ├── extraction/
-    │   ├── description/{추출 모델}/
-    │   │   ├── scenes/
-    │   │   └── summaries/{요약 모델}/
-    │   └── graph/{추출 모델}/
-    │       ├── scenes/
-    │       └── summaries/{요약 모델}/
+    │   ├── scenes/{SCENE_ARM}/{content_id}.jsonl
+    │   │   └── failures/{content_id}.jsonl
+    │   ├── summaries/{SUMMARY_ARM}/{content_id}.json
+    │   │   └── failures.jsonl
+    │   └── arm-layout-migration.json
     └── validation/
-        ├── cohort/                     # Run별 요약 교집합·이벤트·제외 사유
-        ├── representations/
+        ├── cohort/
+        ├── representations/{arm}_embeddings.npz
         ├── recommendations/{date}/seed_{seed}/{arm}/
         └── diagnosis/diagnosis.json
 ```
 
-`scenes/{content_id}.jsonl`은 장면당 한 줄이며, Description·Graph 모두 `content_id`, `scene_idx`, 본문 세 필드만 저장합니다. Qwen·Gemini에 같은 형식을 적용합니다.
+`scenes/{SCENE_ARM}/{content_id}.jsonl`은 장면당 한 줄이며, Description·Graph 모두 `content_id`, `scene_idx`, 본문과 생성 provenance를 저장합니다. 아래 예시는 본문 필드만 표시합니다. Qwen·Gemini에 같은 형식을 적용합니다.
 
 ```json
 {"content_id":"123","scene_idx":0,"description":"A person walks outdoors."}
 {"content_id":"123","scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
 ```
 
-장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 Raw Output은 `scene_graph` 문자열로 저장하고, Desc의 Raw Output은 `description`에 저장하며 같은 장면의 실패 기록으로 식별합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다.
+장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. 신규 성공 장면에는 생성 당시 `provenance`를 보존합니다. 과거 Raw Graph·Desc는 읽기 호환만 유지하며 Summary 입력에서 제외합니다. 신규 실패는 본문 대신 실패 로그에 빈 `raw_output`을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다.
 
-기존 전체 필드 JSONL과 두 필드 JSONL도 읽을 수 있습니다. 두 필드 파일은 원래 `.metadata`에서 장면 번호를 읽어야 하므로 먼저 삭제하지 마세요. 추출 재실행 또는 아래 명령으로 세 필드 형식으로 변환하며, 저장이 성공한 파일의 기존 메타데이터만 삭제합니다. 메타데이터가 없거나 본문과 맞지 않는 이전 파일은 장면 번호를 추측하거나 전체 재생성하지 않고 오류를 보고합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
+기존 전체 필드 JSONL과 두 필드 JSONL도 읽을 수 있습니다. 두 필드 파일은 원래 `.metadata`에서 장면 번호를 읽어야 하므로 먼저 삭제하지 마세요. 추출 재실행 또는 아래 명령으로 장면 번호를 포함한 형식으로 변환하며, 저장이 성공한 파일의 기존 메타데이터만 삭제합니다. 메타데이터가 없거나 본문과 맞지 않는 이전 파일은 장면 번호를 추측하거나 전체 재생성하지 않고 오류를 보고합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
 
 ```bash
 python -m extraction migrate-scene-schema --run-id "$RUN_ID"
@@ -174,14 +180,14 @@ python -m extraction migrate-scene-schema --run-id "$RUN_ID"
 
 Qwen Desc·Graph·Summary는 설정된 repetition penalty별로 전체 pass를 완료하고 실패 항목만 다음 pass에서 재생성합니다. 기본 순서는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20`이며 성공 항목은 제외합니다. Vertex Gemini의 `429 RESOURCE_EXHAUSTED`만 30초 뒤 한 번 재시도하며, Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면 번호는 본문 파일의 `scene_idx`에, 요약의 생성 당시 provenance는 요약 문서에 남깁니다.
 
-장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 생성 실패는 `summaries/{요약 모델}/failures.jsonl`에 `content_id`, `error`, `raw_output`, `summary_model`과 Qwen의 `repetition_penalty`를 저장합니다. `raw_output`은 공백·줄바꿈까지 보존하며 응답이 없으면 빈 문자열입니다. 장면 생성은 재실행 시 첫 penalty부터 실패 항목을 처리합니다. Qwen Summary는 아직 처리하지 않은 콘텐츠를 먼저 초기 penalty로 처리한 뒤, 실패별 마지막 penalty보다 큰 다음 설정값부터 이어갑니다. 마지막 penalty까지 완료했거나 penalty 필드가 없는 기존 실패는 재생성 없이 콘텐츠별 `.json`의 `text`로 복구합니다. 원문이 비어 있으면 Scene 관측 내용을 대신 저장하고 provenance에 `summary_fallback=scene_observations`를 기록합니다. 최종 실패 기록은 유지하며 `--force`로 전체 재생성을 요청할 수 있습니다. 재시도 성공 결과를 저장한 뒤 해당 실패 행을 제거하고, 남은 실패가 없으면 파일도 삭제합니다. 실행 시작 시 이전 실패 파일을 현재 형식으로 옮기며 기존 penalty와 원문을 보존합니다.
+장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 생성 실패는 `summaries/{SUMMARY_ARM}/failures.jsonl`에 `content_id`, `error`, `raw_output`, `summary_model`과 Qwen의 `repetition_penalty`를 저장합니다. 새 실패의 `raw_output`은 빈 문자열이며 생성 당시 `provenance`를 함께 보존합니다. 장면 생성은 재실행 시 첫 penalty부터 실패 항목을 처리합니다. Qwen Summary는 아직 처리하지 않은 콘텐츠를 먼저 초기 penalty로 처리한 뒤, 실패별 마지막 penalty보다 큰 다음 설정값부터 이어갑니다. 마지막 penalty까지 완료했거나 penalty 필드가 없는 기존 실패는 재생성 없이 빈 Summary로 기록합니다. 실패 이유·재시도 정보·실제 생성 provenance를 보존합니다. Scene 입력이 복구되면 실패 Summary를 다시 시도하고, 성공 결과까지 다시 만들려면 `--force`를 사용합니다. 재시도 성공 후 해당 실패 행을 제거합니다. 기존 실패 로그를 읽을 때 과거 원문은 일괄 삭제하지 않습니다.
 
 ```json
 {"content_id":"123","scene_idx":2,"error":"model produced an empty description","raw_output":""}
-{"content_id":"123","error":"max_tokens","raw_output":"Truncated output...","repetition_penalty":1.2}
+{"content_id":"123","error":"max_tokens","raw_output":"","repetition_penalty":1.2}
 ```
 
-진행률의 `success`와 `failed`는 현재 패스에서 완료된 성공·실패 수이고, `raw`는 그중 fallback 결과를 보존한 수입니다. Qwen 재시도는 실패 항목만 다음 패스로 넘기며, 매 패스 시작 시 분모를 실제 처리 대상 수로 바꾸고 완료 건수·경과 시간을 초기화합니다. `pass=N/M`은 설정된 penalty 순서를 나타내며, `scene/s`와 `summary/s` 및 ETA는 현재 패스 기준입니다. 재사용 결과는 집계에서 제외하고 전체 최종 결과는 단계 종료 로그에 표시합니다. Qwen·Gemini Graph와 Summary의 토큰 한도 종료는 실패로 기록합니다.
+진행률의 `success`와 `failed`는 현재 패스에서 완료된 성공·실패 수이고, 신규 정책에서는 실패 원문을 표현으로 보존하지 않으므로 `raw`는 0입니다. Qwen 재시도는 실패 항목만 다음 패스로 넘기며, 매 패스 시작 시 분모를 실제 처리 대상 수로 바꾸고 완료 건수·경과 시간을 초기화합니다. `pass=N/M`은 설정된 penalty 순서를 나타내며, `scene/s`와 `summary/s` 및 ETA는 현재 패스 기준입니다. 재사용 결과는 집계에서 제외하고 전체 최종 결과는 단계 종료 로그에 표시합니다. Qwen·Gemini Graph와 Summary의 토큰 한도 종료는 실패로 기록합니다.
 
 각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.
 
@@ -189,19 +195,20 @@ Qwen Desc·Graph·Summary는 설정된 repetition penalty별로 전체 pass를 �
 
 - 기본 장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다.
 - 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
-- Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 최종 원문을 Raw로 사용하며, 빈 장면 원문은 실패 기록만 남기며, 빈 Summary 원문은 Scene 관측 내용으로 대체합니다. 성공한 항목은 재생성하지 않습니다.
+- Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 빈 표현으로 처리하고 실패 기록을 남깁니다. 성공한 항목은 재생성하지 않습니다.
 - Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 필수 필드·타입·빈 문자열 등 JSON 구조 검증은 유지합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
-- Graph 생성에는 JSON Schema를 강제하지 않습니다. `graph_scene_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행·토큰 잘림은 원문과 실패 기록을 보존합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
-- 신규 Summary는 문단·목록·마크업·구조화 필드를 허용하며 줄바꿈을 보존합니다. 단어 수는 기록만 하고 실패 조건으로 사용하지 않습니다. Qwen은 빈 출력과 `finish_reason=length`를 실패로 기록하고 다음 penalty에서 재생성합니다. Qwen의 마지막 실패 원문은 `raw_fallback`으로 저장하며, 원문이 비어 있으면 프롬프트 지시문을 제외한 Scene 관측 내용을 저장합니다. 유효한 Scene 입력이 없으면 명시적인 입력 오류로 보고합니다.
+- Graph 생성에는 JSON Schema를 강제하지 않습니다. `graph_scene_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행·토큰 잘림은 실패 이유와 생성 provenance를 보존하며 새 실패 원문은 빈 문자열로 기록합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
+- 신규 Summary는 문단·목록·마크업·구조화 필드를 허용하며 줄바꿈을 보존합니다. 단어 수는 기록만 하고 실패 조건으로 사용하지 않습니다. Qwen은 빈 출력과 `finish_reason=length`를 실패로 기록하고 다음 penalty에서 재생성합니다. 최종 실패 Summary는 빈 텍스트이며 사용할 성공 Scene이 없으면 `scene_count=0`을 허용합니다.
 - Qwen·Gemini Graph·Desc는 설정·프롬프트·경로가 달라도 기존 성공 결과를 그대로 재사용합니다. Summary도 동일한 요약 모델(qwen/gemini) 안에서는 같은 정책을 따릅니다. 일반 실행은 결과가 없는 항목과 재시도가 남은 실패만 생성합니다. 장면을 갱신해도 이미 성공한 Summary는 보존하며, 성공 결과까지 다시 만들려면 해당 단계에 `--force`를 지정합니다. 실패 기록은 재생성 성공 후 제거합니다. 다른 run ID의 결과를 자동으로 가져오지는 않습니다.
-- Validation은 선택한 `--summary-source`에서 `protocol.arms`의 모든 시각 Arm이 자체 `complete` 요약을 가진 아이템만 사용합니다. 누락·실패·손상·`raw_fallback`은 제외하며 다른 Arm의 요약으로 대체하지 않습니다.
-- BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata title만 영벡터를 사용합니다.
+- Validation은 각 Arm의 자체 Summary를 읽습니다. 다른 Arm·요약 모델로 대체하지 않습니다. 실패·누락은 해당 표현만 영벡터로 처리합니다.
+- BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata 제목과 빈 시각 표현은 모두 영벡터입니다. SASRec 구조는 유지하며 영벡터 아이템 사이의 동일 점수와 기존 catalog 순서 기반 동점 처리를 유지합니다.
+
 
 ## 평가와 검증
 
-기본 데이터는 사용자 100,000명·interaction 719,405건·아이템 19,738개입니다. 같은 사건·후보 catalog에서 날짜별 독립 selection → refit → test를 실행합니다. 5개 Arm은 **7일 × 3 seeds × 5 = 105개 조합**입니다.
+기본 데이터는 사용자 100,000명·interaction 719,405건·아이템 19,738개입니다. 같은 사건·후보 catalog에서 날짜별 독립 selection → refit → test를 실행합니다. 9개 Arm은 **7일 × 3 seeds × 9 = 189개 조합**입니다. 부분 target은 선택한 Arm 수만큼 처리합니다.
 
-NDCG@10을 주 지표로 사용자 단위 paired bootstrap 10,000회, seed 평균 후 날짜 균등 평균을 적용합니다. Metadata 대비 4개, 표현 방식 2개, 모델 2개 비교군에 각각 α=0.05와 Bonferroni 양측 신뢰구간을 적용합니다. 부분 target에서도 보정 분모 4·2·2은 유지합니다. Graph 개선 폭의 모델 간 차이는 탐색적으로 보고합니다. Description·Graph의 기존 coverage 기준을 유지합니다. 자세한 규칙은 [전체 실험 가이드](docs/full_rolling.md)에 있습니다.
+NDCG@10을 주 지표로 사용자 단위 paired bootstrap 10,000회, seed 평균 후 날짜 균등 평균을 적용합니다. Meta 대비 8개, 표현 방식 4개, 추출 모델 4개, 제목 제공 효과 4개 비교군에 각각 α=0.05와 Bonferroni 양측 신뢰구간을 적용합니다. 부분 target에서도 보정 분모 8·4·4·4를 유지하고 필요한 Arm이 없는 비교만 생략합니다. Graph 개선 폭의 모델 간 차이는 제목 유무별 탐색적으로 보고합니다. Description·Graph 생성 coverage는 별도로 보고하며 기록된 실패·빈 표현은 전체 데이터 평가를 차단하지 않습니다. 자세한 규칙은 [전체 실험 가이드](docs/full_rolling.md)에 있습니다.
 
 ```bash
 python -m pytest -q

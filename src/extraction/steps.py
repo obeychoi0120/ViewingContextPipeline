@@ -4,10 +4,11 @@ from typing import Any
 
 from tqdm import tqdm
 
-from arm_registry import generated_arm
+from arm_registry import generated_arm, resolve_generation_arm, legacy_layout
 from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
+from extraction.arm_migration import migrate_arm_layout
 from extraction.qwen_runtime import QwenRuntime
 from extraction.recovery import file_fingerprint, penalty_schedule
 from extraction.failures import FailureLog
@@ -70,13 +71,14 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
             settings["response_parser"] = GRAPH_PARSER_VERSION
     return {
         "arm": arm.name,
+        **({"uses_title": arm.uses_title, "scene_arm": arm.scene_arm} if summary else {}),
         "representation": arm.representation,
         "prompt_path": str(path),
         "prompt_hash": file_fingerprint(path),
         "model": model,
         "settings": settings,
         **({"summary_model": source} if summary else {}),
-        "schema_contract": "summary/v4"
+        "schema_contract": "summary/v5"
         if summary
         else ("graph/v3" if arm.representation == "graph" else "description/v2"),
     }
@@ -90,11 +92,14 @@ def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     return generation
 
 
-def _extract(context, *, representation, model, schema, force=False):
-    arm = generated_arm(context.config, representation, model)
+def _extract(context, *, representation, model, schema, force=False, arm=None):
+    if arm is None and not legacy_layout(context.config):
+        raise ValueError("extraction requires --arm")
+    arm = (resolve_generation_arm(context.config, arm, representation, model) if arm
+           else generated_arm(context.config, representation, model))
     stage = f"extract-{representation}-scenes"
     path = context.prompt_path(schema)
-    log_step_start(context, stage, model=model, schema=path, force=force)
+    log_step_start(context, stage, model=model, schema=path, force=force, arm=arm.name)
     context.initialize()
     prompt = path.read_text(encoding="utf-8")
     print("[PREPARE] Reading prompt/model settings and cohort...", flush=True)
@@ -179,6 +184,7 @@ def _extract(context, *, representation, model, schema, force=False):
         if model == "qwen":
             run_qwen_scenes(
                 pending_contents(),
+                provenance=prompt_provenance(context, path, arm),
                 scene_dir=scene_dir,
                 failures=failures,
                 model_path=context.path("models", "qwen"),
@@ -199,6 +205,7 @@ def _extract(context, *, representation, model, schema, force=False):
             )
             run_gemini_scenes(
                 pending_contents(),
+                provenance=prompt_provenance(context, path, arm),
                 pool=pool,
                 records_by_content=existing,
                 scene_dir=scene_dir,
@@ -211,13 +218,19 @@ def _extract(context, *, representation, model, schema, force=False):
                   failure_count=failures.count(content_ids))
 
 
-def _summarize(context, *, representation, source, model, schema, force=False):
+def _summarize(context, *, representation, source=None, model, schema, force=False, arm=None):
     if model not in GRAPH_SOURCES:
         raise ValueError("summary model must be qwen or gemini")
-    arm = generated_arm(context.config, representation, source)
+    if arm is None and not legacy_layout(context.config):
+        raise ValueError("summarization requires --arm")
+    arm = (resolve_generation_arm(context.config, arm, representation, model, summary=True) if arm
+           else generated_arm(context.config, representation, source))
     path = context.prompt_path(schema)
     stage = f"summarize-{representation}"
-    log_step_start(context, stage, source=source, model=model, schema=path, force=force)
+    log_step_start(context, stage, source=arm.model, model=model, schema=path, force=force, arm=arm.name)
+    if not legacy_layout(context.config):
+        from extraction.summary_prompt import validate_summary_template
+        validate_summary_template(path.read_text(), arm.uses_title)
     context.initialize()
     cohort = context.require_ready_cohort()
     return run_summary_stage(
@@ -225,7 +238,7 @@ def _summarize(context, *, representation, source, model, schema, force=False):
         arm=arm,
         schema=path,
         catalog=cohort["catalog"],
-        metadata_titles=cohort["metadata_titles"],
+        metadata_titles=cohort["metadata_titles"] if arm.uses_title else [],
         provenance=prompt_provenance(context, path, arm, summary=True, model=model),
         generation=_summary_generation_settings(context) if model == "qwen" else {},
         model=model,
@@ -235,31 +248,33 @@ def _summarize(context, *, representation, source, model, schema, force=False):
     )
 
 
-def extract_graph_scenes(context, *, model, schema, force=False):
+def extract_graph_scenes(context, *, model, schema, force=False, arm=None):
     return _extract(
-        context, representation="graph", model=model, schema=schema, force=force
+        context, representation="graph", model=model, schema=schema, force=force, arm=arm
     )
 
 
-def extract_description_scenes(context, *, model, schema, force=False):
+def extract_description_scenes(context, *, model, schema, force=False, arm=None):
     return _extract(
-        context, representation="description", model=model, schema=schema, force=force
+        context, representation="description", model=model, schema=schema, force=force, arm=arm
     )
 
 
-def summarize_graph(context, *, source, model, schema, force=False):
+def summarize_graph(context, *, model, schema, arm=None, source=None, force=False):
     return _summarize(
-        context, representation="graph", source=source, model=model, schema=schema, force=force
+        context, representation="graph", source=source, model=model, schema=schema, force=force, arm=arm
     )
 
 
-def summarize_description(context, *, source, model, schema, force=False):
+def summarize_description(context, *, model, schema, arm=None, source=None, force=False):
     return _summarize(
-        context, representation="description", source=source, model=model, schema=schema, force=force
+        context, representation="description", source=source, model=model, schema=schema, force=force, arm=arm
     )
+
 
 
 STEP_HANDLERS = {
+    "migrate-arm-layout": migrate_arm_layout,
     "migrate-scene-schema": migrate_scene_schema,
     "extract-graph-scenes": extract_graph_scenes,
     "extract-description-scenes": extract_description_scenes,

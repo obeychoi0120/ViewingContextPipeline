@@ -7,7 +7,7 @@ from validation.metrics import metrics_from_rank
 from validation.representation_provenance import state_path
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_diagnosis import collect_metrics, diagnose, diagnosis_training
-from validation.rolling_recommendation import SCHEMA, combination_complete, combination_dir, phase_ids
+from validation.rolling_recommendation import LEGACY_SCHEMA as SCHEMA, combination_complete, combination_dir, phase_ids
 from validation.steps import validation_config
 
 
@@ -77,9 +77,7 @@ def test_historical_diagnosis_and_strict_current_resume(historical_results, vers
     assert report["recommendations"]["means"]["metadata"]["NDCG@10"] == 1
     for directory, before in zip(directories, original, strict=True):
         complete = read_json(directory / "complete.json")
-        assert combination_complete(directory, complete["identity"], complete["event_count"]) == (
-            version == "sasrec-content-v3"
-        )
+        assert combination_complete(directory, complete["identity"], complete["event_count"]) is False
         assert (directory / "training.json").read_bytes() == before
 
 

@@ -11,8 +11,8 @@ from pipeline_runtime import ConfigError, RunContext
     [
         ("extract-graph-scenes", "--model"),
         ("extract-description-scenes", "--model"),
-        ("summarize-graph", "--source"),
-        ("summarize-description", "--source"),
+        ("summarize-graph", "--model"),
+        ("summarize-description", "--model"),
     ],
 )
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
@@ -27,8 +27,7 @@ def test_required_generation_options_and_prompt_paths(
         lambda context, **kw: calls.append(kw),
     )
     prefix = [step, "--run-id", "run"]
-    if step.startswith("summarize-"):
-        prefix += ["--model", "qwen"]
+    prefix += ["--arm", f"{'graph' if 'graph' in step else 'desc'}_{model}"]
     assert extract(prefix + [selector, model]) == 1
     assert extract(prefix + ["--schema", "prompts/graph_scene_v3.md"]) == 1
     assert extract(prefix + [selector, model, "--schema", "prompts/missing.md"]) == 1
@@ -38,8 +37,9 @@ def test_required_generation_options_and_prompt_paths(
     assert calls[-1][selector[2:]] == model
     assert calls[-1]["schema"].is_absolute()
     if step.startswith("extract-"):
-        assert extract(prefix + [selector, model, "--source", model,
-                                 "--schema", str(calls[-1]["schema"])]) == 1
+        with pytest.raises(SystemExit):
+            extract(prefix + [selector, model, "--source", model,
+                              "--schema", str(calls[-1]["schema"])])
     assert "gpus" not in calls[-1]
     with pytest.raises(SystemExit):
         extract(prefix + [selector, model, "--schema", "prompts/graph_scene_v3.md", "--gpus", "1"])

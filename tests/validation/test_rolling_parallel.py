@@ -8,7 +8,7 @@ import pytest
 from tqdm import tqdm
 
 from pipeline_runtime import read_json, write_json
-from validation.recommendation_contracts import RECOMMENDATION_ARMS
+from arm_registry import registry
 from validation.rolling_data import EventTable
 from validation.selection import load_validation_cohort, prepare_validation_cohort, training_signature
 from validation.rolling_recommendation import (
@@ -51,7 +51,7 @@ def prepare_embeddings(context):
     context.representations_dir.mkdir(parents=True, exist_ok=True)
     write_json(context.representations_dir / "item_index.json", {str(i): i - 1 for i in range(1, 5)})
     write_json(context.representations_dir / "graph_gemini_fallbacks.json", {"fallbacks": []})
-    for branch in RECOMMENDATION_ARMS.values():
+    for branch in registry(context.config):
         values = np.random.default_rng(4).normal(size=(4, 1024)).astype(np.float32)
         np.savez(context.representations_dir / f"{branch}_embeddings.npz", values=values)
 
@@ -106,8 +106,12 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
                             prepare_split(table, split), torch.device("cpu"))
             parallel_dir = combination_dir(context, split["evaluation_date"], identity["seed"], identity["arm"])
             serial_dir = combination_dir(serial, split["evaluation_date"], identity["seed"], identity["arm"])
-            for filename in ("complete.json", "per_event_metrics.jsonl"):
+            for filename in ("per_event_metrics.jsonl",):
                 assert (parallel_dir / filename).read_bytes() == (serial_dir / filename).read_bytes()
+            complete_a, complete_b = (read_json(path / "complete.json") for path in (parallel_dir, serial_dir))
+            complete_a.pop("checksums")
+            complete_b.pop("checksums")
+            assert complete_a == complete_b
             a, b = (read_json(path / "training.json") for path in (parallel_dir, serial_dir))
             a.pop("elapsed_seconds")
             b.pop("elapsed_seconds")

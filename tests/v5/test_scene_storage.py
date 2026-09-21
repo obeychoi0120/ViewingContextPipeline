@@ -29,14 +29,14 @@ def test_scenes_have_explicit_indices_without_metadata(tmp_path, kind):
     write_scene_results(path, records)
     payload = read_jsonl(path)
     field = "description" if kind == "description" else "scene_graph"
-    assert all(set(row) == {"content_id", "scene_idx", field} for row in payload)
+    assert all(set(row) == {"content_id", "scene_idx", field, "provenance"} for row in payload)
     assert [row["scene_idx"] for row in payload] == [0, 3]
     assert not metadata_path(path).parent.exists()
     restored = read_scene_records(path)
     assert [row["scene_idx"] for row in restored] == [0, 3]
     body = "raw_response" if kind == "raw" else kind
     assert restored[0][body] == records[0][body]
-    assert all("provenance" not in row and "generation" not in row for row in restored)
+    assert all("provenance" in row and "generation" not in row for row in restored)
 
 
 def test_interrupted_publication_preserves_readable_previous_results(tmp_path, monkeypatch):
@@ -90,6 +90,7 @@ def test_legacy_migration_deletes_metadata_only_after_successful_write(tmp_path,
     legacy_file(path)
     records = read_scene_records(path)
     assert [row["scene_idx"] for row in records] == [2, 7]
+    assert all(row['provenance'] == scene('graph')['provenance'] for row in records)
     before = path.read_bytes()
     with monkeypatch.context() as patch:
         def fail(*args, **kwargs):
@@ -140,7 +141,7 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
     assert migrate_scene_schema(context) == {"converted": 0, "unchanged": 16}
     for path, records in records_by_path.items():
         assert read_scene_records(path) == records
-        assert len(read_jsonl(path)[0]) == 3
+        assert len(read_jsonl(path)[0]) == 4
     for model in ("qwen", "gemini"):
         extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
         extract_description_scenes(context, model=model, schema="prompts/description_scene_v2.md")

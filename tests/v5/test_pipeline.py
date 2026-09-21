@@ -96,7 +96,7 @@ def test_scene_prompt_changes_reuse_success_without_changing_arm(ready_context, 
     assert embed_representations(context, summary_source="qwen", target=[name])["generated_arms"] == []
 
 
-def test_missing_raw_and_corrupt_summaries_are_excluded(ready_context, fake_models):
+def test_missing_and_raw_are_empty_but_corruption_is_an_error(ready_context, fake_models):
     from validation.selection import load_validation_cohort
     context = ready_context
     generate_all(context)
@@ -109,10 +109,14 @@ def test_missing_raw_and_corrupt_summaries_are_excluded(ready_context, fake_mode
             write_json(path, contents)
         else:
             path.write_text(contents)
+        if isinstance(contents, str):
+            with pytest.raises((ValueError, RuntimeError)):
+                embed_representations(context, summary_source="qwen", target=["desc_gemini"])
+            continue
         embed_representations(context, summary_source="qwen", target=["desc_gemini"])
         cohort = load_validation_cohort(context)
-        assert len(cohort["catalog"]) == 3
-        assert cohort["excluded"][0]["content_id"] == path.stem
+        assert len(cohort["catalog"]) == 4
+        assert not cohort["excluded"]
         assert all(r["actual_arm"] == "desc_gemini" for r in read_state(context, "desc_gemini")["sources"])
     write_json(path, native)
     with pytest.raises(RuntimeError, match="stale"):
@@ -266,7 +270,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
     for path in context.graph_scene_dir(model).glob("*.jsonl"):
         for row in read_scene_records(path):
             assert row["graph"] == graph
-            assert "generation" not in row and "provenance" not in row
+            assert "generation" not in row and row["provenance"]["prompt_hash"]
             assert row["semantic_warnings"] == []
             assert _success_scene_row_issues(f"graph_{model}", row, path.stem) == []
     summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")

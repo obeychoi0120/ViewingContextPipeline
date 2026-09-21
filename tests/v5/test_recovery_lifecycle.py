@@ -44,7 +44,7 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
                 callback(task.task_id, text)
                 if interrupt and index == 1:
                     rows = read_jsonl(directory / "failures.jsonl")
-                    assert len(rows) == 1 and all(set(row) == {"content_id", "error", "raw_output", "repetition_penalty", "summary_model"} for row in rows)
+                    assert len(rows) == 1 and all(set(row) == {"content_id", "error", "raw_output", "repetition_penalty", "summary_model", "provenance"} for row in rows)
                     assert progress_instances[-1].failed == 1
                     assert progress_instances[-1].success == 1
                     for name in (".recovery", ".pending", "failures"):
@@ -61,16 +61,16 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     expected = ids
     assert calls == expected
     rows = read_jsonl(directory / "failures.jsonl")
-    assert rows == [
+    assert [{k: v for k, v in row.items() if k != "provenance"} for row in rows] == [
         {"content_id": ids[0], "error": "empty", "raw_output": "", "repetition_penalty": 1.0, "summary_model": "qwen"},
-        {"content_id": ids[2], "error": "max_tokens", "raw_output": "A truncated sentence", "repetition_penalty": 1.0, "summary_model": "qwen"},
+        {"content_id": ids[2], "error": "max_tokens", "raw_output": "", "repetition_penalty": 1.0, "summary_model": "qwen"},
     ]
     doc = read_json(directory / f"{ids[1]}.json")
     assert doc["status"] == "complete" and doc["word_count"] == 201
     assert doc["violations"] == [] and doc["correction_count"] == 0
     doc = read_json(directory / f"{ids[2]}.json")
-    assert doc["status"] == "raw_fallback" and doc["correction_count"] == 0
-    assert read_json(directory / f"{ids[0]}.json")["provenance"]["summary_fallback"] == "scene_observations"
+    assert doc["status"] == "failed" and doc["correction_count"] == 0
+    assert read_json(directory / f"{ids[0]}.json")["text"] == ""
     assert summarize(context, model="qwen", **options)["failure_count"] == 2
     assert calls == expected
     succeed = True

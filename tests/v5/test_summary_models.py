@@ -28,10 +28,11 @@ def test_summary_cli(v5_context, monkeypatch, representation, source, model):
                         lambda context, **kw: calls.append(kw))
     args = [f"summarize-{representation}", "--run-id", "run", "--schema",
             f"prompts/{representation}_summary_v4.md"]
-    assert main(args + ["--source", source]) == 1
+    arm = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
+    assert main(args + ["--arm", arm]) == 1
     assert main(args + ["--model", model]) == 1
-    assert main(args + ["--source", source, "--model", model]) == 0
-    assert calls[0]["source"] == source and calls[0]["model"] == model
+    assert main(args + ["--arm", arm, "--model", model]) == 0
+    assert calls[0]["arm"] == arm and calls[0]["model"] == model
 
 
 @pytest.fixture(params=[("graph", "qwen"), ("graph", "gemini"),
@@ -93,7 +94,7 @@ def test_gemini_text_only_and_reuse(case, monkeypatch):
     assert len(calls) == len(case.ids) and len(configs) == 1
 
 
-def test_failures_retry_and_block_embedding(case, monkeypatch):
+def test_failures_retry_and_preserve_empty_expressions(case, monkeypatch):
     calls = []
     fail = True
 
@@ -119,15 +120,16 @@ def test_failures_retry_and_block_embedding(case, monkeypatch):
         case.run()
     rows = read_jsonl(case.directory / "failures.jsonl")
     assert len(rows) == 3 and all(r["summary_model"] == "gemini" for r in rows)
-    assert all(not (case.directory / f"{cid}.json").exists() for cid in case.ids[:3])
+    assert all(read_json(case.directory / f"{cid}.json")["status"] == "failed"
+               for cid in case.ids[:3])
     # A source fallback exists, but must never hide a failed Gemini generation.
     if case.arm.model == "gemini":
         other = case.ctx.summary_dir(case.arm.representation, "qwen", "gemini")
         other.mkdir(parents=True)
         for cid in case.ids:
             atomic_write_json(other / f"{cid}.json", {"text": "must not be read"}, durable=False)
-    with pytest.raises(ValueError, match="unresolved Gemini summary"):
-        documents_for_arm(case.ctx, case.cohort, case.arm, summary_source="gemini")
+    docs = documents_for_arm(case.ctx, case.cohort, case.arm, summary_source="gemini")
+    assert all(d["text"] == "" and d["status"] == "failed" for d in docs[:3])
     before = {p: p.read_bytes() for p in case.directory.iterdir()}
     case.run(model="qwen")
     assert embed_representations(case.ctx, target=[case.arm.name], summary_source="qwen")
@@ -192,7 +194,7 @@ def test_models_coexist_interrupt_resume_and_embedding_selection(case, monkeypat
     assert saved_qwen == {p: p.read_bytes() for p in qwen_dir.glob("*.json")}
     interrupt = False
     case.run()
-    assert embed("qwen")["generated_arms"] == [case.arm.name]
+    assert embed("qwen")["reuse"]["shared"] == [case.arm.name]
     assert recommendation_identity(case.ctx, case.arm.name) == old_recommendation
 
 
@@ -238,36 +240,30 @@ def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: case.ctx)
     assert main([f"summarize-{case.arm.representation}", "--run-id", case.ctx.run_id,
-                 "--source", case.arm.model, "--model", "gemini", "--schema",
+                 "--arm", case.arm.name, "--model", "gemini", "--schema",
                  f"prompts/{case.arm.representation}_summary_v4.md"]) == 1
     assert len(read_jsonl(case.directory / "failures.jsonl")) == len(case.ids)
 
 
-@pytest.mark.parametrize("summary_source", ["qwen", "gemini"])
-def test_embedding_cli_requires_summary_source(v5_context, monkeypatch, summary_source):
+def test_embedding_cli_reads_model_from_arm_artifact(v5_context, monkeypatch):
     from validation.cli import main as validate
     from validation.steps import STEP_HANDLERS
-
     calls = []
     monkeypatch.setattr("validation.cli.RunContext.load", lambda _: v5_context)
-    monkeypatch.setitem(STEP_HANDLERS, "embed-representations",
-                        lambda context, **kwargs: calls.append(kwargs))
+    monkeypatch.setitem(STEP_HANDLERS, "embed-representations", lambda context, **kwargs: calls.append(kwargs))
     args = ["embed-representations", "--run-id", "run"]
-    assert validate(args) == 1
-    assert not calls
-    assert validate(args + ["--summary-source", summary_source]) == 0
-    assert calls == [{"force": False, "summary_source": summary_source}]
-    for step in ("run-recommendation", "run-diagnosis"):
-        assert validate([step, "--run-id", "run", "--summary-source", summary_source]) == 1
+    assert validate(args) == 0
+    assert calls == [{"force": False}]
     with pytest.raises(SystemExit):
-        validate(args + ["--summary-source", "other"])
+        validate(args + ["--summary-source", "qwen"])
 
 
 def test_embedding_does_not_fall_back_to_other_summary_model(case):
     case.run(model="qwen")
-    with pytest.raises(ValueError, match="intersection is empty"):
-        embed_representations(case.ctx, target=[case.arm.name], summary_source="gemini")
-    assert not (case.ctx.representations_dir / f"{case.arm.name}_embeddings.npz").exists()
+    embed_representations(case.ctx, target=[case.arm.name], summary_source="gemini")
+    import numpy as np
+    with np.load(case.ctx.representations_dir / f"{case.arm.name}_embeddings.npz") as data:
+        assert not data["values"].any()
 
 
 def test_selected_summary_provenance_and_staleness(case):
@@ -291,5 +287,5 @@ def test_selected_summary_provenance_and_staleness(case):
         verify_representations(case.ctx, case.cohort, arms=[case.arm.name])
     doc["provenance"]["summary_model"] = "qwen"
     atomic_write_json(gemini_path, doc, durable=False)
-    result = embed_representations(case.ctx, target=[case.arm.name], summary_source="gemini")
-    assert result["content_count"] == len(case.ids) - 1
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        embed_representations(case.ctx, target=[case.arm.name], summary_source="gemini")

@@ -40,6 +40,8 @@ possibly a casual greeting
 @pytest.fixture
 def v5_context(tmp_path):
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config["schema_version"] = "viewing-context-config/v5"
+    config["protocol"]["arms"] = ["desc_gemini", "desc_qwen", "graph_gemini", "graph_qwen", "metadata"]
     config["artifacts_root"] = "artifacts"
     config["data"].pop("titles_supplement_csv", None)
     for key in config["data"]:

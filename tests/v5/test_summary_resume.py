@@ -98,11 +98,11 @@ def test_mixed_legacy_terminal_and_pending_failures(summary_case, monkeypatch):
     monkeypatch.setattr(steps, "qwen_generator", generator)
     assert run()["content_count"] == len(ids)
     assert calls == [(ids[3], 1.0), (ids[2], 1.1)]
-    assert read_json(directory / f"{ids[0]}.json")["text"] == rows[0]["raw_output"]
+    assert read_json(directory / f"{ids[0]}.json")["text"] == ""
     fallback = read_json(directory / f"{ids[1]}.json")
-    assert fallback["text"].strip()
-    assert fallback["text"].startswith("English Title: (unavailable)\n\n")
-    assert fallback["provenance"]["summary_fallback"] == "scene_observations"
+    assert fallback["text"] == ""
+    assert fallback["status"] == "failed"
+    assert "prompt_hash" not in fallback["provenance"]
     assert read_jsonl(directory / "failures.jsonl") == rows[:2]
     assert len(documents()) == len(ids)
     assert run()["failure_count"] == 2
@@ -169,6 +169,12 @@ def test_invalid_scene_input_reports_error(summary_case, scene_state):
         scene_path.unlink()
     else:
         write_jsonl(scene_path, [] if scene_state == "empty" else [{"bad": "record"}])
-    with pytest.raises(ExtractionStepError, match="scene"):
+    if scene_state == "invalid":
+        with pytest.raises(ExtractionStepError, match="scene"):
+            run()
+        assert not (directory / f"{ids[0]}.json").exists()
+    else:
         run()
-    assert not (directory / f"{ids[0]}.json").exists()
+        doc = read_json(directory / f"{ids[0]}.json")
+        assert doc["status"] == "failed" and doc["text"] == ""
+        assert doc["scene_count"] == doc["word_count"] == 0

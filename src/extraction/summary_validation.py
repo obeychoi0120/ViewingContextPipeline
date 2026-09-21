@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-SUMMARY_SCHEMA_VERSION = "video-summary/v4"
+SUMMARY_SCHEMA_VERSION = "video-summary/v5"
 
 
 class SummaryContractError(ValueError):
