@@ -165,7 +165,7 @@ def test_metadata_recommendation_reuses_checkpoint_and_metrics(ready_context, fa
         assert run_rolling(second)['completed'] == 1
     finally:
         torch.set_num_threads(threads)
-    entries = list((first.run_root.parent.parent / 'shared_cache/v2/recommendations').glob('*/cache.json'))
+    entries = list((first.run_root.parent.parent / 'shared_cache/recommendations').glob('*/cache.json'))
     before = {p: p.read_bytes() for p in entries}
     calls = []
     with monkeypatch.context() as patch:

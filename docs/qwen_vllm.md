@@ -18,7 +18,7 @@ Qwen의 네 생성 단계는 `--gpus` 없이 `CUDA_VISIBLE_DEVICES`에서 보이
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m extraction extract-graph-scenes --model qwen --run-id "$RUN_ID" --schema prompts/scene_graph_v3.md --arm graph_qwen
-CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_qwen
+CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_qwen
 ```
 
 Qwen Graph와 Description은 영상 경계 없이 장면을 연속 공급합니다. 한 pass가 모두 끝나면 실패한 장면만 다음 repetition penalty로 재생성하고 같은 GPU 엔진을 재사용합니다. Gemini 추출도 영상 경계 없이 장면을 공급하며 `extraction.gemini.threads`로 전체 동시성을 제한하고 장면 완료 시 결과를 게시합니다. Vertex Gemini가 `429 RESOURCE_EXHAUSTED`를 반환하면 해당 요청만 30초 대기한 뒤 한 번 재시도합니다. 두 번째 429와 그 밖의 API 오류는 장면 실패로 기록합니다.

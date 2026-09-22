@@ -4,7 +4,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from arm_registry import generated_arm, resolve_generation_arm, legacy_layout
+from arm_registry import generated_arm, generation_registry, resolve_generation_arm, legacy_layout
 from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
@@ -259,6 +259,17 @@ def extract_description_scenes(context, *, model, schema, force=False, arm=None)
     )
 
 
+def summarize(context, *, model, schema, arm=None, force=False):
+    if arm is None:
+        raise ValueError("summarize requires --arm")
+    selected = generation_registry(context.config).get(arm)
+    # Keep source-arm validation (including metadata-concat hints) in _summarize.
+    representation = selected.representation if selected else None
+    return _summarize(
+        context, representation=representation, model=model, schema=schema, force=force, arm=arm
+    )
+
+
 def summarize_graph(context, *, model, schema, arm=None, source=None, force=False):
     return _summarize(
         context, representation="graph", source=source, model=model, schema=schema, force=force, arm=arm
@@ -277,6 +288,7 @@ STEP_HANDLERS = {
     "migrate-scene-schema": migrate_scene_schema,
     "extract-graph-scenes": extract_graph_scenes,
     "extract-description-scenes": extract_description_scenes,
+    "summarize": summarize,
     "summarize-graph": summarize_graph,
     "summarize-description": summarize_description,
 }

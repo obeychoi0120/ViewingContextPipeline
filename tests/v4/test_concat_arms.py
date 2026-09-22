@@ -248,19 +248,47 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(six, fake_models,
         torch.set_num_threads(previous)
 
 
-def test_cli_source_and_target_contract(six, fake_models, monkeypatch):
+@pytest.mark.parametrize('command', ['summarize', 'summarize-graph'])
+def test_cli_source_and_target_contract(six, fake_models, monkeypatch, command):
     from extraction.cli import main as extract
     from validation.cli import main as validate
     monkeypatch.setattr('extraction.cli.RunContext.load', lambda _: six)
     monkeypatch.setattr('validation.cli.RunContext.load', lambda _: six)
     assert extract(['extract-graph-scenes', '--run-id', 'new', '--model', 'gemini',
                     '--arm', 'graph_gemini', '--schema', 'prompts/scene_graph_v4.md']) == 0
-    assert extract(['summarize-graph', '--run-id', 'new', '--model', 'gemini',
+    assert extract([command, '--run-id', 'new', '--model', 'gemini',
                     '--arm', 'graph_gemini', '--schema', 'prompts/summary_graph_v5.md']) == 0
-    assert extract(['summarize-graph', '--run-id', 'new', '--model', 'gemini',
+    assert extract([command, '--run-id', 'new', '--model', 'gemini',
                     '--arm', 'graph_gemini_meta', '--schema', 'prompts/summary_graph_v5.md']) == 1
     assert validate(['embed-representations', '--run-id', 'new', '--target', 'graph_gemini']) == 1
     assert validate(['embed-representations', '--run-id', 'new', '--target', 'graph_gemini_meta']) == 0
+
+
+@pytest.mark.parametrize('arm', ['graph_qwen', 'desc_qwen', 'graph_gemini'])
+def test_unified_summary_reuses_alias_output(six, fake_models, arm):
+    source = generation_registry(six.config)[arm]
+    kind = source.representation
+    getattr(steps, f'extract_{kind}_scenes')(
+        six, arm=arm, model=source.model,
+        schema=f'prompts/scene_{kind}_v{4 if kind == "graph" else 2}.md')
+    kwargs = dict(arm=arm, model='gemini', schema=f'prompts/summary_{kind}_v5.md')
+    steps.summarize(six, **kwargs)
+    paths = list(six.summary_arm_dir(arm).glob('*.json'))
+    assert paths
+    assert all(read_json(path)['status'] == 'complete' for path in paths)
+    before = {path: path.read_bytes() for path in paths}
+    calls = len(fake_models)
+    getattr(steps, f'summarize_{kind}')(six, **kwargs)
+    steps.summarize(six, **kwargs)
+    assert len(fake_models) == calls
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+@pytest.mark.parametrize('arm', [None, 'meta', 'unknown', 'desc_qwen_meta'])
+def test_unified_summary_rejects_invalid_source(six, fake_models, arm):
+    with pytest.raises(ValueError):
+        steps.summarize(six, arm=arm, model='gemini', schema='prompts/summary_graph_v5.md')
+    assert not fake_models
 
 
 def test_v7_rejects_title_prompt_and_historical_migration(six, fake_models):

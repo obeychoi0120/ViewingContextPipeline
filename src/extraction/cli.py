@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         extract = args.step.startswith("extract-")
-        summary = args.step.startswith("summarize-")
+        summary = args.step == "summarize" or args.step.startswith("summarize-")
         if extract or summary:
             if args.schema is None:
                 raise ValueError(f"{args.step} requires --schema PATH.md")

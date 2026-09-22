@@ -59,9 +59,9 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prom
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v4.md --model qwen --arm graph_qwen
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v4.md --model gemini --arm graph_gemini
 
-python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model qwen --arm desc_qwen
-python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_qwen
-python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_gemini
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model qwen --arm desc_qwen
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_qwen
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_gemini
 
 python -m validation embed-representations --run-id "$RUN_ID"
 python -m validation run-recommendation --run-id "$RUN_ID"
@@ -80,7 +80,9 @@ python -m validation run-diagnosis --run-id "$RUN_ID"
 
 Validation은 결합 Arm의 원본 `summaries/{source}`를 읽고 실제 Summary 모델과 제목 미사용 provenance를 검증합니다. 제목을 넣어 생성한 과거 Summary는 새 결합 입력으로 사용하지 않습니다. `meta` 없이 부분 실행할 수 있으며, 선택하지 않은 소스는 요구하지 않습니다.
 
-Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용하며 `--gpus` 인자를 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --arm graph_gemini --model qwen --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md`는 두 GPU를 사용합니다. 환경 변수를 설정하지 않으면 CUDA에서 보이는 모든 GPU를 사용하고, 보이는 GPU가 없으면 오류를 냅니다. 추천도 보이는 GPU를 모두 사용하며 `--gpus`를 받지 않습니다. 기본 GPU당 한 작업을 실행하고 `--workers-per-gpu N`으로 GPU당 동시 작업 수를 조절합니다. 추천은 GPU가 없으면 기본 설정에서 CPU로 실행합니다. Gemini는 영상 구분 없이 scene 큐를 공유하며, 전체 장면 동시 실행 수는 `extraction.gemini.threads`입니다.
+요약은 `summarize --arm ...`으로 실행하며, arm에 따라 graph/description 입력 형식을 자동 선택합니다. 기존 `summarize-graph`, `summarize-description` 명령도 호환용으로 지원합니다. `--model`은 요약 모델, `--schema`는 요약 프롬프트를 지정합니다.
+
+Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용하며 `--gpus` 인자를 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize --arm graph_gemini --model qwen --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md`는 두 GPU를 사용합니다. 환경 변수를 설정하지 않으면 CUDA에서 보이는 모든 GPU를 사용하고, 보이는 GPU가 없으면 오류를 냅니다. 추천도 보이는 GPU를 모두 사용하며 `--gpus`를 받지 않습니다. 기본 GPU당 한 작업을 실행하고 `--workers-per-gpu N`으로 GPU당 동시 작업 수를 조절합니다. 추천은 GPU가 없으면 기본 설정에서 CPU로 실행합니다. Gemini는 영상 구분 없이 scene 큐를 공유하며, 전체 장면 동시 실행 수는 `extraction.gemini.threads`입니다.
 
 일부 Arm만 실행하는 예:
 
@@ -94,7 +96,7 @@ Validation은 preparation의 전체 catalog·item 순서·events·평가 구간�
 
 일부 Scene이 실패하면 성공 장면만 Summary에 사용합니다. 성공 장면이 없거나 Summary가 최종 실패하면 `status="failed", text="", word_count=0`을 저장합니다. 실패 로그의 새 `raw_output`은 빈 문자열입니다. 기존 `raw_fallback`은 빈 표현으로 읽고 기존 파일은 일괄 변경하지 않습니다. Summary 파일 부재는 `missing`, 손상·잘못된 Arm/모델 provenance는 오류입니다. 빈 표현은 인코더에 보내지 않고 영벡터로 유지하며 고유 item ID와 추천 후보 자격을 보존합니다.
 
-모든 Arm의 embedding과 완료된 추천 결과는 **현재 Run → 공유 캐시 → 새 계산** 순서로 처리합니다. 공유 캐시는 `<artifacts_root>/shared_cache/v2/{embeddings,recommendations}/`에 저장하며 다른 Run 지정이 필요 없습니다. Scene·Summary를 다른 Run에서 자동으로 가져오지는 않습니다. `--force`는 선택한 단계의 로컬·공유 읽기를 우회하고 기존 공유 엔트리를 덮어쓰지 않습니다.
+모든 Arm의 embedding과 완료된 추천 결과는 **현재 Run → 공유 캐시 → 새 계산** 순서로 처리합니다. 공유 캐시는 `<artifacts_root>/shared_cache/{embeddings,recommendations}/`에 저장하며 다른 Run 지정이 필요 없습니다. Scene·Summary를 다른 Run에서 자동으로 가져오지는 않습니다. `--force`는 선택한 단계의 로컬·공유 읽기를 우회하고 기존 공유 엔트리를 덮어쓰지 않습니다.
 
 공통 데이터 키는 순서가 있는 item/content 매핑·전체 events·평가 구간입니다. Embedding 키는 해당 Arm의 실제 입력 텍스트·빈 위치, 인코더/토크나이저 식별자·설정, 표현 계약과 생성 provenance입니다. 시각 표현의 두 프롬프트는 파일명이 아닌 본문 해시로 기록합니다. 과거 생성 결과에 현재 설정을 소급하지 않으며, 생성 provenance가 부족한 시각 산출물은 Run 내부에서만 사용할 수 있습니다. Metadata 제목·인코더가 같으면 시각 Arm의 변경과 무관하게 embedding을 재사용합니다.
 
@@ -141,7 +143,7 @@ python -m extraction.normalize_summary_arms --run-id "$RUN_ID"
 ```text
 artifacts/
 ├── preparation/{cohort,resized_keyframes,source_assets}/
-├── shared_cache/v2/{embeddings,recommendations}/
+├── shared_cache/{embeddings,recommendations}/
 └── runs/{RUN_ID}/
     ├── extraction/
     │   ├── scenes/{SCENE_ARM}/{content_id}.jsonl

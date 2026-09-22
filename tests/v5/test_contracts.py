@@ -13,6 +13,7 @@ from pipeline_runtime import ConfigError, RunContext
         ("extract-description-scenes", "--model"),
         ("summarize-graph", "--model"),
         ("summarize-description", "--model"),
+        ("summarize", "--model"),
     ],
 )
 @pytest.mark.parametrize("model", ["qwen", "gemini"])

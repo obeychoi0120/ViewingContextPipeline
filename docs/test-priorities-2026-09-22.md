@@ -538,4 +538,13 @@
 
 ## 검증 결과
 
-검증 진행 중. 완료 결과로 갱신한다.
+- 분류 문서의 198개 함수와 실행 시점 AST inventory가 1:1로 일치한다. 남은 함수 집합은 P0 182개와 정확히 일치한다.
+- 삭제 직전 작업 트리와 비교해 P0 본문·decorator 및 공용 helper/fixture의 원문이 동일하다. 제거된 함수의 전용 중첩 helper 외에 새로 미사용이 된 모듈 helper는 없다.
+- `python -m ruff check --config pyproject.toml src tests benchmarks`: 통과.
+- `git diff --check`: 통과.
+- `python -m pytest -q`: **457 passed, 1 failed** (488.05초). 총 458개 실행 사례이며 torch marker를 제외하지 않았다. CPU 및 자동 선택된 CUDA 장치의 실제 학습 검증을 포함한다.
+- 실패: `tests/v5/test_shared_cache.py::test_metadata_recommendation_reuses_checkpoint_and_metrics`, 153행. 원본 checkpoint의 CUDA 텐서와 캐시에서 복원된 CPU 텐서를 `torch.equal`로 직접 비교하여 장치 불일치 `RuntimeError`가 발생했다. `recommendation_cache.restore`는 `map_location='cpu'`로 읽어 저장한다. 이 테스트 파일과 캐시 구현은 삭제 직전 원문과 동일하다.
+- 실패 시 생성된 원본/복원 checkpoint 21쌍을 모두 `map_location='cpu'`로 읽어 비교한 결과 state_dict의 key 및 모든 tensor 값이 **21/21 일치**했다.
+- `CUDA_VISIBLE_DEVICES='' python -m pytest -q tests/v5/test_shared_cache.py::test_metadata_recommendation_reuses_checkpoint_and_metrics`: **1 passed** (58.29초). 동일 P0 테스트의 CPU 실행에서는 손상 cache 재계산 및 force의 공유 cache 보존까지 통과했다. 기본 GPU 환경의 실패를 통과로 간주하지 않으며, P0 보존 요청에 따라 해당 함수는 수정하지 않았다.
+- 변경 전 참고 실행은 도중에 외부 작업이 설정 계약과 fixture를 바꾸어 불안정한 결과가 되었으므로 중단했다. 해당 결과를 안정적인 전후 비교 기준으로 사용하지 않는다.
+- 실제 외부 Gemini API·Qwen 모델 추론은 fake backend로 대체하며, torch 테스트는 실제 소형 모델 학습을 실행한다.
