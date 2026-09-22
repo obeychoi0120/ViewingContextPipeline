@@ -1,0 +1,124 @@
+{
+  "environment": {
+    "python": "3.12.14 | packaged by Anaconda, Inc. | (main, Aug 27 2026, 14:46:43) [GCC 14.3.0]",
+    "torch": "2.13.0+cu129",
+    "cuda": "12.9",
+    "device": "cuda:0",
+    "gpu": "NVIDIA L4"
+  },
+  "settings": {
+    "device": "cuda:0",
+    "items": 19738,
+    "users": 64,
+    "history": 33,
+    "repeats": 3,
+    "output": "/tmp/rolling-optimization-benchmark.json"
+  },
+  "measurements": {
+    "reference": [
+      {
+        "preparation_seconds": 0.11187212402001023,
+        "training_seconds": 0.4033389709657058,
+        "validation_seconds": 0.40488008299143985,
+        "test_seconds": 0.39353704603854567,
+        "total_seconds": 1.3136282240157016,
+        "training_events_per_second": 5077.614977537424,
+        "peak_gpu_bytes": 523476992,
+        "loss": 106.92379093170166,
+        "validation_ndcg10": 0.0008961484014228193,
+        "event_count": 2048
+      },
+      {
+        "preparation_seconds": 0.11213265097467229,
+        "training_seconds": 0.4017696409719065,
+        "validation_seconds": 0.3863760240492411,
+        "test_seconds": 0.3751835459843278,
+        "total_seconds": 1.2754618619801477,
+        "training_events_per_second": 5097.448366297057,
+        "peak_gpu_bytes": 523397632,
+        "loss": 106.92379093170166,
+        "validation_ndcg10": 0.0008961484014228193,
+        "event_count": 2048
+      },
+      {
+        "preparation_seconds": 0.1117030069581233,
+        "training_seconds": 0.40289958100765944,
+        "validation_seconds": 0.3982618519803509,
+        "test_seconds": 0.390487730037421,
+        "total_seconds": 1.3033521699835546,
+        "training_events_per_second": 5083.152469103873,
+        "peak_gpu_bytes": 523476992,
+        "loss": 106.92379093170166,
+        "validation_ndcg10": 0.0008961484014228193,
+        "event_count": 2048
+      }
+    ],
+    "optimized": [
+      {
+        "preparation_seconds": 0.16753785201581195,
+        "training_seconds": 0.16060638095950708,
+        "validation_seconds": 0.1055858859908767,
+        "test_seconds": 0.11250473203836009,
+        "total_seconds": 0.5462348510045558,
+        "training_events_per_second": 12751.672678038567,
+        "peak_gpu_bytes": 523556864,
+        "loss": 106.92379093170166,
+        "validation_ndcg10": 0.0008961484014228193,
+        "event_count": 2048
+      },
+      {
+        "preparation_seconds": 0.1681384289986454,
+        "training_seconds": 0.16153458901681006,
+        "validation_seconds": 0.10488386597717181,
+        "test_seconds": 0.11045398301212117,
+        "total_seconds": 0.5450108670047484,
+        "training_events_per_second": 12678.3991742281,
+        "peak_gpu_bytes": 523477504,
+        "loss": 106.92379093170166,
+        "validation_ndcg10": 0.0008961484014228193,
+        "event_count": 2048
+      },
+      {
+        "preparation_seconds": 0.1677546090213582,
+        "training_seconds": 0.16060291801113635,
+        "validation_seconds": 0.10596912598703057,
+        "test_seconds": 0.11099810700397938,
+        "total_seconds": 0.5453247600235045,
+        "training_events_per_second": 12751.94763184807,
+        "peak_gpu_bytes": 523556864,
+        "loss": 106.92379093170166,
+        "validation_ndcg10": 0.0008961484014228193,
+        "event_count": 2048
+      }
+    ]
+  },
+  "median": {
+    "reference": {
+      "preparation_seconds": 0.11187212402001023,
+      "training_seconds": 0.40289958100765944,
+      "validation_seconds": 0.3982618519803509,
+      "test_seconds": 0.390487730037421,
+      "total_seconds": 1.3033521699835546,
+      "training_events_per_second": 5083.152469103873,
+      "peak_gpu_bytes": 523476992,
+      "loss": 106.92379093170166,
+      "validation_ndcg10": 0.0008961484014228193,
+      "event_count": 2048
+    },
+    "optimized": {
+      "preparation_seconds": 0.1677546090213582,
+      "training_seconds": 0.16060638095950708,
+      "validation_seconds": 0.1055858859908767,
+      "test_seconds": 0.11099810700397938,
+      "total_seconds": 0.5453247600235045,
+      "training_events_per_second": 12751.672678038567,
+      "peak_gpu_bytes": 523556864,
+      "loss": 106.92379093170166,
+      "validation_ndcg10": 0.0008961484014228193,
+      "event_count": 2048
+    }
+  },
+  "total_speedup": 2.3900476661418746,
+  "rank_parity": "exact",
+  "scope": "Synthetic full-width catalog, one epoch, no Run/cache/checkpoint writes; not full training"
+}

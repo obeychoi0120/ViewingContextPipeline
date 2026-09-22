@@ -115,6 +115,8 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
             a, b = (read_json(path / "training.json") for path in (parallel_dir, serial_dir))
             a.pop("elapsed_seconds")
             b.pop("elapsed_seconds")
+            a["execution"].pop("seconds")
+            b["execution"].pop("seconds")
             assert a == b
             a, b = (torch.load(path / "sasrec.pt", weights_only=True)["state_dict"]
                     for path in (parallel_dir, serial_dir))

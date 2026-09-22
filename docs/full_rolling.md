@@ -51,6 +51,67 @@ Qwen·Gemini는 영상 경계 없이 scene을 공급하고 장면별 결과를 �
 
 추천은 `recommendations/{date}/seed_{seed}/{arm}/`에 사건별 결과, 학습 이력, `sasrec.pt`를 저장한 뒤 `complete.json`을 마지막으로 게시합니다. 완료 검증에 실패한 조합만 재실행합니다. `training.json`에 전체 아이템 빈도 사전을 중복 저장하지 않으며 검증에 쓰는 사건별 `refit_item_frequency`는 유지합니다.
 
+## 추천 실행 최적화와 호환성
+
+`rolling-vectorized/v1`은 worker별 최근 10개 이력 배열 재사용, in-batch negative 마스크 벡터화,
+날짜별 selection/refit 인기도 로그 확률 재사용, GPU 전체 이력 마스킹·순위 계산,
+validation 전용 NDCG@10 경로를 사용합니다. 평가 시 GPU에서 CPU로 전달하는 것은 순위이며,
+최종 test에서는 기존 사건별 전체 지표를 생성합니다. 전체 과거 이력 마스킹과 정답 예외,
+동점에서 작은 item index 우선 규칙은 유지합니다. 영벡터 아이템도 같은 규칙을 따릅니다.
+
+배치·seed·FP32·optimizer·early stopping·refit 조건 및 추천 identity/계약 버전은 변경하지
+않았습니다. 기존 완료 조합은 로컬 → 공유 캐시 순서로 재사용하며 미완료 조합만 계산합니다.
+모든 조합이 재사용되면 새 이력 배열 준비나 GPU 초기화를 하지 않습니다. 준비 배열은
+프로세스 메모리에만 보관하며 영구 캐시를 만들지 않습니다. 719,405개 이벤트의 int64
+10열 이력 배열은 worker당 약 55 MiB입니다. `--target`, `--force`, GPU당 worker 수는 기존과 같습니다.
+
+새 `training.json`의 선택적 `execution`에는 구현 버전과 `seconds`의 `preparation`,
+`selection_training`, `validation`, `refit`, `test`를 기록합니다. preparation은 해당 조합에서
+발생한 이력 배열·인기도 텐서 준비 시간이며, 재사용 시 작아집니다. split 구성·모델 초기화·
+checkpoint 저장은 개별 단계 시간에 포함되지 않아 단계 시간 합계와 전체 시간이 다를 수
+있습니다. 이 실행 정보는 재사용 키에 들어가지 않으며 기존 완료 파일에 소급 추가하지 않습니다.
+
+회귀 기준은 loss `atol=1e-6, rtol=1e-5`, gradient 상대 L2 오차 `≤1e-4`, 모든 값의 유한성입니다.
+입력·마스크 및 동일 점수의 순위는 정확히 같아야 합니다. 학습 통합 검증에서는 `best_epoch`와
+optimizer 갱신 횟수를 동일하게 유지하며, 각 cutoff의 HR/NDCG 차이를 조합별 `≤0.0005`,
+조합별 절대 차이의 평균 `≤0.0001`로 제한합니다. validation 합산은 기존 Python `sum()`을
+유지합니다. 특히 Python 3.12에서는 반복 덧셈으로 바꾸어도 미세한 수치 차이가 날 수 있습니다.
+
+재현 명령은 아래와 같습니다. CUDA 테스트는 명시적으로 켜야 실행하며, 기본 테스트는 CPU를 사용합니다.
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 ROLLING_TEST_CUDA=1 \
+  python -m pytest -q tests/validation/test_rolling_execution.py
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0 \
+  python benchmarks/rolling_benchmark.py --device cuda:0 \
+  --output /tmp/rolling-optimization-benchmark.json
+```
+
+2026-09-22 NVIDIA L4, Torch 2.13.0+cu129, Python 3.12.14에서 워밍업 후 3회 중앙값을 측정했습니다.
+합성 catalog 19,738개, 학습·평가 각각 2,048개 이벤트, batch 256, 실제 모델 크기
+(1024차원 입력, 512차원 hidden, 2개 block)를 사용했습니다.
+
+| 측정 구간 | 기존 | 최적화 |
+| --- | ---: | ---: |
+| 준비 | 0.112초 | 0.168초 |
+| 1 epoch 학습 | 0.403초 | 0.161초 |
+| Validation | 0.398초 | 0.106초 |
+| Test 지표 생성 | 0.390초 | 0.111초 |
+| 준비 포함 합계 | 1.303초 | 0.545초 |
+| 학습 처리량 | 5,083 events/s | 12,752 events/s |
+| 최대 GPU allocated memory | 499.23 MiB | 499.30 MiB |
+
+이 조건에서 합계는 **2.39배**, 학습은 **2.51배** 빨라졌으며 loss·NDCG@10·사건별 순위는
+정확히 같았습니다. [원시 측정 결과](reports/rolling_optimization_20260922.json)에 환경과 반복별
+값을 보관했습니다. 모델 초기화·디스크 저장을 제외한 합성 데이터 kernel 측정이며,
+전체 데이터의 selection/refit 완료 시간이나 189개 조합 처리 속도를 보장하는 수치는 아닙니다.
+벤치마크는 실제 Run이나 공유 캐시를 열지 않습니다.
+
+전체 CPU 테스트 478개 및 CPU/CUDA 최적화 회귀 테스트 30개를 통과했습니다. 별도의 작은
+selection→refit→test fixture에서 meta·graph_qwen·graph_meta_qwen × seeds 42·43·44의 순위,
+best_epoch, optimizer 갱신 횟수가 일치했습니다. 실행 정보가 없는 변경 전 완료 bundle도
+바이트를 보존한 로컬 재개와 학습 없는 Run 간 공유 재사용을 확인했습니다.
+
 ## 환경 간 전달
 
 GPU와 Gemini 장비에서는 공유 `artifacts/preparation/cohort/`, `artifacts/preparation/resized_keyframes/`, `artifacts/preparation/source_assets/`를 배치하고 Gemini 결과를 `extraction/scenes/desc_gemini`와 `extraction/scenes/graph_gemini`로 돌려보냅니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
