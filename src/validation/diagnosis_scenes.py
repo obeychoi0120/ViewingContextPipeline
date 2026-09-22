@@ -18,8 +18,13 @@ from .diagnosis_support import (
 
 def scene_arms(config):
     from arm_registry import registry
-    return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
-                   f"extraction/{arm.representation}/{arm.model}/scenes/failures")
+    from arm_registry import legacy_layout
+    if legacy_layout(config):
+        return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
+                       f"extraction/{arm.representation}/{arm.model}/scenes/failures")
+                for name, arm in registry(config).items() if arm.model}
+    return {name: (f"extraction/scenes/{arm.scene_arm}",
+                   f"extraction/scenes/{arm.scene_arm}/failures")
             for name, arm in registry(config).items() if arm.model}
 
 
@@ -29,14 +34,14 @@ def _expected_scenes(
     errors: list[dict[str, Any]],
     scene_duration: int = 30,
     num_keyframes: int = 6,
+    *, source_assets_dir=None,
 ) -> tuple[set[tuple[str, int]], bool]:
     expected: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
     examples: list[dict[str, Any]] = []
     for content_id in content_ids:
         path = (
-            run_root.parent.parent
-            / "source_assets"
+            (source_assets_dir or run_root.parent.parent / "source_assets")
             / content_id
             / timestamp_filename(scene_duration, num_keyframes)
         )
@@ -124,10 +129,11 @@ def _success_scene_row_issues(
             invalid.append("invalid_graph_scene_fields")
         from extraction.structured_output import validate_graph_structure, OutputValidationError
         try:
-            validate_graph_structure(row.get("graph"))
+            if not (row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)):
+                validate_graph_structure(row.get("graph"))
         except OutputValidationError:
             invalid.append("invalid_graph")
-        if row.get("parse_mode") not in {"native", "repaired", "unknown"}:
+        if row.get("parse_mode") not in {"native", "repaired", "unknown", "text"}:
             invalid.append("invalid_parse_mode")
         if not isinstance(row.get("semantic_warnings"), list):
             invalid.append("invalid_semantic_warnings")
@@ -159,6 +165,7 @@ def _scene_arm_contract(
     expected: set[tuple[str, int]],
     errors: list[dict[str, Any]],
     paths,
+    *, excluded_content_ids=(),
 ) -> tuple[dict[str, Any], set[tuple[str, int]], bool]:
     scene_relative, failure_relative = paths[arm]
     scene_dir = run_root / scene_relative
@@ -178,13 +185,16 @@ def _scene_arm_contract(
     else:
         issues["missing_scene_directory"] += 1
         examples.append({"path": str(scene_dir)})
-    extra_scene_files = sorted(existing_scene_files - catalog_contents)
+    excluded_contents = set(excluded_content_ids)
+    extra_scene_files = sorted(existing_scene_files - catalog_contents - excluded_contents)
     if extra_scene_files:
         issues["extra_scene_files"] += len(extra_scene_files)
         examples.extend({"content_id": value} for value in _bounded_examples(extra_scene_files))
 
     failures_by_content = {}
     for failure_path in sorted(failure_dir.glob("*.jsonl")):
+        if failure_path.stem in excluded_contents:
+            continue
         rows, failure_loaded = _read_jsonl(
             failure_path, f"{arm} failure outcomes", errors, report_error=False,
         )
@@ -192,7 +202,7 @@ def _scene_arm_contract(
             issues["invalid_failure_file"] += 1
         for row in rows:
             cid = row.get("content_id")
-            if (set(row) != {"content_id", "scene_idx", "error", "raw_output"}
+            if (set(row) - {"provenance"} != {"content_id", "scene_idx", "error", "raw_output"}
                     or not isinstance(row.get("error"), str) or not row["error"].strip()
                     or not isinstance(row.get("raw_output"), str)):
                 issues["invalid_failure_fields"] += 1
@@ -335,9 +345,12 @@ def _scene_coverage(
     settings,
     decision_config_valid,
     runtime_paths_valid,
-    *, branches=None, config=None,
+    *, branches=None, config=None, excluded_content_ids=(), source_assets_dir=None, informational=False,
 ):
     from validation.recommendation_contracts import DEFAULT_PROTOCOL
+    original_errors = errors
+    if informational:
+        errors = []
     paths = scene_arms(config or DEFAULT_PROTOCOL)
     selected = [arm for arm in paths if branches is None or arm in branches]
     if not selected:
@@ -348,13 +361,15 @@ def _scene_coverage(
         errors,
         scene_duration,
         config["extraction"]["visual_evidence"]["num_keyframes"] if config else 6,
+        source_assets_dir=source_assets_dir,
     )
     scene_documents: dict[str, Any] = {}
     successful_scenes: dict[str, set[tuple[str, int]]] = {}
     scene_arm_valid: dict[str, bool] = {}
     for arm in selected:
         document, success, valid = _scene_arm_contract(
-            arm, run_root, content_ids, expected_scenes, errors, paths
+            arm, run_root, content_ids, expected_scenes, errors, paths,
+            excluded_content_ids=excluded_content_ids,
         )
         scene_documents[arm] = document
         successful_scenes[arm] = success
@@ -372,7 +387,7 @@ def _scene_coverage(
         and scene_denominator_valid
         and observed_gap <= float(settings["max_arm_coverage_gap"])
     )
-    if not minimum_scene_coverage_met:
+    if not minimum_scene_coverage_met and not informational:
         _error(
             errors,
             "minimum_scene_coverage_not_met",
@@ -380,7 +395,7 @@ def _scene_coverage(
             minimum=settings.get("min_scene_coverage"),
             observed={arm: value["success_coverage"] for arm, value in scene_documents.items()},
         )
-    if not coverage_gap_within_limit:
+    if not coverage_gap_within_limit and not informational:
         _error(
             errors,
             "arm_scene_coverage_gap_exceeded",
@@ -406,6 +421,12 @@ def _scene_coverage(
         "arms": scene_documents,
     }
 
+    if informational:
+        scene_coverage["informational_errors"] = errors
+        for error in errors:
+            issues = error.get("issue_counts", {})
+            if error.get("code") == "invalid_scene_outcomes" and set(issues) - {"missing_scene_outcome", "missing_scene_directory"}:
+                original_errors.append(error)
     return (
         scene_coverage,
         scene_outcomes_complete,

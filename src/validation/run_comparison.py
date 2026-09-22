@@ -5,7 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from extraction.recovery import fingerprint
-from pipeline_runtime import RunContext, read_jsonl
+from pipeline_runtime import RunContext
+from validation.selection import load_validation_cohort
 from validation.representation_provenance import read_state
 
 
@@ -16,15 +17,19 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     if reference_run_id == context.run_id:
         raise ValueError("comparison requires two different run IDs")
     reference = RunContext.load(reference_run_id, root=context.root)
-    names = [name for name in ("graph_gemini", "graph_qwen") if target is None or name in target]
+    from validation.selection import diagnosis_context
+    if hasattr(context, "run_root"):
+        context = diagnosis_context(context)
+        reference = diagnosis_context(reference)
+    from arm_registry import registry
+    names = [name for name, arm in registry(context.config).items()
+             if arm.representation == "graph" and (target is None or name in target)]
     if not names:
         raise ValueError("run comparison requires at least one Graph target")
     arms = {name: name for name in names}
-    cohorts = [ctx.require_ready_cohort() for ctx in (context, reference)]
-    for filename in ("events.jsonl", "catalog.jsonl"):
-        if fingerprint(read_jsonl(context.cohort_dir / filename)) != fingerprint(
-            read_jsonl(reference.cohort_dir / filename)
-        ):
+    cohorts = [load_validation_cohort(ctx) for ctx in (context, reference)]
+    for filename in ("events", "catalog"):
+        if fingerprint(cohorts[0][filename]) != fingerprint(cohorts[1][filename]):
             raise ValueError(f"run comparison requires identical {filename}")
     if cohorts[0]["plan"]["splits"] != cohorts[1]["plan"]["splits"]:
         raise ValueError("run comparison requires identical evaluation dates")
@@ -45,7 +50,8 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         left - right, counts, samples=configs[0].evaluation.bootstrap_samples
     )
     # Two prespecified model comparisons, even when only one model is selected.
-    alpha = configs[0].evaluation.familywise_alpha / 2
+    alpha = configs[0].evaluation.familywise_alpha / len([a for a in registry(context.config).values()
+                                                         if a.representation == "graph"])
     intervals = np.quantile(draws, [alpha / 2, 1 - alpha / 2], axis=0)
     results = {
         name: {
@@ -56,16 +62,21 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         }
         for i, name in enumerate(names)
     }
-    interaction = None
-    if len(names) == 2:
-        lo, hi = np.quantile(draws[:, 0] - draws[:, 1], [0.025, 0.975])
-        interaction = {
-            "role": "exploratory",
-            "difference": float(observed[0] - observed[1]),
-            "ci_low": float(lo),
-            "ci_high": float(hi),
-            "confidence_level": 0.95,
+    from arm_registry import legacy_layout
+    old = legacy_layout(context.config)
+    interactions = {}
+    for title in ((True,) if old else (False, True)):
+        pair = {arm.model: name for name, arm in registry(context.config).items()
+                if arm.representation == "graph" and arm.uses_title == title and name in names}
+        if set(pair) != {"qwen", "gemini"}:
+            continue
+        g, q = names.index(pair["gemini"]), names.index(pair["qwen"])
+        lo, hi = np.quantile(draws[:, g] - draws[:, q], [0.025, 0.975])
+        interactions["meta" if title else "no_meta"] = {
+            "role": "exploratory", "difference": float(observed[g] - observed[q]),
+            "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
         }
+    interaction = interactions.get("meta") if old else None
     return {
         "run_id": context.run_id,
         "reference_run_id": reference.run_id,
@@ -73,9 +84,10 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         "metric": "NDCG@10",
         "bootstrap": bootstrap,
         "correction": "bonferroni",
-        "family_size": 2,
+        "family_size": len([a for a in registry(context.config).values() if a.representation == "graph"]),
         "comparisons": results,
         "model_interaction": interaction,
+        **({"model_interactions": interactions} if not old else {}),
         "interpretation": "Includes differences in extraction, summary prompts, models and fallback; inspect provenance.",
         "sources": {
             ctx.run_id: {name: read_state(ctx, name).get("sources", []) for name in names}

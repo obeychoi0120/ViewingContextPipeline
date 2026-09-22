@@ -16,7 +16,8 @@ def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypat
     images = {p: p.read_bytes() for p in first.keyframes_dir.rglob("*.png")}
     stamps = {p: p.stat().st_mtime_ns for p in images}
     second = RunContext.load("second", root=first.root)
-    prepare_cohort_step(second)
+    assert second.cohort_dir == first.cohort_dir
+    assert second.require_ready_cohort() == first.require_ready_cohort()
     assert not list(second.cohort_dir.rglob("timestamp_fixed*.json"))
     monkeypatch.setattr(
         "extraction.data_preparation.video_processor.subprocess.run",

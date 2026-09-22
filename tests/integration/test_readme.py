@@ -10,6 +10,10 @@ COMMANDS = [line for line in README.splitlines() if line.startswith(("python -m 
 
 @pytest.mark.parametrize("command", COMMANDS)
 def test_documented_commands_dispatch(v5_context, monkeypatch, command):
+    from arm_registry import registry
+    v5_context.config["schema_version"] = "viewing-context-config/v6"
+    v5_context.config["protocol"]["arms"] = ["meta"]
+    v5_context.config["protocol"]["arms"] = list(registry(v5_context.config))
     module = f"{shlex.split(command)[2]}.cli"
     cli = __import__(module, fromlist=["STEP_HANDLERS"])
     args = shlex.split(command.replace("$RUN_ID", v5_context.run_id))[3:]

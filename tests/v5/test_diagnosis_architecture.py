@@ -1,13 +1,13 @@
 import numpy as np
 import pytest
 
-from extraction.recovery import fingerprint
+from validation.selection import prepare_validation_cohort, training_signature
 from pipeline_runtime import read_json, write_json, write_jsonl
 from validation.metrics import metrics_from_rank
 from validation.representation_provenance import state_path
 from validation.rolling_data import EventTable, iter_jsonl
 from validation.rolling_diagnosis import collect_metrics, diagnose, diagnosis_training
-from validation.rolling_recommendation import SCHEMA, combination_complete, combination_dir, phase_ids
+from validation.rolling_recommendation import LEGACY_SCHEMA as SCHEMA, combination_complete, combination_dir, phase_ids
 from validation.steps import validation_config
 
 
@@ -15,10 +15,10 @@ from validation.steps import validation_config
 def historical_results(ready_context, monkeypatch):
     context = ready_context
     config = validation_config(context)
-    cohort = context.require_ready_cohort()
-    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
-    signature = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
-                             "cutoffs": config.evaluation.cutoffs})
+    context.config["protocol"]["arms"] = ["metadata"]
+    cohort = prepare_validation_cohort(context, "qwen")
+    table = EventTable(cohort["events"])
+    signature = training_signature(context, cohort, config)
     write_json(state_path(context, "metadata"), {"recommendation_hash": "embedding"})
     monkeypatch.setattr("validation.rolling_diagnosis.verify_representations", lambda *a, **k: None)
     monkeypatch.setattr("validation.metadata.verify_missing_metadata", lambda *a: {})
@@ -77,9 +77,7 @@ def test_historical_diagnosis_and_strict_current_resume(historical_results, vers
     assert report["recommendations"]["means"]["metadata"]["NDCG@10"] == 1
     for directory, before in zip(directories, original, strict=True):
         complete = read_json(directory / "complete.json")
-        assert combination_complete(directory, complete["identity"], complete["event_count"]) == (
-            version == "sasrec-content-v3"
-        )
+        assert combination_complete(directory, complete["identity"], complete["event_count"]) is False
         assert (directory / "training.json").read_bytes() == before
 
 

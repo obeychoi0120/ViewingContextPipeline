@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from pipeline_runtime import write_jsonl
+from pipeline_runtime import write_jsonl, read_jsonl
 from validation.run_comparison import compare_graph_runs
 
 
@@ -17,6 +17,7 @@ def paired_runs(tmp_path, monkeypatch):
             write_jsonl(directory / filename, [{"id": 1}, {"id": 2}])
         contexts.append(
             SimpleNamespace(
+                config={"protocol": {"arms": ["metadata", "graph_qwen", "graph_gemini"]}},
                 root=tmp_path,
                 run_id=name,
                 cohort_dir=directory,
@@ -33,6 +34,11 @@ def paired_runs(tmp_path, monkeypatch):
             evaluation=SimpleNamespace(bootstrap_samples=1000, familywise_alpha=0.05)
         ),
     )
+    monkeypatch.setattr("validation.run_comparison.load_validation_cohort", lambda ctx: {
+        **ctx.require_ready_cohort(),
+        "events": read_jsonl(ctx.cohort_dir / "events.jsonl"),
+        "catalog": read_jsonl(ctx.cohort_dir / "catalog.jsonl"),
+    })
     reports = {}
     for ctx in contexts:
         reports[ctx.run_id] = {

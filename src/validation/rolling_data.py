@@ -151,7 +151,6 @@ def prepare_full_cohort(context, *, plan_only=False):
         "schema_version": SCHEMA,
         "metadata_missing_policy": settings["metadata_missing_policy"],
         "pipeline_schema": context.config["schema_version"],
-        "run_id": context.run_id,
         **observed,
         "duplicate_rows_preserved": duplicates,
         "no_history_count": int(np.count_nonzero(table.history_ends == 0)),
@@ -166,6 +165,8 @@ def prepare_full_cohort(context, *, plan_only=False):
     plan["eligible_test_count"] = sum(s["phases"]["test"]["eligible_count"] for s in plan["splits"])
     if any(p["eligible_count"] == 0 for s in plan["splits"] for p in s["phases"].values()):
         raise ValueError("rolling partition has no eligible events")
+    # Invalidate the shared ready marker before replacing any cohort files.
+    write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
     write_jsonl(directory / "events.jsonl", table.rows)
     required = [{"item_id": item, "content_id": content_id_for_item(item)} for item in table.items]
     write_jsonl(directory / "required_items.jsonl", required)
@@ -187,7 +188,6 @@ def prepare_full_cohort(context, *, plan_only=False):
     if plan_only:
         print(f"[COHORT] Plan saved: {directory} (plan-only complete)", flush=True)
         return result
-    write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
     print(f"[COHORT] Checking {len(table.items)} video files (existence, size, duplicates)...", flush=True)
     inventory, failures = build_item_inventory(
         set(table.items), context.path("data", "videos_dir"), probe=None,
@@ -259,7 +259,6 @@ def prepare_full_cohort(context, *, plan_only=False):
         {
             "schema_version": SCHEMA,
             "status": "ready",
-            "run_id": context.run_id,
         },
     )
     print(
@@ -269,13 +268,12 @@ def prepare_full_cohort(context, *, plan_only=False):
     return {**result, "status": "ready"}
 
 
-def load_cohort(directory, run_id):
+def load_cohort(directory):
     eligibility = read_json(directory / "eligibility.json")
     if (
         eligibility.get("schema_version"),
         eligibility.get("status"),
-        eligibility.get("run_id"),
-    ) != (SCHEMA, "ready", run_id):
+    ) != (SCHEMA, "ready"):
         raise RuntimeError("full rolling cohort is not ready")
     cohort = {
         "eligibility": eligibility,

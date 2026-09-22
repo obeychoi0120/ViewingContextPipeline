@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -68,8 +69,6 @@ def test_explicit_empty_sections(marker):
 
 
 @pytest.mark.parametrize("text", [
-    TEXT.replace("[End]", ""),
-    TEXT.replace("[Context]\nA blue-green, softly lit room.\n", ""),
     TEXT.replace("[Relations]", "[Entities]"),
     TEXT.replace("[Context]", "[context]\n[Context]"),
     TEXT + "\n[Entities]\nnone",
@@ -117,3 +116,83 @@ def test_complete_json_remains_supported(fenced):
     result = parse_or_repair_graph(text)
     assert result.graph == GRAPH
     assert result.parse_mode == ("repaired" if fenced else "native")
+
+
+@pytest.mark.parametrize("form", ["native", "repaired", "json"])
+def test_graph_without_context(form):
+    graph = {key: value for key, value in GRAPH.items() if key != "context"}
+    text = TEXT.replace("[Context]\nA blue-green, softly lit room.\n", "")
+    if form == "repaired":
+        text = text.replace("[Relations]", "Relations:").replace(" -> ", " → ")
+    elif form == "json":
+        text = json.dumps(graph)
+    result = parse_or_repair_graph(text)
+    assert result.graph == graph
+    assert result.parse_mode == ("repaired" if form == "repaired" else "native")
+    validate_graph_structure(result.graph)
+
+
+def test_v4_example_passes_scene_validation_and_summary():
+    from extraction.scene_executor import graph_scene_result
+    from extraction.semantic_graph import graph_summary_prompt
+    from extraction.step_support import minimal_graph_records
+
+    root = Path(__file__).resolve().parents[3]
+    prompt = (root / "prompts/graph_scene_v4.md").read_text()
+    example = prompt.split("[Example]", 1)[1]
+    example = example[example.index("[Entities]"):]
+    assert "context" not in prompt.lower()
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, example)
+    assert failure is None
+    assert "context" not in record["graph"]
+    assert record["semantic_warnings"] == []
+    records = minimal_graph_records([record], Path("video.jsonl"))
+    observations = json.loads(graph_summary_prompt("{scenes}", records))
+    assert observations[0]["observation"] == record["graph"]
+
+
+@pytest.mark.parametrize("text", [
+    "[Entities]\nnone\n[End]",
+    "[Entities]\nnone\n[Relations]\nnone\n[Relations]\nnone\n[End]",
+    "[Entities]\nnone\n[Relations]\nnone\n[End]\nextra",
+])
+def test_contextless_graph_still_requires_complete_ordered_sections(text):
+    assert parse_or_repair_graph(text).graph is None
+
+
+def test_empty_contextless_graph_and_invalid_legacy_context():
+    from extraction.structured_output import GRAPH_JSON_SCHEMA, OutputValidationError
+
+    result = parse_or_repair_graph("[Entities]\nnone\n[Relations]\nnone\n[End]")
+    assert result.graph == {"entities": [], "relations": []}
+    validate_graph_structure(result.graph)
+    assert "context" not in GRAPH_JSON_SCHEMA["properties"]
+    with pytest.raises(OutputValidationError):
+        validate_graph_structure({**result.graph, "context": "invalid"})
+
+
+@pytest.mark.parametrize('legacy_context', [False, True])
+def test_missing_end_is_accepted_without_inventing_context(legacy_context):
+    text = '[Entities]\nperson1: person; blue hair\n[Relations]\nnone'
+    if legacy_context:
+        text += '\n[Context]\nA room.'
+    result = parse_or_repair_graph(text)
+    assert result.error is None
+    assert result.graph['entities'][0]['id'] == 'person1'
+    assert result.graph['relations'] == []
+    assert ('context' in result.graph) == legacy_context
+    validate_graph_structure(result.graph)
+
+
+@pytest.mark.parametrize('text, missing', [
+    ('', None),
+    ('[Entities]\nnone', 'Relations'),
+    ('[Entities]\nnone\n[Context]\nnone\n[End]', None),
+])
+def test_optional_context_does_not_replace_required_sections(text, missing):
+    result = parse_or_repair_graph(text)
+    assert result.graph is None
+    if missing:
+        assert f'missing [{missing}]' in result.error
+    else:
+        assert result.error

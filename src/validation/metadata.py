@@ -23,7 +23,9 @@ def missing_metadata_report(titles):
 
 def verify_missing_metadata(context, cohort):
     expected = missing_metadata_report(cohort["metadata_titles"])
-    with np.load(context.representations_dir / "metadata_embeddings.npz") as data:
+    from arm_registry import legacy_layout
+    name = "metadata" if legacy_layout(context.config) else "meta"
+    with np.load(context.representations_dir / f"{name}_embeddings.npz") as data:
         values = data["values"]
         if values.shape != (
             len(cohort["catalog"]),

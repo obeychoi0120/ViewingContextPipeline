@@ -1,0 +1,2453 @@
+{
+  "description_qwen": {
+    "counts": {
+      "scene_files": 100,
+      "scene_records": 563,
+      "scene_records_with_provenance": 0,
+      "summary_files": 100,
+      "summary_status_complete": 100,
+      "summary_prompt_hash_match": 100,
+      "summary_input_hash_match": 100,
+      "summary_over_150_words": 0,
+      "summary_under_100_words": 13,
+      "description_over_350_words": 17,
+      "description_under_200_words": 229
+    },
+    "summary_words": {
+      "n": 100,
+      "min": 73,
+      "median": 112.0,
+      "mean": 112.17,
+      "max": 136
+    },
+    "scene_words": {
+      "n": 563,
+      "min": 101,
+      "median": 210,
+      "mean": 219.77,
+      "max": 551
+    },
+    "entities_per_graph": {
+      "n": 0
+    },
+    "relations_per_graph": {
+      "n": 0
+    },
+    "structural_details": []
+  },
+  "description_gemini": {
+    "counts": {
+      "scene_files": 100,
+      "scene_records": 560,
+      "scene_records_with_provenance": 0,
+      "summary_files": 100,
+      "summary_status_complete": 100,
+      "summary_prompt_hash_match": 100,
+      "summary_input_hash_match": 100,
+      "summary_over_150_words": 0,
+      "summary_under_100_words": 2,
+      "description_over_350_words": 0,
+      "description_under_200_words": 355
+    },
+    "summary_words": {
+      "n": 100,
+      "min": 90,
+      "median": 117.5,
+      "mean": 117.05,
+      "max": 134
+    },
+    "scene_words": {
+      "n": 560,
+      "min": 96,
+      "median": 192.0,
+      "mean": 190.15,
+      "max": 246
+    },
+    "entities_per_graph": {
+      "n": 0
+    },
+    "relations_per_graph": {
+      "n": 0
+    },
+    "structural_details": []
+  },
+  "graph_qwen": {
+    "counts": {
+      "scene_files": 100,
+      "scene_records": 563,
+      "scene_records_with_provenance": 0,
+      "summary_files": 100,
+      "summary_status_complete": 100,
+      "summary_prompt_hash_match": 100,
+      "summary_input_hash_match": 100,
+      "summary_over_150_words": 0,
+      "summary_under_100_words": 45,
+      "graph_records_with_context": 0,
+      "graph_over_4_entities": 171,
+      "graph_exactly_4_entities": 355,
+      "graph_over_4_relations": 169,
+      "graph_unresolved_reference_records": 113,
+      "graph_entities": 2635,
+      "graph_relations": 2681,
+      "graph_entities_over_3_attributes": 0,
+      "graph_self_relation_records": 4,
+      "raw_graph_records": 9,
+      "graph_duplicate_id_records": 1
+    },
+    "summary_words": {
+      "n": 100,
+      "min": 33,
+      "median": 101.0,
+      "mean": 96.61,
+      "max": 133
+    },
+    "scene_words": {
+      "n": 0
+    },
+    "entities_per_graph": {
+      "n": 554,
+      "min": 2,
+      "median": 4.0,
+      "mean": 4.76,
+      "max": 40
+    },
+    "relations_per_graph": {
+      "n": 554,
+      "min": 1,
+      "median": 4.0,
+      "mean": 4.84,
+      "max": 39
+    },
+    "structural_details": [
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cart",
+            "predicate": "pushing",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "cart",
+            "predicate": "pushing",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "ground",
+            "predicate": "placed on",
+            "subject_id": "speaker"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 7,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "device",
+            "predicate": "using",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 8,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 9,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bench",
+            "predicate": "sitting on",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 11,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cart",
+            "predicate": "pulling",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 13,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "trumpet",
+            "predicate": "playing",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00099",
+        "scene_idx": 23,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "camera",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00270",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00270",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "wall",
+            "predicate": "pointing at",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00270",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "dough",
+            "predicate": "kneading",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "dough",
+            "predicate": "cutting",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "dough",
+            "predicate": "shaping",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00270",
+        "scene_idx": 6,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "food",
+            "predicate": "cutting",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "food",
+            "predicate": "cutting",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "food",
+            "predicate": "cutting",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "food",
+            "predicate": "cutting",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_00665",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "drinking",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "table",
+            "predicate": "lying",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "light",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "light",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_01339",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bed",
+            "predicate": "lying on",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "table",
+            "predicate": "standing beside",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_01491",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "glasses",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "tie",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "glasses",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "glasses",
+            "predicate": "holding",
+            "subject_id": "person5"
+          },
+          {
+            "object_id": "tie",
+            "predicate": "holding",
+            "subject_id": "person6"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_01492",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "eating",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "cup1",
+            "predicate": "eating",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "neck",
+            "predicate": "touching",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_01492",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "toilet",
+            "predicate": "sitting on",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_01492",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "chair",
+            "predicate": "sitting on",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_01492",
+        "scene_idx": 4,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "bathtub",
+            "predicate": "in",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_02276",
+        "scene_idx": 2,
+        "issue": "self_relation",
+        "relations": [
+          {
+            "object_id": "ship1",
+            "predicate": "docked",
+            "subject_id": "ship1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_02276",
+        "scene_idx": 7,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "sea",
+            "predicate": "moving",
+            "subject_id": "ship1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_02549",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "weapon",
+            "predicate": "using",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "weapon",
+            "predicate": "using",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "weapon",
+            "predicate": "using",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "weapon",
+            "predicate": "using",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_02549",
+        "scene_idx": 11,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "item1",
+            "predicate": "picking up",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "item2",
+            "predicate": "picking up",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "item3",
+            "predicate": "picking up",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "item4",
+            "predicate": "picking up",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_02549",
+        "scene_idx": 13,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "backpack",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "backpack",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04111",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person5"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person6"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person7"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person8"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04380",
+        "scene_idx": 4,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "cup2",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "cup3",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "cup4",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "cup5",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04380",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "object",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04444",
+        "scene_idx": 3,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_04444",
+        "scene_idx": 4,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "flag",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "passing",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person5"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person6"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person7"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person8"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person9"
+          },
+          {
+            "object_id": "ball",
+            "predicate": "defending",
+            "subject_id": "person10"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04444",
+        "scene_idx": 7,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "goal",
+            "predicate": "running towards",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04525",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "car",
+            "predicate": "entering",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_04974",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "cup2",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "cup3",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "cup4",
+            "predicate": "holding",
+            "subject_id": "person5"
+          },
+          {
+            "object_id": "cup5",
+            "predicate": "holding",
+            "subject_id": "person6"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_05083",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "AWM",
+            "predicate": "using",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_05172",
+        "scene_idx": 1,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_05584",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "arms",
+            "predicate": "raising",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "arms",
+            "predicate": "raising",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "arms",
+            "predicate": "raising",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_05584",
+        "scene_idx": 2,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_05584",
+        "scene_idx": 4,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_05947",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "headpiece",
+            "predicate": "adjusting",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "drum",
+            "predicate": "playing instrument",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06050",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06050",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06171",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person7"
+          },
+          {
+            "object_id": "floor",
+            "predicate": "sitting",
+            "subject_id": "person9"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person10"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06171",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06171",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06171",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06241",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "pen3",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06492",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "sword",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "sword",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "sword",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "sword",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "sword",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_06508",
+        "scene_idx": 4,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "building",
+            "predicate": "growing on",
+            "subject_id": "plant1"
+          },
+          {
+            "object_id": "ground",
+            "predicate": "on",
+            "subject_id": "plant2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_07613",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "paper",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_07613",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "paper",
+            "predicate": "touching",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "floor",
+            "predicate": "falling",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "door",
+            "predicate": "looking at",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "paper",
+            "predicate": "carrying",
+            "subject_id": "dog1"
+          },
+          {
+            "object_id": "paper",
+            "predicate": "carrying",
+            "subject_id": "dog2"
+          },
+          {
+            "object_id": "paper",
+            "predicate": "carrying",
+            "subject_id": "dog3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_07613",
+        "scene_idx": 3,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_08672",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08672",
+        "scene_idx": 0,
+        "issue": "self_relation",
+        "relations": [
+          {
+            "object_id": "person1",
+            "predicate": "pointing",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08672",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "veil",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08672",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "boat",
+            "predicate": "lying",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08672",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "leaves",
+            "predicate": "touching",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08733",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "child",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "child",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08733",
+        "scene_idx": 4,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bed",
+            "predicate": "sitting on",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_08733",
+        "scene_idx": 8,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "camera",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_09060",
+        "scene_idx": 5,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_09060",
+        "scene_idx": 9,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "fan",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "fan",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_09361",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "papers",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "papers",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "fan",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_09383",
+        "scene_idx": 4,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_09383",
+        "scene_idx": 7,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_09398",
+        "scene_idx": 4,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_10438",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "pot",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10438",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "hand1"
+          },
+          {
+            "object_id": "food",
+            "predicate": "cooking",
+            "subject_id": "wok"
+          },
+          {
+            "object_id": "food",
+            "predicate": "stirring",
+            "subject_id": "chopsticks"
+          },
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "plate"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10438",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "cup2",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10707",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bird",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10707",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "gun",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10718",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "podium",
+            "predicate": "standing at",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "notebook",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10718",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "floor",
+            "predicate": "sitting on",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "desk",
+            "predicate": "sitting at",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_10718",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bed",
+            "predicate": "sitting",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "classroom",
+            "predicate": "standing",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "classroom",
+            "predicate": "standing",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "bicycle",
+            "predicate": "riding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "classroom",
+            "predicate": "standing",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_11314",
+        "scene_idx": 0,
+        "issue": "self_relation",
+        "relations": [
+          {
+            "object_id": "fish1",
+            "predicate": "being grilled",
+            "subject_id": "fish1"
+          },
+          {
+            "object_id": "flatbread1",
+            "predicate": "being cut",
+            "subject_id": "flatbread1"
+          },
+          {
+            "object_id": "mushroom1",
+            "predicate": "being served with",
+            "subject_id": "mushroom1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_11409",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "hammer",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_11724",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "card",
+            "predicate": "picking up",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "card",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "card",
+            "predicate": "looking at",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "card",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_11724",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "card",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12523",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "plate",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12541",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "gift",
+            "predicate": "holding",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12576",
+        "scene_idx": 0,
+        "issue": "self_relation",
+        "relations": [
+          {
+            "object_id": "person3",
+            "predicate": "driving",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12576",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "camera",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "car",
+            "predicate": "standing beside",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "car",
+            "predicate": "standing beside",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "sky",
+            "predicate": "looking up",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12576",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "camera",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "camera",
+            "predicate": "looking at",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12676",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "head",
+            "predicate": "touching",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12984",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "using",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "hands",
+            "predicate": "washing",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "computer",
+            "predicate": "using",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_12984",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13291",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "flower",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "flower",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13291",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13901",
+        "scene_idx": 8,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "bed",
+            "predicate": "lying",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "bed",
+            "predicate": "lying",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13901",
+        "scene_idx": 10,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bed",
+            "predicate": "lying on",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "bed",
+            "predicate": "lying on",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "bed",
+            "predicate": "lying on",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13911",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "hat",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13911",
+        "scene_idx": 1,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_13911",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "tracks",
+            "predicate": "moving",
+            "subject_id": "vehicle1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_13911",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "ground",
+            "predicate": "lying on",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_14217",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bag",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "bag",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "bag",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "bag",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_14217",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "machine",
+            "predicate": "operating",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_14217",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "machine",
+            "predicate": "operating",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "machine",
+            "predicate": "operating",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "machine",
+            "predicate": "operating",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_14217",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "food",
+            "predicate": "eating",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "food",
+            "predicate": "eating",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "food",
+            "predicate": "eating",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_14217",
+        "scene_idx": 6,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "stool",
+            "predicate": "sitting",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "stool",
+            "predicate": "sitting",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "stool",
+            "predicate": "sitting",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "stool",
+            "predicate": "sitting",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "bowl",
+            "predicate": "eating",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "bowl",
+            "predicate": "eating",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "bowl",
+            "predicate": "eating",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "bowl",
+            "predicate": "eating",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "chopsticks",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "chopsticks",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "chopsticks",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "food",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_14853",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "spoon",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "hand",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_15228",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "basketball",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "basketball",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "basketball",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_16181",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "steps",
+            "predicate": "sitting on",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_16181",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "device",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_16462",
+        "scene_idx": 0,
+        "issue": "raw_graph"
+      },
+      {
+        "id": "microlens_100k_16462",
+        "scene_idx": 2,
+        "issue": "duplicate_id"
+      },
+      {
+        "id": "microlens_100k_16692",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bag",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17118",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "bed",
+            "predicate": "lying on",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "bed",
+            "predicate": "lying on",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "bed",
+            "predicate": "standing beside",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17118",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "sword",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17118",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17598",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "couch",
+            "predicate": "sitting on",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "floor",
+            "predicate": "sweeping",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "broom",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17598",
+        "scene_idx": 5,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "chair",
+            "predicate": "sitting",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17976",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_17976",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "gate",
+            "predicate": "standing beside",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "gate",
+            "predicate": "standing beside",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18336",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person5"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person6"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person7"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person8"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person9"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person10"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18336",
+        "scene_idx": 9,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "microphone",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18491",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "green_plant",
+            "predicate": "holding",
+            "subject_id": "spongebob"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18491",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "spray",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18522",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "room",
+            "predicate": "entering",
+            "subject_id": "bear1"
+          },
+          {
+            "object_id": "chair",
+            "predicate": "sitting",
+            "subject_id": "scientist1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18522",
+        "scene_idx": 3,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "tool",
+            "predicate": "holding",
+            "subject_id": "robot1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_18938",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "looking at",
+            "subject_id": "person1"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19044",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19044",
+        "scene_idx": 1,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "watermelon",
+            "predicate": "eating",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "watermelon",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "watermelon",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19044",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "couch",
+            "predicate": "sitting on",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19044",
+        "scene_idx": 6,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19044",
+        "scene_idx": 8,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "text1",
+            "predicate": "displaying",
+            "subject_id": "screen1"
+          },
+          {
+            "object_id": "text2",
+            "predicate": "displaying",
+            "subject_id": "screen2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19426",
+        "scene_idx": 0,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "cup1",
+            "predicate": "holding",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "cup2",
+            "predicate": "holding",
+            "subject_id": "person2"
+          },
+          {
+            "object_id": "cup3",
+            "predicate": "holding",
+            "subject_id": "person3"
+          },
+          {
+            "object_id": "cup4",
+            "predicate": "holding",
+            "subject_id": "person4"
+          },
+          {
+            "object_id": "cup5",
+            "predicate": "holding",
+            "subject_id": "person5"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19491",
+        "scene_idx": 2,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "holding",
+            "subject_id": "person4"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19491",
+        "scene_idx": 10,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "glove",
+            "predicate": "holding",
+            "subject_id": "person2"
+          }
+        ]
+      },
+      {
+        "id": "microlens_100k_19491",
+        "scene_idx": 15,
+        "issue": "unresolved_reference",
+        "relations": [
+          {
+            "object_id": "phone",
+            "predicate": "looking at",
+            "subject_id": "person1"
+          },
+          {
+            "object_id": "phone",
+            "predicate": "looking at",
+            "subject_id": "person2"
+          }
+        ]
+      }
+    ]
+  },
+  "graph_gemini": {
+    "counts": {
+      "scene_files": 100,
+      "scene_records": 563,
+      "scene_records_with_provenance": 0,
+      "summary_files": 100,
+      "summary_status_complete": 100,
+      "summary_prompt_hash_match": 100,
+      "summary_input_hash_match": 100,
+      "summary_over_150_words": 0,
+      "summary_under_100_words": 43,
+      "graph_records_with_context": 563,
+      "graph_over_4_entities": 1,
+      "graph_exactly_4_entities": 266,
+      "graph_over_4_relations": 0,
+      "graph_entities": 1834,
+      "graph_relations": 833,
+      "graph_entities_over_3_attributes": 0
+    },
+    "summary_words": {
+      "n": 100,
+      "min": 38,
+      "median": 102.5,
+      "mean": 97.55,
+      "max": 125
+    },
+    "scene_words": {
+      "n": 0
+    },
+    "entities_per_graph": {
+      "n": 563,
+      "min": 1,
+      "median": 3,
+      "mean": 3.26,
+      "max": 5
+    },
+    "relations_per_graph": {
+      "n": 563,
+      "min": 0,
+      "median": 1,
+      "mean": 1.48,
+      "max": 4
+    },
+    "structural_details": []
+  }
+}

@@ -23,12 +23,12 @@ def summary_case(request, ready_context, fake_models):
     )
     cohort = context.require_ready_cohort()
     ids = [str(row["content_id"]) for row in cohort["catalog"]]
-    directory = context.extraction_dir(representation, source, "summaries")
+    directory = context.summary_dir(representation, source, "qwen")
     arm_name = f"{'desc' if representation == 'description' else 'graph'}_{source}"
 
     def run(**kwargs):
         return getattr(steps, f"summarize_{representation}")(
-            context, source=source, schema=f"prompts/{representation}_summary_v4.md", **kwargs,
+            context, model="qwen", source=source, schema=f"prompts/{representation}_summary_v4.md", **kwargs,
         )
 
     def documents():
@@ -98,10 +98,11 @@ def test_mixed_legacy_terminal_and_pending_failures(summary_case, monkeypatch):
     monkeypatch.setattr(steps, "qwen_generator", generator)
     assert run()["content_count"] == len(ids)
     assert calls == [(ids[3], 1.0), (ids[2], 1.1)]
-    assert read_json(directory / f"{ids[0]}.json")["text"] == rows[0]["raw_output"]
+    assert read_json(directory / f"{ids[0]}.json")["text"] == ""
     fallback = read_json(directory / f"{ids[1]}.json")
-    assert fallback["text"].strip()
-    assert fallback["provenance"]["summary_fallback"] == "scene_observations"
+    assert fallback["text"] == ""
+    assert fallback["status"] == "failed"
+    assert "prompt_hash" not in fallback["provenance"]
     assert read_jsonl(directory / "failures.jsonl") == rows[:2]
     assert len(documents()) == len(ids)
     assert run()["failure_count"] == 2
@@ -163,11 +164,17 @@ def test_failure_penalty_survives_migration_and_update(tmp_path):
 def test_invalid_scene_input_reports_error(summary_case, scene_state):
     context, ids, directory, run, _ = summary_case
     from extraction.errors import ExtractionStepError
-    scene_path = directory.parent / "scenes" / f"{ids[0]}.jsonl"
+    scene_path = directory.parent.parent / "scenes" / f"{ids[0]}.jsonl"
     if scene_state == "missing":
         scene_path.unlink()
     else:
         write_jsonl(scene_path, [] if scene_state == "empty" else [{"bad": "record"}])
-    with pytest.raises(ExtractionStepError, match="scene"):
+    if scene_state == "invalid":
+        with pytest.raises(ExtractionStepError, match="scene"):
+            run()
+        assert not (directory / f"{ids[0]}.json").exists()
+    else:
         run()
-    assert not (directory / f"{ids[0]}.json").exists()
+        doc = read_json(directory / f"{ids[0]}.json")
+        assert doc["status"] == "failed" and doc["text"] == ""
+        assert doc["scene_count"] == doc["word_count"] == 0

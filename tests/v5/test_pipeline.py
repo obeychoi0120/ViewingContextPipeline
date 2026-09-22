@@ -10,7 +10,7 @@ from extraction.steps import extract_graph_scenes, extract_description_scenes, s
 from extraction.structured_output import validate_graph_structure, OutputValidationError
 from extraction.summary_validation import inspect_summary
 from validation.steps import embed_representations
-from validation.representation_provenance import read_state, recommendation_identity
+from validation.representation_provenance import read_state
 from validation.representation_checks import verify_representations
 
 # pytest's repository conftest supplies fixtures; constants are intentionally local.
@@ -30,18 +30,18 @@ def generate_all(context):
     for model in ("qwen", "gemini"):
         extract_description_scenes(context, model=model, schema="prompts/description_scene_v2.md")
         extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
-        summarize_description(context, source=model, schema="prompts/description_summary_v4.md")
-        summarize_graph(context, source=model, schema="prompts/graph_summary_v4.md")
+        summarize_description(context, model="qwen", source=model, schema="prompts/description_summary_v4.md")
+        summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")
 
 
 def test_default_flow_and_artifact_lifecycle(ready_context, fake_models):
     context = ready_context
     generate_all(context)
-    result = embed_representations(context)
+    result = embed_representations(context, summary_source="qwen")
     assert set(result["generated_arms"]) == set(select_arms(context.config))
     assert len(result["generated_arms"]) == 5
-    assert {p.name for p in context.run_root.iterdir()} == {"cohort", "extraction", "validation"}
-    assert context.keyframes_dir.parent == context.run_root.parent.parent
+    assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation"}
+    assert context.keyframes_dir.parent == context.run_root.parent.parent / "preparation"
     for pattern in (
         ".recovery",
         ".pending",
@@ -57,7 +57,7 @@ def test_default_flow_and_artifact_lifecycle(ready_context, fake_models):
     calls = len(fake_models)
     generate_all(context)
     assert len(fake_models) == calls
-    assert embed_representations(context)["generated_arms"] == []
+    assert embed_representations(context, summary_source="qwen")["generated_arms"] == []
     with np.load(context.representations_dir / "metadata_embeddings.npz") as values:
         assert np.all(values["values"][1] == 0)
     for name in select_arms(context.config):
@@ -76,55 +76,53 @@ def test_scene_prompt_changes_reuse_success_without_changing_arm(ready_context, 
     path.write_text(path.read_text() + "\nPreserve direction carefully.")
     extract_graph_scenes(context, model="qwen", schema=schema)
     assert len(fake_models) == count
-    summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
+    summarize_graph(context, model="qwen", source="qwen", schema="prompts/graph_summary_v4.md")
     count = len(fake_models)
     prompt = context.prompt_path("prompts/graph_summary_v4.md")
     prompt.write_text(prompt.read_text() + "\nUse concise prose.")
-    summarize_graph(context, source="qwen", schema=prompt)
+    summarize_graph(context, model="qwen", source="qwen", schema=prompt)
     assert len(fake_models) == count
     name = "graph_qwen"
-    embed_representations(context, target=[name])
+    context.config["protocol"]["arms"] = [name]
+    embed_representations(context, summary_source="qwen", target=[name])
     replacement = context.root / "prompts/graph_scene_v99.md"
     replacement.write_text(path.read_text() + "\nPreserve all visible attributes.")
     extract_graph_scenes(context, model="qwen", schema=replacement)
-    assert embed_representations(context, target=[name])["generated_arms"] == []
-    summarize_graph(context, source="qwen", schema=prompt)
+    assert embed_representations(context, summary_source="qwen", target=[name])["generated_arms"] == []
+    summarize_graph(context, model="qwen", source="qwen", schema=prompt)
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
     assert doc["arm"] == "graph_qwen"
     assert "graph_version" not in doc["provenance"]
-    assert embed_representations(context, target=[name])["generated_arms"] == []
+    assert embed_representations(context, summary_source="qwen", target=[name])["generated_arms"] == []
 
 
-def test_fallback_missing_only_raw_precedence_and_identical_vectors(ready_context, fake_models):
+def test_missing_and_raw_are_empty_but_corruption_is_an_error(ready_context, fake_models):
+    from validation.selection import load_validation_cohort
     context = ready_context
     generate_all(context)
-    path = next(context.description_summary_dir("gemini").glob("*.json"))
+    path = sorted(context.description_summary_dir("gemini").glob("*.json"))[0]
     native = read_json(path)
-    path.unlink()
-    embed_representations(context, target=["desc_gemini"])
-    before = recommendation_identity(context, "desc_gemini")
-    state = read_state(context, "desc_gemini")
-    assert any(row["actual_arm"] == "desc_qwen" for row in state["sources"])
-    native.update(
-        status="raw_fallback", violations=["over_200_words"], text="word " * 201, word_count=201
-    )
+    for contents in (None, {**native, "status": "raw_fallback", "violations": ["empty"]}, "{broken"):
+        if contents is None:
+            path.unlink()
+        elif isinstance(contents, dict):
+            write_json(path, contents)
+        else:
+            path.write_text(contents)
+        if isinstance(contents, str):
+            with pytest.raises((ValueError, RuntimeError)):
+                embed_representations(context, summary_source="qwen", target=["desc_gemini"])
+            continue
+        embed_representations(context, summary_source="qwen", target=["desc_gemini"])
+        cohort = load_validation_cohort(context)
+        assert len(cohort["catalog"]) == 4
+        assert not cohort["excluded"]
+        assert all(r["actual_arm"] == "desc_gemini" for r in read_state(context, "desc_gemini")["sources"])
     write_json(path, native)
     with pytest.raises(RuntimeError, match="stale"):
         verify_representations(context, arms={"desc_gemini": "desc_gemini"})
-    assert embed_representations(context, target=["desc_gemini"])["generated_arms"] == [
-        "desc_gemini"
-    ]
-    assert recommendation_identity(context, "desc_gemini") != before
-    assert all(
-        row["actual_arm"] == "desc_gemini" for row in read_state(context, "desc_gemini")["sources"]
-    )
-    path.write_text("{broken")
-    with pytest.raises(ValueError):
-        embed_representations(context, target=["desc_gemini"])
-    path.unlink()
-    (context.description_summary_dir("qwen") / path.name).unlink()
-    with pytest.raises(ValueError, match="missing"):
-        embed_representations(context, target=["desc_gemini"])
+    embed_representations(context, summary_source="qwen", target=["desc_gemini"])
+    assert len(load_validation_cohort(context)["catalog"]) == 4
 
 
 @pytest.mark.parametrize("source", ["qwen", "gemini"])
@@ -141,7 +139,7 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
             schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
     summarize = getattr(steps, f"summarize_{representation}")
     options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
-    directory = context.extraction_dir(representation, source, "summaries")
+    directory = context.summary_dir(representation, source, "qwen")
     calls = []
 
     @contextmanager
@@ -158,7 +156,7 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
         yield generate
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    assert summarize(context, **options)["failure_count"] == 0
+    assert summarize(context, model="qwen", **options)["failure_count"] == 0
     assert len(calls) == 1
     for path in directory.glob("*.json"):
         doc = read_json(path)
@@ -166,10 +164,11 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
         assert doc["text"] == " ".join(["word"] * length)
         assert doc["violations"] == [] and doc["correction_count"] == 0
     assert not (directory / "failures.jsonl").exists()
-    assert summarize(context, **options)["failure_count"] == 0
+    assert summarize(context, model="qwen", **options)["failure_count"] == 0
     assert len(calls) == 1
     arm = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
-    assert embed_representations(context, target=[arm])["generated_arms"] == [arm]
+    context.config["protocol"]["arms"] = [arm]
+    assert embed_representations(context, summary_source="qwen", target=[arm])["generated_arms"] == [arm]
 
 
 def test_summary_accepts_multiple_paragraphs_without_correction(ready_context, fake_models, monkeypatch):
@@ -189,7 +188,7 @@ def test_summary_accepts_multiple_paragraphs_without_correction(ready_context, f
         yield generate
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    summarize_graph(context, source="qwen", schema="prompts/graph_summary_v4.md")
+    summarize_graph(context, model="qwen", source="qwen", schema="prompts/graph_summary_v4.md")
     assert len(calls) == 1
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
     assert doc["status"] == "complete" and doc["correction_count"] == 0
@@ -197,7 +196,8 @@ def test_summary_accepts_multiple_paragraphs_without_correction(ready_context, f
     assert doc["violations"] == []
     assert "\n\n" in doc["text"]
     assert doc["text"].startswith("first")
-    embed_representations(context, target=["graph_qwen"])
+    context.config["protocol"]["arms"] = ["graph_qwen"]
+    embed_representations(context, summary_source="qwen", target=["graph_qwen"])
 
 
 def test_graph_preserves_ids_and_only_validates_json_shape():
@@ -216,7 +216,7 @@ def test_graph_preserves_ids_and_only_validates_json_shape():
         lambda g: g["entities"][0].update(attributes="red"),
         lambda g: g["relations"][0].update(object_id=None),
         lambda g: g["entities"][0].update(id=""),
-        lambda g: g.pop("context"),
+        lambda g: g.pop("entities"),
     ):
         value = deepcopy(GRAPH)
         mutate(value)
@@ -270,11 +270,12 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
     for path in context.graph_scene_dir(model).glob("*.jsonl"):
         for row in read_scene_records(path):
             assert row["graph"] == graph
-            assert "generation" not in row and "provenance" not in row
+            assert "generation" not in row and row["provenance"]["prompt_hash"]
             assert row["semantic_warnings"] == []
             assert _success_scene_row_issues(f"graph_{model}", row, path.stem) == []
-    summarize_graph(context, source=model, schema="prompts/graph_summary_v4.md")
-    assert embed_representations(context, target=[f"graph_{model}"])["generated_arms"] == [
+    summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")
+    context.config["protocol"]["arms"] = [f"graph_{model}"]
+    assert embed_representations(context, summary_source="qwen", target=[f"graph_{model}"])["generated_arms"] == [
         f"graph_{model}"]
 
 

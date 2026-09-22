@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import numpy as np
 
-from arm_registry import select_arms
+from validation.selection import prepare_validation_cohort, validation_arms
 from pipeline_logging import log_step_start
 from pipeline_runtime import read_json, read_jsonl, write_json
 from validation.config import build_validation_config
@@ -86,22 +86,35 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def embed_representations(context, *, force=False, target=None):
+def embed_representations(context, *, summary_source=None, force=False, target=None):
+    from arm_registry import legacy_layout
+    legacy = legacy_layout(context.config)
+    if legacy and summary_source is None:
+        summary_source = "qwen"
+    if summary_source not in {None, "qwen", "gemini"}:
+        raise ValueError("summary_source must be qwen or gemini")
     from validation.features import BGETextEncoder
     from validation.representation_checks import verify_representations
 
-    log_step_start(context, "embed-representations", force=force, target=target)
+    log_step_start(context, "embed-representations", force=force, target=target,
+                   summary_source=summary_source)
     context.initialize()
-    cohort = context.require_ready_cohort()
+    arms = validation_arms(context, target)
+    cohort = prepare_validation_cohort(context, summary_source)
     config = validation_config(context)
-    arms = select_arms(context.config, target)
     catalog = cohort["catalog"]
+    from validation.shared_cache import SharedCache
+    from validation.cache_identity import shareable_document
+
     pending = []
+    reused = {"local": [], "shared": []}
+    encoder = None
     # Validate all selected input documents before loading the encoder or writing results.
     inputs = {}
     for name, arm in arms.items():
-        docs = documents_for_arm(context, cohort, arm)
-        signature = representation_signature(context, catalog, arm, docs)
+        docs = documents_for_arm(context, cohort, arm, summary_source=summary_source, strict=True)
+        signature = representation_signature(context, catalog, arm, docs,
+                                             selection_hash=cohort["manifest"]["selection_hash"])
         inputs[name] = (docs, signature)
         state = read_state(context, name)
         path = _embedding_path(context, name)
@@ -120,51 +133,92 @@ def embed_representations(context, *, force=False, target=None):
             or state.get("embedding_hash") != matrix_hash(path)
         ):
             pending.append(name)
-    if pending:
-        encoder = BGETextEncoder(config.encoder)
-        for name in pending:
-            docs, signature = inputs[name]
-            # Only missing metadata titles receive zero vectors.
-            indices = [i for i, row in enumerate(docs) if row["text"].strip()]
-            if name != "metadata" and len(indices) != len(catalog):
-                raise ValidationStepError(f"empty visual summary: {name}")
-            matrix = np.zeros((len(catalog), config.encoder.embedding_dim), dtype=np.float32)
-            if indices:
-                encoded = np.asarray(
-                    encoder.encode([docs[i]["text"] for i in indices]), dtype=np.float32
-                )
-                if (
-                    encoded.shape != (len(indices), config.encoder.embedding_dim)
-                    or not np.isfinite(encoded).all()
-                ):
-                    raise ValidationStepError(f"invalid embedding values: {name}")
-                matrix[indices] = encoded
-            path = _embedding_path(context, name)
-            previous = matrix_hash(path) if path.is_file() else None
-            previous = begin_write(context, name, previous)
-            _write_embedding(path, matrix)
-            sources = [{k: v for k, v in doc.items() if k != "text"} for doc in docs]
-            finish_write(
-                context,
-                name,
-                signature,
-                previous,
-                sources=sources,
-                truncation=getattr(encoder, "last_truncation", None)
-                if indices
-                else {"text_count": 0, "truncated_count": 0},
-            )
-        write_json(
-            context.representations_dir / "item_index.json",
-            {str(row["item_id"]): i for i, row in enumerate(catalog)},
+        else:
+            reused["local"].append(name)
+    generated = []
+    for name in arms:
+        docs, signature = inputs[name]
+        eligible = name in {"meta", "metadata"} or all(shareable_document(d) for d in docs)
+        cache = SharedCache(context, "embeddings", signature)
+        state = read_state(context, name)
+        truncation = state.get("truncation")
+        origin = {"run_id": context.run_id, "kind": "local", "key": signature,
+                  "reused_from": ((state.get("cache") or {}).get("reused_from")
+                                  or (state.get("cache") if (state.get("cache") or {}).get("kind") == "shared" else None))}
+        if name in pending:
+            restored = None
+            if not force and eligible:
+                with tempfile.TemporaryDirectory() as temporary:
+                    temporary = Path(temporary)
+                    restored = cache.restore(temporary)
+                    if restored:
+                        try:
+                            with np.load(temporary / "values.npz") as arrays:
+                                matrix = arrays["values"]
+                                valid = (matrix.shape == (len(catalog), config.encoder.embedding_dim)
+                                         and np.isfinite(matrix).all()
+                                         and all(np.all(matrix[i] == 0) for i, d in enumerate(docs)
+                                                 if not d["text"].strip()))
+                            if valid:
+                                _write_embedding(_embedding_path(context, name), matrix)
+                            else:
+                                restored = None
+                        except (OSError, ValueError, KeyError):
+                            restored = None
+            if restored:
+                reused["shared"].append(name)
+                origin = {"kind": "shared", "key": signature, **restored["origin"]}
+                truncation = restored["origin"].get("truncation")
+            else:
+                generated.append(name)
+                origin = {"run_id": context.run_id, "kind": "generated", "key": signature}
+                if encoder is None and any(d["text"].strip() for d in docs):
+                    encoder = BGETextEncoder(config.encoder)
+                _encode_arm(context, config, name, docs, encoder)
+                truncation = (getattr(encoder, "last_truncation", None)
+                              if any(d["text"].strip() for d in docs)
+                              else {"text_count": 0, "truncated_count": 0})
+        finish_write(
+            context, name, signature, None,
+            sources=[{**{k: v for k, v in d.items() if k != "text"},
+                      "empty": not d["text"].strip()} for d in docs],
+            selection_hash=cohort["manifest"]["selection_hash"],
+            summary_source=summary_source if legacy and name != "metadata" else None,
+            cache=origin, shareable=eligible,
+            truncation=truncation,
         )
+        if eligible:
+            cache.publish(context.representations_dir, {"values.npz": f"{name}_embeddings.npz"},
+                          origin={"run_id": context.run_id, "truncation": truncation},
+                          replace_corrupt=not force)
+    write_json(context.representations_dir / "item_index.json",
+               {str(row["item_id"]): i for i, row in enumerate(catalog)})
     verify_representations(context, cohort, arms={name: name for name in arms})
-    return {
-        "stage": "embed-representations",
-        "content_count": len(catalog),
-        "generated_arms": pending,
-        "selected_arms": list(arms),
-    }
+    return {"stage": "embed-representations", "content_count": len(catalog),
+            "generated_arms": generated, "selected_arms": list(arms), "reuse": reused}
+
+
+def _encode_arm(context, config, name, docs, encoder):
+    catalog = docs
+    indices = [i for i, row in enumerate(docs) if row["text"].strip()]
+    matrix = np.zeros((len(catalog), config.encoder.embedding_dim), dtype=np.float32)
+    if indices:
+        encoded = np.asarray(
+            encoder.encode([docs[i]["text"] for i in indices]), dtype=np.float32
+        )
+        if (
+            encoded.shape != (len(indices), config.encoder.embedding_dim)
+            or not np.isfinite(encoded).all()
+        ):
+            raise ValidationStepError(f"invalid embedding values: {name}")
+        matrix[indices] = encoded
+    path = _embedding_path(context, name)
+    try:
+        previous = matrix_hash(path) if path.is_file() else None
+    except (OSError, ValueError):
+        previous = None
+    begin_write(context, name, previous)
+    _write_embedding(path, matrix)
 
 
 def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):

@@ -43,6 +43,8 @@ def representation_report(context, arms):
                     issue_examples.append({**example, "fields": reasons})
         summary = {
             "count": len(rows),
+            "status_counts": dict(Counter(r.get("status", "complete") for r in rows)),
+            "zero_vector_count": state.get("zero_vector_count", 0),
             "generation_record_count": sum(row.get("generation") is not None for row in rows),
             "issue_count": issue_count,
             "issue_examples": issue_examples,
@@ -63,7 +65,7 @@ def representation_report(context, arms):
             }
         representations[name] = {
             **{key: state[key] for key in (
-                "input_hash", "embedding_hash", "recommendation_hash", "truncation"
+                "input_hash", "embedding_hash", "recommendation_hash", "truncation", "cache", "shareable"
             ) if key in state},
             "details_path": details_path,
             "sources_summary": summary,

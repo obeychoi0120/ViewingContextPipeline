@@ -6,19 +6,21 @@ from validation.recommendation_contracts import DEFAULT_PROTOCOL
 
 def comparison_families(config=None):
     arms = registry(config or DEFAULT_PROTOCOL)
-    by_kind = {(a.representation, a.model): a.name for a in arms.values()}
-    metadata = [(name, "metadata") for name in arms if name != "metadata"]
-    representations = []
-    for model in ("gemini", "qwen"):
-        for left, right in (
-            ("graph", "description"),
-        ):
-            representations.append((by_kind[left, model], by_kind[right, model]))
-    models = [
-        (by_kind[kind, "gemini"], by_kind[kind, "qwen"])
-        for kind in ("description", "graph")
-    ]
-    return {"metadata_baseline": metadata, "representation": representations, "model": models}
+    from arm_registry import legacy_layout
+    old = legacy_layout(config or DEFAULT_PROTOCOL)
+    baseline = "metadata" if old else "meta"
+    by_kind = {(a.representation, a.model, a.uses_title): a.name for a in arms.values()}
+    titles = (True,) if old else (False, True)
+    metadata = [(name, baseline) for name in arms if name != baseline]
+    representations = [(by_kind["graph", model, title], by_kind["description", model, title])
+                       for title in titles for model in ("gemini", "qwen")]
+    models = [(by_kind[kind, "gemini", title], by_kind[kind, "qwen", title])
+              for title in titles for kind in ("description", "graph")]
+    result = {"metadata_baseline": metadata, "representation": representations, "model": models}
+    if not old:
+        result["title_input"] = [(by_kind[kind, model, True], by_kind[kind, model, False])
+                                 for kind in ("graph", "description") for model in ("qwen", "gemini")]
+    return result
 
 
 def multiple_comparison_policy(

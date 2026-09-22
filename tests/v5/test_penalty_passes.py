@@ -3,12 +3,11 @@ from contextlib import contextmanager
 import pytest
 
 import extraction.steps as steps
-from extraction.scene_storage import read_scene_records
 from pipeline_runtime import read_json, read_jsonl
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
-def test_scene_passes_retry_only_failures_and_keep_final_raw(ready_context, monkeypatch, representation):
+def test_scene_passes_retry_only_failures_and_keep_empty_failure(ready_context, monkeypatch, representation):
     context = ready_context
     context.config["extraction"][f"{representation}_repetition_penalty"] = [1.0, 1.05, 1.1]
     ids = [v["content_id"] for v in steps.visual_rows(context)]
@@ -47,19 +46,10 @@ def test_scene_passes_retry_only_failures_and_keep_final_raw(ready_context, monk
                      + [(i, 1.1) for i in (2, 3)])
     assert len(engines) == 1
     directory = context.extraction_dir(representation, "qwen", "scenes")
-    raw = read_scene_records(directory / f"{ids[3]}.jsonl")[0]
-    assert raw["status"] == "raw_fallback"
-    assert raw["raw_response" if representation == "graph" else "description"] == "  unfinished output 1.1\n"
-    assert read_jsonl(directory / "failures" / f"{ids[3]}.jsonl")[0]["raw_output"] == "  unfinished output 1.1\n"
+    assert not (directory / f"{ids[3]}.jsonl").exists()
+    assert read_jsonl(directory / "failures" / f"{ids[3]}.jsonl")[0]["raw_output"] == ""
     for cid in ids[:3]:
         assert not (directory / "failures" / f"{cid}.jsonl").exists()
-    # Raw descriptions remain consumable by Summary and valid for diagnosis.
-    from extraction.step_support import minimal_description_records
-    from extraction.descriptions import description_summary_prompt
-    if representation == "description":
-        assert "unfinished output" in description_summary_prompt("{scenes}", minimal_description_records(
-            [raw], directory / f"{ids[3]}.jsonl",
-        ))
     from validation.diagnosis_scenes import _scene_arm_contract, scene_arms
     errors = []
     _, _, valid = _scene_arm_contract(
@@ -77,7 +67,7 @@ def test_scene_passes_retry_only_failures_and_keep_final_raw(ready_context, monk
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
 @pytest.mark.parametrize("source", ["qwen", "gemini"])
-def test_summary_passes_retry_only_failures_and_keep_final_raw(
+def test_summary_passes_retry_only_failures_and_keep_empty_failure(
     ready_context, fake_models, monkeypatch, representation, source,
 ):
     context = ready_context
@@ -103,20 +93,20 @@ def test_summary_passes_retry_only_failures_and_keep_final_raw(
                 kwargs["runtime"].current_result = {"finish_reason": "length" if failed else "stop"}
                 callback(task.task_id, f"  - failed {penalty}\n" if failed else "A person walks.")
                 if failed and penalty < 1.1:
-                    directory = context.extraction_dir(representation, source, "summaries")
+                    directory = context.summary_dir(representation, source, "qwen")
                     assert not (directory / f"{ids[index]}.json").exists()
             return {}
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     summarize = getattr(steps, f"summarize_{representation}")
-    assert summarize(context, source=source, schema=f"prompts/{representation}_summary_v4.md")["failure_count"] == 1
+    assert summarize(context, model="qwen", source=source, schema=f"prompts/{representation}_summary_v4.md")["failure_count"] == 1
     assert calls == ([(i, 1.0) for i in range(4)] + [(i, 1.05) for i in (1, 2, 3)]
                      + [(i, 1.1) for i in (2, 3)])
     assert len(engines) == 1
-    directory = context.extraction_dir(representation, source, "summaries")
+    directory = context.summary_dir(representation, source, "qwen")
     raw = read_json(directory / f"{ids[3]}.json")
-    assert raw["status"] == "raw_fallback" and raw["text"] == "  - failed 1.1\n"
+    assert raw["status"] == "failed" and raw["text"] == ""
     assert read_jsonl(directory / "failures.jsonl") == [{
-        "content_id": ids[3], "error": "max_tokens", "raw_output": raw["text"], "repetition_penalty": 1.1,
+        "content_id": ids[3], "error": "max_tokens", "raw_output": raw["text"], "repetition_penalty": 1.1, "summary_model": "qwen", "provenance": raw["provenance"],
     }]

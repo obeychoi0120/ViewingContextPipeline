@@ -3,10 +3,8 @@ from __future__ import annotations
 from itertools import chain
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
-from extraction.monitoring import graph_skip_message, scene_messages
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.structured_output import OutputValidationError, validate_graph_structure
-from extraction.raw_output import raw_graph_record
 from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
     write_progress,
@@ -18,17 +16,19 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
     """Convert one response without changing artifacts or the raw graph."""
     parsed = parse_or_repair_graph(text) if error is None else None
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
+    parse_warning = parsed.error if parsed is not None else None
     if strict and parsed is not None and parsed.graph is not None:
         try:
             validate_graph_structure(parsed.graph)
         except OutputValidationError as exc:
-            error = str(exc)
-    if error is None and parsed is not None and parsed.graph is not None:
+            parse_warning = str(exc)
+    if error is None and parsed is not None:
+        structured = parsed.graph is not None and parse_warning is None
         return {
             **common,
-            "graph": parsed.graph,
-            "parse_mode": parsed.parse_mode,
-            "semantic_warnings": graph_semantic_warnings(parsed.graph),
+            "graph": parsed.graph if structured else text,
+            "parse_mode": parsed.parse_mode if structured else "text",
+            "semantic_warnings": graph_semantic_warnings(parsed.graph) if structured else [parse_warning],
         }, None
     failure = {
         **common,
@@ -58,21 +58,8 @@ def description_scene_result(row, text, *, content_id, error=None):
     }
 
 
-def _report_scene(progress, name, record, failure, *, arm, source):
-    if record is not None:
-        write_progress(progress, scene_messages(name, [record], arm=arm, source=source)[0])
-    elif arm == "graph":
-        write_progress(progress, graph_skip_message(name, failure, source=source))
-    else:
-        write_progress(
-            progress,
-            f"[SKIPPED] {name} | description scene "
-            f"#{int(failure['scene_idx']):03d} | {failure['error']}",
-        )
-
-
 class SceneResults:
-    def __init__(self, pending, *, scene_dir, failures, records, progress, arm, source, names):
+    def __init__(self, pending, *, scene_dir, failures, records, progress, arm, source, names, provenance=None):
         self.pending = pending
         self.scene_dir = scene_dir
         self.failures = failures
@@ -81,6 +68,8 @@ class SceneResults:
         self.arm = arm
         self.source = source
         self.names = names
+        self.provenance = provenance
+        self.penalty = None
         self.rows = {}
         self.contents = {}
         self.completed = set()
@@ -107,20 +96,18 @@ class SceneResults:
                 row, text, error=error or ("graph: output truncated at token limit" if truncated else None),
                 diagnostics=diagnostics,
             )
-            # Keep nonempty failed observations usable by the downstream E2E run.
-            if final and failure is not None and error is None and text.strip():
-                record = raw_graph_record(row, text)
         else:
             record, failure = description_scene_result(
                 row, text, content_id=cid,
                 error=error or ("description: output truncated at token limit" if truncated else None),
             )
-        if (self.arm == "description" and self.source == "qwen" and final
-                and failure is not None and error is None and text.strip()):
-            record, _ = description_scene_result(row, text, content_id=cid)
-            record["description"] = text
-            record["status"] = "raw_fallback"
+        provenance = self.provenance
+        if provenance and self.penalty is not None:
+            provenance = {**provenance, "settings": {**provenance["settings"],
+                          "actual_repetition_penalty": self.penalty}}
         if record is not None:
+            if provenance is not None:
+                record["provenance"] = provenance
             self.contents[cid][int(row["scene_idx"])] = record
         else:
             self.contents[cid].pop(int(row["scene_idx"]), None)
@@ -128,10 +115,7 @@ class SceneResults:
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
         self.records[cid] = records
         if failure is not None:
-            self.failures.record(cid, int(row["scene_idx"]), failure["error"], text)
-            if record is None:
-                _report_scene(self.progress, self.names.get(cid, f"{cid}.mp4"),
-                              record, failure, arm=self.arm, source=self.source)
+            self.failures.record(cid, int(row["scene_idx"]), failure["error"], "", provenance=provenance)
         else:
             self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)
@@ -143,16 +127,20 @@ class SceneResults:
 def run_qwen_scenes(
     pending, *, scene_dir, failures, model_path, generator_factory,
     names, progress, arm, existing_records, source=None,
-    qwen_options=None, image_limit=6, runtime=None, penalties=(1.0,),
+    qwen_options=None, image_limit=6, runtime=None, penalties=(1.0,), provenance=None,
 ):
     results = SceneResults(pending, scene_dir=scene_dir, failures=failures,
                            records=existing_records, progress=progress,
-                           arm=arm, source=source, names=names)
+                           arm=arm, source=source, names=names, provenance=provenance)
 
     def receive(task_id, text, *, final):
         event = runtime.current_result if runtime and runtime.current_result else {}
         results.completed.discard(task_id)
         return results.receive(task_id, text, truncated=event.get("finish_reason") == "length", final=final)
+
+    def begin_pass(index, count, total):
+        results.penalty = penalties[index - 1]
+        progress.begin_pass(progress.total if total is None else total, index=index, count=count)
 
     tasks = results.tasks()
     first = next(tasks, None)
@@ -165,18 +153,15 @@ def run_qwen_scenes(
     ) as generate:
         generate_penalty_passes(generate, chain((first,), tasks), list(penalties), receive,
                                 log=lambda message: write_progress(progress, message),
-                                on_pass=lambda index, count, total: progress.begin_pass(
-                                    progress.total if total is None else total,
-                                    index=index, count=count,
-                                ))
+                                on_pass=begin_pass)
 
 
 def run_gemini_scenes(
-    pending, *, pool, records_by_content, scene_dir, failures, names, progress, arm="graph",
+    pending, *, pool, records_by_content, scene_dir, failures, names, progress, arm="graph", provenance=None,
 ):
     results = SceneResults(pending, scene_dir=scene_dir, failures=failures,
                            records=records_by_content, progress=progress,
-                           arm=arm, source="gemini", names=names)
+                           arm=arm, source="gemini", names=names, provenance=provenance)
 
     def receive(outcome):
         candidates = (outcome.response_diagnostics or {}).get("candidates") or []

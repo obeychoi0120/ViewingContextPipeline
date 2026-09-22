@@ -92,7 +92,9 @@ if nn is not None:
                 batch_first=True,
                 norm_first=True,
             )
-            self.encoder = nn.TransformerEncoder(layer, num_layers=num_blocks)
+            self.encoder = nn.TransformerEncoder(
+                layer, num_layers=num_blocks, enable_nested_tensor=False,
+            )
             self.dropout = nn.Dropout(dropout)
             self.norm = nn.LayerNorm(embedding_dim)
             self.user_mlp = ResidualMLP(

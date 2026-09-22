@@ -5,7 +5,6 @@ from __future__ import annotations
 import numpy as np
 
 from pipeline_runtime import read_json, write_json
-from extraction.recovery import fingerprint
 from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
@@ -15,6 +14,7 @@ from validation.recommendation_contracts import (
 from arm_registry import registry
 from validation.representation_checks import verify_representations
 from validation.rolling_data import EventTable, iter_jsonl
+from validation.selection import load_validation_cohort, recount_splits, training_signature
 from validation.rolling_recommendation import (
     combination_complete,
     combination_dir,
@@ -97,16 +97,19 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
                 "relative_difference": (float((observed[a] - observed[b]) / observed[b])
                                         if observed[b] > 0 else None),
             }
-    by_kind = {(arm.representation, arm.model): name for name, arm in configured.items()}
-    for control in ("description",):
-        terms = [by_kind["graph", "gemini"], by_kind[control, "gemini"],
-                 by_kind["graph", "qwen"], by_kind[control, "qwen"]]
+    from arm_registry import legacy_layout
+    old = legacy_layout(config or DEFAULT_PROTOCOL)
+    by_kind = {(arm.representation, arm.model, arm.uses_title): name for name, arm in configured.items()}
+    for title in ((True,) if old else (False, True)):
+        terms = [by_kind[kind, model, title] for model in ("gemini", "qwen")
+                 for kind in ("graph", "description")]
         if not set(terms) <= indices.keys():
             continue
         a, b, c, d = [indices[name] for name in terms]
         delta = draws[:, a] - draws[:, b] - draws[:, c] + draws[:, d]
         lo, hi = np.quantile(delta, [0.025, 0.975])
-        result[f"interaction_graph_vs_{control}"] = {
+        name = "interaction_graph_vs_description" + ("" if old else "_meta" if title else "_no_meta")
+        result[name] = {
             "family": "interaction", "role": "exploratory", "arms": terms,
             "difference": float(observed[a] - observed[b] - observed[c] + observed[d]),
             "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
@@ -134,17 +137,17 @@ def diagnosis_training(directory, identity, expected_count, *, architecture_vers
 
 def collect_metrics(context, config, cohort, *, arms=None):
     selected = resolve_target_arms(config=context.config) if arms is None else arms
-    table = EventTable(iter_jsonl(context.cohort_dir / "events.jsonl"))
-    training_input_hash = fingerprint({"events": table.rows, "model": context.config["validation"]["model"],
-                                       "cutoffs": config.evaluation.cutoffs})
+    cohort = load_validation_cohort(context)
+    table = EventTable(cohort["events"])
+    training_input_hash = training_signature(context, cohort, config)
     users = {user: i for i, user in enumerate(table.users)}
     splits = cohort["plan"]["splits"]
     if (len(table.users), len(table.rows), len(table.items)) != (
-        config.cohort.user_count,
-        config.cohort.interaction_count,
-        config.cohort.item_count,
-    ) or splits != table.splits():
-        raise ValueError("full source cardinality or rolling split manifest mismatch")
+        cohort["plan"]["user_count"],
+        cohort["plan"]["interaction_count"],
+        cohort["plan"]["item_count"],
+    ) or splits != recount_splits(table, splits):
+        raise ValueError("validation cohort cardinality or rolling split manifest mismatch")
     arms = list(selected)
     verify_representations(context, cohort, arms=selected)
     sums = np.zeros((len(users), len(splits), len(arms)))
@@ -252,6 +255,8 @@ def collect_metrics(context, config, cohort, *, arms=None):
 def diagnose(context, *, target=None, compare_run_id=None):
     from validation.steps import validation_config
 
+    from validation.selection import diagnosis_context
+    context = diagnosis_context(context)
     arms = resolve_target_arms(target, config=context.config)
     context.initialize()
     config = validation_config(context)
@@ -263,10 +268,13 @@ def diagnose(context, *, target=None, compare_run_id=None):
         "statistics": {"status": "not_computed"},
     }
     try:
-        cohort = context.require_ready_cohort()
+        cohort = load_validation_cohort(context)
         document["cohort"] = cohort["plan"]
+        document["selection"] = {key: value for key, value in cohort["manifest"].items()
+                                 if key != "included_item_ids"}
+        document["selection"]["manifest_path"] = "validation/cohort/manifest.json"
         from validation.metadata import verify_missing_metadata
-        if "metadata" in arms.values():
+        if any(name in arms for name in ("meta", "metadata")):
             document["metadata_missing"] = verify_missing_metadata(context, cohort)
         scene = _scene_coverage(
             context.run_root,
@@ -277,16 +285,24 @@ def diagnose(context, *, target=None, compare_run_id=None):
             True,
             True,
             branches=set(arms.values()), config=context.config,
+            excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
+            source_assets_dir=context.source_assets_dir,
+            informational=cohort["manifest"]["policy"] == "full-catalog-zero-vector/v2",
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
-        document["generation_recovery"] = recovery_report(context, branches=arms)
+        document["generation_recovery"] = recovery_report(
+            context, branches=arms, content_ids=[r["content_id"] for r in cohort["catalog"]]
+        )
         from validation.diagnosis_representations import representation_report
         document["representations"], document["gemini_summary_fallbacks"] = (
             representation_report(context, arms)
         )
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
+        reuse_path = context.recommendations_dir / "reuse.json"
+        if reuse_path.is_file():
+            document["recommendations"]["reuse"] = read_json(reuse_path)
         if not errors:
             observed, draws, bootstrap = cluster_bootstrap(
                 sums, counts, samples=config.evaluation.bootstrap_samples
@@ -309,8 +325,9 @@ def diagnose(context, *, target=None, compare_run_id=None):
         "metadata_hr10": 0.046,
         "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
     }
-    if "recommendations" in document and "metadata" in arms:
-        value = document["recommendations"]["means"]["metadata"]["HR@10"]
+    baseline = "meta" if "meta" in arms else "metadata"
+    if "recommendations" in document and baseline in arms:
+        value = document["recommendations"]["means"][baseline]["HR@10"]
         document["paper_reference"]["hr10_difference"] = value - 0.046
     write_json(context.diagnosis_path, document)
     if errors or document["statistics"]["status"] != "computed":

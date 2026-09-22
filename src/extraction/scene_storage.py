@@ -15,7 +15,7 @@ def metadata_path(path):
 
 
 def is_compact_scene(row):
-    return isinstance(row, dict) and set(row) in (
+    return isinstance(row, dict) and (set(row) - {"provenance", "graph_format"}) in (
         {"content_id", "description"}, {"content_id", "scene_graph"},
         {"content_id", "scene_idx", "description"}, {"content_id", "scene_idx", "scene_graph"},
     )
@@ -30,7 +30,10 @@ def _payload(path, record):
         raise ValueError(f"invalid scene index: {path}")
     field = fields.pop()
     public_field = "description" if field == "description" else "scene_graph"
-    return {"content_id": path.stem, "scene_idx": index, public_field: record[field]}
+    return {"content_id": path.stem, "scene_idx": index, public_field: record[field],
+            **({"graph_format": "text"} if isinstance(record.get("graph"), str)
+               or record.get("graph_format") == "text" else {}),
+            **({"provenance": record["provenance"]} if "provenance" in record else {})}
 
 
 def read_scene_records(path):
@@ -51,7 +54,9 @@ def read_scene_records(path):
                 or not isinstance(metadata.get("rows"), list)
                 or len(metadata["rows"]) != len(rows)):
             raise ValueError(f"scene metadata does not match legacy payload: {path}")
-        rows = [{**row, "scene_idx": saved["record"]["scene_idx"]}
+        rows = [{**row, "scene_idx": saved["record"]["scene_idx"],
+                 **({"provenance": saved["record"]["provenance"]}
+                    if "provenance" not in row and "provenance" in saved["record"] else {})}
                 for row, saved in zip(rows, metadata["rows"])]
     payload = [_payload(path, row) for row in rows]
     if len({row["scene_idx"] for row in payload}) != len(payload):
@@ -67,11 +72,17 @@ def read_scene_records(path):
             failed = failures.get(row["scene_idx"])
             if failed and failed.get("raw_output") == row["description"]:
                 record["status"] = "raw_fallback"
+        elif row.get("graph_format") == "text":
+            if not isinstance(row["scene_graph"], str):
+                raise ValueError(f"invalid text graph: {path}")
+            record = {**common, "graph": row["scene_graph"], "parse_mode": "text", "semantic_warnings": []}
         elif isinstance(row["scene_graph"], str):
             record = {"schema_version": "graph-scene-raw/v1", "status": "raw_fallback",
                       **common, "raw_response": row["scene_graph"]}
         else:
             record = {**common, "graph": row["scene_graph"], "parse_mode": "unknown", "semantic_warnings": []}
+        if "provenance" in row:
+            record["provenance"] = row["provenance"]
         records.append(record)
     return records
 
