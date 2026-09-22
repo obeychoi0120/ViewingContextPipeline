@@ -19,7 +19,7 @@ def summary_case(request, ready_context, fake_models):
     context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
     getattr(steps, f"extract_{representation}_scenes")(
         context, model=source,
-        schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md",
+        schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md",
     )
     cohort = context.require_ready_cohort()
     ids = [str(row["content_id"]) for row in cohort["catalog"]]
@@ -28,7 +28,7 @@ def summary_case(request, ready_context, fake_models):
 
     def run(**kwargs):
         return getattr(steps, f"summarize_{representation}")(
-            context, model="qwen", source=source, schema=f"prompts/{representation}_summary_v4.md", **kwargs,
+            context, model="qwen", source=source, schema=f"prompts/summary_{representation}_v4.md", **kwargs,
         )
 
     def documents():

@@ -26,6 +26,10 @@ def verified_generation(prov):
 
 
 def shareable_document(doc):
+    from arm_registry import CONCAT_POLICY
+    if doc.get("composition_policy") == CONCAT_POLICY and not doc.get("summary_used"):
+        # Missing/failed visual inputs have a deterministic metadata-only or zero representation.
+        return doc.get("summary_status") in {"missing", "failed", "not_applicable"}
     prov = doc.get("source_provenance", {})
     scenes = prov.get("scene_provenance")
     return (verified_generation(prov) and isinstance(scenes, list) and bool(scenes)
@@ -34,7 +38,9 @@ def shareable_document(doc):
 
 def semantic_documents(docs):
     return [{"content_id": d["content_id"], "text": d["text"],
-             "generation": generation_identity(d.get("source_provenance", {}))} for d in docs]
+             "generation": generation_identity(d.get("source_provenance", {})),
+             **({"composition": {k: d.get(k) for k in ("composition_policy", "components", "summary_source", "summary_status")}}
+                if "composition_policy" in d else {})} for d in docs]
 
 
 def semantic_document_hash(doc):

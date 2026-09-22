@@ -114,8 +114,8 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
     context = ready_context
     records_by_path = {}
     for model in ("qwen", "gemini"):
-        extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
-        extract_description_scenes(context, model=model, schema="prompts/description_scene_v2.md")
+        extract_graph_scenes(context, model=model, schema="prompts/scene_graph_v3.md")
+        extract_description_scenes(context, model=model, schema="prompts/scene_description_v2.md")
         for representation in ("graph", "description"):
             for path in context.extraction_dir(representation, model, "scenes").glob("*.jsonl"):
                 records = read_scene_records(path)
@@ -123,16 +123,16 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
                 # Simulate outputs created before the storage format changed.
                 write_jsonl(path, records)
                 metadata_path(path).unlink(missing_ok=True)
-        summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")
-        summarize_description(context, model="qwen", source=model, schema="prompts/description_summary_v4.md")
+        summarize_graph(context, model="qwen", source=model, schema="prompts/summary_graph_v4.md")
+        summarize_description(context, model="qwen", source=model, schema="prompts/summary_description_v4.md")
     arms = ["graph_qwen", "graph_gemini", "desc_qwen", "desc_gemini"]
     embed_representations(context, summary_source="qwen", target=arms)
     summaries = {path: path.read_bytes() for path in context.run_root.glob(
         "extraction/*/*/summaries/*.json")}
     benchmark_schemas = {
-        "description-summary": "prompts/description_summary_v4.md",
-        "graph-summary-qwen": "prompts/graph_summary_v4.md",
-        "graph-summary-gemini": "prompts/graph_summary_v4.md",
+        "description-summary": "prompts/summary_description_v4.md",
+        "graph-summary-qwen": "prompts/summary_graph_v4.md",
+        "graph-summary-gemini": "prompts/summary_graph_v4.md",
     }
     requests = {stage: export_requests(context, stage, 2, schema)
                 for stage, schema in benchmark_schemas.items()}
@@ -143,10 +143,10 @@ def test_migration_preserves_existing_summary_and_embedding_reuse(ready_context,
         assert read_scene_records(path) == records
         assert len(read_jsonl(path)[0]) == 4
     for model in ("qwen", "gemini"):
-        extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
-        extract_description_scenes(context, model=model, schema="prompts/description_scene_v2.md")
-        summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")
-        summarize_description(context, model="qwen", source=model, schema="prompts/description_summary_v4.md")
+        extract_graph_scenes(context, model=model, schema="prompts/scene_graph_v3.md")
+        extract_description_scenes(context, model=model, schema="prompts/scene_description_v2.md")
+        summarize_graph(context, model="qwen", source=model, schema="prompts/summary_graph_v4.md")
+        summarize_description(context, model="qwen", source=model, schema="prompts/summary_description_v4.md")
     assert len(fake_models) == calls
     assert all(path.read_bytes() == saved for path, saved in summaries.items())
     assert embed_representations(context, summary_source="qwen", target=arms)["generated_arms"] == []
@@ -166,8 +166,8 @@ def test_changed_settings_retry_only_explicit_scene_and_summary_failures(
     context = ready_context
     extract = getattr(steps, f"extract_{representation}_scenes")
     summarize = getattr(steps, f"summarize_{representation}")
-    scene_schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
-    summary_schema = f"prompts/{representation}_summary_v4.md"
+    scene_schema = f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md"
+    summary_schema = f"prompts/summary_{representation}_v4.md"
     extract(context, model=model, schema=scene_schema)
     summarize(context, model="qwen", source=model, schema=summary_schema)
     directory = context.extraction_dir(representation, model, "scenes")

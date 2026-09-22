@@ -11,7 +11,13 @@ COMMANDS = [line for line in README.splitlines() if line.startswith(("python -m 
 @pytest.mark.parametrize("command", COMMANDS)
 def test_documented_commands_dispatch(v5_context, monkeypatch, command):
     from arm_registry import registry
-    v5_context.config["schema_version"] = "viewing-context-config/v6"
+    historical = "migrate-arm-layout" in command
+    if historical:
+        v5_context.config["schema_version"] = "viewing-context-config/v6"
+    else:
+        v5_context.config.pop("schema_version")
+        v5_context.config["experiment_config_version"] = "v4"
+    v5_context.config["protocol"]["description_extractors"] = ["qwen", "gemini"] if historical else ["qwen"]
     v5_context.config["protocol"]["arms"] = ["meta"]
     v5_context.config["protocol"]["arms"] = list(registry(v5_context.config))
     module = f"{shlex.split(command)[2]}.cli"

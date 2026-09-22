@@ -40,7 +40,9 @@ possibly a casual greeting
 @pytest.fixture
 def v5_context(tmp_path):
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
+    config.pop("experiment_config_version", None)
     config["schema_version"] = "viewing-context-config/v5"
+    config["protocol"]["description_extractors"] = ["qwen", "gemini"]
     config["protocol"]["arms"] = ["desc_gemini", "desc_qwen", "graph_gemini", "graph_qwen", "metadata"]
     config["artifacts_root"] = "artifacts"
     config["data"].pop("titles_supplement_csv", None)
@@ -67,6 +69,9 @@ def v5_context(tmp_path):
         Path(config["models"][model]).mkdir()
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(config))
     shutil.copytree(ROOT / "prompts", tmp_path / "prompts")
+    for kind in ("graph", "description"):
+        template = (tmp_path / f"prompts/summary_{kind}_v4.md").read_text()
+        (tmp_path / f"prompts/summary_{kind}_v4_meta.md").write_text(template.replace("Scene observations:", "English Title: {english_title}\n\nScene observations:"))
     return RunContext.load("test_run", root=tmp_path)
 
 

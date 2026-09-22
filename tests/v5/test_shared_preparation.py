@@ -21,9 +21,9 @@ def test_new_run_consumes_preparation_without_rebuilding(ready_context, fake_mod
     assert first.require_ready_cohort() == second.require_ready_cohort()
     for context in (first, second):
         context.config["protocol"]["arms"] = ["desc_qwen", "metadata"]
-        extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
+        extract_description_scenes(context, model="qwen", schema="prompts/scene_description_v2.md")
         summarize_description(context, source="qwen", model="gemini",
-                              schema="prompts/description_summary_v4.md")
+                              schema="prompts/summary_description_v4.md")
         result = embed_representations(context, target=["desc_qwen", "metadata"], summary_source="gemini")
         assert result["generated_arms"] == (["desc_qwen", "metadata"] if context == first else [])
         assert not (context.run_root / "cohort").exists()

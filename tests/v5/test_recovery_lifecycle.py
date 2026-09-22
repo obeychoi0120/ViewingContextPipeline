@@ -16,10 +16,10 @@ def test_summary_single_pass_records_first_failure_without_scene_or_correction(
     context = ready_context
     extract = extract_graph_scenes if representation == "graph" else extract_description_scenes
     extract(context, model=source,
-            schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+            schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     context.config["extraction"]["summary_repetition_penalty"] = [1.0]
     summarize = getattr(steps, f"summarize_{representation}")
-    options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
+    options = {"source": source, "schema": f"prompts/summary_{representation}_v4.md"}
     directory = context.summary_dir(representation, source, "qwen")
     ids = [item["content_id"] for item in context.require_ready_cohort()["catalog"]]
     calls, progress_instances = [], []
@@ -87,7 +87,7 @@ def test_summary_publish_error_requires_regeneration_without_journal(
     import extraction.summary_executor as executor
     context = ready_context
     extract = getattr(steps, f"extract_{representation}_scenes")
-    extract(context, model="qwen", schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    extract(context, model="qwen", schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     calls = []
     @contextmanager
     def generator(**kwargs):
@@ -103,7 +103,7 @@ def test_summary_publish_error_requires_regeneration_without_journal(
         raise OSError("disk full")
     monkeypatch.setattr(executor, "atomic_write_json", fault)
     summarize = getattr(steps, f"summarize_{representation}")
-    options = {"source": "qwen", "schema": f"prompts/{representation}_summary_v4.md"}
+    options = {"source": "qwen", "schema": f"prompts/summary_{representation}_v4.md"}
     with pytest.raises(OSError, match="disk full"):
         summarize(context, model="qwen", **options)
     directory = context.summary_dir(representation, "qwen", "qwen")

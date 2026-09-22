@@ -27,7 +27,7 @@ def test_summary_cli(v5_context, monkeypatch, representation, source, model):
     monkeypatch.setitem(steps.STEP_HANDLERS, f"summarize-{representation}",
                         lambda context, **kw: calls.append(kw))
     args = [f"summarize-{representation}", "--run-id", "run", "--schema",
-            f"prompts/{representation}_summary_v4.md"]
+            f"prompts/summary_{representation}_v4.md"]
     arm = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
     assert main(args + ["--arm", arm]) == 1
     assert main(args + ["--model", model]) == 1
@@ -42,7 +42,7 @@ def case(request, ready_context, fake_models):
     ctx = ready_context
     getattr(steps, f"extract_{representation}_scenes")(
         ctx, model=source,
-        schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md",
+        schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md",
     )
     cohort = ctx.require_ready_cohort()
     arm = generated_arm(ctx.config, representation, source)
@@ -52,7 +52,7 @@ def case(request, ready_context, fake_models):
     def run(model="gemini", **kwargs):
         return getattr(steps, f"summarize_{representation}")(
             ctx, source=source, model=model,
-            schema=f"prompts/{representation}_summary_v4.md", **kwargs,
+            schema=f"prompts/summary_{representation}_v4.md", **kwargs,
         )
 
     return SimpleNamespace(ctx=ctx, cohort=cohort, arm=arm, directory=directory, run=run,
@@ -89,7 +89,10 @@ def test_gemini_text_only_and_reuse(case, monkeypatch):
     assert configs == [case.ctx.config["models"]["gemini"]]
     doc = read_json(case.directory / f"{case.ids[0]}.json")
     assert doc["provenance"]["summary_model"] == "gemini"
-    assert doc["provenance"]["settings"] == {"backend": "gemini", "max_new_tokens": 512}
+    assert doc["provenance"]["settings"] == {
+        "backend": "gemini",
+        "max_new_tokens": case.ctx.config["extraction"][case.arm.representation]["summary_max_new_tokens"],
+    }
     assert case.run()["content_count"] == len(case.ids)
     assert len(calls) == len(case.ids) and len(configs) == 1
 
@@ -241,7 +244,7 @@ def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
     monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: case.ctx)
     assert main([f"summarize-{case.arm.representation}", "--run-id", case.ctx.run_id,
                  "--arm", case.arm.name, "--model", "gemini", "--schema",
-                 f"prompts/{case.arm.representation}_summary_v4.md"]) == 1
+                 f"prompts/summary_{case.arm.representation}_v4.md"]) == 1
     assert len(read_jsonl(case.directory / "failures.jsonl")) == len(case.ids)
 
 

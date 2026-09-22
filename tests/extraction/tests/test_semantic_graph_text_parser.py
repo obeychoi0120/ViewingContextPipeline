@@ -138,7 +138,7 @@ def test_v4_example_passes_scene_validation_and_summary():
     from extraction.step_support import minimal_graph_records
 
     root = Path(__file__).resolve().parents[3]
-    prompt = (root / "prompts/graph_scene_v4.md").read_text()
+    prompt = (root / "prompts/scene_graph_v4.md").read_text()
     example = prompt.split("[Example]", 1)[1]
     example = example[example.index("[Entities]"):]
     assert "context" not in prompt.lower()

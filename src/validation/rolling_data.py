@@ -150,7 +150,9 @@ def prepare_full_cohort(context, *, plan_only=False):
     plan = {
         "schema_version": SCHEMA,
         "metadata_missing_policy": settings["metadata_missing_policy"],
-        "pipeline_schema": context.config["schema_version"],
+        **({"experiment_config_version": context.config["experiment_config_version"]}
+           if "experiment_config_version" in context.config
+           else {"pipeline_schema": context.config["schema_version"]}),
         **observed,
         "duplicate_rows_preserved": duplicates,
         "no_history_count": int(np.count_nonzero(table.history_ends == 0)),

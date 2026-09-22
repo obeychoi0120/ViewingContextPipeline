@@ -81,7 +81,7 @@ def test_progress_counts_only_pending_scenes(
     scenes.append({**scenes[0], "scene_idx": 1})
     timestamp.write_text(json.dumps(scenes))
     extract = getattr(steps, f"extract_{representation}_scenes")
-    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    schema = f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md"
     expected_total = 5
     expected_reused = 0
     instances = []

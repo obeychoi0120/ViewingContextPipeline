@@ -50,6 +50,15 @@ def representation_report(context, arms):
             "issue_examples": issue_examples,
             "issue_examples_omitted_count": issue_count - len(issue_examples),
         }
+        from arm_registry import concat_layout
+        if concat_layout(context.config):
+            counts = Counter(row.get("components", "neither") for row in rows)
+            summary["component_counts"] = {key: counts[key] for key in ("both", "title_only", "summary_only", "neither")}
+            summary["title_fallback_count"] = counts["title_only"] if registered[name].model else 0
+            if registered[name].model:
+                summary["visual_summary_count"] = sum(bool(row.get("summary_used")) for row in rows)
+                summary["visual_summary_coverage"] = summary["visual_summary_count"] / len(rows) if rows else 0.0
+                summary["summary_status_counts"] = dict(Counter(row.get("summary_status") for row in rows))
         if registered[name].model is not None:
             summary["distributions"] = {
                 field: _distribution(rows, field)

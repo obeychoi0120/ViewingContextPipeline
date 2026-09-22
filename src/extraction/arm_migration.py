@@ -3,7 +3,7 @@ from contextlib import contextmanager
 import fcntl
 import json
 
-from arm_registry import registry, legacy_layout
+from arm_registry import registry, legacy_layout, concat_layout
 from artifact_io import atomic_write_json, atomic_write_jsonl
 from extraction.recovery import file_fingerprint
 from extraction.scene_storage import read_scene_records, _payload
@@ -23,8 +23,8 @@ def migration_lock(root):
 
 
 def migrate_arm_layout(context, *, summary_model):
-    if legacy_layout(context.config):
-        raise ValueError("migrate-arm-layout requires the new nine-arm config contract")
+    if legacy_layout(context.config) or concat_layout(context.config):
+        raise ValueError("migrate-arm-layout requires the v6 nine-arm config contract")
     if summary_model not in {'qwen', 'gemini'}:
         raise ValueError('summary-model must be qwen or gemini')
     root = context.run_root / 'extraction'

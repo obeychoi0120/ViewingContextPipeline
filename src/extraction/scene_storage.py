@@ -121,15 +121,17 @@ def migrate_scene_file(path, records):
 def migrate_scene_schema(context, *, force=False):
     """Remove legacy metadata after preserving scene indices, without model calls."""
     converted = unchanged = 0
-    for representation in ("description", "graph"):
-        for model in ("qwen", "gemini"):
-            directory = context.extraction_dir(representation, model, "scenes")
-            for path in sorted(directory.glob("*.jsonl")):
-                if path.name in {"failure.jsonl", "failures.jsonl"}:
-                    continue
-                if migrate_scene_file(path, read_scene_records(path)):
-                    converted += 1
-                else:
-                    unchanged += 1
+    from arm_registry import generation_registry
+    for source in generation_registry(context.config).values():
+        if source.model is None or source.name != source.scene_arm:
+            continue
+        directory = context.scene_arm_dir(source.name)
+        for path in sorted(directory.glob("*.jsonl")):
+            if path.name in {"failure.jsonl", "failures.jsonl"}:
+                continue
+            if migrate_scene_file(path, read_scene_records(path)):
+                converted += 1
+            else:
+                unchanged += 1
     print(f"[SCHEMA] converted={converted} unchanged={unchanged}", flush=True)
     return {"converted": converted, "unchanged": unchanged}

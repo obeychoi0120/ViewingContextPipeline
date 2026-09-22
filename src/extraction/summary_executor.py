@@ -11,7 +11,7 @@ from extraction.progress import InferenceProgress
 from extraction.qwen_runtime import QwenRuntime
 
 from artifact_io import atomic_write_json
-from arm_registry import legacy_layout
+from arm_registry import legacy_layout, concat_layout
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
 from extraction.errors import ExtractionStepError
@@ -200,6 +200,11 @@ def run_summary_stage(
             except ExtractionStepError:
                 pass
             else:
+                if concat_layout(context.config):
+                    prov = existing["provenance"]
+                    if (prov.get("uses_title") is not False or "english_title" in prov
+                            or prov.get("scene_arm") != arm.scene_arm):
+                        raise ExtractionStepError(f"Summary source/title policy mismatch: {output}; use --force or a new run")
                 if existing["status"] == "complete":
                     clear_dirty(output)
                     documents[cid] = existing

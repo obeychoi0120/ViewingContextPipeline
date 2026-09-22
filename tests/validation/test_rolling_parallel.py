@@ -25,9 +25,9 @@ def full_context(ready_context, fake_models):
         for kind in ("description", "graph"):
             getattr(steps, f"extract_{kind}_scenes")(
                 ready_context, model=source,
-                schema=f"prompts/{kind}_scene_v{'3' if kind == 'graph' else '2'}.md")
+                schema=f"prompts/scene_{kind}_v{'3' if kind == 'graph' else '2'}.md")
             getattr(steps, f"summarize_{kind}")(
-                ready_context, source=source, model="qwen", schema=f"prompts/{kind}_summary_v4.md")
+                ready_context, source=source, model="qwen", schema=f"prompts/summary_{kind}_v4.md")
     prepare_validation_cohort(ready_context, "qwen")
     return ready_context
 

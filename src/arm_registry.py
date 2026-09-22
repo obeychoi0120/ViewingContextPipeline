@@ -3,6 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ARM_CONTRACT = "shared-scenes-nine-arms/v1"
+CONCAT_ARM_CONTRACT = "title-summary-six-arms/v1"
+CONCAT_POLICY = "title-summary-double-newline/v1"
+EXPERIMENT_CONFIG_VERSION = "v4"
+
+
+def concat_layout(config):
+    return config.get("experiment_config_version") == EXPERIMENT_CONFIG_VERSION
+
+
+def arm_contract(config):
+    return CONCAT_ARM_CONTRACT if concat_layout(config) else ARM_CONTRACT
 
 
 @dataclass(frozen=True)
@@ -15,7 +26,7 @@ class Arm:
 
     @property
     def fallback(self):
-        return self.name.removesuffix("gemini") + "qwen" if self.model == "gemini" else None
+        return self.name.removesuffix("gemini") + "qwen" if self.model == "gemini" and self.name.endswith("_gemini") else None
 
 
 def legacy_layout(config):
@@ -24,7 +35,14 @@ def legacy_layout(config):
 
 
 def registry(config):
-    if legacy_layout(config):
+    if concat_layout(config):
+        arms = [Arm("meta", "metadata", uses_title=True),
+                Arm("graph_qwen", "graph", "qwen", False, "graph_qwen"),
+                Arm("desc_qwen", "description", "qwen", False, "desc_qwen"),
+                Arm("graph_qwen_meta", "graph", "qwen", True, "graph_qwen"),
+                Arm("desc_qwen_meta", "description", "qwen", True, "desc_qwen"),
+                Arm("graph_gemini_meta", "graph", "gemini", True, "graph_gemini")]
+    elif legacy_layout(config):
         arms = [Arm(f"{prefix}_{model}", kind, model, True, f"{prefix}_{model}")
                 for prefix, kind in (("desc", "description"), ("graph", "graph"))
                 for model in ("gemini", "qwen")]
@@ -58,16 +76,32 @@ def select_arms(config, target=None):
     return {name: arm for name, arm in registered.items() if name in names}
 
 
+def generation_registry(config):
+    if concat_layout(config):
+        return {name: Arm(name, kind, model, False, name)
+                for name, kind, model in (("graph_qwen", "graph", "qwen"),
+                                          ("desc_qwen", "description", "qwen"),
+                                          ("graph_gemini", "graph", "gemini"))}
+    return registry(config)
+
+
 def generated_arm(config, representation, model):
     if model not in {"gemini", "qwen"}:
         raise ValueError("model/source must be qwen or gemini")
-    return next(a for a in registry(config).values()
-                if a.representation == representation and a.model == model
-                and a.name == a.scene_arm)
+    source = next((a for a in generation_registry(config).values()
+                   if a.representation == representation and a.model == model
+                   and a.name == a.scene_arm), None)
+    if source is None:
+        raise ValueError(f"unsupported generation source: {representation}/{model}")
+    return source
 
 
 def resolve_generation_arm(config, name, representation, model, *, summary=False):
-    arm = registry(config).get(name)
+    arm = generation_registry(config).get(name)
+    if concat_layout(config) and arm is None:
+        source = registry(config).get(name)
+        hint = f"; use source --arm {source.scene_arm}" if source and source.scene_arm else ""
+        raise ValueError(f"invalid generation source: {name}{hint}")
     if arm is None or arm.representation != representation or arm.model is None:
         raise ValueError(f"invalid {representation} generation arm: {name}")
     if not summary and (arm.name != arm.scene_arm or arm.model != model):

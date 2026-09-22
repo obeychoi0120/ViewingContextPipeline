@@ -28,10 +28,10 @@ def generate_all(context):
     from extraction.steps import summarize_description
 
     for model in ("qwen", "gemini"):
-        extract_description_scenes(context, model=model, schema="prompts/description_scene_v2.md")
-        extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
-        summarize_description(context, model="qwen", source=model, schema="prompts/description_summary_v4.md")
-        summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")
+        extract_description_scenes(context, model=model, schema="prompts/scene_description_v2.md")
+        extract_graph_scenes(context, model=model, schema="prompts/scene_graph_v3.md")
+        summarize_description(context, model="qwen", source=model, schema="prompts/summary_description_v4.md")
+        summarize_graph(context, model="qwen", source=model, schema="prompts/summary_graph_v4.md")
 
 
 def test_default_flow_and_artifact_lifecycle(ready_context, fake_models):
@@ -67,7 +67,7 @@ def test_default_flow_and_artifact_lifecycle(ready_context, fake_models):
 
 def test_scene_prompt_changes_reuse_success_without_changing_arm(ready_context, fake_models):
     context = ready_context
-    schema = "prompts/graph_scene_v3.md"
+    schema = "prompts/scene_graph_v3.md"
     extract_graph_scenes(context, model="qwen", schema=schema)
     count = len(fake_models)
     extract_graph_scenes(context, model="qwen", schema=schema)
@@ -76,16 +76,16 @@ def test_scene_prompt_changes_reuse_success_without_changing_arm(ready_context, 
     path.write_text(path.read_text() + "\nPreserve direction carefully.")
     extract_graph_scenes(context, model="qwen", schema=schema)
     assert len(fake_models) == count
-    summarize_graph(context, model="qwen", source="qwen", schema="prompts/graph_summary_v4.md")
+    summarize_graph(context, model="qwen", source="qwen", schema="prompts/summary_graph_v4.md")
     count = len(fake_models)
-    prompt = context.prompt_path("prompts/graph_summary_v4.md")
+    prompt = context.prompt_path("prompts/summary_graph_v4.md")
     prompt.write_text(prompt.read_text() + "\nUse concise prose.")
     summarize_graph(context, model="qwen", source="qwen", schema=prompt)
     assert len(fake_models) == count
     name = "graph_qwen"
     context.config["protocol"]["arms"] = [name]
     embed_representations(context, summary_source="qwen", target=[name])
-    replacement = context.root / "prompts/graph_scene_v99.md"
+    replacement = context.root / "prompts/scene_graph_v99.md"
     replacement.write_text(path.read_text() + "\nPreserve all visible attributes.")
     extract_graph_scenes(context, model="qwen", schema=replacement)
     assert embed_representations(context, summary_source="qwen", target=[name])["generated_arms"] == []
@@ -136,9 +136,9 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
     context = ready_context
     extract = getattr(steps, f"extract_{representation}_scenes")
     extract(context, model=source,
-            schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+            schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     summarize = getattr(steps, f"summarize_{representation}")
-    options = {"source": source, "schema": f"prompts/{representation}_summary_v4.md"}
+    options = {"source": source, "schema": f"prompts/summary_{representation}_v4.md"}
     directory = context.summary_dir(representation, source, "qwen")
     calls = []
 
@@ -173,7 +173,7 @@ def test_summary_word_count_is_prompt_only_and_cached_resume(
 
 def test_summary_accepts_multiple_paragraphs_without_correction(ready_context, fake_models, monkeypatch):
     context = ready_context
-    extract_graph_scenes(context, model="qwen", schema="prompts/graph_scene_v3.md")
+    extract_graph_scenes(context, model="qwen", schema="prompts/scene_graph_v3.md")
     calls = []
 
     @contextmanager
@@ -188,7 +188,7 @@ def test_summary_accepts_multiple_paragraphs_without_correction(ready_context, f
         yield generate
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    summarize_graph(context, model="qwen", source="qwen", schema="prompts/graph_summary_v4.md")
+    summarize_graph(context, model="qwen", source="qwen", schema="prompts/summary_graph_v4.md")
     assert len(calls) == 1
     doc = read_json(next(context.graph_summary_dir("qwen").glob("*.json")))
     assert doc["status"] == "complete" and doc["correction_count"] == 0
@@ -264,7 +264,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
         patch.setattr("extraction.steps.qwen_generator", generator)
         patch.setattr("extraction.steps.GeminiWorkerPool", Pool)
         for _ in range(2):
-            result = extract_graph_scenes(context, model=model, schema="prompts/graph_scene_v3.md")
+            result = extract_graph_scenes(context, model=model, schema="prompts/scene_graph_v3.md")
             assert result["failure_count"] == 0
     assert len(generated) == len(set(generated)) == 4
     for path in context.graph_scene_dir(model).glob("*.jsonl"):
@@ -273,7 +273,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
             assert "generation" not in row and row["provenance"]["prompt_hash"]
             assert row["semantic_warnings"] == []
             assert _success_scene_row_issues(f"graph_{model}", row, path.stem) == []
-    summarize_graph(context, model="qwen", source=model, schema="prompts/graph_summary_v4.md")
+    summarize_graph(context, model="qwen", source=model, schema="prompts/summary_graph_v4.md")
     context.config["protocol"]["arms"] = [f"graph_{model}"]
     assert embed_representations(context, summary_source="qwen", target=[f"graph_{model}"])["generated_arms"] == [
         f"graph_{model}"]
@@ -281,7 +281,7 @@ def test_graph_id_mismatches_do_not_retry_or_block_downstream(
 
 def test_changed_model_settings_and_frame_bytes_reuse_success_until_force(ready_context, fake_models):
     context = ready_context
-    schema = "prompts/description_scene_v2.md"
+    schema = "prompts/scene_description_v2.md"
     extract_description_scenes(context, model="qwen", schema=schema)
     count = len(fake_models)
     context.config["extraction"]["description"]["scene_max_new_tokens"] = 768

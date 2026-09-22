@@ -1,4 +1,4 @@
-schema_version: viewing-context-config/v6
+experiment_config_version: v4
 protocol:
   dataset: microlens_100k
   modality: visual_only
@@ -11,16 +11,12 @@ protocol:
   arms:
   - meta
   - graph_qwen
-  - graph_gemini
   - desc_qwen
-  - desc_gemini
-  - graph_meta_qwen
-  - graph_meta_gemini
-  - desc_meta_qwen
-  - desc_meta_gemini
+  - graph_qwen_meta
+  - desc_qwen_meta
+  - graph_gemini_meta
   description_extractors:
   - qwen
-  - gemini
 artifacts_root: artifacts
 data:
   pairs_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs.csv
@@ -63,29 +59,26 @@ extraction:
   - 1.05
   - 1.1
   - 1.15
-  - 1.2
   description_repetition_penalty:
   - 1.0
   - 1.05
   - 1.1
   - 1.15
-  - 1.2
   summary_repetition_penalty:
   - 1.0
   - 1.05
   - 1.1
   - 1.15
-  - 1.2
   summary_sampling:
     temperature: 0.2
     top_p: 0.8
     top_k: 20
   graph:
     scene_max_new_tokens: 1024
-    summary_max_new_tokens: 512
+    summary_max_new_tokens: 2048
   description:
     scene_max_new_tokens: 1024
-    summary_max_new_tokens: 512
+    summary_max_new_tokens: 2048
 validation:
   cohort:
     mode: full_rolling

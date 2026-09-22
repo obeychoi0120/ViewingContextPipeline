@@ -7,12 +7,12 @@ from typing import Any
 
 import yaml
 
+from arm_registry import EXPERIMENT_CONFIG_VERSION
 from artifact_io import atomic_write_json, atomic_write_jsonl
 from visual_sampling import validate_sampling
 
 
 CONFIG_PATH = Path("config.yaml")
-CONFIG_SCHEMA = "viewing-context-config/v6"
 
 
 class ConfigError(RuntimeError):
@@ -142,8 +142,8 @@ class RunContext:
         return self.run_root / "extraction" / representation / model / phase
 
     def scene_arm_dir(self, arm):
-        from arm_registry import registry, legacy_layout
-        selected = registry(self.config)[arm]
+        from arm_registry import generation_registry, legacy_layout
+        selected = generation_registry(self.config)[arm]
         if selected.model is None or selected.name != selected.scene_arm:
             raise ValueError(f"not a Scene arm: {arm}")
         if legacy_layout(self.config):
@@ -151,8 +151,8 @@ class RunContext:
         return self.run_root / "extraction" / "scenes" / arm
 
     def summary_arm_dir(self, arm):
-        from arm_registry import registry
-        if registry(self.config)[arm].model is None:
+        from arm_registry import generation_registry
+        if generation_registry(self.config)[arm].model is None:
             raise ValueError("Meta has no Summary artifacts")
         return self.run_root / "extraction" / "summaries" / arm
 
@@ -219,8 +219,10 @@ class RunContext:
 
 
 def _validate_config(value: dict[str, Any]) -> None:
+    uses_experiment_version = "experiment_config_version" in value
+    version_key = "experiment_config_version" if uses_experiment_version else "schema_version"
     expected_keys = {
-        "schema_version",
+        version_key,
         "protocol",
         "artifacts_root",
         "data",
@@ -230,8 +232,14 @@ def _validate_config(value: dict[str, Any]) -> None:
     }
     if set(value) != expected_keys:
         raise ConfigError(f"pipeline config must contain exactly {sorted(expected_keys)}")
-    if value.get("schema_version") not in {CONFIG_SCHEMA, "viewing-context-config/v5"}:
-        raise ConfigError(f"schema_version must be {CONFIG_SCHEMA}")
+    if uses_experiment_version:
+        if value.get("experiment_config_version") != EXPERIMENT_CONFIG_VERSION:
+            raise ConfigError(f"experiment_config_version must be {EXPERIMENT_CONFIG_VERSION}")
+    elif value.get("schema_version") not in {"viewing-context-config/v6", "viewing-context-config/v5"}:
+        raise ConfigError(
+            f"experiment_config_version must be {EXPERIMENT_CONFIG_VERSION}; "
+            "schema_version is accepted only for historical v5/v6 configs"
+        )
     _validate_protocol(value)
     _validate_extraction(value)
     _validate_models(value)
@@ -245,7 +253,8 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "dataset": "microlens_100k", "modality": "visual_only", "sampling": "fixed_windows",
         "cohort_sampling": "full_rolling", "catalog_scope": "full_source_catalog",
         "graph_extractors": ["qwen", "gemini"],
-        "description_extractors": ["qwen", "gemini"],
+        "description_extractors": (["qwen"] if value.get("experiment_config_version") == EXPERIMENT_CONFIG_VERSION
+                                   else ["qwen", "gemini"]),
     }
     if set(protocol) - {"graph_summarizer"} != set(expected) | {"arms"}:
         raise ConfigError("invalid protocol keys")
@@ -364,8 +373,7 @@ def _validate_models(value: dict[str, Any]) -> None:
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
     data_keys = {"videos_dir", "pairs_tsv", "titles_csv"}
-    if value["schema_version"] in {CONFIG_SCHEMA, "viewing-context-config/v5"}:
-        data_keys.add("pairs_csv")
+    data_keys.add("pairs_csv")
     if not data_keys <= set(data) or set(data) - data_keys - {"titles_supplement_csv"}:
         raise ConfigError(f"data must contain {sorted(data_keys)} and optionally titles_supplement_csv")
     if "titles_supplement_csv" in data and (not isinstance(data["titles_supplement_csv"], str) or not data["titles_supplement_csv"].strip()):

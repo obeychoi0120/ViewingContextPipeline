@@ -141,7 +141,7 @@ def test_extraction_builds_paths_without_probing_assets(ready_context, fake_mode
     monkeypatch.setattr(Path, "is_dir", is_dir)
     monkeypatch.setattr(Path, "iterdir", iterdir)
     monkeypatch.setattr(Path, "open", open_file)
-    extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
+    extract_description_scenes(context, model="qwen", schema="prompts/scene_description_v2.md")
     assert len(reads) == len(set(reads)) == 4
     assert fake_models
 

@@ -6,7 +6,7 @@ import tarfile
 from collections import Counter
 from datetime import datetime, timezone
 
-from arm_registry import registry
+from arm_registry import registry, concat_layout
 from artifact_io import atomic_write_json, atomic_write_jsonl
 from extraction.arm_migration import normalize_summary_arm
 from extraction.summary_executor import reuse_summary_document
@@ -19,6 +19,8 @@ def main(argv=None):
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args(argv)
     ctx = RunContext.load(args.run_id)
+    if concat_layout(ctx.config):
+        raise ValueError("Summary arm normalization is for historical v5/v6 layouts only")
     root = ctx.run_root / 'extraction' / 'summaries'
     backup = ctx.run_root.parents[1] / 'backups' / ctx.run_id / ('summary-arm-normalization-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
     plans = []
