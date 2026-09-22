@@ -155,7 +155,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
                     "arm": arm,
                 }
                 from validation.representation_provenance import recommendation_identity
-                identity.update(recommendation_identity(context, RECOMMENDATION_ARMS[arm]))
+                identity.update(recommendation_identity(context, selected[arm]))
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
                 if not combination_complete(directory, identity, len(ids)):
                     raise ValueError(f"incomplete/corrupt combination: {directory}")

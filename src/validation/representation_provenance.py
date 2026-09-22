@@ -69,6 +69,10 @@ def recommendation_identity(context, branch):
 
 
 def summary_sources(context, branch, documents, fallback_ids):
+    from validation.metadata_graph import FUSION_SOURCES
+    if branch in FUSION_SOURCES:
+        yield context.cohort_dir / "metadata_titles.jsonl"
+    branch = FUSION_SOURCES.get(branch, branch)
     for row in documents:
         content = row["content_id"]
         if branch == "metadata":

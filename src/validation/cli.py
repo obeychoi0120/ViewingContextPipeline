@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--target", nargs="+", type=str.upper, choices=tuple(TARGET_SOURCES),
-        help="Sources to include (run-recommendation/run-diagnosis only; default: all).",
+        help="Embedding/recommendation/diagnosis sources (default: original four arms).",
     )
     parser.add_argument(
         "--gpus", type=_positive_int,
@@ -38,8 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        if args.target is not None and args.step not in {"run-recommendation", "run-diagnosis"}:
-            raise ValueError("--target is only supported by run-recommendation/run-diagnosis")
+        if args.target is not None and args.step not in {
+            "embed-representations", "run-recommendation", "run-diagnosis",
+        }:
+            raise ValueError("--target requires embed-representations/run-recommendation/run-diagnosis")
         if args.plan_only and args.step != "prepare-cohort":
             raise ValueError("--plan-only is only supported by prepare-cohort")
         if (args.gpus is not None or args.workers_per_gpu is not None) and args.step != "run-recommendation":

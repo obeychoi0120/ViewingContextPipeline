@@ -18,7 +18,9 @@ from validation.rolling_recommendation import combination_dir, run_rolling
 from validation.steps import validation_config
 
 
-SUBSETS = [list(group) for size in range(1, 5) for group in combinations(TARGET_SOURCES, size)]
+DEFAULT_TARGETS = [name for name, branch in TARGET_SOURCES.items()
+                   if branch in RECOMMENDATION_ARMS.values()]
+SUBSETS = [list(group) for size in range(1, 5) for group in combinations(DEFAULT_TARGETS, size)]
 
 
 @pytest.mark.parametrize("target", SUBSETS)

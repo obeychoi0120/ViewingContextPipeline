@@ -182,6 +182,9 @@ def _embedding_work(context, catalog, config, force, *, branches=None):
         "graph_gemini": context.graph_summary_dir("gemini"),
         "desc": context.description_summary_dir,
     }
+    from validation.metadata_graph import BRANCH
+    if branches is not None and BRANCH in branches:
+        sources[BRANCH] = sources["graph_qwen"]
     if branches is not None:
         sources = {branch: path for branch, path in sources.items() if branch in branches}
     gemini_fallbacks = [
@@ -217,9 +220,20 @@ def _embedding_work(context, catalog, config, force, *, branches=None):
 
 
 def _embedding_documents(context, catalog, sources, pending, fallback_ids):
+    from validation.metadata_graph import BRANCH, combined_text
     content_ids = [str(row["content_id"]) for row in catalog]
     documents_by_branch: dict[str, list[dict[str, Any]]] = {}
     for branch in pending:
+        if branch == BRANCH:
+            inputs = _embedding_documents(
+                context, catalog, {"metadata": None, "graph_qwen": sources[branch]},
+                ["metadata", "graph_qwen"], set(),
+            )
+            documents_by_branch[branch] = [
+                {"content_id": title["content_id"], "text": combined_text(title["text"], graph["text"])}
+                for title, graph in zip(inputs["metadata"], inputs["graph_qwen"], strict=True)
+            ]
+            continue
         if branch == "metadata":
             metadata_titles_path = context.cohort_dir / "metadata_titles.jsonl"
             if not _metadata_titles_match_catalog(
@@ -322,16 +336,25 @@ def _persist_representations(context, matrices, catalog, gemini_fallbacks, signa
     )
 
 
-def embed_representations(context: RunContext, *, force: bool = False) -> dict[str, Any]:
-    log_step_start(context, "embed-representations", force=force)
+def embed_representations(
+    context: RunContext, *, force: bool = False, target: list[str] | None = None,
+) -> dict[str, Any]:
+    from validation.metadata_graph import BRANCH
+    from validation.recommendation_contracts import resolve_target_arms
+    arms = resolve_target_arms(target)
+    full = context.config["schema_version"] == "viewing-context-config/v4"
+    if BRANCH in arms.values() and not full:
+        raise ValueError("metadata graph fusion requires the v4 rolling protocol")
+    log_step_start(context, "embed-representations", force=force, target=target)
     context.initialize()
     cohort = context.require_ready_cohort()
     from validation.features import BGETextEncoder
 
     config = validation_config(context)
     catalog = cohort["catalog"]
-    sources, gemini_fallbacks, pending = _embedding_work(context, catalog, config, force)
-    full = context.config["schema_version"] == "viewing-context-config/v4"
+    sources, gemini_fallbacks, pending = _embedding_work(
+        context, catalog, config, force, branches=set(arms.values()),
+    )
     documents_by_branch = _embedding_documents(
         context,
         catalog,
@@ -377,7 +400,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
                 clear_changed(path)
         if full:
             from validation.representation_checks import verify_representations
-            verify_representations(context, cohort)
+            verify_representations(context, cohort, arms=arms)
         return _result("embed-representations", content_count=len(catalog))
 
     context.representations_dir.mkdir(parents=True, exist_ok=True)
@@ -389,7 +412,7 @@ def embed_representations(context: RunContext, *, force: bool = False) -> dict[s
             clear_changed(path)
     if full:
         from validation.representation_checks import verify_representations
-        verify_representations(context, cohort)
+        verify_representations(context, cohort, arms=arms)
     return _result("embed-representations", content_count=len(catalog))
 
 
@@ -456,6 +479,9 @@ def run_recommendation(
                            workers_per_gpu=workers_per_gpu, target=target)
     if gpus is not None or workers_per_gpu != 1:
         raise ValueError("parallel recommendation options require the v4 full rolling protocol")
+    from validation.metadata_graph import BRANCH
+    if BRANCH in arms.values():
+        raise ValueError("metadata graph fusion requires the v4 rolling protocol")
     cohort = context.require_ready_cohort()
     from validation.recommendation import train_recommendation_arms
     from validation.representation_checks import verify_recorded_representations
@@ -501,6 +527,9 @@ def run_diagnosis(
     if context.config["schema_version"] == "viewing-context-config/v4":
         from validation.rolling_diagnosis import diagnose
         return diagnose(context, target=target)
+    from validation.metadata_graph import BRANCH
+    if BRANCH in arms.values():
+        raise ValueError("metadata graph fusion requires the v4 rolling protocol")
     from validation.diagnosis import diagnose_recommendations
 
     context.initialize()

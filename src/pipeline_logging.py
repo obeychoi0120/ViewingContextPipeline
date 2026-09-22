@@ -102,7 +102,7 @@ def step_settings(context: RunContext, step: str, **options: Any) -> dict[str, A
             values["plan_only"] = options.get("plan_only", False)
         elif step == "prepare-input-data":
             values["reuse_run_id"] = options.get("reuse_run_id")
-        elif step in {"run-recommendation", "run-diagnosis"}:
+        elif step in {"embed-representations", "run-recommendation", "run-diagnosis"}:
             from validation.recommendation_contracts import resolve_target_arms, target_scope
 
             scope = target_scope(resolve_target_arms(options.get("target")))

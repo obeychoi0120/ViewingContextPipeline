@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import replace
+from pathlib import Path
 
 from extraction.steps import GRAPH_SOURCES, STEP_HANDLERS
 from pipeline_runtime import RunContext
@@ -22,12 +24,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", choices=GRAPH_SOURCES)
     parser.add_argument("--source", choices=GRAPH_SOURCES)
     parser.add_argument(
+        "--qwen-model-path", type=Path,
+        help="Merged LoRA checkpoint for Qwen graph extraction only; summaries use models.qwen.",
+    )
+    parser.add_argument(
         "--gpus",
         type=_positive_int,
         help="Number of visible CUDA devices to use.",
     )
     args = parser.parse_args(argv)
     try:
+        if args.qwen_model_path is not None and (
+            args.step != "extract-graph-scenes" or args.model != "qwen"
+        ):
+            raise ValueError("--qwen-model-path requires extract-graph-scenes --model qwen")
         if args.reuse_run_id is not None:
             if args.step != "prepare-input-data":
                 raise ValueError("--reuse-run-id is only supported by prepare-input-data")
@@ -55,6 +65,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.gpus is not None and not gpu_enabled:
             raise ValueError("--gpus is not supported for this step")
         context = RunContext.load(args.run_id)
+        if args.qwen_model_path is not None:
+            # Override only this invocation; keep the base summary model in YAML.
+            context = replace(context, config={
+                **context.config,
+                "models": {**context.config["models"],
+                           "qwen": str(args.qwen_model_path.expanduser().resolve())},
+            })
         kwargs = {"force": args.force}
         if args.reuse_run_id is not None:
             kwargs["reuse_run_id"] = args.reuse_run_id

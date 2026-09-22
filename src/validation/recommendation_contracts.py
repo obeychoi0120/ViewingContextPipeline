@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from validation.metadata_graph import ARM, BRANCH, TARGET
 
 TRAINING_RUNS_FILENAME = "training_runs.jsonl"
 TRAINING_RUN_SCHEMA_VERSION = "sasrec-training-run/v2"
@@ -17,6 +18,7 @@ TARGET_SOURCES = {
     "GRAPH_QWEN": "graph_qwen",
     "GRAPH_GEMINI": "graph_gemini",
     "DESC_QWEN": "desc",
+    TARGET: BRANCH,
 }
 
 
@@ -30,7 +32,8 @@ def resolve_target_arms(target: list[str] | None = None) -> dict[str, str]:
     if unknown:
         raise ValueError(f"unknown target source(s): {', '.join(sorted(unknown))}")
     branches = {TARGET_SOURCES[name] for name in names}
-    return {arm: branch for arm, branch in RECOMMENDATION_ARMS.items() if branch in branches}
+    registered = {**RECOMMENDATION_ARMS, ARM: BRANCH}
+    return {arm: branch for arm, branch in registered.items() if branch in branches}
 
 
 def target_scope(arms: dict[str, str]) -> dict:

@@ -7,6 +7,8 @@ from pipeline_runtime import read_jsonl
 
 
 def recovery_report(run_root, *, branches=None):
+    from validation.metadata_graph import visual_dependencies
+    branches = visual_dependencies(branches)
     report = {}
     root = run_root / "extraction"
     sources = {"graph_qwen": "graph/qwen", "graph_gemini": "graph/gemini", "desc": "description"}

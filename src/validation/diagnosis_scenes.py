@@ -334,6 +334,8 @@ def _scene_coverage(
     runtime_paths_valid,
     *, branches=None,
 ):
+    from validation.metadata_graph import visual_dependencies
+    branches = visual_dependencies(branches)
     selected = [arm for arm in SCENE_ARMS if branches is None or arm in branches]
     if not selected:
         return {"status": "not_applicable", "reason": "no visual source selected", "arms": {}}, True, True, True

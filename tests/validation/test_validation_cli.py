@@ -72,7 +72,7 @@ def test_gpu_options_are_scoped_and_positive(option):
     assert raised.value.code == 2
 
 
-@pytest.mark.parametrize("step", ["run-recommendation", "run-diagnosis"])
+@pytest.mark.parametrize("step", ["embed-representations", "run-recommendation", "run-diagnosis"])
 def test_target_sources_are_forwarded(step, monkeypatch):
     received = {}
     monkeypatch.setattr(cli_module.RunContext, "load", lambda _: object())
@@ -89,6 +89,6 @@ def test_empty_or_unknown_target_is_rejected(target):
     assert raised.value.code == 2
 
 
-@pytest.mark.parametrize("step", ["prepare-cohort", "embed-representations"])
+@pytest.mark.parametrize("step", ["prepare-cohort"])
 def test_target_is_rejected_before_loading_unrelated_stages(step):
     assert cli_module.main([step, "--run-id", "test", "--target", "METADATA"]) == 1

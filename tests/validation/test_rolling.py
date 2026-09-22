@@ -606,8 +606,10 @@ def test_84_combinations_real_cpu_training_resume_and_diagnosis(full_context, mo
     # Reuse real training evidence to validate all target grids through public diagnosis.
     from itertools import combinations
     from validation.recommendation_contracts import TARGET_SOURCES, resolve_target_arms
+    default_targets = [name for name, branch in TARGET_SOURCES.items()
+                       if branch in RECOMMENDATION_ARMS.values()]
     for size in range(1, 5):
-        for target in combinations(TARGET_SOURCES, size):
+        for target in combinations(default_targets, size):
             arms = resolve_target_arms(list(target))
             assert diagnose(context, target=list(target))["status"] == "pass"
             selected = read_json(context.diagnosis_path)
