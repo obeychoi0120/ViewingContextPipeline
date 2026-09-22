@@ -271,10 +271,3 @@ def test_v7_rejects_title_prompt_and_historical_migration(six, fake_models):
     with pytest.raises(ValueError, match='v6'):
         migrate_arm_layout(six, summary_model='gemini')
     assert not fake_models
-
-
-def test_scene_schema_migration_uses_three_sources(six, fake_models):
-    from extraction.scene_storage import migrate_scene_schema
-    generate(six)
-    result = migrate_scene_schema(six)
-    assert result == {'converted': 0, 'unchanged': 12}

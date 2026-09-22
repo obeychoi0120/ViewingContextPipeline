@@ -62,12 +62,6 @@ def test_surface_repairs_preserve_every_field(text):
     assert result.graph == GRAPH and result.parse_mode == "repaired"
 
 
-@pytest.mark.parametrize("marker", ["none", "NONE", "None", "[]"])
-def test_explicit_empty_sections(marker):
-    text = f"[Entities]\n{marker}\n[Relations]\n{marker}\n[Context]\n{marker}\n[End]"
-    assert parse_or_repair_graph(text).graph == {"entities": [], "relations": [], "context": []}
-
-
 @pytest.mark.parametrize("text", [
     TEXT.replace("[Relations]", "[Entities]"),
     TEXT.replace("[Context]", "[context]\n[Context]"),

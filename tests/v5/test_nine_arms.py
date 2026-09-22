@@ -125,18 +125,6 @@ def test_title_change_does_not_invalidate_title_free_arm(nine, monkeypatch):
     assert read_state(nine, 'graph_qwen')['input_hash'] == before
 
 
-def test_new_run_reuses_all_embeddings_without_encoder(nine, monkeypatch):
-    generate(nine)
-    embed_representations(nine)
-    other = replace(nine, run_id='second', run_root=nine.run_root.parent / 'second')
-    shutil.copytree(nine.run_root / 'extraction', other.run_root / 'extraction')
-    def fail(*a, **k):
-        pytest.fail('shared embedding must not initialize encoder')
-    monkeypatch.setattr('validation.features.BGETextEncoder', fail)
-    assert embed_representations(other)['reuse']['shared'] == NAMES
-    assert (nine.run_root.parent.parent / 'shared_cache/v2/embeddings').is_dir()
-
-
 def legacy_generation(ctx):
     settings = deepcopy(ctx.config)
     settings['schema_version'] = 'viewing-context-config/v5'

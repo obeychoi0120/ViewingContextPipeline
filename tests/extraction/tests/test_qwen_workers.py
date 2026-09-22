@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import queue
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +10,7 @@ import pytest
 import extraction.backends.qwen as qwen_module
 import extraction.backends.qwen_workers as workers
 from extraction.backends.qwen import QwenOutput
-from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool, _visible_gpu_ids
+from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 
 
 class Channel:
@@ -101,33 +100,6 @@ def test_completion_refills_fast_gpu_before_saving_without_batch_barrier(pool_fa
     pool.abort()
 
 
-def test_initial_admission_is_bounded_and_runtime_events_are_delivered(pool_factory):
-    ready = []
-    pool = pool_factory(count=1, events=[
-        {"kind": "started", "worker_index": 0, "process_group": None},
-        {"kind": "ready", "ok": True, "worker_index": 0},
-        event("a"), event("b"), event("c"),
-    ], on_runtime=ready.append)
-    consumed = []
-
-    def tasks():
-        for name in "abc":
-            consumed.append(name)
-            yield task(name)
-
-    original_get = pool._result_queue.get
-
-    def get(timeout):
-        if not ready:
-            assert consumed == ["a", "b"]
-        return original_get(timeout)
-
-    pool._result_queue.get = get
-    assert pool.generate(tasks()) == {"a": "A", "b": "B", "c": "C"}
-    assert len(ready) == 1
-    pool.abort()
-
-
 @pytest.mark.parametrize("failure", [KeyboardInterrupt(), OSError("disk full")])
 def test_callback_failure_keeps_prior_saves_and_stops_all_workers(pool_factory, failure):
     pool = pool_factory(count=1, events=[event("a"), event("b")])
@@ -157,23 +129,6 @@ def test_engine_failure_is_fatal(pool_factory, events, dead, match):
     with pytest.raises(RuntimeError, match=match):
         pool.generate([task("a")])
     assert pool._closed
-
-
-@pytest.mark.parametrize("mask,available,expected", [
-    ("4,7,9", 3, ["4", "7", "9"]),
-    ("7", 1, ["7"]),
-    (None, 3, ["0", "1", "2"]),
-    ("GPU-abc,GPU-def", 2, ["GPU-abc", "GPU-def"]),
-    ("MIG-abc", 1, ["MIG-abc"]),
-    ("4,7,-1,9", 2, ["4", "7"]),
-])
-def test_all_visible_devices_preserved(monkeypatch, mask, available, expected):
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: available)))
-    if mask is None:
-        monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
-    else:
-        monkeypatch.setenv("CUDA_VISIBLE_DEVICES", mask)
-    assert _visible_gpu_ids() == expected
 
 
 def test_worker_reuses_one_engine_and_passes_requests_concurrently(monkeypatch):

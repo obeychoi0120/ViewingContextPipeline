@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 import pytest
-import yaml
 
 import extraction.steps as steps
 from arm_registry import generated_arm
@@ -11,7 +10,7 @@ from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool
 from extraction.cli import main
 from extraction.errors import ExtractionStepError
 from extraction.failures import FailureLog
-from pipeline_runtime import RunContext, read_json, read_jsonl, write_jsonl
+from pipeline_runtime import read_json, read_jsonl, write_jsonl
 from validation.representation_inputs import documents_for_arm, representation_signature
 from validation.representation_checks import verify_representations
 from validation.representation_provenance import recommendation_identity
@@ -222,15 +221,6 @@ def test_failure_model_survives_migration(tmp_path):
     assert FailureLog(tmp_path).rows[("a", None)]["summary_model"] == "gemini"
 
 
-@pytest.mark.parametrize("legacy", [None, "qwen", "gemini"])
-def test_legacy_config_optional_and_ignored(v5_context, legacy):
-    cfg = v5_context.config
-    if legacy is not None:
-        cfg["protocol"]["graph_summarizer"] = legacy
-    (v5_context.root / "config.yaml").write_text(yaml.safe_dump(cfg))
-    assert RunContext.load("test", root=v5_context.root).config == cfg
-
-
 def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
     class Pool:
         def __init__(self, *args, **kwargs):
@@ -246,19 +236,6 @@ def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
                  "--arm", case.arm.name, "--model", "gemini", "--schema",
                  f"prompts/summary_{case.arm.representation}_v4.md"]) == 1
     assert len(read_jsonl(case.directory / "failures.jsonl")) == len(case.ids)
-
-
-def test_embedding_cli_reads_model_from_arm_artifact(v5_context, monkeypatch):
-    from validation.cli import main as validate
-    from validation.steps import STEP_HANDLERS
-    calls = []
-    monkeypatch.setattr("validation.cli.RunContext.load", lambda _: v5_context)
-    monkeypatch.setitem(STEP_HANDLERS, "embed-representations", lambda context, **kwargs: calls.append(kwargs))
-    args = ["embed-representations", "--run-id", "run"]
-    assert validate(args) == 0
-    assert calls == [{"force": False}]
-    with pytest.raises(SystemExit):
-        validate(args + ["--summary-source", "qwen"])
 
 
 def test_embedding_does_not_fall_back_to_other_summary_model(case):

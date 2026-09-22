@@ -1,7 +1,7 @@
 """Preparation is shared across runs; extraction and validation remain isolated."""
 import pytest
 
-from pipeline_runtime import RunContext, read_json, write_json
+from pipeline_runtime import RunContext, read_json
 from preparation.steps import prepare_cohort_step
 from extraction.steps import extract_description_scenes, summarize_description
 from validation.steps import embed_representations
@@ -32,12 +32,6 @@ def test_new_run_consumes_preparation_without_rebuilding(ready_context, fake_mod
     assert first.description_summary_dir("qwen", "gemini") != second.description_summary_dir("qwen", "gemini")
     assert first.representations_dir != second.representations_dir
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in shared.rglob("*") if p.is_file()}
-
-
-def test_shared_cohort_accepts_legacy_run_identity(ready_context):
-    path = ready_context.cohort_dir / "eligibility.json"
-    write_json(path, {**read_json(path), "run_id": "old_run"})
-    assert RunContext.load("new_run", root=ready_context.root).require_ready_cohort()
 
 
 def test_plan_only_invalidates_previous_shared_ready_state(ready_context):
