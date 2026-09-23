@@ -218,7 +218,8 @@ def run_summary_stage(
                        and r["scene_idx"] not in failed_indices]
         except (ValueError, KeyError, TypeError) as exc:
             raise ExtractionStepError(f"invalid scene input {source}: {exc}") from exc
-        raw_count = len(all_records) - len(records)
+        text_count = sum(r.get("parse_mode") == "text" for r in records) if graph else 0
+        raw_count = len(all_records) - len(records) + text_count
         scene_provenance = [without_provenance_arm(r.get("provenance", {})) for r in records]
         if not records:
             scene_provenance = [without_provenance_arm(r.get("provenance", {})) for r in scene_failures]
@@ -228,8 +229,9 @@ def run_summary_stage(
             "scene_provenance": scene_provenance,
             "scene_input_hash": fingerprint(canonical(records)),
             "scene_path": str(source),
-            "normal_scene_count": len(records),
+            "normal_scene_count": len(records) - text_count,
             "raw_scene_count": raw_count,
+            **({"text_scene_count": text_count} if graph else {}),
         }
         prov["input_hash"] = fingerprint(prov)
         if not records:

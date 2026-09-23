@@ -181,7 +181,7 @@ An indoor gathering.
         == 2
     )
     assert calls == [f"{cid}:{i}" for i in range(len(responses))]
-    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (5, 2, 0)
+    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (5, 2, 1)
     directory = context.graph_scene_dir(model)
     records = read_scene_records(directory / f"{cid}.jsonl")
     by_scene = {row["scene_idx"]: row for row in records}

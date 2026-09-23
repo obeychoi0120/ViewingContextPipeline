@@ -51,7 +51,7 @@ class InferenceProgress:
     REFRESH_SECONDS = 5.0
 
     def __init__(self, *, total, desc, unit, reused=0, empty=0, progress_factory=tqdm,
-                 clock=None):
+                 clock=None, track_structured=False):
         self.bar = progress_factory(
             total=total, desc=desc, unit=unit, mininterval=self.REFRESH_SECONDS,
             dynamic_ncols=True,
@@ -65,6 +65,7 @@ class InferenceProgress:
         self.empty = empty
         self.success = self.failed = 0
         self.raw = 0
+        self.track_structured = track_structured
         self._outcomes = {}
         self.stats = {"phase": "initializing", "inflight": 0}
         self._clock = clock or time.monotonic
@@ -176,6 +177,8 @@ class InferenceProgress:
             if hasattr(self, "pass_label"):
                 fields = f"{self.pass_label} {fields}"
             fields += f" raw={self.raw}"
+            if self.track_structured:
+                fields += f" structured={self.success - self.raw}"
             formatted_rate = f"{rate:.2f}" if elapsed > 0 else "--"
             fields += f" {self.unit}/s={formatted_rate}"
             self.bar.n = completed

@@ -120,7 +120,8 @@ class SceneResults:
             self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)
         self.progress.complete(task_id=task_id, failed=failure is not None,
-                               raw=record is not None and record.get("status") == "raw_fallback")
+                               raw=record is not None and (record.get("status") == "raw_fallback"
+                                                           or record.get("parse_mode") == "text"))
         return failure is not None
 
 

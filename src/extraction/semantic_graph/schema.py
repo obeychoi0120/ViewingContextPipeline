@@ -1,4 +1,4 @@
-"""Open vocabulary scene entities and directed relations."""
+"""Content context and actions, with read compatibility for relational graphs."""
 
 from __future__ import annotations
 import json
@@ -9,7 +9,7 @@ from extraction.summary_validation import (
     validate_summary as validate_summary,
 )
 
-GRAPH_SCHEMA_VERSION = "scene-graph/v3"
+GRAPH_SCHEMA_VERSION = "scene-graph/v4"
 
 
 class SemanticGraphError(ValueError):

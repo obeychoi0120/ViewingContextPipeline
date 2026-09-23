@@ -27,6 +27,8 @@ Summary는 `summary_description_v5.md`, `summary_graph_v5.md`를 사용합니다
 
 ## 실행 준비
 
+Context + Actions 방식의 실험용 Graph 프롬프트(`scene_graph_v5.md`, `summary_graph_v6.md`)와 첫 100개 비교 도구는 [설계·검증 가이드](docs/graph_context_actions.md)에 정리되어 있습니다. 기존 실행 경로는 유지하며, 파일럿 없이 기본 프롬프트를 자동 교체하지 않습니다.
+
 Ubuntu/Bash, Python 3.11+와 저장소 루트를 기준으로 합니다. 입력 준비에는 ffmpeg·ffprobe가 필요합니다. 모델과 데이터는 자동 다운로드하지 않습니다.
 
 ```bash
