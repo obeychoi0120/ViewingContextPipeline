@@ -7,7 +7,7 @@ from pipeline_runtime import read_json, read_jsonl
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
-def test_scene_passes_retry_only_failures_and_keep_empty_failure(
+def test_scene_passes_retry_only_failures_and_preserve_graph_cutoff_text(
     ready_context, monkeypatch, representation
 ):
     context = ready_context
@@ -37,6 +37,8 @@ def test_scene_passes_retry_only_failures_and_keep_empty_failure(
                 if failed and penalty < 1.1:
                     directory = context.extraction_dir(representation, "qwen", "scenes")
                     assert not (directory / f"{ids[index]}.jsonl").exists()
+                    saved = read_jsonl(directory / "failures" / f"{ids[index]}.jsonl")[0]
+                    assert saved["raw_output"] == (text if representation == "graph" else "")
             return {}
 
         yield generate
@@ -61,7 +63,9 @@ def test_scene_passes_retry_only_failures_and_keep_empty_failure(
     assert len(engines) == 1
     directory = context.extraction_dir(representation, "qwen", "scenes")
     assert not (directory / f"{ids[3]}.jsonl").exists()
-    assert read_jsonl(directory / "failures" / f"{ids[3]}.jsonl")[0]["raw_output"] == ""
+    assert read_jsonl(directory / "failures" / f"{ids[3]}.jsonl")[0]["raw_output"] == (
+        "  unfinished output 1.1\n" if representation == "graph" else ""
+    )
     for cid in ids[:3]:
         assert not (directory / "failures" / f"{cid}.jsonl").exists()
     from validation.diagnosis_scenes import _scene_arm_contract, scene_arms

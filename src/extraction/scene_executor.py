@@ -14,6 +14,8 @@ from extraction.step_support import (
 
 def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
     """Convert one response without changing artifacts or the raw graph."""
+    if error is None and not text.strip():
+        error = "model produced an empty graph"
     parsed = parse_or_repair_graph(text) if error is None else None
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
     parse_warning = parsed.error if parsed is not None else None
@@ -117,7 +119,9 @@ class SceneResults:
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
         self.records[cid] = records
         if failure is not None:
-            self.failures.record(cid, int(row["scene_idx"]), failure["error"], "", provenance=provenance)
+            raw_output = text if self.arm == "graph" and truncated else ""
+            self.failures.record(cid, int(row["scene_idx"]), failure["error"], raw_output,
+                                 provenance=provenance)
         else:
             self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)

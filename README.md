@@ -169,7 +169,7 @@ artifacts/
 {"content_id":"123","warning":[],"scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
 ```
 
-장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 구조화 결과는 객체, 파싱 실패 원문은 문자열로 `scene_graph`에 저장하며 타입으로 구분합니다. 별도 `graph_format`은 저장하지 않습니다. `warning`에는 정상 출력은 `[]`, raw 출력은 다섯 오류 태그 중 해당 항목을 기록합니다. 태그와 완화된 검증 규칙은 [Graph 규약](docs/graph_context_actions.md)을 참고하세요. 과거 실패 Raw Graph·Desc는 실패 로그를 유지하며 Summary 입력에서 제외합니다. 신규 생성 실패는 본문 대신 실패 로그에 빈 `raw_output`을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다. Graph 장면 provenance를 제거했으므로 이를 입력으로 새로 생성한 Summary는 기존 검증 정책상 다른 Run과 공유 캐시를 재사용하지 않습니다. 같은 Run의 정상 결과 재사용은 유지합니다.
+장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 구조화 결과는 객체, 파싱 실패 원문은 문자열로 `scene_graph`에 저장하며 타입으로 구분합니다. 별도 `graph_format`은 저장하지 않습니다. `warning`에는 정상 출력은 `[]`, raw 출력은 다섯 오류 태그 중 해당 항목을 기록합니다. 태그와 완화된 검증 규칙은 [Graph 규약](docs/graph_context_actions.md)을 참고하세요. 과거 실패 Raw Graph·Desc는 실패 로그를 유지하며 Summary 입력에서 제외합니다. 신규 생성 실패는 본문 대신 실패 로그에 기록합니다. Graph의 토큰 한도 종료는 잘린 응답 원문을 `raw_output`에 보존하고, 나머지 신규 실패는 빈 문자열을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다. Graph 장면 provenance를 제거했으므로 이를 입력으로 새로 생성한 Summary는 기존 검증 정책상 다른 Run과 공유 캐시를 재사용하지 않습니다. 같은 Run의 정상 결과 재사용은 유지합니다.
 
 기존 전체 필드 JSONL과 두 필드 JSONL도 읽을 수 있습니다. 두 필드 파일은 원래 `.metadata`에서 장면 번호를 읽어야 하므로 먼저 삭제하지 마세요. 추출 재실행 또는 아래 명령으로 장면 번호를 포함한 형식으로 변환하며, 저장이 성공한 파일의 기존 메타데이터만 삭제합니다. 메타데이터가 없거나 본문과 맞지 않는 이전 파일은 장면 번호를 추측하거나 전체 재생성하지 않고 오류를 보고합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
 
@@ -189,7 +189,7 @@ python -m extraction migrate-scene-schema --run-id "$RUN_ID"
 
 Qwen Desc·Graph·Summary는 설정된 repetition penalty별로 전체 pass를 완료하고 실패 항목만 다음 pass에서 재생성합니다. 기본 순서는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20`이며 성공 항목은 제외합니다. Vertex Gemini의 `429 RESOURCE_EXHAUSTED`만 30초 뒤 한 번 재시도하며, Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면 번호는 본문 파일의 `scene_idx`에, 요약의 생성 당시 provenance는 요약 문서에 남깁니다.
 
-장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 생성 실패는 `summaries/{SUMMARY_ARM}/failures.jsonl`에 `content_id`, `error`, `raw_output`, `summary_model`과 Qwen의 `repetition_penalty`를 저장합니다. 새 실패의 `raw_output`은 빈 문자열이며 생성 당시 `provenance`를 함께 보존합니다. 장면 생성은 재실행 시 첫 penalty부터 실패 항목을 처리합니다. Qwen Summary는 아직 처리하지 않은 콘텐츠를 먼저 초기 penalty로 처리한 뒤, 실패별 마지막 penalty보다 큰 다음 설정값부터 이어갑니다. 마지막 penalty까지 완료했거나 penalty 필드가 없는 기존 실패는 재생성 없이 빈 Summary로 기록합니다. 실패 이유·재시도 정보·실제 생성 provenance를 보존합니다. Scene 입력이 복구되면 실패 Summary를 다시 시도하고, 성공 결과까지 다시 만들려면 `--force`를 사용합니다. 재시도 성공 후 해당 실패 행을 제거합니다. 기존 실패 로그를 읽을 때 과거 원문은 일괄 삭제하지 않습니다.
+장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 생성 실패는 `summaries/{SUMMARY_ARM}/failures.jsonl`에 `content_id`, `error`, `raw_output`, `summary_model`과 Qwen의 `repetition_penalty`를 저장합니다. Graph 토큰 한도 종료의 `raw_output`에는 응답 원문을 공백·줄바꿈까지 그대로 저장합니다. 나머지 신규 실패는 빈 문자열을 사용하며 생성 당시 `provenance`를 함께 보존합니다. 장면 생성은 재실행 시 첫 penalty부터 실패 항목을 처리합니다. Qwen Summary는 아직 처리하지 않은 콘텐츠를 먼저 초기 penalty로 처리한 뒤, 실패별 마지막 penalty보다 큰 다음 설정값부터 이어갑니다. 마지막 penalty까지 완료했거나 penalty 필드가 없는 기존 실패는 재생성 없이 빈 Summary로 기록합니다. 실패 이유·재시도 정보·실제 생성 provenance를 보존합니다. Scene 입력이 복구되면 실패 Summary를 다시 시도하고, 성공 결과까지 다시 만들려면 `--force`를 사용합니다. 재시도 성공 후 해당 실패 행을 제거합니다. 기존 실패 로그를 읽을 때 과거 원문은 일괄 삭제하지 않습니다.
 
 ```json
 {"content_id":"123","scene_idx":2,"error":"model produced an empty description","raw_output":""}

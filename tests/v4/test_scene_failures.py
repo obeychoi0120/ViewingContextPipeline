@@ -9,6 +9,55 @@ from extraction.scene_storage import read_scene_records
 from pipeline_runtime import read_jsonl
 
 
+@pytest.mark.parametrize("text", ["", " \n\t "])
+def test_empty_graph_is_a_generation_failure(text):
+    from extraction.scene_executor import graph_scene_result
+
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, text)
+    assert record is None
+    assert failure["failure_kind"] == "generation"
+    assert failure["error"] == "model produced an empty graph"
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypatch, recover):
+    context = ready_context
+    context.config["extraction"]["graph_repetition_penalty"] = [1.0, 1.05]
+    visuals = steps.visual_rows(context)[:1]
+    monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
+    cid = visuals[0]["content_id"]
+    directory = context.graph_scene_dir("qwen")
+    calls = []
+
+    @contextmanager
+    def generator(**kwargs):
+        def generate(tasks, callback):
+            for task in tasks:
+                calls.append(task.repetition_penalty)
+                kwargs["runtime"].current_result = {"finish_reason": "stop"}
+                text = ('[Entities]\nnone\n[Relations]\nnone' if recover and
+                        task.repetition_penalty == 1.05 else ' \n\t ')
+                callback(task.task_id, text)
+                if task.repetition_penalty == 1.0:
+                    assert not (directory / f"{cid}.jsonl").exists()
+                    assert read_jsonl(directory / "failures" / f"{cid}.jsonl")[0]["error"] == (
+                        "model produced an empty graph")
+            return {}
+        yield generate
+
+    monkeypatch.setattr(steps, "qwen_generator", generator)
+    result = steps.extract_graph_scenes(context, model="qwen", arm="graph_qwen",
+                                       schema="prompts/scene_graph_v4.md")
+    assert calls == [1.0, 1.05]
+    assert result["failure_count"] == (0 if recover else 1)
+    path = directory / f"{cid}.jsonl"
+    if recover:
+        assert isinstance(read_jsonl(path)[0]["scene_graph"], dict)
+        assert not (directory / "failures" / f"{cid}.jsonl").exists()
+    else:
+        assert not path.exists()
+
+
 @pytest.mark.parametrize("truncated", [False, True])
 def test_description_cutoff_is_saved_only_as_failure(ready_context, monkeypatch, truncated):
     model = "qwen"
@@ -199,7 +248,7 @@ An indoor gathering.
     assert {row["scene_idx"] for row in failures} == {4, 5}
     for failure in failures:
         index = failure["scene_idx"]
-        assert failure["raw_output"] == ""
+        assert failure["raw_output"] == responses[index]
         assert index not in by_scene
         if index in (4, 5):
             assert failure["error"] == "graph: output truncated at token limit"
