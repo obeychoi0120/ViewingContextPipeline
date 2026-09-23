@@ -1,6 +1,8 @@
-# ViewingContextPipeline v7
+# ViewingContextPipeline v4
 
-![ViewingContextPipeline 구성도](docs/design/Diagram_preview.png)
+![ViewingContextPipeline v4 구성도](docs/design/Diagram_preview.png)
+
+생성 소스 3개에서 제목 없는 Summary를 만들고, 제목과의 결합 여부에 따라 6개 Arm을 평가합니다. 제목은 BGE 임베딩 직전에 결합합니다.
 
 MicroLens-100K 영상의 Description, Scene Graph, 영문 title을 BGE로 임베딩하고 동일한 SASRec 구조로 추천 성능을 평가합니다. 주 비교는 `graph_qwen_meta − meta`로, 제목에 Graph 정보를 추가하는 효과입니다.
 
@@ -50,7 +52,7 @@ Gemini 전용 환경은 `.[gemini,dev]`로 설치할 수 있습니다. Vertex AD
 ## 전체 실행
 
 ```bash
-RUN_ID=experiment_v7
+RUN_ID=experiment_v4
 
 python -m preparation prepare-cohort --run-id "$RUN_ID"
 python -m preparation prepare-input-data --run-id "$RUN_ID"
@@ -122,7 +124,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference
 
 ## 기존 생성 결과 변환
 
-아래 절차는 과거 v5 → v6 변환 전용이며 v7 결합 Arm으로 변환하지 않습니다. 기존 제목 포함 Summary는 v6의 `*_meta_*` Arm에 해당합니다. `config.yaml`을 v6 계약으로 설정한 뒤 다음 명령으로 명시적으로 복사합니다.
+아래 절차는 과거 v5 → v6 변환 전용이며 v4 결합 Arm으로 변환하지 않습니다. 기존 제목 포함 Summary는 v6의 `*_meta_*` Arm에 해당합니다. `config.yaml`을 v6 계약으로 설정한 뒤 다음 명령으로 명시적으로 복사합니다.
 
 ```bash
 python -m extraction migrate-arm-layout --run-id "$RUN_ID" --summary-model qwen
@@ -222,4 +224,4 @@ python -m pytest -q
 ruff check --config pyproject.toml src tests benchmarks
 ```
 
-v5/v6 호환 회귀 테스트와 v7 입력·캐시·진단 테스트, 작은 CPU 추천 학습을 사용합니다. 실제 모델/API 호출과 전체 데이터 Run은 별도로 실행합니다.
+v5/v6 호환 회귀 테스트와 v4 입력·캐시·진단 테스트, 작은 CPU 추천 학습을 사용합니다. 실제 모델/API 호출과 전체 데이터 Run은 별도로 실행합니다.
