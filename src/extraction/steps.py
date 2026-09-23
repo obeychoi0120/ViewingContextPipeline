@@ -79,7 +79,8 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         **({"summary_model": source} if summary else {}),
         "schema_contract": "summary/v5"
         if summary
-        else ("graph/v3" if arm.representation == "graph" else "description/v2"),
+        else (("graph/v4" if "[Actions]" in path.read_text(encoding="utf-8") else "graph/v3")
+              if arm.representation == "graph" else "description/v2"),
     }
 
 
@@ -179,6 +180,7 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
         desc=arm.name,
         unit="scene",
         progress_factory=tqdm,
+        track_structured=representation == "graph",
     ) as progress:
         if model == "qwen":
             run_qwen_scenes(

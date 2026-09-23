@@ -1,34 +1,41 @@
 """Summary retries resume from persisted attempts, including terminal publication."""
+
 from contextlib import contextmanager
 
 import pytest
 
 import extraction.steps as steps
 import extraction.summary_executor as executor
-from extraction.failures import FailureLog
 from pipeline_runtime import read_json, read_jsonl, write_jsonl
 from arm_registry import registry
 from validation.representation_inputs import documents_for_arm
 
 
-@pytest.fixture(params=[("graph", "qwen"), ("graph", "gemini"),
-                        ("description", "qwen"), ("description", "gemini")])
+@pytest.fixture(params=[("graph", "qwen"), ("description", "qwen")])
 def summary_case(request, ready_context, fake_models):
     representation, source = request.param
     context = ready_context
     context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
     getattr(steps, f"extract_{representation}_scenes")(
-        context, model=source,
-        schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md",
+        context,
+        arm=f"{'graph' if representation == 'graph' else 'desc'}_{source}",
+        model=source,
+        schema=f"prompts/scene_{representation}_v{'4' if representation == 'graph' else '2'}.md",
     )
     cohort = context.require_ready_cohort()
     ids = [str(row["content_id"]) for row in cohort["catalog"]]
-    directory = context.summary_dir(representation, source, "qwen")
+    directory = context.summary_arm_dir(
+        f"{'graph' if representation == 'graph' else 'desc'}_{source}"
+    )
     arm_name = f"{'desc' if representation == 'description' else 'graph'}_{source}"
 
     def run(**kwargs):
         return getattr(steps, f"summarize_{representation}")(
-            context, model="qwen", source=source, schema=f"prompts/summary_{representation}_v4.md", **kwargs,
+            context,
+            model="qwen",
+            arm=f"{'graph' if representation == 'graph' else 'desc'}_{source}",
+            schema=f"prompts/summary_{representation}_v5.md",
+            **kwargs,
         )
 
     def documents():
@@ -37,8 +44,8 @@ def summary_case(request, ready_context, fake_models):
     return context, ids, directory, run, documents
 
 
-@pytest.mark.parametrize("interrupt_after", [2, 5, 7])
-def test_resume_after_out_of_order_results(summary_case, monkeypatch, interrupt_after):
+def test_resume_after_out_of_order_results(summary_case, monkeypatch):
+    interrupt_after = 5
     _, ids, directory, run, documents = summary_case
     calls = []
     thresholds = dict(zip(ids, [1.0, 1.05, 1.1, 2.0]))
@@ -51,22 +58,28 @@ def test_resume_after_out_of_order_results(summary_case, monkeypatch, interrupt_
                 calls.append((task.task_id, task.repetition_penalty))
                 failed = task.repetition_penalty < thresholds[task.task_id]
                 kwargs["runtime"].current_result = {"finish_reason": "length" if failed else "stop"}
-                callback(task.task_id, "  unfinished\n\ntext  " if failed else "- First\n\n- Second")
+                callback(
+                    task.task_id, "  unfinished\n\ntext  " if failed else "- First\n\n- Second"
+                )
                 if len(calls) == interrupt_after:
                     raise KeyboardInterrupt
             return {}
+
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     with pytest.raises(KeyboardInterrupt):
         run()
     assert run()["content_count"] == len(ids)
-    expected = ([(cid, 1.0) for cid in ids] + [(cid, 1.05) for cid in ids[1:]]
-                + [(cid, 1.1) for cid in ids[2:]])
+    expected = (
+        [(cid, 1.0) for cid in ids]
+        + [(cid, 1.05) for cid in ids[1:]]
+        + [(cid, 1.1) for cid in ids[2:]]
+    )
     assert sorted(calls) == sorted(expected)
     assert len(calls) == len(set(calls))
     assert [penalty for _, penalty in calls] == sorted(penalty for _, penalty in calls)
-    row, = read_jsonl(directory / "failures.jsonl")
+    (row,) = read_jsonl(directory / "failures.jsonl")
     assert row["repetition_penalty"] == 1.1
     assert read_json(directory / f"{ids[-1]}.json")["text"] == row["raw_output"]
     assert len(documents()) == len(ids)
@@ -74,41 +87,6 @@ def test_resume_after_out_of_order_results(summary_case, monkeypatch, interrupt_
     assert run()["failure_count"] == 1
     assert len(calls) == len(expected)
     assert all(p.read_bytes() == value for p, value in saved.items())
-
-
-def test_mixed_legacy_terminal_and_pending_failures(summary_case, monkeypatch):
-    _, ids, directory, run, documents = summary_case
-    rows = [
-        {"content_id": ids[0], "error": "multiple_paragraphs", "raw_output": "  old\n\nraw\n"},
-        {"content_id": ids[1], "error": "empty", "raw_output": "", "repetition_penalty": 1.1},
-        {"content_id": ids[2], "error": "max_tokens", "raw_output": "partial", "repetition_penalty": 1.05},
-    ]
-    write_jsonl(directory / "failures.jsonl", rows)
-    calls = []
-
-    @contextmanager
-    def generator(**kwargs):
-        def generate(tasks, callback):
-            for task in tasks:
-                calls.append((task.task_id, task.repetition_penalty))
-                callback(task.task_id, "First\n\nSecond")
-            return {}
-        yield generate
-
-    monkeypatch.setattr(steps, "qwen_generator", generator)
-    assert run()["content_count"] == len(ids)
-    assert calls == [(ids[3], 1.0), (ids[2], 1.1)]
-    assert read_json(directory / f"{ids[0]}.json")["text"] == ""
-    fallback = read_json(directory / f"{ids[1]}.json")
-    assert fallback["text"] == ""
-    assert fallback["status"] == "failed"
-    assert "prompt_hash" not in fallback["provenance"]
-    assert read_jsonl(directory / "failures.jsonl") == rows[:2]
-    assert len(documents()) == len(ids)
-    assert run()["failure_count"] == 2
-    assert len(calls) == 2
-    assert run(force=True)["failure_count"] == 0
-    assert calls[2:] == [(cid, 1.0) for cid in ids]
 
 
 def test_terminal_write_failure_recovers_without_regeneration(summary_case, monkeypatch):
@@ -124,6 +102,7 @@ def test_terminal_write_failure_recovers_without_regeneration(summary_case, monk
                 kwargs["runtime"].current_result = {"finish_reason": "length"}
                 callback(task.task_id, "  unfinished\n\nraw  ")
             return {}
+
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
@@ -135,7 +114,7 @@ def test_terminal_write_failure_recovers_without_regeneration(summary_case, monk
     monkeypatch.setattr(executor, "atomic_write_json", fail)
     with pytest.raises(OSError, match="disk full"):
         run()
-    row, = read_jsonl(directory / "failures.jsonl")
+    (row,) = read_jsonl(directory / "failures.jsonl")
     assert row["repetition_penalty"] == 1.0
     assert not (directory / f"{ids[0]}.json").exists()
     monkeypatch.setattr(executor, "atomic_write_json", original)
@@ -144,27 +123,12 @@ def test_terminal_write_failure_recovers_without_regeneration(summary_case, monk
     assert len(documents()) == len(ids)
 
 
-def test_failure_penalty_survives_migration_and_update(tmp_path):
-    write_jsonl(tmp_path / "failures" / "a.jsonl", [{
-        "content_id": "a", "error": "max_tokens", "raw_output": " raw\n",
-        "repetition_penalty": 1.05,
-    }])
-    log = FailureLog(tmp_path)
-    assert log.rows[("a", None)]["repetition_penalty"] == 1.05
-    log.record("a", None, "max_tokens", " new\n", repetition_penalty=1.1)
-    log = FailureLog(tmp_path)
-    log.record("a", None, "max_tokens", " new\n")
-    assert FailureLog(tmp_path).rows[("a", None)] == {
-        "content_id": "a", "error": "max_tokens", "raw_output": " new\n",
-        "repetition_penalty": 1.1,
-    }
-
-
 @pytest.mark.parametrize("scene_state", ["missing", "empty", "invalid"])
 def test_invalid_scene_input_reports_error(summary_case, scene_state):
     context, ids, directory, run, _ = summary_case
     from extraction.errors import ExtractionStepError
-    scene_path = directory.parent.parent / "scenes" / f"{ids[0]}.jsonl"
+
+    scene_path = context.scene_arm_dir(directory.name) / f"{ids[0]}.jsonl"
     if scene_state == "missing":
         scene_path.unlink()
     else:

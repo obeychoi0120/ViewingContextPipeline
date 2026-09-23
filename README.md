@@ -27,6 +27,8 @@ Summary는 `summary_description_v5.md`, `summary_graph_v5.md`를 사용합니다
 
 ## 실행 준비
 
+Context + Actions 방식의 실험용 Graph 프롬프트(`scene_graph_v5.md`, `summary_graph_v6.md`)와 첫 100개 비교 도구는 [설계·검증 가이드](docs/graph_context_actions.md)에 정리되어 있습니다. 기존 실행 경로는 유지하며, 파일럿 없이 기본 프롬프트를 자동 교체하지 않습니다.
+
 Ubuntu/Bash, Python 3.11+와 저장소 루트를 기준으로 합니다. 입력 준비에는 ffmpeg·ffprobe가 필요합니다. 모델과 데이터는 자동 다운로드하지 않습니다.
 
 ```bash
@@ -160,14 +162,14 @@ artifacts/
         └── diagnosis/diagnosis.json
 ```
 
-`scenes/{SCENE_ARM}/{content_id}.jsonl`은 장면당 한 줄이며, Description·Graph 모두 `content_id`, `scene_idx`, 본문과 생성 provenance를 저장합니다. 아래 예시는 본문 필드만 표시합니다. Qwen·Gemini에 같은 형식을 적용합니다.
+`scenes/{SCENE_ARM}/{content_id}.jsonl`은 장면당 한 줄입니다. Graph는 `content_id`, `warning`, `scene_idx`, `scene_graph` 순서로 네 필드를 저장하고, Description은 기존대로 본문과 생성 provenance를 저장합니다. 아래 Description 예시는 provenance를 생략했습니다. Qwen·Gemini에 같은 형식을 적용합니다.
 
 ```json
 {"content_id":"123","scene_idx":0,"description":"A person walks outdoors."}
-{"content_id":"123","scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
+{"content_id":"123","warning":[],"scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
 ```
 
-장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. 신규 성공 장면에는 생성 당시 `provenance`를 보존합니다. 과거 Raw Graph·Desc는 읽기 호환만 유지하며 Summary 입력에서 제외합니다. 신규 실패는 본문 대신 실패 로그에 빈 `raw_output`을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다.
+장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 구조화 결과는 객체, 파싱 실패 원문은 문자열로 `scene_graph`에 저장하며 타입으로 구분합니다. 별도 `graph_format`은 저장하지 않습니다. `warning`에는 정상 출력은 `[]`, raw 출력은 다섯 오류 태그 중 해당 항목을 기록합니다. 태그와 완화된 검증 규칙은 [Graph 규약](docs/graph_context_actions.md)을 참고하세요. 과거 실패 Raw Graph·Desc는 실패 로그를 유지하며 Summary 입력에서 제외합니다. 신규 생성 실패는 본문 대신 실패 로그에 빈 `raw_output`을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다. Graph 장면 provenance를 제거했으므로 이를 입력으로 새로 생성한 Summary는 기존 검증 정책상 다른 Run과 공유 캐시를 재사용하지 않습니다. 같은 Run의 정상 결과 재사용은 유지합니다.
 
 기존 전체 필드 JSONL과 두 필드 JSONL도 읽을 수 있습니다. 두 필드 파일은 원래 `.metadata`에서 장면 번호를 읽어야 하므로 먼저 삭제하지 마세요. 추출 재실행 또는 아래 명령으로 장면 번호를 포함한 형식으로 변환하며, 저장이 성공한 파일의 기존 메타데이터만 삭제합니다. 메타데이터가 없거나 본문과 맞지 않는 이전 파일은 장면 번호를 추측하거나 전체 재생성하지 않고 오류를 보고합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
 
@@ -203,7 +205,7 @@ Qwen Desc·Graph·Summary는 설정된 repetition penalty별로 전체 pass를 �
 - 기본 장면 상한은 1,024 tokens, 요약 상한은 2,048 tokens입니다.
 - 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
 - Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 빈 표현으로 처리하고 실패 기록을 남깁니다. 성공한 항목은 재생성하지 않습니다.
-- Graph의 구조화 필드는 `entities`, `relations`이며 과거 `context`도 허용합니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 구조 검증에 맞지 않는 응답은 `scene_graph` 문자열과 `graph_format="text"`로 정상 저장합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
+- Graph의 구조화 필드는 `entities`, `relations`이며 과거 `context`도 허용합니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 구조 검증에 맞지 않는 응답은 `scene_graph` 문자열로 정상 저장하며 별도 `graph_format` 필드는 쓰지 않습니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
 - Graph 생성에는 JSON Schema를 강제하지 않습니다. `scene_graph_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행 등 형식 문제는 실패로 처리하지 않고 원문으로 저장합니다. `[End]` 생략을 허용하며 출력 잘림은 실제 backend의 토큰 한도 종료로만 판단합니다. 토큰 한도 종료와 API 오류는 실패로 기록합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
 - 신규 Summary는 문단·목록·마크업·구조화 필드를 허용하며 줄바꿈을 보존합니다. 단어 수는 기록만 하고 실패 조건으로 사용하지 않습니다. Qwen은 빈 출력과 `finish_reason=length`를 실패로 기록하고 다음 penalty에서 재생성합니다. 최종 실패 Summary는 빈 텍스트이며 사용할 성공 Scene이 없으면 `scene_count=0`을 허용합니다.
 - Qwen Graph·Desc와 Gemini Graph는 설정·프롬프트·경로가 달라도 기존 성공 결과를 그대로 재사용합니다. Summary도 동일한 요약 모델(qwen/gemini) 안에서는 같은 정책을 따릅니다. 일반 실행은 결과가 없는 항목과 재시도가 남은 실패만 생성합니다. 장면을 갱신해도 이미 성공한 Summary는 보존하며, 성공 결과까지 다시 만들려면 해당 단계에 `--force`를 지정합니다. 실패 기록은 재생성 성공 후 제거합니다. 다른 run ID의 결과를 자동으로 가져오지는 않습니다.

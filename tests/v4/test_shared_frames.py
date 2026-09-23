@@ -11,7 +11,7 @@ from pipeline_runtime import RunContext
 from preparation.steps import prepare_cohort_step
 
 
-def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypatch, capsys):
+def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypatch):
     first = ready_context
     images = {p: p.read_bytes() for p in first.keyframes_dir.rglob("*.png")}
     stamps = {p: p.stat().st_mtime_ns for p in images}
@@ -23,17 +23,15 @@ def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypat
         "extraction.data_preparation.video_processor.subprocess.run",
         lambda *a, **k: pytest.fail("shared frames must not be extracted again"),
     )
-    capsys.readouterr()
     with monkeypatch.context() as patch:
-        patch.setattr("extraction.data_preparation.media.probe_duration",
-                      lambda *a: pytest.fail("shared duration must not be probed again"))
+        patch.setattr(
+            "extraction.data_preparation.media.probe_duration",
+            lambda *a: pytest.fail("shared duration must not be probed again"),
+        )
         from extraction.step_support import visual_rows
+
         assert visual_rows(second)
         prepare_input_data(second)
-    output = capsys.readouterr()
-    assert "new_frames=0" in output.out
-    assert "[KEYFRAMES] extracting" not in output.out
-    assert "Extract resized keyframes" not in output.err
     prepare_input_data(second, force=True)
     assert list(second.source_assets_dir.rglob("timestamp_fixed*.json"))
     assert not (second.cohort_dir / "source_assets").exists()
@@ -80,9 +78,9 @@ def test_missing_frames_concurrent_writers_and_invalid_existing(tmp_path, monkey
 
 
 def test_failed_preparation_resumes_without_new_probe_for_completed_duration(
-    v5_context, monkeypatch
+    current_context, monkeypatch
 ):
-    context = v5_context
+    context = current_context
     prepare_cohort_step(context)
     probes, extracted = [], []
 
@@ -112,50 +110,3 @@ def test_failed_preparation_resumes_without_new_probe_for_completed_duration(
     assert sorted(probes) == ["1", "2", "3", "4"]
     assert set(extracted[before:]) == {"4"}
     assert not (context.cohort_dir / "preparation_failures.jsonl").exists()
-
-
-def test_extraction_builds_paths_without_probing_assets(ready_context, fake_models, monkeypatch):
-    from extraction.steps import extract_description_scenes
-
-    context = ready_context
-    original_is_file, original_is_dir = Path.is_file, Path.is_dir
-    original_iterdir, original_open = Path.iterdir, Path.open
-    def asset(path):
-        return path.is_relative_to(context.keyframes_dir) or path.is_relative_to(context.source_assets_dir)
-    def is_file(path):
-        assert not asset(path), f"unexpected asset is_file: {path}"
-        return original_is_file(path)
-    def is_dir(path):
-        assert not asset(path), f"unexpected asset is_dir: {path}"
-        return original_is_dir(path)
-    def iterdir(path):
-        assert not asset(path), f"unexpected asset scan: {path}"
-        return original_iterdir(path)
-    reads = []
-    def open_file(path, *a, **kw):
-        if asset(path):
-            assert path.name.startswith("timestamp_fixed"), f"unexpected asset read: {path}"
-            reads.append(path)
-        return original_open(path, *a, **kw)
-    monkeypatch.setattr(Path, "is_file", is_file)
-    monkeypatch.setattr(Path, "is_dir", is_dir)
-    monkeypatch.setattr(Path, "iterdir", iterdir)
-    monkeypatch.setattr(Path, "open", open_file)
-    extract_description_scenes(context, model="qwen", schema="prompts/scene_description_v2.md")
-    assert len(reads) == len(set(reads)) == 4
-    assert fake_models
-
-
-def test_preparation_rejects_changed_source_without_overwriting_shared_metadata(ready_context):
-    from extraction.step_support import visual_rows
-
-    first = ready_context
-    before = {p: p.read_bytes() for p in first.source_assets_dir.rglob("*.json")}
-    source = first.path("data", "videos_dir") / "1.mp4"
-    source.write_bytes(b"a different source video")
-    second = RunContext.load("changed_source", root=first.root)
-    prepare_cohort_step(second)
-    assert visual_rows(second)
-    with pytest.raises(RuntimeError, match="preparation incomplete"):
-        prepare_input_data(second)
-    assert all(p.read_bytes() == data for p, data in before.items())

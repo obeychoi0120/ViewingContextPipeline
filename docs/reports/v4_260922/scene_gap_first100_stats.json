@@ -1,0 +1,1221 @@
+{
+  "run_id": "v4_260922",
+  "date": "2026-09-23",
+  "selection": "content_id 00001–00100, join on content_id and scene_idx",
+  "semantic_sampling": "All 100 first scenes (scene_idx=0), plus 23 targeted matched scenes and 2 missing-graph slots. Nonrandom qualitative sample; no video-level semantic prevalence estimates.",
+  "structural_scope": "All 638 Graph rows. Structural entity/relation counts only for 623 dict-form graphs; 15 raw text graphs retained but excluded from those denominators.",
+  "reference_limit": "Description is comparison reference, not video ground truth; frames not inspected.",
+  "metric_definitions": {
+    "duplicate_signature": "At least two entities with exactly equal name and sorted attribute strings; does not prove duplicate real-world identity.",
+    "dangling_reference": "At least one relation endpoint ID absent from declared entities.",
+    "uniform_full_cycle": "At least three declared entities, same number of relations, one predicate, every entity has one incoming/outgoing edge and all form one directed cycle.",
+    "over4entities": "More than 4 entity entries; compare verified scene_graph_v4 prompt max.",
+    "over4relations": "More than 4 relation entries; duplicates counted as saved.",
+    "person_to_person": "Both declared endpoint names exactly person. Predicate-specific diagnostic, not automatically an error."
+  },
+  "counts": {
+    "desc_qwen_rows": 640,
+    "graph_qwen_rows": 638,
+    "matched_pairs": 638,
+    "structured_scenes": 623,
+    "entity_count": 2858,
+    "relation_count": 2951,
+    "duplicate_signature": 331,
+    "dangling_reference": 131,
+    "uniform_full_cycle": 108,
+    "over4entities": 179,
+    "over4relations": 182,
+    "exact4entities": 408,
+    "exact4relations": 406,
+    "self_relations": 14,
+    "cutting_relations": 29,
+    "cutting_person_to_person": 9,
+    "stirring_relations": 7,
+    "stirring_person_to_person": 1,
+    "eating_relations": 81,
+    "eating_person_to_person": 24,
+    "raw_text_scenes": 15,
+    "dribbling_relations": 22,
+    "dribbling_person_to_person": 17,
+    "semantic_reviewed_matched_pairs": 123,
+    "semantic_reviewed_missing_slots": 2
+  },
+  "predicate_counts": {
+    "standing beside": 1034,
+    "holding": 481,
+    "looking at": 159,
+    "attacking": 95,
+    "eating": 81,
+    "sitting": 78,
+    "speaking": 72,
+    "talking": 45,
+    "touching": 39,
+    "showing": 34,
+    "cutting": 29,
+    "running": 28,
+    "using": 28,
+    "driving": 22,
+    "dribbling": 22,
+    "dancing": 21,
+    "sitting beside": 20,
+    "moving": 19,
+    "falling": 19,
+    "placing": 18,
+    "being held by": 17,
+    "moving towards": 16,
+    "appearing": 16,
+    "containing": 13,
+    "sitting on": 12,
+    "walking": 12,
+    "being attacked": 12,
+    "aiming": 12,
+    "defending": 12,
+    "opening": 11,
+    "pouring": 10,
+    "talking to": 10,
+    "pointing": 10,
+    "applying": 10,
+    "lying on": 9,
+    "lying on ground": 9,
+    "on": 9,
+    "watching": 8,
+    "pointing at": 8,
+    "stirring": 7,
+    "pushing": 7,
+    "riding": 7,
+    "selecting": 7,
+    "gesturing": 7,
+    "shooting": 7,
+    "jumping": 7,
+    "giving": 7,
+    "standing": 7,
+    "displaying": 7,
+    "firing": 7,
+    "listing": 7,
+    "picking up": 6,
+    "lying": 6,
+    "setting": 6,
+    "adjusting": 6,
+    "thinking": 5,
+    "adding": 5,
+    "in": 5,
+    "running towards": 5,
+    "sitting in": 5,
+    "placed on": 5,
+    "smiling": 4,
+    "receiving": 4,
+    "raising hands": 4,
+    "kneeling": 4,
+    "climbing": 4,
+    "crying": 4,
+    "mixing": 4,
+    "presenting": 4,
+    "sitting at": 4,
+    "upgrading": 4,
+    "guarding": 4,
+    "applying makeup": 4,
+    "saying": 3,
+    "washing": 3,
+    "being eaten": 3,
+    "talking on phone": 3,
+    "asking": 3,
+    "speaking to": 3,
+    "being held": 3,
+    "observing": 3,
+    "being pushed": 3,
+    "lying on bed": 3,
+    "entering": 3,
+    "flying": 3,
+    "placed in": 3,
+    "playing": 3,
+    "leaning on": 3,
+    "being served": 3,
+    "being opened": 3,
+    "affecting": 3,
+    "dancing with": 3,
+    "looking down": 2,
+    "whispering": 2,
+    "lying on floor": 2,
+    "standing in": 2,
+    "squeezing": 2,
+    "dribbling ball": 2,
+    "standing on court": 2,
+    "parked": 2,
+    "reading": 2,
+    "taking from": 2,
+    "tearing": 2,
+    "talking about": 2,
+    "waving": 2,
+    "walking towards": 2,
+    "serving": 2,
+    "throwing": 2,
+    "flowing": 2,
+    "rising": 2,
+    "appearing on": 2,
+    "eating with": 2,
+    "drinking": 2,
+    "hugging": 2,
+    "raising a hand": 2,
+    "carrying": 2,
+    "passing": 2,
+    "spraying": 2,
+    "bending": 2,
+    "raising hand": 2,
+    "operating": 2,
+    "having": 1,
+    "wearing": 1,
+    "singing": 1,
+    "extending hand": 1,
+    "being attacked by": 1,
+    "pulling up": 1,
+    "pulling": 1,
+    "inserting": 1,
+    "raising arms": 1,
+    "holding basketball": 1,
+    "standing near": 1,
+    "driving on": 1,
+    "located on": 1,
+    "driving on road": 1,
+    "located near": 1,
+    "stationary": 1,
+    "being pushed by": 1,
+    "throwing grenade": 1,
+    "killed by": 1,
+    "using phone to call": 1,
+    "standing on": 1,
+    "turning": 1,
+    "lying under": 1,
+    "caught": 1,
+    "placing into": 1,
+    "reaching into": 1,
+    "landing": 1,
+    "aiming at": 1,
+    "being washed": 1,
+    "being placed in": 1,
+    "being soaked in": 1,
+    "working with": 1,
+    "placed on table": 1,
+    "searching": 1,
+    "being cut": 1,
+    "peeling": 1,
+    "following": 1,
+    "colliding with": 1,
+    "falling into": 1,
+    "damaged": 1,
+    "flying over": 1,
+    "lying on the ground": 1,
+    "falling to the ground": 1,
+    "shouting": 1,
+    "playing on": 1,
+    "pouring into": 1,
+    "being stirred by": 1,
+    "having added": 1,
+    "starting": 1,
+    "sealing": 1,
+    "preparing": 1,
+    "making": 1,
+    "stretching": 1,
+    "greeting": 1,
+    "pressing": 1,
+    "exercising": 1,
+    "activating": 1,
+    "facing": 1,
+    "waves": 1,
+    "clouds": 1,
+    "on shore": 1,
+    "in distance": 1,
+    "writing": 1,
+    "standing at": 1,
+    "being tied": 1,
+    "looking at camera": 1,
+    "blocking": 1,
+    "stepping on": 1,
+    "jumping over": 1,
+    "lifting": 1,
+    "screaming": 1,
+    "being carried": 1,
+    "crashing": 1,
+    "lying on the floor": 1,
+    "calling": 1,
+    "hovering above": 1,
+    "flying above": 1,
+    "exploding": 1,
+    "touching face": 1,
+    "laughing": 1,
+    "dropping": 1,
+    "speaking into microphone": 1,
+    "having tape": 1,
+    "stepping": 1,
+    "hiding": 1,
+    "showing phone": 1,
+    "ending": 1,
+    "walking away from": 1,
+    "holding camera": 1,
+    "reaching for": 1
+  },
+  "entity_name_counts": {
+    "person": 2393,
+    "cup": 55,
+    "food": 29,
+    "card": 28,
+    "car": 25,
+    "text": 25,
+    "map": 22,
+    "object": 21,
+    "robot": 20,
+    "plate": 17,
+    "box": 16,
+    "vehicle": 15,
+    "building": 12,
+    "bowl": 12,
+    "bird": 12,
+    "image": 11,
+    "phone": 9,
+    "chopstick": 7,
+    "crayfish": 5,
+    "tool": 4,
+    "container": 4,
+    "pot": 4,
+    "backpack": 4,
+    "skill": 4,
+    "ship": 4,
+    "wok": 3,
+    "spoon": 3,
+    "structure": 3,
+    "package": 3,
+    "card pack": 3,
+    "animal": 3,
+    "river": 3,
+    "appliance": 3,
+    "mountain": 3,
+    "cooking vessel": 2,
+    "hand": 2,
+    "tree": 2,
+    "lettuce": 2,
+    "device": 2,
+    "pen": 2,
+    "notebook": 2,
+    "pencil case": 2,
+    "fire": 2,
+    "enemy": 2,
+    "pepper": 2,
+    "pan": 2,
+    "stuffed animal": 2,
+    "boat": 2,
+    "gun": 2,
+    "target": 2,
+    "bear": 2,
+    "brush": 2,
+    "eyeliner": 2,
+    "drink": 2,
+    "utensil": 1,
+    "bag": 1,
+    "sea_urchin": 1,
+    "house": 1,
+    "note": 1,
+    "net": 1,
+    "meat": 1,
+    "sauce": 1,
+    "pouch": 1,
+    "tablet": 1,
+    "lobster": 1,
+    "drone": 1,
+    "aerial view": 1,
+    "tv": 1,
+    "screen": 1,
+    "audio": 1,
+    "chop": 1,
+    "spice": 1,
+    "water": 1,
+    "knife": 1,
+    "noodle": 1,
+    "book": 1,
+    "sun": 1,
+    "shore": 1,
+    "sea": 1,
+    "sky": 1,
+    "city": 1,
+    "creature": 1,
+    "plane": 1,
+    "planet": 1,
+    "lipstick": 1,
+    "highlighter": 1,
+    "speaker": 1
+  },
+  "missing": [
+    {
+      "video": 71,
+      "scene_idx": 4,
+      "missing_arm": "graph_qwen"
+    },
+    {
+      "video": 82,
+      "scene_idx": 4,
+      "missing_arm": "graph_qwen"
+    }
+  ],
+  "raw_text_slots": [
+    {
+      "video": 3,
+      "scene_idx": 8
+    },
+    {
+      "video": 8,
+      "scene_idx": 2
+    },
+    {
+      "video": 26,
+      "scene_idx": 2
+    },
+    {
+      "video": 32,
+      "scene_idx": 3
+    },
+    {
+      "video": 35,
+      "scene_idx": 1
+    },
+    {
+      "video": 50,
+      "scene_idx": 4
+    },
+    {
+      "video": 52,
+      "scene_idx": 1
+    },
+    {
+      "video": 52,
+      "scene_idx": 11
+    },
+    {
+      "video": 52,
+      "scene_idx": 17
+    },
+    {
+      "video": 64,
+      "scene_idx": 1
+    },
+    {
+      "video": 64,
+      "scene_idx": 2
+    },
+    {
+      "video": 71,
+      "scene_idx": 3
+    },
+    {
+      "video": 95,
+      "scene_idx": 1
+    },
+    {
+      "video": 96,
+      "scene_idx": 3
+    },
+    {
+      "video": 96,
+      "scene_idx": 8
+    }
+  ],
+  "source_files": [
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00001.jsonl",
+      "sha256": "a28bc0da7b92c3f45ed2defd8923984d0bfa2a931801053b27c787ffa5508649"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00001.jsonl",
+      "sha256": "d963fe1262d496dc0c5b65d10cdca7cc64dbefabaae7d609331ccb2b99eb95d0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00002.jsonl",
+      "sha256": "beb70e4afbd916d1608c80ebffaf88a710d3aa559dc9406a181b6368fef21ed8"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00002.jsonl",
+      "sha256": "4bf6586790b29bd6dba351b39f251bee79f9d863573328b37a1d028a3c7ea9a5"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00003.jsonl",
+      "sha256": "dc27248718ba3edd83d30b251b2ebb3c2b015ac8ae124e23fc50a3946d345c80"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00003.jsonl",
+      "sha256": "d497c3fe05365c58f82d1a9c0ee75906d3d12fdb1aae7e134d2cbfdafbaf1dfa"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00004.jsonl",
+      "sha256": "4a8be23d619d93b8dc50572c986e539559486e741ea86429501994e0d6ecfa7a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00004.jsonl",
+      "sha256": "ec37069dfb6094d0cd0af10bb9d49fd01ce4a2a349ab508ea64507ca1310b165"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00005.jsonl",
+      "sha256": "3977915bdca7b51a328779b8126f72b940a1c614e23aa78f1de99d98fc9234ef"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00005.jsonl",
+      "sha256": "b322d1f149de3d47998808dc5e29f85bac09aacd7d2a3f2779813fbc2db4a91f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00006.jsonl",
+      "sha256": "1b9b2351e52318563e093834fab8dff11f4ed23c8812a5e685e56ab97dbeca03"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00006.jsonl",
+      "sha256": "ce1878971994bcef3604bad621759258b501a0614eddfbb940ff35bd73f22fd1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00007.jsonl",
+      "sha256": "7e1eaebcf4a1199f01f61c9a32cf2514af035e4f42c484ec3953111a5a5c5e50"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00007.jsonl",
+      "sha256": "a44441fa883c82c33a2a177eb7efb6bc2197c1781612a57d8b0362bc0eb1d551"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00008.jsonl",
+      "sha256": "974b990fc1b30d4b0b832cc664314a16887a0e087f4390b8c22de65d5d4b76ca"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00008.jsonl",
+      "sha256": "442d2c0f4001268c27f34550d0dd529762a70abd312bcee86aa1443af15b78ec"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00009.jsonl",
+      "sha256": "4068872d45d47df5d8f98d058420a68926110ba7c7f41c138a38a9d59b2c72ab"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00009.jsonl",
+      "sha256": "0dc47b18ac343d8498e98b80ac92bb676ec6157347b6b69c600729a436c75bb2"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00010.jsonl",
+      "sha256": "dff27d89a06088e2e7c02b6bea5e8e183f5b92e17750a66ac4404add7728bddc"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00010.jsonl",
+      "sha256": "670203b4418d6541328ac6495389d0d0f849accb37b1a6ddf5f4db386a4d5ddc"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00011.jsonl",
+      "sha256": "1433baa684f3d3086cb03d5ecc5e45843a9b270c986e4fe7029e0a1438c5fadb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00011.jsonl",
+      "sha256": "e19334e00b2e5a7131489a85b0f2b748cd0c0c9e3f6befc0cf8819979d7179f0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00012.jsonl",
+      "sha256": "b57bc0094d613c7413d905bcc4251c225ab2e037f8c3a1f5de53a483d4c64cc0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00012.jsonl",
+      "sha256": "79e3057bfb7753131437344ecf0f2632dfaf3c91d209d3db2cd267c504465b8d"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00013.jsonl",
+      "sha256": "9d2f4dc2212a7275f0a942480e1142febce973ebae94d230114852f69a6fa444"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00013.jsonl",
+      "sha256": "73889df8ae52bf886d3d347c5ac58fe410c1675017ca40d87231e9de18916930"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00014.jsonl",
+      "sha256": "36339229ead517c272f0c4e4ba5f9dabc820dc05deeac52d77882bcb3d5f940e"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00014.jsonl",
+      "sha256": "dfd56a9a43fb115e789d60d90df5fcbee78e1db74d705ca0884ee041983883a6"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00015.jsonl",
+      "sha256": "411df91c272c826822fc8cf8e82ab77ddadfc45911b977685c8002937f3c107a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00015.jsonl",
+      "sha256": "6ea490ed42b760c29b2a50b0a969e404fb1dfb0a891c199d282154f523b1a1aa"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00016.jsonl",
+      "sha256": "3525a0c9ecd87b3121f9aa9f8c28dfb8e742eeb31772d1f584b205535ff9d59c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00016.jsonl",
+      "sha256": "9693462bd5e90c9948f6b74bfaf769b40af5ad00ec3a9c870d9523a62074ff89"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00017.jsonl",
+      "sha256": "7192888973064d89d29351d09299a397395b1111c4a61a18ad258fb0243aca91"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00017.jsonl",
+      "sha256": "f8d07905c920f9e2f67403735fed646ece2df56454889b786457691a46b8c600"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00018.jsonl",
+      "sha256": "c2cc6875b23a828043183fac6ac55445b4fa9e08f34e183f2103e83086d5948c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00018.jsonl",
+      "sha256": "5574d2e539c4108817cd81c168143f04ee8c690be4462a037732c35bb092dc16"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00019.jsonl",
+      "sha256": "8aefdb51bd69df3ae736f149d65a4a2c1944a34d422ecfa574f9159020582880"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00019.jsonl",
+      "sha256": "d37e86f2ab7216d452fa37cbc7c5ca845fb39c45001a5840779fa48b5e08fbb3"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00020.jsonl",
+      "sha256": "c80bdb40864788ecb26522d728901e864ddf18b8a73450f7701d8514b71b1527"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00020.jsonl",
+      "sha256": "f26963a3fb336d833f17c5f25f6769be3b9bde693e960fcd326f35c3886faa5c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00021.jsonl",
+      "sha256": "d2948ab5d03d156038755a7af2b65f7447e8f9fa55e4adada0bef718d30b4a8d"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00021.jsonl",
+      "sha256": "d810bd9cacbba3b81afb3fa45aa09259a76940dfee4103818796648938c9c4c4"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00022.jsonl",
+      "sha256": "56d6e0ef5e209e85d8aee40426d6f83f642ac54dfe744c1954203fdcf781daad"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00022.jsonl",
+      "sha256": "5e90bed88e45bb069197e7d850af97d3cca6762f10b58ed82c6e0ee6bf9d160a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00023.jsonl",
+      "sha256": "e96882fa2f1df20dff015da4ed8d4720a912e8eeab1ccba831587aaf021b2ed4"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00023.jsonl",
+      "sha256": "695b133aff35058f996839e5cdc86a345b7795bf55edee4c725fc38199143994"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00024.jsonl",
+      "sha256": "c5444b8d0452f44dc40e89075295c18ac2c8f54de2f6acee1ce5b42d9bb3e962"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00024.jsonl",
+      "sha256": "81e2aa1d5f0a85585537e4473ccb904d27af38181584125efc39ebd0659007e6"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00025.jsonl",
+      "sha256": "494f3b1eff0a9d857a506b8c4b6e532570793220f32a478d20420df433bf3fc0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00025.jsonl",
+      "sha256": "87d8b6a0cbf240e86e901b78963cb7aa6f1aba5d5460b2ed2b5f6a1f39226e60"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00026.jsonl",
+      "sha256": "e5f6f4be313994d855c9ca7e885abe5b23e38b46fe0aa0cafa9c4f8a65bd521e"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00026.jsonl",
+      "sha256": "4b27e2b5925e4e6bb9ab2d9021d4e2995e98f0391d4095e88dbcf198f4471334"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00027.jsonl",
+      "sha256": "545742b33711b8c26713de8139342989895e49c2abf368e39949dbf4118ad4e7"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00027.jsonl",
+      "sha256": "26b1fef149f4ccf100165a92da02ab768212aa0de9ace6409864f62998ecc4c1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00028.jsonl",
+      "sha256": "5ae27ba56f617432e3401ef8fbb7d5d08d528fcb6f39689f5ff6a899a6777a23"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00028.jsonl",
+      "sha256": "ab8b578984eabb8e7c7f701a3ddb64003c41d0128e30f5292961ad2feb8e63e8"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00029.jsonl",
+      "sha256": "da6cf0a662f9aaea1f67b6225852e60f77e8cd43a96e99196adc9bf83fc2deeb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00029.jsonl",
+      "sha256": "8c55179adc1e8462caadd91ef76ceb2cd97404332f2b30bd441778d92ea9296c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00030.jsonl",
+      "sha256": "b78b1fe62fc365c2a594879b975150e36b025fe015e717d9f10a70605f2160cb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00030.jsonl",
+      "sha256": "2e190d93ab0228bb7d5d1c4ace757f2dae8d8005b4eac167057c5f0fd4aff5e9"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00031.jsonl",
+      "sha256": "583d0a52826a6043057afbd48c6a80a1dd2102aabd1596a32a45b9c3ca06cf25"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00031.jsonl",
+      "sha256": "60c6d85214c354c9ac4b5f3c12f5c9a99699cac75ed08ec924e71f726f7a6d82"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00032.jsonl",
+      "sha256": "6601e92fdd6cd3b76d6d535dd443bc3ddf3dfd890d72a00fc6aca76e9cd0505f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00032.jsonl",
+      "sha256": "b0af6a6f748fde6ab30b22a3a0f91ac57c3ceedf116c44ac85a935597b5405a0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00033.jsonl",
+      "sha256": "289a1fd1550a950d7cf17a906819889b4d30870764c7d9f1811f7894a727d086"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00033.jsonl",
+      "sha256": "d409f85656e668b26f76ba1344895948c5d888074fc2cf1cef3529f3c3306d79"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00034.jsonl",
+      "sha256": "b242d9ed422328896b72827c232da0bd8c9baf0141d233a4ff6a78b4c4adc58a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00034.jsonl",
+      "sha256": "a502c49b7872c7d1a7e85f769b6d4acf017db7d7b6ce004c62cd5f8845e4c94f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00035.jsonl",
+      "sha256": "3b34f7000417339c2e3f995b951b76843a1cbbb60ea96f6331e80522ddff6399"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00035.jsonl",
+      "sha256": "ebac73cc8ad50a0ed5f7fd7254099f5fec30249e0329f99552b3cb99e7b79e0f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00036.jsonl",
+      "sha256": "1879482275903c19697a45d6080545582061c3c382122ff90ca6a6d8809089ed"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00036.jsonl",
+      "sha256": "a0ddc36e7d8146373195e10e691e74cb22fa955c35109dd9bd64d123c36d1c58"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00037.jsonl",
+      "sha256": "f81fb307fa8893e7071fba0bbb95d7597ac5e7262e5b318575bfdf608868dc19"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00037.jsonl",
+      "sha256": "580b08798024981fe93c240dbd91b137f6b5d75036adabc78e01ec2a1e842a46"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00038.jsonl",
+      "sha256": "05dfdfde89076af130d74b5f129f78fec07310aef1e241cc071f0f1bc561072b"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00038.jsonl",
+      "sha256": "a8ef125628b124d9ce2430d839da2f35b80ef949888620696f9f9b8265492b9d"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00039.jsonl",
+      "sha256": "cfdf57887ca88dc94ef57a2e85b5098be5205ba1ec59421066f60de9b2279bb7"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00039.jsonl",
+      "sha256": "a30486b9dfcac83c4310e34ed84aae7badc4b5353d60b0ee0bb3ebf7e3b92d40"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00040.jsonl",
+      "sha256": "acd213c0a2f2e49635303ba004ee29a3005e32319568835399c222dcea9e5b4c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00040.jsonl",
+      "sha256": "19785f028a4b2e56e3fdf71e7f7ffd1b8cf0380b3ae9d3dc7b5d9f181fb047ff"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00041.jsonl",
+      "sha256": "ba611801959b719cca5284bb60cb70389776627731d39c0aa780fba37670a6ec"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00041.jsonl",
+      "sha256": "a0d6299ff0d8bcfc76bd6c415df38d7c69206e83e202f17e36e455457c8422fc"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00042.jsonl",
+      "sha256": "73ff1cda39073592cc853c54aa818d45f3f32ba7861b55860816e21a17a50e71"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00042.jsonl",
+      "sha256": "809123f67000ea2b990a53cac0ba6df817449ccd84ce8e64c630639e491e59f0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00043.jsonl",
+      "sha256": "3a65fc294c40d0395e4527545dcc2daa10d4695cf798dc1d6f88ec4a1b44550c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00043.jsonl",
+      "sha256": "8e60aaa93128909b7e03987a9df394bc25a23948dd14d8e5d3ee014d1844fa0b"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00044.jsonl",
+      "sha256": "57b0610d30def009105afd464aea21aa58f96a51fbb581aebc3f2580116d5744"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00044.jsonl",
+      "sha256": "39544f0575f0b7488e9151dddcf5f7527e2671da504b42eccd3eddead7271147"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00045.jsonl",
+      "sha256": "208ab901698400caf6cefc278b3ff9013c0ce9be68ada91d46c07b2ee94e564a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00045.jsonl",
+      "sha256": "777bb29b77c4865b57de38d687789bb96e1e6e654f7ff7058a4f8c6b8f941180"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00046.jsonl",
+      "sha256": "86ad0bc28dc9314c864cb056b5df899b1c308c4bec59b2847f8b552f90113a2c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00046.jsonl",
+      "sha256": "1d6e6a0aed937de5cd704bf7aa9a8191d029bdb02fbc2b37e3c13365e28eccc9"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00047.jsonl",
+      "sha256": "8199766f7164a525a6e89ef939778969173ceb6a27cf3a5e7dc00160363ce73c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00047.jsonl",
+      "sha256": "bd1e1292eb78e2e19ae0000f07f320f971f69d58e43797adc06e8478349a466e"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00048.jsonl",
+      "sha256": "3d6657c8a628df44c619909685b42bca75671c9957c55527fdc21cec2894979c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00048.jsonl",
+      "sha256": "32b129f4cc75accd6cb80ad960d0845b1b6eeb7b474afaca301fff0baff90055"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00049.jsonl",
+      "sha256": "8eedc48cde39e0c84a232f5545bae62acebf788a061d31b8b6319a141ea178c1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00049.jsonl",
+      "sha256": "eee679e08d42370cc410cbdd756f5936c3a6da5a489fe37407034817cf6c2cff"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00050.jsonl",
+      "sha256": "4f9f77d327e9e354be106e5188d87abe097f4a7cb8d3b4e2dbd381f35ad1a688"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00050.jsonl",
+      "sha256": "3516f6f2fbe9a094e886454060dd6bf84f3d0759a461d181a284c13474e52c90"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00051.jsonl",
+      "sha256": "ff14eba67ae240cda4ce2aff764a4c5eb626ce01cde82ca5c5074ec7a1775d84"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00051.jsonl",
+      "sha256": "420359c821a6a677a0c42fd3bca7c3a5353807411366c1b2725a26f7eae217e3"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00052.jsonl",
+      "sha256": "443eac2886df2e083a9b5ae2be418f078a01848f344bedf158631faf17efb959"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00052.jsonl",
+      "sha256": "9c0583665c3772d545cb5d409553838ec3a782b557f707821e0d130aca22f580"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00053.jsonl",
+      "sha256": "73489da0fd497cb2e7ab42284e3ced02d1be803572b3d19e356eaf47d557041d"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00053.jsonl",
+      "sha256": "bafc2d9aea936cb4035e18bb36572423bf3b797ed38a5d9c92899709b3622a96"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00054.jsonl",
+      "sha256": "32298268e9a2ca593ca37b708358b36b2a843c413edc259b6baa9a283d88a431"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00054.jsonl",
+      "sha256": "8b984c8ea776464cd870b4e013c00b7ceb941d1a889ec3911c873ca7ce8e6adc"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00055.jsonl",
+      "sha256": "39ce9c6678caa74820cfb62585136f64285caaa4e40bc4856fec4574c756dcea"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00055.jsonl",
+      "sha256": "89d46e83e4208340f112b597e4705faf96026d268c0219dcaf12eeca98ecf066"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00056.jsonl",
+      "sha256": "be0dbcdef37e7b28fb7ae269d6ab3f8145a72c9cd19f9f992e89339f1bf82332"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00056.jsonl",
+      "sha256": "3d852e3041cddd5fc521b0c0d3646f619b0689983b0d235d48e403080e742108"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00057.jsonl",
+      "sha256": "a85ed017e65f2ee186d74ea278db7698d4409ba2f14143e1d98c382bd9591e28"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00057.jsonl",
+      "sha256": "413fd9d6e4f9740b88110e768642fb6bdf6846a201837573bf181ba358d1708c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00058.jsonl",
+      "sha256": "4375b10dcad686cfe9018699f14f57584229ca0821d8a89bdba253c5a3459c3f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00058.jsonl",
+      "sha256": "173fd4362333862ed495c2cd3ead6d0cb21788af6084a5708fa7fc29a695a53a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00059.jsonl",
+      "sha256": "d36d79f64846cc981f3dc69e6b066a6a1a2299c6d7c9b7f317f39876afb14a8f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00059.jsonl",
+      "sha256": "e891d4452d4e40a27e9315b9246004a42ddf5b0d18cc1ea4e9f860380530d909"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00060.jsonl",
+      "sha256": "079756818791ca32b7ce389d9d4c886f3c2df5135b39ceefaca7a570fe9fe113"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00060.jsonl",
+      "sha256": "8772d16870fbab927a091208822b461519879a5434327ad495f9b8d4d4b01de0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00061.jsonl",
+      "sha256": "421e6a578ad0e40d9b86505a97fd97e37b663f11f8ecf7bb65a31c5ce585f732"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00061.jsonl",
+      "sha256": "1fd43ddadb8b3e3cf6075dbd2e319293b4ba83910de6e49b376282969a8d5259"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00062.jsonl",
+      "sha256": "91944ceb60b2f5a99967fab1cefd05cff2e0d6b3e64d4ba5464ddb9f3ce12f8d"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00062.jsonl",
+      "sha256": "483f1ba188845a4662ff79a98a553130ab1827e925fe1f32860926b65273b4fe"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00063.jsonl",
+      "sha256": "375baf7c057c08c38c42c5f5c4e374e87ff45927eba6fc8ce9a2a7a71ab9575c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00063.jsonl",
+      "sha256": "dc8e62b898bdc85c992791c6fc77e42a4d56f95ff93bea479d3e5aa095089846"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00064.jsonl",
+      "sha256": "b6892b4d5970c0f989c56c0526c82f9eb8bf734e01df089d048d7d143fe779a1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00064.jsonl",
+      "sha256": "75f8337d2c99f2d9c153ffb66ff7bd23faa117d042d83556e1e86f0597df6f19"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00065.jsonl",
+      "sha256": "b7934b75443f78bc98ef7cad773b82ffb83821d960c8e94484a7ca0e05f115c5"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00065.jsonl",
+      "sha256": "11f22c3d55d1e24d634ae84436fb74306eea11487ab0838534774ea81292adcb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00066.jsonl",
+      "sha256": "5d9893eff2b2a09bdd760f69175cb001a5d9ee056dd8ad3d4d4ecc9a4c15d3ef"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00066.jsonl",
+      "sha256": "e067d289de44a402db1941735d3da64b66dcc49df9076ee30ad4335530891731"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00067.jsonl",
+      "sha256": "983f512ad172ab568a017d79744a24a521d1cd50d73b4ad2dc3247b9b804ed80"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00067.jsonl",
+      "sha256": "3ab75ebc85648cc67d03bb91de1a97feb846080b5e9065094350efea8a70f797"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00068.jsonl",
+      "sha256": "40e88ebe7c1e1d8a75b0fb325014cf1d7e0f5480bf319bc1b00d00413908860a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00068.jsonl",
+      "sha256": "1ee6e2af301e5613d763875987938ea38ab5371656dc0e9c699eadcd11325de0"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00069.jsonl",
+      "sha256": "8ed8626c1040d5a2d43aae7f1ab4a016897be4269a70fe76884a6c8d5bff2d0f"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00069.jsonl",
+      "sha256": "9d195fe59940eed0a8c0b1978c1e2e64b2fb67b536cc6fcd7c3cdbf8dbd307be"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00070.jsonl",
+      "sha256": "1afebef451ce59fdf93920f0f861e9f069b2380ce1e247c7646d91e8a6fb955c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00070.jsonl",
+      "sha256": "d99feae223e91602a2c346f3ff7644a461b8fffa70e8c08247d49f44137f1efb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00071.jsonl",
+      "sha256": "6f32cb1c8bf94cb96ad87c40d40f866d5a4c4d5b13dbdf63e2cccfe6e57fc985"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00071.jsonl",
+      "sha256": "6bc0ab867bc60f98b3740ae6548c50fe898d119c650b374600c6bec424c53efb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00072.jsonl",
+      "sha256": "33718e034847768f364fa7079602ab2a2027f516f96f9a19ce1966ca537eb6f7"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00072.jsonl",
+      "sha256": "c957c04b8c6f3dd044c526663631bedbc695679fefd801605978af3305b07c22"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00073.jsonl",
+      "sha256": "1537d42ce36fe032239d878f529b51055c9ab2f8217f2a09b043aef063a9f4d5"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00073.jsonl",
+      "sha256": "e17757a24f9846a8ea3d8feed5757b86683687cefaeacf2640d78fe98730eb82"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00074.jsonl",
+      "sha256": "a90dec4ec90aa6e1c3ffaff7eebee264cbf81bdc3578f33ead0d45b9a56435b1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00074.jsonl",
+      "sha256": "55317224d4d7d6b9b0277d6a7035df4eab3063c5cc7020ea8b210ec4300e6a6a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00075.jsonl",
+      "sha256": "07b08e5fbbc1d69d38090793c2f9fe970005f35dd7d08b254f65fab06ebaa5bb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00075.jsonl",
+      "sha256": "b3129aff6cc23563d8b60d8b202033537f7c739252f165e036a95af2f8546ef5"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00076.jsonl",
+      "sha256": "1ae96d1f18e7fd53c261cc8a8e9011908d7b662bf6160a83c0c61ef7364d0be3"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00076.jsonl",
+      "sha256": "401c8160cef07a26661267a1316120f18b22fc5701f0946c351820efe28f45df"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00077.jsonl",
+      "sha256": "1391964ce3ab2e8b2d1c61d90e2f88140d26a520e8f05573a2716dfd5f17fa37"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00077.jsonl",
+      "sha256": "809f0a9d05be0cfe99d3ec9c31139628a6ddd5840620263298dce20a6d099378"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00078.jsonl",
+      "sha256": "3c92ac7acdc7a2d88f93b58c8bf92d4be8fe91b1aef69e7d374cc570b26533a4"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00078.jsonl",
+      "sha256": "720726fc7317666540cbe1b794d182bd5a9ae65f9134983764e12151a44eb563"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00079.jsonl",
+      "sha256": "87f5c9b0c86ee2ef6dfa8475459771387c60f942bc8c889bac5564decedd169c"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00079.jsonl",
+      "sha256": "8ab20c6f572b74a49e1fd41acbb25d6c5a212beb3e5ac70ec0dbf0a0b4cc96bb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00080.jsonl",
+      "sha256": "75f89ec46e6ea41020fd9c5f377d90aca876c3626f3908fa2d19ec002ff55cea"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00080.jsonl",
+      "sha256": "a066ce7fabf9b59655183f53bc42a5102a5a54d6a9737de00ced5f318c9acbdf"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00081.jsonl",
+      "sha256": "16021e0fa599e424df0c3ba3111642c75f5f18d2824b5f392713c5832c2af3c1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00081.jsonl",
+      "sha256": "2bf140848b31c7390484d6104dc8fe5a60604bfbf6b78938578126e2b3375e18"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00082.jsonl",
+      "sha256": "3028a96c60bdea8a751e70910d2afc686c46f1650b92d2784b0b55830521af27"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00082.jsonl",
+      "sha256": "c21c02d97b5337d2ac7b90fe690ee2516def63e4739f3170c8eec6cf6a27e684"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00083.jsonl",
+      "sha256": "015b2246fa18ccaab375a87fbeab3607e640c1a1c4512e644ba65f9d0db6054a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00083.jsonl",
+      "sha256": "9f7abae90d9435015798823be3b400682cd32646ad1e2aacd6545a997fd19894"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00084.jsonl",
+      "sha256": "6599bbe8c7942c89132e7d37e483ed0f3ed9ce021393aff9cfbb153d9b563714"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00084.jsonl",
+      "sha256": "140598e1f5989877119b0da13de8b2676394b2568f33fd1050c3d900ccdf4058"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00085.jsonl",
+      "sha256": "86e43704ed0da43671fb46acfe304f36d1a9493e65827aaec272eeac9c7ce6ce"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00085.jsonl",
+      "sha256": "df629b953bb5075f9a5c60fa2beb108aa8f20ae70a0e8b42d063055f0a0850b1"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00086.jsonl",
+      "sha256": "c39af0be3ee7f9e2dd1afee85e29f4c0c5f96dbcf7f0e3495fd98ccfb225ab39"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00086.jsonl",
+      "sha256": "8f2c905d9f89a7df519e1527717ff026e2003f734b0f233b334fc93beef01f77"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00087.jsonl",
+      "sha256": "c81062b6d591a60ede64638d05eb5e8e64c53b8e37781e8a696e4e1206b8c351"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00087.jsonl",
+      "sha256": "be57e2bc36a473aad617a221da9a58f24714defdc15c68540049e0d6f3323124"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00088.jsonl",
+      "sha256": "297b4c90630b885e1b29f9871edd092760d39398f220e0f5fbf2cf5cb6434866"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00088.jsonl",
+      "sha256": "ea3ddb8c8a00b7b6d98e49ba35a32427f62c9e1baad8021c7cce2838858013f8"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00089.jsonl",
+      "sha256": "197576fe704f15fcb67c54ac95b046ada464512a676a11d17637b0a2882e7783"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00089.jsonl",
+      "sha256": "49f2d5381e970978641d66b109343ee6ef713ab32139fb251b50fba447b013e5"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00090.jsonl",
+      "sha256": "c8fdeac5a742503dd612b9337069fc81ee56b05e54338bf1ea46bc2c0c816cdb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00090.jsonl",
+      "sha256": "829536d16df975ccf53bd8e82aabfad7613d1f283de2afe9cd8b21cd2bf41f5e"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00091.jsonl",
+      "sha256": "0743cab50d85ee9744c67565d43e009e4e5f1f91b6d41699050658cca091bee4"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00091.jsonl",
+      "sha256": "470b11284babdd14a05627659558dbdaab29fa2367c032cc6d255a01da521d1b"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00092.jsonl",
+      "sha256": "7e475d604926a46508c49c6a70216ee8cf0f1682b2faec6cc942edc94d46c94b"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00092.jsonl",
+      "sha256": "0b7d06950af1069f525d02cd01ff94ffd6461cfda34dc4e14315843e1b109380"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00093.jsonl",
+      "sha256": "df9f60c648fa353ebfab9ba6de243275da53f5202435b28d9602671b25316094"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00093.jsonl",
+      "sha256": "fc939c3058a77a2382e446804976d88d198a0c0492a7a04db42df0446be8ce6d"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00094.jsonl",
+      "sha256": "b80b58091fb6e8e9677789a0c00331b228095f7d962ad670c5cdfaea0f768327"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00094.jsonl",
+      "sha256": "6cd8f310b314eb4ba839301ef9b536fc11b09ed284e9b0f430fd9b7ea56991bd"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00095.jsonl",
+      "sha256": "4252e3de09ee28fb3901d632f06690fa27fc32d3614af3acfef78c06ac7e77e5"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00095.jsonl",
+      "sha256": "95eb031bb91be4ecbf5b3d2852df55087b859a6f9e4cecae2a945e2164f11329"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00096.jsonl",
+      "sha256": "e4d58f558d98a2db36bb1beb7a51813c661caf1ddbe47463e7bf0896b48d8ccf"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00096.jsonl",
+      "sha256": "cedfa71291ec8d6fc5c3890aafc8c9347b0db7c33ae8409e77422ac96c8e5166"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00097.jsonl",
+      "sha256": "64b3bcca8d3158ba4a687416bcb1151e7da073fea043a6d5f24c7ce750970b12"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00097.jsonl",
+      "sha256": "ba7fed54f1729df64d9875bdea9f5ed3b094ce1f604f2b906f0210797feda729"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00098.jsonl",
+      "sha256": "9341f93aefa56b0c9260ac48f017b1bf43f41885b95c7b9d1a733edacaeef321"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00098.jsonl",
+      "sha256": "013ffdc0c6736904c933427bc0739ac96947bb9606cd0289f781ec70b4a0f512"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00099.jsonl",
+      "sha256": "1a72a39d4416c35d5fa5429b0f533a0f531cd51b2d01932d48b54acec57a09fe"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00099.jsonl",
+      "sha256": "41d8f8eeb3b6dff0fa7bed1b2d8347f0591699496b234367410549d9c6c0950a"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/desc_qwen/microlens_100k_00100.jsonl",
+      "sha256": "30cbdd76c63f24e139a8a226495bcd09d46987a035cad0e13571d95d52e071cb"
+    },
+    {
+      "path": "artifacts/runs/v4_260922/extraction/scenes/graph_qwen/microlens_100k_00100.jsonl",
+      "sha256": "8d3d5651dd0d5f2cd8adb67ab8bf8e595361f95935889a4b45eba20182083d9e"
+    }
+  ]
+}

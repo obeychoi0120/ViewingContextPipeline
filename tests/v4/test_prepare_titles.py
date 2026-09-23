@@ -16,10 +16,10 @@ def configure_titles(context):
 
 
 def test_single_prepare_command_completes_titles_without_extra_artifacts(
-    v5_context, monkeypatch, fake_models
+    current_context, monkeypatch, fake_models
 ):
-    context = v5_context
-    context.config["protocol"]["arms"] = ["metadata"]
+    context = current_context
+    context.config["protocol"]["arms"] = ["meta"]
     primary, supplement = configure_titles(context)
     originals = {p: p.read_bytes() for p in (primary, supplement)}
     monkeypatch.setattr("preparation.cli.RunContext.load", lambda _: context)
@@ -40,27 +40,27 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     assert not list(context.root.rglob("*.report.json"))
     assert not list(context.root.rglob("*completed.csv"))
     assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation"}
-    embed_representations(context, summary_source="qwen", target=["metadata"])
-    with np.load(context.representations_dir / "metadata_embeddings.npz") as arrays:
+    embed_representations(context, target=["meta"])
+    with np.load(context.representations_dir / "meta_embeddings.npz") as arrays:
         assert np.all(arrays["values"][3] == 0)
         assert np.any(arrays["values"][1] != 0)
     supplement.write_text("item,title\n2,Updated title\n3,Third title\n4,Fourth title\n")
     assert main(["prepare-cohort", "--run-id", context.run_id]) == 0
     titles = read_jsonl(context.cohort_dir / "metadata_titles.jsonl")
     assert titles[1]["title"] == "Updated title" and titles[3]["title"] == "Fourth title"
-    assert embed_representations(context, summary_source="qwen", target=["metadata"])["generated_arms"] == ["metadata"]
+    assert embed_representations(context, target=["meta"])["generated_arms"] == ["meta"]
 
 
 @pytest.mark.parametrize("broken", ["missing", "duplicate"])
 def test_bad_supplement_blocks_preparation_instead_of_silent_zero_vectors(
-    v5_context, monkeypatch, broken
+    current_context, monkeypatch, broken
 ):
-    _, supplement = configure_titles(v5_context)
+    _, supplement = configure_titles(current_context)
     if broken == "missing":
         supplement.unlink()
     else:
         supplement.write_text("item,title\n2,One\n2,Two\n")
-    monkeypatch.setattr("preparation.cli.RunContext.load", lambda _: v5_context)
-    assert main(["prepare-cohort", "--run-id", v5_context.run_id]) == 1
-    assert read_json(v5_context.cohort_dir / "eligibility.json")["status"] == "blocked"
-    assert not (v5_context.cohort_dir / "metadata_titles.jsonl").exists()
+    monkeypatch.setattr("preparation.cli.RunContext.load", lambda _: current_context)
+    assert main(["prepare-cohort", "--run-id", current_context.run_id]) == 1
+    assert read_json(current_context.cohort_dir / "eligibility.json")["status"] == "blocked"
+    assert not (current_context.cohort_dir / "metadata_titles.jsonl").exists()

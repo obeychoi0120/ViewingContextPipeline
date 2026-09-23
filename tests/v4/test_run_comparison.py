@@ -17,7 +17,12 @@ def paired_runs(tmp_path, monkeypatch):
             write_jsonl(directory / filename, [{"id": 1}, {"id": 2}])
         contexts.append(
             SimpleNamespace(
-                config={"protocol": {"arms": ["metadata", "graph_qwen", "graph_gemini"]}},
+                config={
+                    "experiment_config_version": "v4",
+                    "protocol": {
+                        "arms": ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"]
+                    },
+                },
                 root=tmp_path,
                 run_id=name,
                 cohort_dir=directory,
@@ -34,23 +39,28 @@ def paired_runs(tmp_path, monkeypatch):
             evaluation=SimpleNamespace(bootstrap_samples=1000, familywise_alpha=0.05)
         ),
     )
-    monkeypatch.setattr("validation.run_comparison.load_validation_cohort", lambda ctx: {
-        **ctx.require_ready_cohort(),
-        "events": read_jsonl(ctx.cohort_dir / "events.jsonl"),
-        "catalog": read_jsonl(ctx.cohort_dir / "catalog.jsonl"),
-    })
+    monkeypatch.setattr(
+        "validation.run_comparison.load_validation_cohort",
+        lambda ctx: {
+            **ctx.require_ready_cohort(),
+            "events": read_jsonl(ctx.cohort_dir / "events.jsonl"),
+            "catalog": read_jsonl(ctx.cohort_dir / "catalog.jsonl"),
+        },
+    )
     reports = {}
     for ctx in contexts:
         reports[ctx.run_id] = {
             "daily": [
                 {"evaluation_date": "2026-09-01", "seed": 42, "arm": arm}
-                for arm in ("graph_gemini", "graph_qwen")
+                for arm in ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen")
             ]
         }
 
     def collect(ctx, config, cohort, *, arms):
-        values = [0.4, 0.25] if ctx.run_id == "candidate" else [0.2, 0.15]
-        indices = [("graph_gemini", "graph_qwen").index(name) for name in arms]
+        values = [0.4, 0.25, 0.3] if ctx.run_id == "candidate" else [0.2, 0.15, 0.2]
+        indices = [
+            ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen").index(name) for name in arms
+        ]
         return (
             np.tile(np.array(values)[indices], (2, 1, 1)),
             np.ones((2, 1)),
@@ -61,17 +71,17 @@ def paired_runs(tmp_path, monkeypatch):
     return contexts, reports
 
 
-def test_paired_run_effect_direction_interaction_and_partial_family(paired_runs):
+def test_paired_run_effect_direction_and_partial_family(paired_runs):
     contexts, _ = paired_runs
     result = compare_graph_runs(contexts[0], "reference")
-    assert result["comparisons"]["graph_gemini"]["difference"] == pytest.approx(0.2)
+    assert result["comparisons"]["graph_gemini_meta"]["difference"] == pytest.approx(0.2)
     assert result["comparisons"]["graph_qwen"]["ci_low"] == pytest.approx(0.1)
-    assert result["model_interaction"]["difference"] == pytest.approx(0.1)
-    assert result["comparisons"]["graph_qwen"]["confidence_level"] == 0.975
+    assert result["model_interaction"] is None and result["model_interactions"] == {}
+    assert result["comparisons"]["graph_qwen"]["confidence_level"] == pytest.approx(1 - 0.05 / 3)
     assert set(result["sources"]) == {"candidate", "reference"}
     partial = compare_graph_runs(contexts[0], "reference", target=["graph_qwen"])
     assert partial["comparisons"]["graph_qwen"] == result["comparisons"]["graph_qwen"]
-    assert partial["family_size"] == 2 and partial["model_interaction"] is None
+    assert partial["family_size"] == 3 and partial["model_interaction"] is None
 
 
 @pytest.mark.parametrize("mismatch", ["events.jsonl", "catalog.jsonl", "seed", "dates"])
