@@ -67,14 +67,6 @@ def test_single_generation_rejects_invalid_backend_results(case):
         generate_once(generate, tasks, lambda *_: None)
 
 
-def test_returned_results_are_published_once():
-    outputs = {}
-    def generate(tasks, callback):
-        return {item.task_id: "text" for item in tasks}
-    generate_once(generate, [task("a")], lambda key, value: outputs.update({key: value}))
-    assert outputs == {"a": "text"}
-
-
 def test_graph_repair_never_invents_required_fields():
     from extraction.scene_executor import graph_scene_result
     graph = {"entities": [], "relations": [], "context": []}

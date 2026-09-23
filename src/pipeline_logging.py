@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json
 from pathlib import Path
-from arm_registry import generated_arm, select_arms, registry, legacy_layout
+from arm_registry import generation_registry, generated_arm, select_arms, legacy_layout
 from pipeline_runtime import CONFIG_PATH
 
 
@@ -17,7 +17,7 @@ def step_settings(context, step, **options):
         summary = step.startswith("summarize-")
         kind = "graph" if "graph" in step else "description"
         source = options.get("source" if summary else "model")
-        arm = (registry(context.config)[options["arm"]] if options.get("arm")
+        arm = (generation_registry(context.config)[options["arm"]] if options.get("arm")
                else generated_arm(context.config, kind, source))
         source = arm.model
         phase = "summaries" if summary else "scenes"

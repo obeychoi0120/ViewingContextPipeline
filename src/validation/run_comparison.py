@@ -62,10 +62,10 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         }
         for i, name in enumerate(names)
     }
-    from arm_registry import legacy_layout
+    from arm_registry import legacy_layout, concat_layout
     old = legacy_layout(context.config)
     interactions = {}
-    for title in ((True,) if old else (False, True)):
+    for title in (() if concat_layout(context.config) else (True,) if old else (False, True)):
         pair = {arm.model: name for name, arm in registry(context.config).items()
                 if arm.representation == "graph" and arm.uses_title == title and name in names}
         if set(pair) != {"qwen", "gemini"}:

@@ -40,7 +40,7 @@ def test_scene_passes_retry_only_failures_and_keep_empty_failure(ready_context, 
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     extract = getattr(steps, f"extract_{representation}_scenes")
-    options = dict(model="qwen", schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    options = dict(model="qwen", schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     assert extract(context, **options)["failure_count"] == 1
     assert calls == ([(i, 1.0) for i in range(4)] + [(i, 1.05) for i in (1, 2, 3)]
                      + [(i, 1.1) for i in (2, 3)])
@@ -73,7 +73,7 @@ def test_summary_passes_retry_only_failures_and_keep_empty_failure(
     context = ready_context
     context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
     extract = getattr(steps, f"extract_{representation}_scenes")
-    extract(context, model=source, schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    extract(context, model=source, schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     ids = [v["content_id"] for v in steps.visual_rows(context)]
     calls, engines = [], []
 
@@ -100,7 +100,7 @@ def test_summary_passes_retry_only_failures_and_keep_empty_failure(
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     summarize = getattr(steps, f"summarize_{representation}")
-    assert summarize(context, model="qwen", source=source, schema=f"prompts/{representation}_summary_v4.md")["failure_count"] == 1
+    assert summarize(context, model="qwen", source=source, schema=f"prompts/summary_{representation}_v4.md")["failure_count"] == 1
     assert calls == ([(i, 1.0) for i in range(4)] + [(i, 1.05) for i in (1, 2, 3)]
                      + [(i, 1.1) for i in (2, 3)])
     assert len(engines) == 1

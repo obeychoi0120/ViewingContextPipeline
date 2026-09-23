@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from arm_registry import registry, legacy_layout, ARM_CONTRACT
+from arm_registry import registry, legacy_layout
 from model_provenance import local_model_identity
 from extraction.recovery import fingerprint
 from extraction.summary_executor import reuse_summary_document, summary_failure_rows, summary_model_from_document
@@ -133,7 +133,7 @@ def _check_model_source(provenance, expected, path):
         raise ValueError(f"generation model provenance mismatch: {path}")
 
 
-def documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False, failure_rows=None, legacy=False):
+def _source_documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False, failure_rows=None, legacy=False):
     if legacy or arm.representation == "metadata":
         return _legacy_documents_for_arm(context, cohort, arm, summary_source=summary_source or "qwen",
                                          strict=strict, failure_rows=failure_rows)
@@ -221,12 +221,45 @@ def documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False
     return documents
 
 
+def documents_for_arm(context, cohort, arm, *, summary_source=None, strict=False, failure_rows=None, legacy=False):
+    from arm_registry import concat_layout, generation_registry, CONCAT_POLICY
+    if not concat_layout(context.config) or legacy:
+        return _source_documents_for_arm(context, cohort, arm, summary_source=summary_source,
+                                         strict=strict, failure_rows=failure_rows, legacy=legacy)
+    titles = None
+    if arm.uses_title:
+        # Reuse catalog/title alignment validation, including content and item IDs.
+        titles = _legacy_documents_for_arm(context, cohort, registry(context.config)["meta"])
+    if arm.model is None:
+        docs = titles
+    else:
+        source = generation_registry(context.config)[arm.scene_arm]
+        docs = _source_documents_for_arm(context, cohort, source, strict=strict,
+                                         failure_rows=failure_rows)
+    result = []
+    for index, doc in enumerate(docs):
+        title = titles[index]["text"].strip() if titles is not None else ""
+        summary = doc["text"].strip() if arm.model else ""
+        components = "both" if title and summary else "title_only" if title else "summary_only" if summary else "neither"
+        text = "\n\n".join(part for part in (title, summary) if part)
+        result.append({**doc, "text": text, "actual_arm": arm.name,
+                       "source_arm": arm.scene_arm, "summary_source": arm.scene_arm,
+                       "composition_policy": CONCAT_POLICY,
+                       "components": components, "title_used": bool(title),
+                       "title_source_path": titles[index]["source_path"] if titles is not None else None,
+                       "summary_used": bool(summary),
+                       "summary_status": doc.get("status") if arm.model else "not_applicable",
+                       "status": doc.get("status", "complete"), "word_count": len(text.split())})
+    return result
+
+
 def representation_signature(context, catalog, arm, documents, *, selection_hash=None, legacy=False):
     if legacy:
         return _legacy_representation_signature(context, catalog, arm, documents, selection_hash=selection_hash)
     from validation.cache_identity import REPRESENTATION_VERSION, canonical, semantic_documents
+    from arm_registry import arm_contract
     return fingerprint({"version": "full-catalog-representation/v2" if legacy_layout(context.config) else REPRESENTATION_VERSION, "arm": arm.name,
-                        **({"arm_contract": ARM_CONTRACT, "uses_title": arm.uses_title, "scene_arm": arm.scene_arm}
+                        **({"arm_contract": arm_contract(context.config), "uses_title": arm.uses_title, "scene_arm": arm.scene_arm}
                            if not legacy_layout(context.config) else {}),
                         "catalog": [{k: r[k] for k in ("item_id", "content_id")} for r in catalog], "encoder": context.config["validation"]["encoder"],
                         "model": canonical(local_model_identity(context.path("models", "bge"))),

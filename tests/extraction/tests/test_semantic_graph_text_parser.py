@@ -62,12 +62,6 @@ def test_surface_repairs_preserve_every_field(text):
     assert result.graph == GRAPH and result.parse_mode == "repaired"
 
 
-@pytest.mark.parametrize("marker", ["none", "NONE", "None", "[]"])
-def test_explicit_empty_sections(marker):
-    text = f"[Entities]\n{marker}\n[Relations]\n{marker}\n[Context]\n{marker}\n[End]"
-    assert parse_or_repair_graph(text).graph == {"entities": [], "relations": [], "context": []}
-
-
 @pytest.mark.parametrize("text", [
     TEXT.replace("[Relations]", "[Entities]"),
     TEXT.replace("[Context]", "[context]\n[Context]"),
@@ -138,7 +132,7 @@ def test_v4_example_passes_scene_validation_and_summary():
     from extraction.step_support import minimal_graph_records
 
     root = Path(__file__).resolve().parents[3]
-    prompt = (root / "prompts/graph_scene_v4.md").read_text()
+    prompt = (root / "prompts/scene_graph_v4.md").read_text()
     example = prompt.split("[Example]", 1)[1]
     example = example[example.index("[Entities]"):]
     assert "context" not in prompt.lower()

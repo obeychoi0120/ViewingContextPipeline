@@ -165,7 +165,7 @@ def test_metadata_recommendation_reuses_checkpoint_and_metrics(ready_context, fa
         assert run_rolling(second)['completed'] == 1
     finally:
         torch.set_num_threads(threads)
-    entries = list((first.run_root.parent.parent / 'shared_cache/v2/recommendations').glob('*/cache.json'))
+    entries = list((first.run_root.parent.parent / 'shared_cache/recommendations').glob('*/cache.json'))
     before = {p: p.read_bytes() for p in entries}
     calls = []
     with monkeypatch.context() as patch:
@@ -185,7 +185,7 @@ def test_summary_uses_only_successful_scenes_and_recovers_empty(ready_context, f
     ctx = ready_context
     extract = getattr(steps, f'extract_{representation}_scenes')
     summarize = getattr(steps, f'summarize_{representation}')
-    extract(ctx, model='qwen', schema=f'prompts/{representation}_scene_v{3 if representation == "graph" else 2}.md')
+    extract(ctx, model='qwen', schema=f'prompts/scene_{representation}_v{3 if representation == "graph" else 2}.md')
     directory = ctx.extraction_dir(representation, 'qwen', 'scenes')
     paths = sorted(directory.glob('*.jsonl'))
     good = read_scene_records(paths[0])[0]
@@ -201,7 +201,7 @@ def test_summary_uses_only_successful_scenes_and_recovers_empty(ready_context, f
     second_good = read_scene_records(paths[1])
     paths[1].unlink()
     fake_models.clear()
-    options = dict(model='qwen', source='qwen', schema=f'prompts/{representation}_summary_v4.md')
+    options = dict(model='qwen', source='qwen', schema=f'prompts/summary_{representation}_v4.md')
     result = summarize(ctx, **options)
     assert result['failure_count'] == 1
     tasks = [task for batch in fake_models for task in batch]

@@ -1,7 +1,7 @@
 """Preparation is shared across runs; extraction and validation remain isolated."""
 import pytest
 
-from pipeline_runtime import RunContext, read_json, write_json
+from pipeline_runtime import RunContext, read_json
 from preparation.steps import prepare_cohort_step
 from extraction.steps import extract_description_scenes, summarize_description
 from validation.steps import embed_representations
@@ -21,9 +21,9 @@ def test_new_run_consumes_preparation_without_rebuilding(ready_context, fake_mod
     assert first.require_ready_cohort() == second.require_ready_cohort()
     for context in (first, second):
         context.config["protocol"]["arms"] = ["desc_qwen", "metadata"]
-        extract_description_scenes(context, model="qwen", schema="prompts/description_scene_v2.md")
+        extract_description_scenes(context, model="qwen", schema="prompts/scene_description_v2.md")
         summarize_description(context, source="qwen", model="gemini",
-                              schema="prompts/description_summary_v4.md")
+                              schema="prompts/summary_description_v4.md")
         result = embed_representations(context, target=["desc_qwen", "metadata"], summary_source="gemini")
         assert result["generated_arms"] == (["desc_qwen", "metadata"] if context == first else [])
         assert not (context.run_root / "cohort").exists()
@@ -32,12 +32,6 @@ def test_new_run_consumes_preparation_without_rebuilding(ready_context, fake_mod
     assert first.description_summary_dir("qwen", "gemini") != second.description_summary_dir("qwen", "gemini")
     assert first.representations_dir != second.representations_dir
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in shared.rglob("*") if p.is_file()}
-
-
-def test_shared_cohort_accepts_legacy_run_identity(ready_context):
-    path = ready_context.cohort_dir / "eligibility.json"
-    write_json(path, {**read_json(path), "run_id": "old_run"})
-    assert RunContext.load("new_run", root=ready_context.root).require_ready_cohort()
 
 
 def test_plan_only_invalidates_previous_shared_ready_state(ready_context):

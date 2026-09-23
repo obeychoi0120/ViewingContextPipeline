@@ -63,7 +63,7 @@ def test_qwen_graph_finishes_each_penalty_pass_before_retrying_failures(
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     assert steps.extract_graph_scenes(
-        context, schema="prompts/graph_scene_v3.md", model="qwen",
+        context, schema="prompts/scene_graph_v3.md", model="qwen",
     )["failure_count"] == 2
     assert submissions == [{f"{cid}:{i}" for cid, count in (("a", 10), ("b", 9))
                             for i in range(count)}, {"a:0", "a:1", "b:0", "b:8"},
@@ -122,7 +122,7 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
-    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    schema = f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md"
     extract = getattr(steps, f"extract_{representation}_scenes")
     with pytest.raises(KeyboardInterrupt):
         extract(context, model="qwen", schema=schema)
@@ -197,7 +197,7 @@ def test_gemini_refills_across_contents_and_saves_finished_contents(
 
     monkeypatch.setattr(scene_executor, "write_scene_results", save)
     extract = getattr(steps, f"extract_{representation}_scenes")
-    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    schema = f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md"
     assert extract(context, schema=schema, model="gemini")["failure_count"] == 1
     assert peak == threads
     assert next_content_started.is_set()
@@ -245,12 +245,12 @@ def test_gemini_interrupt_preserves_each_completed_scene(
 
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     with pytest.raises(KeyboardInterrupt):
-        steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini", force=force)
+        steps.extract_graph_scenes(context, schema="prompts/scene_graph_v3.md", model="gemini", force=force)
     saved_a = (scene_dir / "a.jsonl").read_bytes()
     assert [row["scene_idx"] for row in read_scene_records(scene_dir / "b.jsonl")] == [0]
     assert not (scene_dir / ".recovery").exists()
     interrupted = False
-    assert steps.extract_graph_scenes(context, schema="prompts/graph_scene_v3.md", model="gemini")["failure_count"] == 0
+    assert steps.extract_graph_scenes(context, schema="prompts/scene_graph_v3.md", model="gemini")["failure_count"] == 0
     assert calls == [[f"{cid}:{i}" for cid in ("a", "b", "c") for i in range(3)],
                      ["b:1", "b:2", "c:0", "c:1", "c:2"]]
     assert (scene_dir / "a.jsonl").read_bytes() == saved_a
@@ -328,7 +328,7 @@ def test_scene_total_is_known_before_streaming_inference(
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     extract = getattr(steps, f"extract_{representation}_scenes")
-    schema = f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"
+    schema = f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md"
     assert extract(context, model=model, schema=schema)["failure_count"] == 0
     assert completed == ["a", "b", "c"]
     assert opened == [True]
@@ -381,7 +381,7 @@ def test_gemini_resume_preserves_out_of_order_completions_across_interrupts(
                 callback(GeminiGenerationOutcome(task.task_id, '{"entities": [], "relations": [], "context": []}'))
 
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
-    schema = "prompts/graph_scene_v3.md"
+    schema = "prompts/scene_graph_v3.md"
     with pytest.raises(KeyboardInterrupt):
         steps.extract_graph_scenes(context, schema=schema, model="gemini", force=force)
     saved_b = (scene_dir / "b.jsonl").read_bytes()

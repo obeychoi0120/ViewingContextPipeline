@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--target", nargs="+",
-        help="Sources to include (embedding/recommendation/diagnosis; default: configured active arms).",
+        help="Recommendation arms to include (embedding/recommendation/diagnosis; default: configured active arms).",
     )
     parser.add_argument(
         "--workers-per-gpu", type=_positive_int,
@@ -40,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
         kwargs = {"force": args.force}
         if args.compare_run_id is not None:
             kwargs["compare_run_id"] = args.compare_run_id
+        if args.step == "run-diagnosis":
+            from validation.selection import diagnosis_context
+            context = diagnosis_context(context)
         if args.target is not None:
             from arm_registry import select_arms
             select_arms(context.config, args.target)

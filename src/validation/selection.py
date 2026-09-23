@@ -179,8 +179,9 @@ def build_selection(context, summary_source=None):
     payload = {"catalog": source["catalog"], "metadata_titles": source["metadata_titles"],
                "events": events, "plan": plan, "excluded": []}
     count = len(source["catalog"])
-    from arm_registry import legacy_layout, ARM_CONTRACT
-    manifest = {**({"arm_contract": ARM_CONTRACT} if not legacy_layout(context.config) else {}),
+    from arm_registry import legacy_layout, arm_contract, concat_layout
+    manifest = {**({"arm_contract": arm_contract(context.config)} if not legacy_layout(context.config) else {}),
+                **({"arms": list(active_arms(context.config))} if concat_layout(context.config) else {}),
                 "policy": POLICY, "data_hash": fingerprint(payload),
                 "selection_hash": fingerprint(data_identity(payload)),
                 "included_item_ids": [r["item_id"] for r in source["catalog"]],
@@ -258,10 +259,22 @@ def diagnosis_context(context):
     if not manifest_path.is_file():
         return context
     manifest = read_json(manifest_path)
-    if manifest.get("arm_contract"):
-        return context
+    from arm_registry import ARM_CONTRACT, CONCAT_ARM_CONTRACT, EXPERIMENT_CONFIG_VERSION
+    contract = manifest.get("arm_contract")
     settings = deepcopy(context.config)
-    settings["schema_version"] = "viewing-context-config/v5"
+    if contract == CONCAT_ARM_CONTRACT:
+        settings.pop("schema_version", None)
+        settings["experiment_config_version"] = EXPERIMENT_CONFIG_VERSION
+    elif contract == ARM_CONTRACT:
+        settings.pop("experiment_config_version", None)
+        settings["schema_version"] = "viewing-context-config/v6"
+    elif contract:
+        raise ValueError(f"unknown historical arm contract: {contract}")
+    else:
+        settings.pop("experiment_config_version", None)
+        settings["schema_version"] = "viewing-context-config/v5"
     names = manifest.get("arms") or [p.stem for p in (context.representations_dir / ".inputs").glob("*.json")]
-    settings["protocol"]["arms"] = list(names) or ["metadata"]
+    from arm_registry import registry
+    settings["protocol"]["arms"] = list(names) or list(registry(settings))
+    settings["protocol"]["description_extractors"] = (["qwen"] if contract == CONCAT_ARM_CONTRACT else ["qwen", "gemini"])
     return replace(context, config=settings)

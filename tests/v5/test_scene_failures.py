@@ -72,7 +72,7 @@ def test_scene_failures_are_retried_on_resume(
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     extract = getattr(steps, f"extract_{representation}_scenes")
-    options = {"model": model, "schema": f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md"}
+    options = {"model": model, "schema": f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md"}
     with pytest.raises(KeyboardInterrupt):
         extract(context, **options)
     interrupt = False
@@ -133,7 +133,7 @@ def test_description_cutoff_is_saved_only_as_failure(ready_context, monkeypatch,
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
     result = steps.extract_description_scenes(
-        context, model=model, schema="prompts/description_scene_v2.md",
+        context, model=model, schema="prompts/scene_description_v2.md",
     )
     assert result["failure_count"] == int(truncated)
     directory = context.extraction_dir("description", model, "scenes")
@@ -171,7 +171,7 @@ def test_graph_length_cutoff_logs_identity_reason_and_raw_output(ready_context, 
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
-    options = {"model": "qwen", "schema": "prompts/graph_scene_v3.md"}
+    options = {"model": "qwen", "schema": "prompts/scene_graph_v3.md"}
     assert steps.extract_graph_scenes(context, **options)["failure_count"] == 1
     cid = visuals[0]["content_id"]
     assert read_jsonl(scene_dir / "failures" / f"{visuals[0]['content_id']}.jsonl") == [{
@@ -271,7 +271,7 @@ An indoor gathering.
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
-    options = {"model": model, "schema": "prompts/graph_scene_v3.md"}
+    options = {"model": model, "schema": "prompts/scene_graph_v3.md"}
     assert steps.extract_graph_scenes(context, **options)["failure_count"] == 2
     assert calls == [f"{cid}:{i}" for i in range(len(responses))]
     assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (5, 2, 0)

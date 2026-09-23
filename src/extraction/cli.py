@@ -18,13 +18,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", help="Path to one Markdown prompt (required for generation).")
     parser.add_argument("--model", choices=GRAPH_SOURCES,
                         help="Required generation model for extraction and summarization.")
-    parser.add_argument("--arm", help="Scene or Summary arm.")
+    parser.add_argument("--arm", help="Generation source (v7: graph_qwen, desc_qwen, graph_gemini); not a metadata-concat arm.")
     parser.add_argument("--summary-model", choices=GRAPH_SOURCES,
                         help="Summary model to copy with migrate-arm-layout.")
     args = parser.parse_args(argv)
     try:
         extract = args.step.startswith("extract-")
-        summary = args.step.startswith("summarize-")
+        summary = args.step == "summarize" or args.step.startswith("summarize-")
         if extract or summary:
             if args.schema is None:
                 raise ValueError(f"{args.step} requires --schema PATH.md")

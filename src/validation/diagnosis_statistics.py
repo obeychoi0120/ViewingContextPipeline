@@ -1,11 +1,17 @@
 """Prespecified families keep their multiplicity even for partial target runs."""
 
-from arm_registry import registry
+from arm_registry import registry, concat_layout
 from validation.recommendation_contracts import DEFAULT_PROTOCOL
 
 
 def comparison_families(config=None):
     arms = registry(config or DEFAULT_PROTOCOL)
+    if concat_layout(config or DEFAULT_PROTOCOL):
+        return {
+            "metadata_baseline": [(name, "meta") for name in arms if name != "meta"],
+            "representation": [("graph_qwen", "desc_qwen"), ("graph_qwen_meta", "desc_qwen_meta")],
+            "title_input": [("graph_qwen_meta", "graph_qwen"), ("desc_qwen_meta", "desc_qwen")],
+        }
     from arm_registry import legacy_layout
     old = legacy_layout(config or DEFAULT_PROTOCOL)
     baseline = "metadata" if old else "meta"
@@ -46,5 +52,8 @@ def multiple_comparison_policy(
             }
             for family, pairs in comparison_families(config).items()
         },
-        "exploratory": "Graph improvement differences between models; unadjusted 95% intervals",
+        **({"primary_comparison": "graph_qwen_meta-meta"} if concat_layout(config or DEFAULT_PROTOCOL) else {}),
+        "exploratory": ("Teacher reference gap: graph_gemini_meta-graph_qwen_meta; unadjusted 95% interval"
+                        if concat_layout(config or DEFAULT_PROTOCOL) else
+                        "Graph improvement differences between models; unadjusted 95% intervals"),
     }

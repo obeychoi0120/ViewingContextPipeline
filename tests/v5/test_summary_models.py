@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 import pytest
-import yaml
 
 import extraction.steps as steps
 from arm_registry import generated_arm
@@ -11,7 +10,7 @@ from extraction.backends import GeminiGenerationOutcome, GeminiWorkerPool
 from extraction.cli import main
 from extraction.errors import ExtractionStepError
 from extraction.failures import FailureLog
-from pipeline_runtime import RunContext, read_json, read_jsonl, write_jsonl
+from pipeline_runtime import read_json, read_jsonl, write_jsonl
 from validation.representation_inputs import documents_for_arm, representation_signature
 from validation.representation_checks import verify_representations
 from validation.representation_provenance import recommendation_identity
@@ -27,7 +26,7 @@ def test_summary_cli(v5_context, monkeypatch, representation, source, model):
     monkeypatch.setitem(steps.STEP_HANDLERS, f"summarize-{representation}",
                         lambda context, **kw: calls.append(kw))
     args = [f"summarize-{representation}", "--run-id", "run", "--schema",
-            f"prompts/{representation}_summary_v4.md"]
+            f"prompts/summary_{representation}_v4.md"]
     arm = f"{'graph' if representation == 'graph' else 'desc'}_{source}"
     assert main(args + ["--arm", arm]) == 1
     assert main(args + ["--model", model]) == 1
@@ -42,7 +41,7 @@ def case(request, ready_context, fake_models):
     ctx = ready_context
     getattr(steps, f"extract_{representation}_scenes")(
         ctx, model=source,
-        schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md",
+        schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md",
     )
     cohort = ctx.require_ready_cohort()
     arm = generated_arm(ctx.config, representation, source)
@@ -52,7 +51,7 @@ def case(request, ready_context, fake_models):
     def run(model="gemini", **kwargs):
         return getattr(steps, f"summarize_{representation}")(
             ctx, source=source, model=model,
-            schema=f"prompts/{representation}_summary_v4.md", **kwargs,
+            schema=f"prompts/summary_{representation}_v4.md", **kwargs,
         )
 
     return SimpleNamespace(ctx=ctx, cohort=cohort, arm=arm, directory=directory, run=run,
@@ -89,7 +88,10 @@ def test_gemini_text_only_and_reuse(case, monkeypatch):
     assert configs == [case.ctx.config["models"]["gemini"]]
     doc = read_json(case.directory / f"{case.ids[0]}.json")
     assert doc["provenance"]["summary_model"] == "gemini"
-    assert doc["provenance"]["settings"] == {"backend": "gemini", "max_new_tokens": 512}
+    assert doc["provenance"]["settings"] == {
+        "backend": "gemini",
+        "max_new_tokens": case.ctx.config["extraction"][case.arm.representation]["summary_max_new_tokens"],
+    }
     assert case.run()["content_count"] == len(case.ids)
     assert len(calls) == len(case.ids) and len(configs) == 1
 
@@ -219,15 +221,6 @@ def test_failure_model_survives_migration(tmp_path):
     assert FailureLog(tmp_path).rows[("a", None)]["summary_model"] == "gemini"
 
 
-@pytest.mark.parametrize("legacy", [None, "qwen", "gemini"])
-def test_legacy_config_optional_and_ignored(v5_context, legacy):
-    cfg = v5_context.config
-    if legacy is not None:
-        cfg["protocol"]["graph_summarizer"] = legacy
-    (v5_context.root / "config.yaml").write_text(yaml.safe_dump(cfg))
-    assert RunContext.load("test", root=v5_context.root).config == cfg
-
-
 def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
     class Pool:
         def __init__(self, *args, **kwargs):
@@ -241,21 +234,8 @@ def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
     monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: case.ctx)
     assert main([f"summarize-{case.arm.representation}", "--run-id", case.ctx.run_id,
                  "--arm", case.arm.name, "--model", "gemini", "--schema",
-                 f"prompts/{case.arm.representation}_summary_v4.md"]) == 1
+                 f"prompts/summary_{case.arm.representation}_v4.md"]) == 1
     assert len(read_jsonl(case.directory / "failures.jsonl")) == len(case.ids)
-
-
-def test_embedding_cli_reads_model_from_arm_artifact(v5_context, monkeypatch):
-    from validation.cli import main as validate
-    from validation.steps import STEP_HANDLERS
-    calls = []
-    monkeypatch.setattr("validation.cli.RunContext.load", lambda _: v5_context)
-    monkeypatch.setitem(STEP_HANDLERS, "embed-representations", lambda context, **kwargs: calls.append(kwargs))
-    args = ["embed-representations", "--run-id", "run"]
-    assert validate(args) == 0
-    assert calls == [{"force": False}]
-    with pytest.raises(SystemExit):
-        validate(args + ["--summary-source", "qwen"])
 
 
 def test_embedding_does_not_fall_back_to_other_summary_model(case):

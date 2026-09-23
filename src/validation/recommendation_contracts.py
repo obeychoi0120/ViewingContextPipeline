@@ -1,14 +1,13 @@
 from __future__ import annotations
-from arm_registry import registry, select_arms, active_arms
+from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms, active_arms
 
 ARCHITECTURE_VERSION = "sasrec-content-v3"
 # Both versions use the same persisted event/rank and rolling training contracts.
 DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v2", "sasrec-content-v3"})
 DEFAULT_PROTOCOL = {
-    "protocol": {
-        "arms": ["meta", "graph_qwen", "graph_gemini", "desc_qwen", "desc_gemini",
-                 "graph_meta_qwen", "graph_meta_gemini", "desc_meta_qwen", "desc_meta_gemini"],
-    }
+    "experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+    "protocol": {"arms": ["meta", "graph_qwen", "desc_qwen", "graph_qwen_meta",
+                          "desc_qwen_meta", "graph_gemini_meta"]},
 }
 RECOMMENDATION_ARMS = {name: name for name in registry(DEFAULT_PROTOCOL)}
 TARGET_SOURCES = dict(RECOMMENDATION_ARMS)

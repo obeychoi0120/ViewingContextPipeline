@@ -97,7 +97,21 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
                 "relative_difference": (float((observed[a] - observed[b]) / observed[b])
                                         if observed[b] > 0 else None),
             }
-    from arm_registry import legacy_layout
+    from arm_registry import legacy_layout, concat_layout
+    if concat_layout(config or DEFAULT_PROTOCOL):
+        primary = result.get("graph_qwen_meta-meta")
+        if primary is not None:
+            primary["primary"] = True
+        left, right = "graph_gemini_meta", "graph_qwen_meta"
+        if {left, right} <= indices.keys():
+            a, b = indices[left], indices[right]
+            lo, hi = np.quantile(draws[:, a] - draws[:, b], [0.025, 0.975])
+            result[f"{left}-{right}"] = {
+                "family": "teacher_reference", "role": "exploratory",
+                "difference": float(observed[a] - observed[b]),
+                "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
+            }
+        return result
     old = legacy_layout(config or DEFAULT_PROTOCOL)
     by_kind = {(arm.representation, arm.model, arm.uses_title): name for name, arm in configured.items()}
     for title in ((True,) if old else (False, True)):

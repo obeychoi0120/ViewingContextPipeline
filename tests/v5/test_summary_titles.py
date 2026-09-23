@@ -35,7 +35,7 @@ def test_titles_reach_every_summary_and_input_hash(
     context = ready_context
     getattr(steps, f"extract_{representation}_scenes")(
         context, model=source,
-        schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md",
+        schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md",
     )
     cohort = context.require_ready_cohort()
     titles = {str(row["content_id"]): row["title"] for row in cohort["metadata_titles"]}
@@ -43,7 +43,7 @@ def test_titles_reach_every_summary_and_input_hash(
     original_loader = context.require_ready_cohort
     shuffled = {**cohort, "metadata_titles": list(reversed(cohort["metadata_titles"]))}
     run = getattr(steps, f"summarize_{representation}")
-    kwargs = dict(source=source, model=model, schema=f"prompts/{representation}_summary_v4_meta.md")
+    kwargs = dict(source=source, model=model, schema=f"prompts/summary_{representation}_v4_meta.md")
     fake_models.clear()
     with patch.object(type(context), "require_ready_cohort", return_value=shuffled):
         run(context, **kwargs)
@@ -78,7 +78,7 @@ def test_legacy_terminal_failure_stays_empty_without_invented_provenance(ready_c
     context = ready_context
     getattr(steps, f"extract_{representation}_scenes")(
         context, model=source,
-        schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md",
+        schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md",
     )
     directory = context.summary_dir(representation, source, "qwen")
     titles = context.require_ready_cohort()["metadata_titles"]
@@ -88,7 +88,7 @@ def test_legacy_terminal_failure_stays_empty_without_invented_provenance(ready_c
                         summary_model="qwen", repetition_penalty=2.0)
     fake_models.clear()
     getattr(steps, f"summarize_{representation}")(
-        context, source=source, model="qwen", schema=f"prompts/{representation}_summary_v4_meta.md",
+        context, source=source, model="qwen", schema=f"prompts/summary_{representation}_v4_meta.md",
     )
     assert not fake_models
     for row in titles:

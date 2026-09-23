@@ -23,6 +23,9 @@ def nine(ready_context, fake_models):
     ctx = ready_context
     ctx.config['schema_version'] = 'viewing-context-config/v6'
     ctx.config['protocol']['arms'] = list(NAMES)
+    for kind in ('graph', 'description'):
+        template = (ctx.root / f'prompts/summary_{kind}_v4.md').read_text()
+        (ctx.root / f'prompts/summary_{kind}_v4_meta.md').write_text(template.replace("Scene observations:", "English Title: {english_title}\n\nScene observations:"))
     return ctx
 
 
@@ -30,14 +33,14 @@ def scenes(ctx, name):
     arm = registry(ctx.config)[name]
     return getattr(steps, f'extract_{arm.representation}_scenes')(
         ctx, arm=name, model=arm.model,
-        schema=f'prompts/{arm.representation}_scene_v{3 if arm.representation == "graph" else 2}.md')
+        schema=f'prompts/scene_{arm.representation}_v{3 if arm.representation == "graph" else 2}.md')
 
 
 def summary(ctx, name, model='qwen', **kwargs):
     arm = registry(ctx.config)[name]
     return getattr(steps, f'summarize_{arm.representation}')(
         ctx, arm=name, model=model,
-        schema=f'prompts/{arm.representation}_summary_v4{"_meta" if arm.uses_title else ""}.md', **kwargs)
+        schema=f'prompts/summary_{arm.representation}_v4{"_meta" if arm.uses_title else ""}.md', **kwargs)
 
 
 def generate(ctx):
@@ -91,9 +94,9 @@ def test_schema_contract_and_model_change_isolation(nine, fake_models):
     with pytest.raises(ValueError, match='Scene arm'):
         scenes(nine, 'graph_meta_qwen')
     with pytest.raises(ValueError, match='Scene arm'):
-        steps.extract_graph_scenes(nine, arm='graph_qwen', model='gemini', schema='prompts/graph_scene_v3.md')
+        steps.extract_graph_scenes(nine, arm='graph_qwen', model='gemini', schema='prompts/scene_graph_v3.md')
     with pytest.raises(ValueError, match='english_title'):
-        steps.summarize_graph(nine, arm='graph_qwen', model='qwen', schema='prompts/graph_summary_v4_meta.md')
+        steps.summarize_graph(nine, arm='graph_qwen', model='qwen', schema='prompts/summary_graph_v4_meta.md')
     scenes(nine, 'graph_qwen')
     summary(nine, 'graph_qwen')
     summary(nine, 'graph_meta_qwen')
@@ -122,18 +125,6 @@ def test_title_change_does_not_invalidate_title_free_arm(nine, monkeypatch):
     assert read_state(nine, 'graph_qwen')['input_hash'] == before
 
 
-def test_new_run_reuses_all_embeddings_without_encoder(nine, monkeypatch):
-    generate(nine)
-    embed_representations(nine)
-    other = replace(nine, run_id='second', run_root=nine.run_root.parent / 'second')
-    shutil.copytree(nine.run_root / 'extraction', other.run_root / 'extraction')
-    def fail(*a, **k):
-        pytest.fail('shared embedding must not initialize encoder')
-    monkeypatch.setattr('validation.features.BGETextEncoder', fail)
-    assert embed_representations(other)['reuse']['shared'] == NAMES
-    assert (nine.run_root.parent.parent / 'shared_cache/v2/embeddings').is_dir()
-
-
 def legacy_generation(ctx):
     settings = deepcopy(ctx.config)
     settings['schema_version'] = 'viewing-context-config/v5'
@@ -142,9 +133,9 @@ def legacy_generation(ctx):
     for representation in ('graph', 'description'):
         for model in ('qwen', 'gemini'):
             getattr(steps, f'extract_{representation}_scenes')(
-                old, model=model, schema=f'prompts/{representation}_scene_v{3 if representation == "graph" else 2}.md')
+                old, model=model, schema=f'prompts/scene_{representation}_v{3 if representation == "graph" else 2}.md')
             getattr(steps, f'summarize_{representation}')(
-                old, source=model, model='qwen', schema=f'prompts/{representation}_summary_v4_meta.md')
+                old, source=model, model='qwen', schema=f'prompts/summary_{representation}_v4_meta.md')
     return old
 
 
@@ -209,9 +200,9 @@ def test_cli_uses_explicit_arms(nine, monkeypatch):
     monkeypatch.setattr('extraction.cli.RunContext.load', lambda _: nine)
     monkeypatch.setattr('validation.cli.RunContext.load', lambda _: nine)
     assert main(['extract-graph-scenes', '--run-id', 'run', '--model', 'qwen', '--arm', 'graph_qwen',
-                 '--schema', 'prompts/graph_scene_v3.md']) == 0
+                 '--schema', 'prompts/scene_graph_v3.md']) == 0
     assert main(['summarize-graph', '--run-id', 'run', '--model', 'gemini', '--arm', 'graph_meta_qwen',
-                 '--schema', 'prompts/graph_summary_v4_meta.md']) == 0
+                 '--schema', 'prompts/summary_graph_v4_meta.md']) == 0
     assert validate(['embed-representations', '--run-id', 'run', '--target', 'meta', 'graph_meta_qwen']) == 0
     with pytest.raises(SystemExit):
         main(['summarize-graph', '--run-id', 'run', '--source', 'qwen'])

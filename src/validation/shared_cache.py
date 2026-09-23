@@ -20,7 +20,7 @@ def checksum(path):
 
 class SharedCache:
     def __init__(self, context, kind, key):
-        self.root = context.run_root.parent.parent / 'shared_cache' / 'v2' / kind
+        self.root = context.run_root.parent.parent / 'shared_cache' / kind
         self.key = key
         self.path = self.root / key
 

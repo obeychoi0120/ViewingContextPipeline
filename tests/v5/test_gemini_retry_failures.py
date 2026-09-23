@@ -25,7 +25,7 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
     directory = context.extraction_dir(representation, "gemini", "scenes")
     failure_path = directory / "failures" / f"{cid}.jsonl"
     extract = getattr(steps, f"extract_{representation}_scenes")
-    options = dict(model="gemini", schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    options = dict(model="gemini", schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     good = '{"entities": [], "relations": [], "context": []}' if representation == "graph" else "A person walks."
     calls = []
     phase = 0
@@ -83,9 +83,9 @@ def test_gemini_summary_restores_legacy_failures_without_generation(
     context = ready_context
     context.config["extraction"]["summary_repetition_penalty"] = [1.0]
     extract = getattr(steps, f"extract_{representation}_scenes")
-    extract(context, model="gemini", schema=f"prompts/{representation}_scene_v{'3' if representation == 'graph' else '2'}.md")
+    extract(context, model="gemini", schema=f"prompts/scene_{representation}_v{'3' if representation == 'graph' else '2'}.md")
     summarize = getattr(steps, f"summarize_{representation}")
-    options = dict(source="gemini", schema=f"prompts/{representation}_summary_v4.md")
+    options = dict(source="gemini", schema=f"prompts/summary_{representation}_v4.md")
     ids = [row["content_id"] for row in context.require_ready_cohort()["catalog"]]
     directory = context.summary_dir(representation, "gemini", "qwen")
     failure_path = directory / "failures.jsonl"
