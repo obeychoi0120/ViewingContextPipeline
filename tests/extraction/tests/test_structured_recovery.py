@@ -85,9 +85,8 @@ def test_graph_repair_never_invents_required_fields():
     '{"entities": [',
     '{"unexpected": "unstructured model output"}',
     'A person gestures toward another person.',
-    '',
 ])
-def test_graph_format_never_fails_generation_and_survives_summary_roundtrip(tmp_path, text):
+def test_nonempty_graph_format_errors_survive_summary_roundtrip(tmp_path, text):
     import json
     from extraction.scene_executor import graph_scene_result
     from extraction.scene_storage import read_scene_records, write_scene_records

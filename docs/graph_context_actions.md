@@ -46,7 +46,7 @@ medium/format 허용 목록과 topics 3개·각 4단어, entities 6개·속성 2
 {"content_id":"video","warning":["INVALID_REFERENCE"],"scene_idx":0,"scene_graph":"...original model output..."}
 ```
 
-Actions의 tool 자리 누락은 `MISSING_REQUIRED` 대신 `INVALID_ACTION_SYNTAX`로 분류합니다. 토큰 한도 종료·API 오류는 warning이 아닌 기존 생성 실패·재시도 경로로 처리합니다. warning이 없는 과거 문자열은 읽을 때 현재 파서로 재검사하여 태그를 복원하며, 파일에는 다음 저장·명시적 마이그레이션 때 반영합니다. 따라서 복원된 태그는 과거 실행 당시의 정확한 진단을 보장하지 않습니다. 경고는 Summary 관찰 내용에 추가하지 않습니다.
+Actions의 tool 자리 누락은 `MISSING_REQUIRED` 대신 `INVALID_ACTION_SYNTAX`로 분류합니다. 빈 응답·공백만 있는 응답은 Qwen과 Gemini 모두 raw로 저장하지 않고 생성 실패로 처리합니다. Qwen은 기존 penalty 순서로 재시도합니다. 토큰 한도 종료·API 오류도 warning이 아닌 기존 생성 실패·재시도 경로로 처리합니다. warning이 없는 과거 문자열은 읽을 때 현재 파서로 재검사하여 태그를 복원하며, 파일에는 다음 저장·명시적 마이그레이션 때 반영합니다. 따라서 복원된 태그는 과거 실행 당시의 정확한 진단을 보장하지 않습니다. 경고는 Summary 관찰 내용에 추가하지 않습니다.
 
 ## 첫 100개 파일럿 도구
 
