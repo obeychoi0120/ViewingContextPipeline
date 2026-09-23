@@ -13,7 +13,7 @@ def is_raw_graph(row):
 
 
 def valid_raw_graph(row):
-    return (is_raw_graph(row) and set(row) - {"provenance", "generation", "semantic_warnings"} == {
+    return (is_raw_graph(row) and set(row) - {"provenance", "generation", "semantic_warnings", "tokens"} == {
         "schema_version", "status", "scene_idx", "keyframes", "raw_response",
     } and row.get("status") == "raw_fallback"
         and type(row.get("scene_idx")) is int and row["scene_idx"] >= 0

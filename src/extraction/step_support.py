@@ -113,7 +113,7 @@ def minimal_graph_records(
         "semantic_warnings",
     }
     invalid = [index for index, row in enumerate(records)
-               if (not valid_raw_graph(row) if is_raw_graph(row) else set(row) - {"provenance", "generation"} != required)]
+               if (not valid_raw_graph(row) if is_raw_graph(row) else set(row) - {"provenance", "generation", "tokens"} != required)]
     if invalid:
         raise ExtractionStepError(
             f"incompatible graph scene output at rows {invalid[:10]}: {path}; "
@@ -140,7 +140,7 @@ def minimal_description_records(
         "keyframes",
         "description",
     }
-    invalid = [index for index, row in enumerate(records) if set(row) - {"provenance", "generation", "status"} != required
+    invalid = [index for index, row in enumerate(records) if set(row) - {"provenance", "generation", "status", "tokens"} != required
                or row.get("status", "raw_fallback") != "raw_fallback"]
     if invalid:
         raise ExtractionStepError(

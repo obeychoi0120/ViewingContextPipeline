@@ -240,7 +240,7 @@ An indoor gathering.
     assert by_scene[0]["parse_mode"] == "unknown"
     assert by_scene[1]["parse_mode"] == "unknown"
     assert "provenance" not in by_scene[0]
-    assert all(list(row) == ["content_id", "warning", "scene_idx", "scene_graph"]
+    assert all(list(row) == ["content_id", "scene_idx", "tokens", "warning", "scene_graph"]
                for row in read_jsonl(directory / f"{cid}.jsonl"))
     assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
     assert by_scene[6]["graph"] == {"entities": [], "relations": [], "context": []}

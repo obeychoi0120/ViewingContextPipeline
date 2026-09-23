@@ -163,8 +163,8 @@ def test_cache_invalidation_and_run_rename(ready_context, fake_models, monkeypat
     shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
 
     result = embed_representations(other)
-    assert result["reuse"]["shared"] == ["meta", "desc_qwen", "desc_qwen_meta"]
-    assert result["generated_arms"] == ["graph_qwen", "graph_qwen_meta", "graph_gemini_meta"]
+    assert result["reuse"]["shared"] == ["meta"]
+    assert result["generated_arms"] == ["graph_qwen", "desc_qwen", "graph_qwen_meta", "desc_qwen_meta", "graph_gemini_meta"]
     titles = read_jsonl(ready_context.cohort_dir / "metadata_titles.jsonl")
     titles[0]["title"] = "Changed title"
     write_jsonl(ready_context.cohort_dir / "metadata_titles.jsonl", titles)
@@ -257,12 +257,12 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
 
         assert embed_representations(other)["reuse"]["shared"] == [
-            "meta", "desc_qwen", "desc_qwen_meta"
+            "meta"
         ]
         result = run_rolling(other)
-        assert result["skipped"] == 63
-        assert result["completed"] == 63
-        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 63
+        assert result["skipped"] == 21
+        assert result["completed"] == 105
+        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 21
         checkpoints = list(ready_context.recommendations_dir.rglob("sasrec.pt"))
         assert len(checkpoints) == 126
         shared_checkpoints = 0
@@ -279,7 +279,7 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
                 torch.equal(value, reused["state_dict"][key])
                 for key, value in original["state_dict"].items()
             )
-        assert shared_checkpoints == 63
+        assert shared_checkpoints == 21
         assert diagnose(other)["status"] == "pass"
     finally:
         torch.set_num_threads(previous)
