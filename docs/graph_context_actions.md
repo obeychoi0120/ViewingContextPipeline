@@ -28,7 +28,7 @@
 
 허용 medium/format, topics 3개·각 4단어, entities 6개·속성 2개·각 6단어, actions 4개를 검증합니다. 세 필수 섹션과 내용이 완전하면 `[End]` 없이 끝나도 정상으로 처리합니다. 백엔드가 토큰 종료를 보고하면 `[End]` 유무와 관계없이 기존 실패·재시도 흐름을 적용합니다.
 
-파서는 `graph-text/v6`, 새 추출 규약 provenance는 `graph/v4`, 내부 schema 상수는 `scene-graph/v4`입니다. 구형 프롬프트의 provenance는 `graph/v3`를 유지합니다. 구형 Entities/Relations·Context 목록·JSON은 읽을 수 있으며 Actions로 추측 변환하지 않습니다. 파싱·검증 실패 원문은 기존 `graph_format: text`로 보존하고 Summary에 전달합니다. 이 원문은 `structured` 진행 수와 Summary의 `normal_scene_count`에서 제외하며 `raw_scene_count` 및 `text_scene_count`에 반영합니다. `success` 진행 수는 저장에 성공한 전체 응답 수이므로 원문도 포함합니다.
+파서는 `graph-text/v6`, 새 추출 규약 provenance는 `graph/v4`, 내부 schema 상수는 `scene-graph/v4`입니다. 구형 프롬프트의 provenance는 `graph/v3`를 유지합니다. 구형 Entities/Relations·Context 목록·JSON은 읽을 수 있으며 Actions로 추측 변환하지 않습니다. Graph 저장 행에는 `content_id`, `scene_idx`, `scene_graph` 세 필드만 남깁니다. `provenance`와 `graph_format`은 저장하지 않습니다. 파싱·검증 실패 원문은 `scene_graph` 문자열로 보존하고 값의 타입으로 판별해 Summary에 전달합니다. 과거 실패 원문의 재시도 상태는 기존 실패 로그에 보존합니다. 이전 추가 필드가 있는 파일도 읽을 수 있으며, 다시 저장하거나 `migrate-scene-schema`를 실행하면 세 필드로 변환합니다. 이 원문은 `structured` 진행 수와 Summary의 `normal_scene_count`에서 제외하며 `raw_scene_count` 및 `text_scene_count`에 반영합니다. `success` 진행 수는 저장에 성공한 전체 응답 수이므로 원문도 포함합니다.
 
 ## 첫 100개 파일럿 도구
 

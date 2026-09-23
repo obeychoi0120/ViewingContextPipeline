@@ -40,14 +40,56 @@ def test_scenes_have_explicit_indices_without_metadata(tmp_path, kind):
     write_scene_results(path, records)
     payload = read_jsonl(path)
     field = "description" if kind == "description" else "scene_graph"
-    assert all(set(row) == {"content_id", "scene_idx", field, "provenance"} for row in payload)
+    expected = {"content_id", "scene_idx", field}
+    if kind == "description":
+        expected.add("provenance")
+    assert all(set(row) == expected for row in payload)
     assert [row["scene_idx"] for row in payload] == [0, 3]
     assert not metadata_path(path).parent.exists()
     restored = read_scene_records(path)
     assert [row["scene_idx"] for row in restored] == [0, 3]
     body = "raw_response" if kind == "raw" else kind
     assert restored[0][body] == records[0][body]
-    assert all("provenance" in row and "generation" not in row for row in restored)
+    assert all(("provenance" in row) == (kind == "description")
+               and "generation" not in row for row in restored)
+
+
+def test_compact_text_graph_remains_summary_input_without_format_marker(tmp_path):
+    path = tmp_path / "video.jsonl"
+    record = scene("graph")
+    record.update(graph="unparsed text", parse_mode="text")
+    write_scene_results(path, [record])
+    assert read_jsonl(path) == [{"content_id": "video", "scene_idx": 0,
+                               "scene_graph": "unparsed text"}]
+    restored = read_scene_records(path)[0]
+    assert restored["graph"] == "unparsed text" and restored["parse_mode"] == "text"
+    assert "status" not in restored
+
+
+@pytest.mark.parametrize("kind", ["structured", "text", "failed_text"])
+def test_legacy_graph_read_and_explicit_migration(tmp_path, kind):
+    from extraction.scene_storage import migrate_scene_file
+    from pipeline_runtime import write_jsonl
+
+    path = tmp_path / "video.jsonl"
+    value = {"entities": [], "relations": []} if kind == "structured" else "old raw text"
+    row = {"content_id": "video", "scene_idx": 7, "scene_graph": value,
+           "provenance": {"prompt_hash": "legacy"}}
+    if kind == "text":
+        row["graph_format"] = "text"
+    write_jsonl(path, [row])
+    restored = read_scene_records(path)
+    assert restored[0]["provenance"] == row["provenance"]
+    assert migrate_scene_file(path, restored)
+    assert read_jsonl(path) == [{"content_id": "video", "scene_idx": 7, "scene_graph": value}]
+    reread = read_scene_records(path)[0]
+    if kind == "failed_text":
+        assert reread["status"] == "raw_fallback"
+        assert reread["raw_response"] == value
+    else:
+        assert reread["graph"] == value
+        assert "status" not in reread
+    assert not migrate_scene_file(path, [reread])
 
 
 def test_interrupted_publication_preserves_readable_previous_results(tmp_path, monkeypatch):

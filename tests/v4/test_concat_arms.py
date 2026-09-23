@@ -110,7 +110,8 @@ def test_composition_cases_and_zero_vectors(ready_context, fake_models, generate
     assert plain[2]["text"] == plain[3]["text"] == ""
     result = embed_representations(ready_context)
     assert result["generated_arms"] == NAMES
-    assert read_state(ready_context, arm.name)["shareable"]
+    # Compact Graph scenes no longer carry verifiable generation provenance.
+    assert not read_state(ready_context, arm.name)["shareable"]
     with np.load(ready_context.representations_dir / f"{arm.name}_embeddings.npz") as data:
         assert data["values"][2].any() and not data["values"][3].any()
     from validation.diagnosis_representations import representation_report
@@ -161,13 +162,9 @@ def test_cache_invalidation_and_run_rename(ready_context, fake_models, monkeypat
     )
     shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
 
-    def forbidden(*args, **kwargs):
-        pytest.fail("shared cache must avoid BGE initialization")
-
-    with monkeypatch.context() as patch:
-        patch.setattr("validation.features.BGETextEncoder", forbidden)
-        result = embed_representations(other)
-    assert result["reuse"]["shared"] == NAMES
+    result = embed_representations(other)
+    assert result["reuse"]["shared"] == ["meta", "desc_qwen", "desc_qwen_meta"]
+    assert result["generated_arms"] == ["graph_qwen", "graph_qwen_meta", "graph_gemini_meta"]
     titles = read_jsonl(ready_context.cohort_dir / "metadata_titles.jsonl")
     titles[0]["title"] = "Changed title"
     write_jsonl(ready_context.cohort_dir / "metadata_titles.jsonl", titles)
@@ -259,28 +256,30 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         )
         shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
 
-        def forbidden(*args, **kwargs):
-            pytest.fail("shared reuse must not encode or train")
-
-        monkeypatch.setattr("validation.features.BGETextEncoder", forbidden)
-        monkeypatch.setattr("validation.rolling_recommendation.worker_devices", forbidden)
-        monkeypatch.setattr("validation.rolling_recommendation.run_combination", forbidden)
-        assert embed_representations(other)["reuse"]["shared"] == NAMES
-        assert run_rolling(other)["skipped"] == 126
-        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 126
+        assert embed_representations(other)["reuse"]["shared"] == [
+            "meta", "desc_qwen", "desc_qwen_meta"
+        ]
+        result = run_rolling(other)
+        assert result["skipped"] == 63
+        assert result["completed"] == 63
+        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 63
         checkpoints = list(ready_context.recommendations_dir.rglob("sasrec.pt"))
         assert len(checkpoints) == 126
+        shared_checkpoints = 0
         for path in checkpoints:
             copied = other.recommendations_dir / path.relative_to(ready_context.recommendations_dir)
             original = torch.load(path, map_location="cpu", weights_only=True)
             reused = torch.load(copied, map_location="cpu", weights_only=True)
             assert reused["metadata"]["run_id"] == other.run_id
-            assert reused["metadata"]["reused_from"]["source_run_id"] == ready_context.run_id
+            if "reused_from" in reused["metadata"]:
+                shared_checkpoints += 1
+                assert reused["metadata"]["reused_from"]["source_run_id"] == ready_context.run_id
             assert original["state_dict"].keys() == reused["state_dict"].keys()
             assert all(
                 torch.equal(value, reused["state_dict"][key])
                 for key, value in original["state_dict"].items()
             )
+        assert shared_checkpoints == 63
         assert diagnose(other)["status"] == "pass"
     finally:
         torch.set_num_threads(previous)

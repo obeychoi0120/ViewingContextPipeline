@@ -58,6 +58,12 @@ def read_scene_records(path):
                  **({"provenance": saved["record"]["provenance"]}
                     if "provenance" not in row and "provenance" in saved["record"] else {})}
                 for row, saved in zip(rows, metadata["rows"])]
+    legacy_raw_indices = {
+        row["scene_idx"] for row in rows
+        if "raw_response" in row or row.get("status") == "raw_fallback"
+        or (isinstance(row.get("scene_graph"), str) and "provenance" in row
+            and row.get("graph_format") != "text")
+    }
     payload = [_payload(path, row) for row in rows]
     if len({row["scene_idx"] for row in payload}) != len(payload):
         raise ValueError(f"duplicate scene index: {path}")
@@ -76,9 +82,13 @@ def read_scene_records(path):
             if not isinstance(row["scene_graph"], str):
                 raise ValueError(f"invalid text graph: {path}")
             record = {**common, "graph": row["scene_graph"], "parse_mode": "text", "semantic_warnings": []}
-        elif isinstance(row["scene_graph"], str):
+        elif isinstance(row["scene_graph"], str) and (
+            row["scene_idx"] in legacy_raw_indices or row["scene_idx"] in failures
+        ):
             record = {"schema_version": "graph-scene-raw/v1", "status": "raw_fallback",
                       **common, "raw_response": row["scene_graph"]}
+        elif isinstance(row["scene_graph"], str):
+            record = {**common, "graph": row["scene_graph"], "parse_mode": "text", "semantic_warnings": []}
         else:
             record = {**common, "graph": row["scene_graph"], "parse_mode": "unknown", "semantic_warnings": []}
         if "provenance" in row:
@@ -99,9 +109,24 @@ def _remove_metadata(path):
 def write_scene_records(path, records):
     """Atomically publish self-contained payloads before deleting legacy metadata."""
     path = Path(path)
+    records = list(records)
     payload = sorted((_payload(path, row) for row in records), key=lambda row: row["scene_idx"])
+    # Graph values carry their format in their type: object or preserved raw text.
+    # Keep Description storage unchanged; Graph rows have exactly three fields.
+    payload = [({key: row[key] for key in ("content_id", "scene_idx", "scene_graph")}
+                if "scene_graph" in row else row) for row in payload]
     if len({row["scene_idx"] for row in payload}) != len(payload):
         raise ValueError(f"duplicate scene index: {path}")
+    legacy_failures = [row for row in records if "raw_response" in row]
+    if legacy_failures:
+        # Old raw-fallback status belongs in the existing failure log, not in
+        # the compact payload. Publish it first so migration cannot lose retry state.
+        from extraction.failures import FailureLog
+        failures = FailureLog(path.parent, scenes=True)
+        for row in legacy_failures:
+            if not failures.contains(path.stem, row["scene_idx"]):
+                failures.record(path.stem, row["scene_idx"],
+                                "graph validation failed; raw response retained", row["raw_response"])
     if payload:
         atomic_write_jsonl(path, payload, durable=True)
     else:
@@ -112,6 +137,8 @@ def write_scene_records(path, records):
 def migrate_scene_file(path, records):
     path = Path(path)
     if metadata_path(path).exists() or any(not is_compact_scene(row) or "scene_idx" not in row
+                                         or ("scene_graph" in row and set(row) != {
+                                             "content_id", "scene_idx", "scene_graph"})
                                          for row in read_jsonl(path)):
         write_scene_records(path, records)
         return True
