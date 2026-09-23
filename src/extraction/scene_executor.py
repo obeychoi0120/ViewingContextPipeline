@@ -119,7 +119,9 @@ class SceneResults:
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
         self.records[cid] = records
         if failure is not None:
-            self.failures.record(cid, int(row["scene_idx"]), failure["error"], "", provenance=provenance)
+            raw_output = text if self.arm == "graph" and truncated else ""
+            self.failures.record(cid, int(row["scene_idx"]), failure["error"], raw_output,
+                                 provenance=provenance)
         else:
             self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)

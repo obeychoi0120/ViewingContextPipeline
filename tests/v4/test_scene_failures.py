@@ -248,7 +248,7 @@ An indoor gathering.
     assert {row["scene_idx"] for row in failures} == {4, 5}
     for failure in failures:
         index = failure["scene_idx"]
-        assert failure["raw_output"] == ""
+        assert failure["raw_output"] == responses[index]
         assert index not in by_scene
         if index in (4, 5):
             assert failure["error"] == "graph: output truncated at token limit"
