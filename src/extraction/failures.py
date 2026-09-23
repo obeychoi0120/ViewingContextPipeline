@@ -6,6 +6,7 @@ import shutil
 
 from artifact_io import atomic_write_jsonl
 from pipeline_runtime import read_jsonl
+from extraction.token_usage import validate_tokens
 
 
 class FailureLog:
@@ -30,7 +31,8 @@ class FailureLog:
                                row.get("error") or "generation failed",
                                row.get("raw_output", row.get("raw_response", "")),
                                repetition_penalty=row.get("repetition_penalty"),
-                               summary_model=row.get("summary_model"), provenance=row.get("provenance"))
+                               summary_model=row.get("summary_model"), provenance=row.get("provenance"),
+                               tokens=row.get("tokens"))
         targets = ({self.path_for(cid): list(rows.values()) for cid, rows in self.by_content.items()}
                    if scenes else {self.path: list(self.rows.values())})
         for path, rows in targets.items():
@@ -53,7 +55,7 @@ class FailureLog:
     def path_for(self, content_id):
         return self.path / f"{content_id}.jsonl" if self.scenes else self.path
 
-    def _remember(self, content_id, scene_idx, error, raw_output, *, repetition_penalty=None, summary_model=None, provenance=None):
+    def _remember(self, content_id, scene_idx, error, raw_output, *, repetition_penalty=None, summary_model=None, provenance=None, tokens=None):
         cid = str(content_id)
         row = {"content_id": cid}
         if self.scenes:
@@ -63,6 +65,8 @@ class FailureLog:
         else:
             scene_idx = None
         row.update(error=str(error), raw_output=raw_output if raw_output is not None else "")
+        if tokens is not None:
+            row["tokens"] = validate_tokens(tokens)
         if provenance is not None:
             row["provenance"] = provenance
         if summary_model is not None:
@@ -97,7 +101,7 @@ class FailureLog:
         if not self.by_content[cid]:
             del self.by_content[cid]
 
-    def record(self, content_id, scene_idx, error, raw_output="", *, repetition_penalty=None, summary_model=None, provenance=None):
+    def record(self, content_id, scene_idx, error, raw_output="", *, repetition_penalty=None, summary_model=None, provenance=None, tokens=None):
         cid = str(content_id)
         previous = self.rows.get((cid, scene_idx))
         if repetition_penalty is None and previous is not None:
@@ -107,7 +111,7 @@ class FailureLog:
         if provenance is None and previous is not None:
             provenance = previous.get("provenance")
         row = self._remember(cid, scene_idx, error, raw_output,
-                             repetition_penalty=repetition_penalty, summary_model=summary_model, provenance=provenance)
+                             repetition_penalty=repetition_penalty, summary_model=summary_model, provenance=provenance, tokens=tokens)
         if previous == row:
             return
         path = self.path_for(cid)

@@ -119,7 +119,7 @@ def _success_scene_row_issues(
             if not valid_raw_graph(row):
                 invalid.append("invalid_raw_graph_scene")
             return invalid
-        if set(row) - {"provenance", "generation"} != {
+        if set(row) - {"provenance", "generation", "tokens"} != {
             "scene_idx",
             "keyframes",
             "graph",
@@ -140,7 +140,7 @@ def _success_scene_row_issues(
     else:
         if row.get("status", "raw_fallback") != "raw_fallback":
             invalid.append("invalid_description_status")
-        if set(row) - {"provenance", "generation", "status"} != {
+        if set(row) - {"provenance", "generation", "status", "tokens"} != {
             "schema_version",
             "content_id",
             "scene_idx",
@@ -202,7 +202,7 @@ def _scene_arm_contract(
             issues["invalid_failure_file"] += 1
         for row in rows:
             cid = row.get("content_id")
-            if (set(row) - {"provenance"} != {"content_id", "scene_idx", "error", "raw_output"}
+            if (set(row) - {"provenance", "tokens"} != {"content_id", "scene_idx", "error", "raw_output"}
                     or not isinstance(row.get("error"), str) or not row["error"].strip()
                     or not isinstance(row.get("raw_output"), str)):
                 issues["invalid_failure_fields"] += 1

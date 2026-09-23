@@ -22,7 +22,7 @@ Use unknown when uncertain; topics may be none. Topics are short categories, not
 - Empty actions are valid. Do not connect entities merely to form a group, chain, or cycle. Order actions chronologically only when the frames support that order; do not infer causality or missing events.
 
 [Output Format]
-The three required sections are [Context], [Entities], [Actions], in exactly that order. An optional [End] marker may follow [Actions].
+The three required sections are [Context], [Entities], [Actions], in exactly that order.
 Context has exactly three lines: medium: value, format: value, topics: value; value.
 Entities use: id: kind; attribute; attribute. Omit unnecessary attributes.
 Actions use: actor - action - target; tool. Always include the tool slot, using none if absent.
@@ -43,7 +43,6 @@ f1: sea urchin
 t1: knife
 [Actions]
 p1 - cutting - f1; t1
-[End]
 
 A game UI shows the same item's upgrade; no operator is visible:
 [Context]
@@ -54,7 +53,6 @@ topics: equipment upgrade
 item1: game item; being upgraded
 [Actions]
 none - upgrading - item1; none
-[End]
 
 Several close-ups show the same animated character without an observed action:
 [Context]
@@ -65,4 +63,3 @@ topics: character portrait
 p1: character; black hair; red eyes
 [Actions]
 none
-[End]

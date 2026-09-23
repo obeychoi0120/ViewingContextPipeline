@@ -55,15 +55,15 @@ extraction:
     num_keyframes: 6
   greedy_decoding: true
   graph_repetition_penalty:
-  - 1.0
   - 1.05
   - 1.1
   - 1.15
+  - 1.20
   description_repetition_penalty:
-  - 1.0
   - 1.05
   - 1.1
   - 1.15
+  - 1.20
   summary_repetition_penalty:
   - 1.0
   - 1.05
@@ -74,10 +74,10 @@ extraction:
     top_p: 0.8
     top_k: 20
   graph:
-    scene_max_new_tokens: 1024
+    scene_max_new_tokens: 256
     summary_max_new_tokens: 2048
   description:
-    scene_max_new_tokens: 1024
+    scene_max_new_tokens: 512
     summary_max_new_tokens: 2048
 validation:
   cohort:

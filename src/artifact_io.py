@@ -16,6 +16,7 @@ def atomic_write_json(
     value: Any,
     *,
     durable: bool,
+    sort_keys: bool = True,
 ) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -31,7 +32,7 @@ def atomic_write_json(
             delete=False,
         ) as handle:
             temporary = Path(handle.name)
-            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=sort_keys)
             handle.write("\n")
             handle.flush()
             if durable:

@@ -9,6 +9,7 @@ from typing import Callable, Iterator
 from tqdm import tqdm
 from extraction.progress import InferenceProgress
 from extraction.qwen_runtime import QwenRuntime
+from extraction.token_usage import qwen_output_tokens, gemini_output_tokens, validate_tokens
 
 from artifact_io import atomic_write_json
 from arm_registry import legacy_layout, concat_layout
@@ -34,6 +35,7 @@ def reuse_summary_document(
 ):
     try:
         doc = read_json(output_path)
+        validate_tokens(doc.get("tokens"))
         if (
             doc.get("schema_version") not in {schema_version, "video-summary/v4"}
             or doc.get("content_id") != content_id
@@ -163,13 +165,14 @@ def run_summary_stage(
         raise ExtractionStepError("summary repetition penalties must be strictly increasing")
     pending, documents, next_penalties = {}, {}, {}
 
-    def publish(cid, text, violations, *, raw=False):
+    def publish(cid, text, violations, *, raw=False, tokens=None):
         records, prov, _ = pending[cid]
         if raw:
             text = ""
         doc = {
             "schema_version": SUMMARY_SCHEMA_VERSION,
             "content_id": cid,
+            "tokens": validate_tokens(tokens),
             "arm": arm.name,
             "status": "failed" if raw else "complete",
             "text": text,
@@ -186,7 +189,7 @@ def run_summary_stage(
         except (ValueError, OSError):
             unchanged = False
         if not unchanged:
-            atomic_write_json(output, doc, durable=True)
+            atomic_write_json(output, doc, durable=True, sort_keys=False)
         clear_dirty(output)
         documents[cid] = doc
 
@@ -227,7 +230,9 @@ def run_summary_stage(
             **provenance,
             **({"english_title": titles[cid]} if arm.uses_title else {}),
             "scene_provenance": scene_provenance,
-            "scene_input_hash": fingerprint(canonical(records)),
+            "scene_input_hash": fingerprint(canonical([
+                {k: v for k, v in record.items() if k != "tokens"} for record in records
+            ])),
             "scene_path": str(source),
             "normal_scene_count": len(records) - text_count,
             "raw_scene_count": raw_count,
@@ -262,7 +267,8 @@ def run_summary_stage(
                 pending[cid] = (records, failed.get("provenance", {
                     "representation": arm.representation, "summary_model": model
                 }), task)
-                publish(cid, failed["raw_output"], failed["error"].split(", "), raw=True)
+                publish(cid, failed["raw_output"], failed["error"].split(", "), raw=True,
+                        tokens=failed.get("tokens"))
             else:
                 next_penalties[cid] = next_penalty
 
@@ -280,21 +286,23 @@ def run_summary_stage(
             prov["input_hash"] = fingerprint({k: v for k, v in prov.items() if k != "input_hash"})
             pending[cid] = (records, prov, task)
             event = runtime.current_result or {}
+            tokens = qwen_output_tokens(event)
             if event.get("finish_reason") == "length":
                 violations.append("max_tokens")
             final = penalty == schedule[-1]
             if violations:
                 # Persist the completed attempt before publishing its terminal artifact.
                 failures.record(cid, None, ", ".join(violations), "",
-                                repetition_penalty=penalty, summary_model=model, provenance=pending[cid][1])
+                                repetition_penalty=penalty, summary_model=model, provenance=pending[cid][1],
+                                tokens=tokens)
                 if final:
-                    publish(cid, text, violations, raw=True)
+                    publish(cid, text, violations, raw=True, tokens=tokens)
                     del next_penalties[cid]
                 else:
                     (output_dir / f"{cid}.json").unlink(missing_ok=True)
                     next_penalties[cid] = schedule[schedule.index(penalty) + 1]
             else:
-                publish(cid, normalized, [])
+                publish(cid, normalized, [], tokens=tokens)
                 failures.remove(cid, None)
                 del next_penalties[cid]
             progress.complete(task_id=cid, failed=bool(violations),
@@ -311,6 +319,7 @@ def run_summary_stage(
                 if cid not in expected or cid in completed:
                     raise ExtractionStepError(f"unexpected Gemini summary result: {cid}")
                 normalized, violations = inspect_summary(outcome.text)
+                tokens = gemini_output_tokens(outcome.response_diagnostics)
                 if outcome.error:
                     violations.append(outcome.error)
                 candidates = (outcome.response_diagnostics or {}).get("candidates") or []
@@ -319,10 +328,10 @@ def run_summary_stage(
                     violations.append("max_tokens")
                 if violations:
                     failures.record(cid, None, ", ".join(violations), "",
-                                    summary_model=model, provenance=pending[cid][1])
-                    publish(cid, "", violations, raw=True)
+                                    summary_model=model, provenance=pending[cid][1], tokens=tokens)
+                    publish(cid, "", violations, raw=True, tokens=tokens)
                 else:
-                    publish(cid, normalized, [])
+                    publish(cid, normalized, [], tokens=tokens)
                     failures.remove(cid, None)
                 completed.add(cid)
                 progress.complete(task_id=cid, failed=bool(violations), raw=False)

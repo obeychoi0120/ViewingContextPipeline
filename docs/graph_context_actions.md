@@ -28,7 +28,7 @@
 
 medium/format 허용 목록과 topics 3개·각 4단어, entities 6개·속성 2개·각 6단어, actions 4개 제한은 프롬프트 지침입니다. 저장 검증에서는 이 제한을 적용하지 않고, 초과 항목 및 목록 밖의 문자열도 삭제·변환 없이 보존합니다. 필수 구조·Actions 문법·참조 무결성·고유 ID만 검사합니다. 세 필수 섹션과 내용이 완전하면 `[End]` 없이 끝나도 정상으로 처리합니다. 백엔드가 토큰 종료를 보고하면 `[End]` 유무와 관계없이 기존 실패·재시도 흐름을 적용합니다.
 
-파서는 `graph-text/v7`, 새 추출 규약 provenance는 `graph/v4`, 내부 schema 상수는 `scene-graph/v4`입니다. 구형 프롬프트의 provenance는 `graph/v3`를 유지합니다. 구형 Entities/Relations·Context 목록·JSON은 읽을 수 있으며 Actions로 추측 변환하지 않습니다. Graph 저장 행에는 `content_id`, `warning`, `scene_idx`, `scene_graph` 순서로 네 필드를 저장합니다. `provenance`와 `graph_format`은 저장하지 않습니다. 파싱·검증 실패 원문은 `scene_graph` 문자열로 보존하고 값의 타입으로 판별해 Summary에 전달합니다. 과거 실패 원문의 재시도 상태는 기존 실패 로그에 보존합니다. 이전 추가 필드가 있는 파일도 읽을 수 있으며, 다시 저장하거나 `migrate-scene-schema`를 실행하면 현재 네 필드로 변환합니다. 이 원문은 `structured` 진행 수와 Summary의 `normal_scene_count`에서 제외하며 `raw_scene_count` 및 `text_scene_count`에 반영합니다. `success` 진행 수는 저장에 성공한 전체 응답 수이므로 원문도 포함합니다.
+파서는 `graph-text/v7`, 새 추출 규약 provenance는 `graph/v4`, 내부 schema 상수는 `scene-graph/v4`입니다. 구형 프롬프트의 provenance는 `graph/v3`를 유지합니다. 구형 Entities/Relations·Context 목록·JSON은 읽을 수 있으며 Actions로 추측 변환하지 않습니다. Graph 저장 행에는 `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph` 순서로 다섯 필드를 저장합니다. `provenance`와 `graph_format`은 저장하지 않습니다. 파싱·검증 실패 원문은 `scene_graph` 문자열로 보존하고 값의 타입으로 판별해 Summary에 전달합니다. 과거 실패 원문의 재시도 상태는 기존 실패 로그에 보존합니다. 이전 추가 필드가 있는 파일도 읽을 수 있으며, 다시 저장하거나 `migrate-scene-schema`를 실행하면 현재 다섯 필드로 변환합니다. 이 원문은 `structured` 진행 수와 Summary의 `normal_scene_count`에서 제외하며 `raw_scene_count` 및 `text_scene_count`에 반영합니다. `success` 진행 수는 저장에 성공한 전체 응답 수이므로 원문도 포함합니다.
 
 ## Warning 태그
 
@@ -43,7 +43,7 @@ medium/format 허용 목록과 topics 3개·각 4단어, entities 6개·속성 2
 | `PARSE_ERROR` | 깨진 JSON, 잘못된 타입, 섹션 순서·중복, 모호한 행 등 나머지 파싱 오류 |
 
 ```json
-{"content_id":"video","warning":["INVALID_REFERENCE"],"scene_idx":0,"scene_graph":"...original model output..."}
+{"content_id":"video","scene_idx":0,"tokens":128,"warning":["INVALID_REFERENCE"],"scene_graph":"...original model output..."}
 ```
 
 Actions의 tool 자리 누락은 `MISSING_REQUIRED` 대신 `INVALID_ACTION_SYNTAX`로 분류합니다. 빈 응답·공백만 있는 응답은 Qwen과 Gemini 모두 raw로 저장하지 않고 생성 실패로 처리합니다. Qwen은 기존 penalty 순서로 재시도합니다. 토큰 한도 종료·API 오류도 warning이 아닌 기존 생성 실패·재시도 경로로 처리합니다. warning이 없는 과거 문자열은 읽을 때 현재 파서로 재검사하여 태그를 복원하며, 파일에는 다음 저장·명시적 마이그레이션 때 반영합니다. 따라서 복원된 태그는 과거 실행 당시의 정확한 진단을 보장하지 않습니다. 경고는 Summary 관찰 내용에 추가하지 않습니다.
@@ -87,3 +87,5 @@ PYTHONPATH=src python -m benchmarks.graph_prompt_pilot --run-id graph_context_ac
 맥락·행동 정확도, 표현 잔존 감소, 보존 사례가 확인된 뒤 동일 조건의 추천 평가로 기본 경로 채택을 판단합니다. 이 도구는 추천 평가나 전체 데이터 재생성을 자동 실행하지 않습니다.
 
 Graph 토큰 한도 종료 시 잘린 응답은 해당 Scene 실패 로그의 `raw_output`에 그대로 저장합니다. Qwen·Gemini 모두 적용하며 각 재시도 실패가 최신 원문으로 갱신합니다. 성공하면 실패 행을 제거하므로 모든 시도의 영구 이력을 저장하는 방식은 아닙니다. 기존 로그에서 이미 비워진 원문은 복원하지 않습니다.
+
+`tokens`는 Qwen의 `output_tokens` 또는 Gemini의 `candidates_token_count`로 보고된 마지막 시도의 출력 토큰 수입니다. 입력·생각 토큰 및 재시도 누적량을 포함하지 않습니다. Graph 객체의 JSON 직렬화 길이를 다시 토큰화하지 않습니다. 읽기 호환을 위해 과거 Scene의 누락된 값은 `null`로 처리하고, 저장·마이그레이션 시 반영합니다. Description은 `content_id`, `scene_idx`, `tokens`, `description`만 저장하며 warning이 없습니다. Summary는 기존 필드를 유지하고 content_id 바로 뒤에 tokens를 추가합니다. 실패 Summary의 text가 비어 있어도 tokens는 마지막 실패 응답의 계측값이며, 응답 계측이 없으면 null입니다.

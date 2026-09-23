@@ -114,7 +114,7 @@ def test_storage_and_summary_preserve_structured_raw_and_legacy(tmp_path):
 def test_prompt_examples_and_summary_template():
     root = Path(__file__).resolve().parents[3]
     prompt = (root / "prompts/scene_graph_v5.md").read_text()
-    examples = re.findall(r"\[Context\]\n.*?\[End\]", prompt.split("[Examples]", 1)[1], re.S)
+    examples = re.findall(r"\[Context\]\n.*?(?=\n\s*\n|\Z)", prompt.split("[Examples]", 1)[1], re.S)
     assert len(examples) == 3
     graphs = [parsed(example).graph for example in examples]
     assert [len(graph["entities"]) for graph in graphs] == [3, 1, 1]
@@ -226,7 +226,7 @@ def test_warning_tags_are_saved_in_order_and_survive_summary_roundtrip(tmp_path,
     path = tmp_path / "video.jsonl"
     write_scene_records(path, [record])
     stored = read_jsonl(path)[0]
-    assert list(stored) == ["content_id", "warning", "scene_idx", "scene_graph"]
+    assert list(stored) == ["content_id", "scene_idx", "tokens", "warning", "scene_graph"]
     assert stored["warning"] == [tag] and stored["scene_graph"] == text
     records = minimal_graph_records(read_scene_records(path), path)
     assert records[0]["semantic_warnings"] == [tag]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from itertools import chain
 
+from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
+
 from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.structured_output import OutputValidationError, validate_graph_structure
@@ -89,7 +91,7 @@ class SceneResults:
                 self.rows[task_id] = (cid, row)
                 yield row["task"]
 
-    def receive(self, task_id, text, *, error=None, diagnostics=None, truncated=False, final=True):
+    def receive(self, task_id, text, *, error=None, diagnostics=None, truncated=False, final=True, tokens=None):
         if task_id not in self.rows:
             raise RuntimeError(f"unexpected scene result: {task_id}")
         if task_id in self.completed:
@@ -110,6 +112,7 @@ class SceneResults:
             provenance = {**provenance, "settings": {**provenance["settings"],
                           "actual_repetition_penalty": self.penalty}}
         if record is not None:
+            record["tokens"] = tokens
             if provenance is not None:
                 record["provenance"] = provenance
             self.contents[cid][int(row["scene_idx"])] = record
@@ -121,7 +124,7 @@ class SceneResults:
         if failure is not None:
             raw_output = text if self.arm == "graph" and truncated else ""
             self.failures.record(cid, int(row["scene_idx"]), failure["error"], raw_output,
-                                 provenance=provenance)
+                                 provenance=provenance, tokens=tokens)
         else:
             self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)
@@ -143,7 +146,8 @@ def run_qwen_scenes(
     def receive(task_id, text, *, final):
         event = runtime.current_result if runtime and runtime.current_result else {}
         results.completed.discard(task_id)
-        return results.receive(task_id, text, truncated=event.get("finish_reason") == "length", final=final)
+        return results.receive(task_id, text, truncated=event.get("finish_reason") == "length", final=final,
+                               tokens=qwen_output_tokens(event))
 
     def begin_pass(index, count, total):
         results.penalty = penalties[index - 1]
@@ -178,7 +182,8 @@ def run_gemini_scenes(
             for candidate in candidates
         )
         results.receive(outcome.task_id, outcome.text, error=outcome.error,
-                        diagnostics=outcome.response_diagnostics, truncated=truncated)
+                        diagnostics=outcome.response_diagnostics, truncated=truncated,
+                        tokens=gemini_output_tokens(outcome.response_diagnostics))
 
     tasks = results.tasks()
     first = next(tasks, None)
