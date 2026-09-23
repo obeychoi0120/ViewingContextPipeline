@@ -26,9 +26,27 @@
 
 정식 Actions 문법은 `actor - action - target; tool`입니다. 화살표는 방향을 바꾸지 않는 보정 경로로 허용합니다. ID·단어 내부 하이픈은 허용합니다. `none` 참조는 `null`, `topics: none`과 빈 섹션은 빈 배열로 저장합니다. 최소 하나의 actor/target이 필요하며 모든 참조는 선언된 고유 ID여야 합니다.
 
-허용 medium/format, topics 3개·각 4단어, entities 6개·속성 2개·각 6단어, actions 4개를 검증합니다. 세 필수 섹션과 내용이 완전하면 `[End]` 없이 끝나도 정상으로 처리합니다. 백엔드가 토큰 종료를 보고하면 `[End]` 유무와 관계없이 기존 실패·재시도 흐름을 적용합니다.
+medium/format 허용 목록과 topics 3개·각 4단어, entities 6개·속성 2개·각 6단어, actions 4개 제한은 프롬프트 지침입니다. 저장 검증에서는 이 제한을 적용하지 않고, 초과 항목 및 목록 밖의 문자열도 삭제·변환 없이 보존합니다. 필수 구조·Actions 문법·참조 무결성·고유 ID만 검사합니다. 세 필수 섹션과 내용이 완전하면 `[End]` 없이 끝나도 정상으로 처리합니다. 백엔드가 토큰 종료를 보고하면 `[End]` 유무와 관계없이 기존 실패·재시도 흐름을 적용합니다.
 
-파서는 `graph-text/v6`, 새 추출 규약 provenance는 `graph/v4`, 내부 schema 상수는 `scene-graph/v4`입니다. 구형 프롬프트의 provenance는 `graph/v3`를 유지합니다. 구형 Entities/Relations·Context 목록·JSON은 읽을 수 있으며 Actions로 추측 변환하지 않습니다. Graph 저장 행에는 `content_id`, `scene_idx`, `scene_graph` 세 필드만 남깁니다. `provenance`와 `graph_format`은 저장하지 않습니다. 파싱·검증 실패 원문은 `scene_graph` 문자열로 보존하고 값의 타입으로 판별해 Summary에 전달합니다. 과거 실패 원문의 재시도 상태는 기존 실패 로그에 보존합니다. 이전 추가 필드가 있는 파일도 읽을 수 있으며, 다시 저장하거나 `migrate-scene-schema`를 실행하면 세 필드로 변환합니다. 이 원문은 `structured` 진행 수와 Summary의 `normal_scene_count`에서 제외하며 `raw_scene_count` 및 `text_scene_count`에 반영합니다. `success` 진행 수는 저장에 성공한 전체 응답 수이므로 원문도 포함합니다.
+파서는 `graph-text/v7`, 새 추출 규약 provenance는 `graph/v4`, 내부 schema 상수는 `scene-graph/v4`입니다. 구형 프롬프트의 provenance는 `graph/v3`를 유지합니다. 구형 Entities/Relations·Context 목록·JSON은 읽을 수 있으며 Actions로 추측 변환하지 않습니다. Graph 저장 행에는 `content_id`, `warning`, `scene_idx`, `scene_graph` 순서로 네 필드를 저장합니다. `provenance`와 `graph_format`은 저장하지 않습니다. 파싱·검증 실패 원문은 `scene_graph` 문자열로 보존하고 값의 타입으로 판별해 Summary에 전달합니다. 과거 실패 원문의 재시도 상태는 기존 실패 로그에 보존합니다. 이전 추가 필드가 있는 파일도 읽을 수 있으며, 다시 저장하거나 `migrate-scene-schema`를 실행하면 현재 네 필드로 변환합니다. 이 원문은 `structured` 진행 수와 Summary의 `normal_scene_count`에서 제외하며 `raw_scene_count` 및 `text_scene_count`에 반영합니다. `success` 진행 수는 저장에 성공한 전체 응답 수이므로 원문도 포함합니다.
+
+## Warning 태그
+
+`warning`은 중복 없는 태그 배열입니다. 정상·보정 성공 결과는 `[]`이며, raw 원문에는 확인된 오류만 기록합니다. 파싱 후 중복 ID와 미선언 참조를 함께 확인할 수 있으면 두 태그를 모두 기록합니다. 오류 설명 문자열은 태그로 저장하지 않습니다.
+
+| 태그 | 조건 |
+| --- | --- |
+| `MISSING_REQUIRED` | 필수 섹션·필드 누락 |
+| `INVALID_ACTION_SYNTAX` | Actions 구분자·tool 자리 오류, 빈 action, actor/target 모두 없음 |
+| `INVALID_REFERENCE` | 선언되지 않은 actor/target/tool ID |
+| `DUPLICATE_ENTITY_ID` | 중복 엔티티 ID |
+| `PARSE_ERROR` | 깨진 JSON, 잘못된 타입, 섹션 순서·중복, 모호한 행 등 나머지 파싱 오류 |
+
+```json
+{"content_id":"video","warning":["INVALID_REFERENCE"],"scene_idx":0,"scene_graph":"...original model output..."}
+```
+
+Actions의 tool 자리 누락은 `MISSING_REQUIRED` 대신 `INVALID_ACTION_SYNTAX`로 분류합니다. 토큰 한도 종료·API 오류는 warning이 아닌 기존 생성 실패·재시도 경로로 처리합니다. warning이 없는 과거 문자열은 읽을 때 현재 파서로 재검사하여 태그를 복원하며, 파일에는 다음 저장·명시적 마이그레이션 때 반영합니다. 따라서 복원된 태그는 과거 실행 당시의 정확한 진단을 보장하지 않습니다. 경고는 Summary 관찰 내용에 추가하지 않습니다.
 
 ## 첫 100개 파일럿 도구
 

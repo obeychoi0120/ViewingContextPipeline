@@ -76,15 +76,9 @@ def test_ambiguous_or_incomplete_lines_are_preserved_as_text(old, new):
 
 
 @pytest.mark.parametrize("mutation", [
-    lambda g: g.update(medium="video"),
-    lambda g: g.update(format="tutorial"),
-    lambda g: g.update(topics=["a b c d e"]),
-    lambda g: g.update(topics=["a"] * 4),
     lambda g: g.update(topics="cooking"),
     lambda g: g["entities"].append(copy.deepcopy(g["entities"][0])),
     lambda g: g["entities"][0].update(id="none"),
-    lambda g: g["entities"][0].update(attributes=["a b c d e f g"]),
-    lambda g: g["entities"][0].update(attributes=["a", "b", "c"]),
     lambda g: g["actions"][0].update(actor="missing"),
     lambda g: g["actions"][0].update(target="missing"),
     lambda g: g["actions"][0].update(tool="missing"),
@@ -92,7 +86,6 @@ def test_ambiguous_or_incomplete_lines_are_preserved_as_text(old, new):
     lambda g: g["actions"][0].pop("tool"),
     lambda g: g["actions"][0].update(actor=1),
     lambda g: g["actions"][0].update(action="cutting - slicing"),
-    lambda g: g.update(actions=g["actions"] * 5),
     lambda g: g.update(entities=[{"id": f"x{i}", "name": "cup", "attributes": []}
                                  for i in range(7)]),
 ])
@@ -190,3 +183,74 @@ def test_summary_receives_raw_but_does_not_count_it_as_structured(ready_context,
         assert doc["provenance"]["normal_scene_count"] == 1
         assert doc["provenance"]["raw_scene_count"] == 1
         assert doc["provenance"]["text_scene_count"] == 1
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda g: g.update(medium="video"),
+    lambda g: g.update(format="tutorial"),
+    lambda g: g.update(topics=["a b c d e"]),
+    lambda g: g.update(topics=["a"] * 4),
+    lambda g: g["entities"][0].update(attributes=["a b c d e f g"]),
+    lambda g: g["entities"][0].update(attributes=["a", "b", "c"]),
+    lambda g: g.update(actions=g["actions"] * 5),
+    lambda g: g["entities"].extend({"id": f"x{i}", "name": "cup", "attributes": []}
+                                  for i in range(7)),
+])
+def test_prompt_limits_do_not_reject_or_trim_graph(mutation):
+    graph = parsed().graph
+    mutation(graph)
+    validate_graph_structure(graph)
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, json.dumps(graph))
+    assert failure is None and record["graph"] == graph
+    assert record["semantic_warnings"] == []
+
+
+@pytest.mark.parametrize("text,tag", [
+    (TEXT.replace("[Context]", ""), "MISSING_REQUIRED"),
+    (TEXT.replace("[Entities]", ""), "MISSING_REQUIRED"),
+    (TEXT.replace("[Actions]", ""), "MISSING_REQUIRED"),
+    (TEXT.replace("format: demonstration\n", ""), "MISSING_REQUIRED"),
+    (TEXT.replace("food-1: sea urchin", "food-1:"), "MISSING_REQUIRED"),
+    (TEXT.replace("; knife-1", ""), "INVALID_ACTION_SYNTAX"),
+    (TEXT.replace("cross-cutting", "cutting - slicing"), "INVALID_ACTION_SYNTAX"),
+    (TEXT.replace("; knife-1", "; absent"), "INVALID_REFERENCE"),
+    (TEXT.replace("[Actions]", "person-1: person\n[Actions]"), "DUPLICATE_ENTITY_ID"),
+    ("{broken JSON", "PARSE_ERROR"),
+    (TEXT + "\nUnexpected commentary", "PARSE_ERROR"),
+])
+def test_warning_tags_are_saved_in_order_and_survive_summary_roundtrip(tmp_path, text, tag):
+    from pipeline_runtime import read_jsonl
+
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, text)
+    assert failure is None and record["semantic_warnings"] == [tag]
+    path = tmp_path / "video.jsonl"
+    write_scene_records(path, [record])
+    stored = read_jsonl(path)[0]
+    assert list(stored) == ["content_id", "warning", "scene_idx", "scene_graph"]
+    assert stored["warning"] == [tag] and stored["scene_graph"] == text
+    records = minimal_graph_records(read_scene_records(path), path)
+    assert records[0]["semantic_warnings"] == [tag]
+    assert json.loads(graph_summary_prompt("{scenes}", records))[0]["observation"] == text
+
+
+def test_duplicate_and_reference_tags_are_collected_without_duplicates():
+    graph = parsed().graph
+    graph["entities"].append(copy.deepcopy(graph["entities"][0]))
+    graph["actions"][0].update(actor="missing", tool="missing")
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, json.dumps(graph))
+    assert failure is None
+    assert record["semantic_warnings"] == ["DUPLICATE_ENTITY_ID", "INVALID_REFERENCE"]
+
+
+@pytest.mark.parametrize("mutation,tag", [
+    (lambda g: g.pop("medium"), "MISSING_REQUIRED"),
+    (lambda g: g["actions"][0].pop("tool"), "INVALID_ACTION_SYNTAX"),
+    (lambda g: g["actions"][0].update(action=""), "INVALID_ACTION_SYNTAX"),
+    (lambda g: g["actions"][0].update(actor=None, target=None), "INVALID_ACTION_SYNTAX"),
+    (lambda g: g.update(topics="wrong type"), "PARSE_ERROR"),
+])
+def test_json_structure_uses_specific_tags(mutation, tag):
+    graph = parsed().graph
+    mutation(graph)
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, json.dumps(graph))
+    assert failure is None and record["semantic_warnings"] == [tag]

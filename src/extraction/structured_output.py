@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import re
 
+from extraction.graph_warnings import (
+    MISSING_REQUIRED, INVALID_ACTION_SYNTAX, INVALID_REFERENCE, DUPLICATE_ENTITY_ID, PARSE_ERROR,
+)
+
 
 def _object(properties):
     return {
@@ -35,25 +39,27 @@ FORMATS = ("demonstration", "explanation", "review", "narrative", "highlights",
            "performance", "interview", "other", "unknown")
 REFERENCE = {"type": ["string", "null"], "minLength": 1}
 GRAPH_JSON_SCHEMA = _object({
-    "medium": {**STRING, "enum": list(MEDIA)},
-    "format": {**STRING, "enum": list(FORMATS)},
-    "topics": {**_array(STRING), "maxItems": 3},
-    "entities": {**_array(_object({
+    "medium": STRING,
+    "format": STRING,
+    "topics": _array(STRING),
+    "entities": _array(_object({
         "id": STRING, "name": STRING,
-        "attributes": {**_array(STRING), "maxItems": 2},
-    })), "maxItems": 6},
-    "actions": {**_array(_object({
+        "attributes": _array(STRING),
+    })),
+    "actions": _array(_object({
         "actor": REFERENCE, "action": STRING, "target": REFERENCE, "tool": REFERENCE,
-    })), "maxItems": 4},
+    })),
 })
 
 
 class OutputValidationError(ValueError):
-    pass
+    def __init__(self, message, tags=(PARSE_ERROR,)):
+        super().__init__(message)
+        self.tags = list(dict.fromkeys(tags))
 
 
 def validate_graph_structure(value, schema=None, path="graph"):
-    """Check new actions strictly without changing the permissive legacy contract."""
+    """Enforce structural integrity; selection budgets and enums are prompt guidance."""
     if schema is None:
         if isinstance(value, dict) and set(value) & {"actions", "medium", "format", "topics"}:
             schema = GRAPH_JSON_SCHEMA
@@ -75,8 +81,11 @@ def _validate_shape(value, schema, path):
     if not isinstance(value, expected):
         raise OutputValidationError(f"{path}: expected {kind}")
     if kind == "object":
-        if set(value) != set(schema["properties"]):
-            raise OutputValidationError(f"{path}: missing or extra fields")
+        if set(schema["properties"]) - set(value):
+            tag = INVALID_ACTION_SYNTAX if ".actions[" in path else MISSING_REQUIRED
+            raise OutputValidationError(f"{path}: missing required fields", (tag,))
+        if set(value) - set(schema["properties"]):
+            raise OutputValidationError(f"{path}: extra fields")
         for key, child in schema["properties"].items():
             _validate_shape(value[key], child, f"{path}.{key}")
     elif kind == "array":
@@ -85,29 +94,33 @@ def _validate_shape(value, schema, path):
         for index, item in enumerate(value):
             _validate_shape(item, schema["items"], f"{path}[{index}]")
     elif not value.strip():
-        raise OutputValidationError(f"{path}: empty string")
+        raise OutputValidationError(f"{path}: empty string",
+                                    (INVALID_ACTION_SYNTAX if ".actions[" in path else PARSE_ERROR,))
     if "enum" in schema and value not in schema["enum"]:
         raise OutputValidationError(f"{path}: invalid value {value!r}")
 
 
 def _validate_actions(graph, path):
-    ids = set()
+    ids, tags, messages = set(), [], []
+
+    def report(tag, message):
+        tags.append(tag)
+        messages.append(message)
+
     for entity in graph["entities"]:
         identifier = entity["id"]
-        if (not re.fullmatch(r"[\w.-]+", identifier) or identifier.casefold() == "none"
-                or identifier in ids):
-            raise OutputValidationError(f"{path}: invalid or duplicate entity ID {identifier!r}")
+        if not re.fullmatch(r"[\w.-]+", identifier) or identifier.casefold() == "none":
+            report(PARSE_ERROR, f"invalid entity ID {identifier!r}")
+        if identifier in ids:
+            report(DUPLICATE_ENTITY_ID, f"duplicate entity ID {identifier!r}")
         ids.add(identifier)
-        if any(len(attribute.split()) > 6 for attribute in entity["attributes"]):
-            raise OutputValidationError(f"{path}: attribute exceeds six words")
-    if any(len(topic.split()) > 4 or topic.casefold() == "none"
-           for topic in graph["topics"]):
-        raise OutputValidationError(f"{path}: invalid topic; use up to four words or an empty list")
     for action in graph["actions"]:
         if action["actor"] is None and action["target"] is None:
-            raise OutputValidationError(f"{path}: action requires an actor or target")
+            report(INVALID_ACTION_SYNTAX, "action requires an actor or target")
         if any(mark in action["action"] for mark in (" - ", "->", "→", "⇒", ";", "\n")):
-            raise OutputValidationError(f"{path}: ambiguous action phrase")
+            report(INVALID_ACTION_SYNTAX, "ambiguous action phrase")
         for field in ("actor", "target", "tool"):
             if action[field] is not None and action[field] not in ids:
-                raise OutputValidationError(f"{path}: undeclared {field} {action[field]!r}")
+                report(INVALID_REFERENCE, f"undeclared {field} {action[field]!r}")
+    if tags:
+        raise OutputValidationError(f"{path}: " + "; ".join(messages), tags)

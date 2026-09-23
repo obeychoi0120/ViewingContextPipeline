@@ -17,18 +17,20 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
     parsed = parse_or_repair_graph(text) if error is None else None
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
     parse_warning = parsed.error if parsed is not None else None
+    warnings = list(parsed.warning) if parsed is not None else []
     if strict and parsed is not None and parsed.graph is not None:
         try:
             validate_graph_structure(parsed.graph)
         except OutputValidationError as exc:
             parse_warning = str(exc)
+            warnings = exc.tags
     if error is None and parsed is not None:
         structured = parsed.graph is not None and parse_warning is None
         return {
             **common,
             "graph": parsed.graph if structured else text,
             "parse_mode": parsed.parse_mode if structured else "text",
-            "semantic_warnings": graph_semantic_warnings(parsed.graph) if structured else [parse_warning],
+            "semantic_warnings": graph_semantic_warnings(parsed.graph) if structured else warnings,
         }, None
     failure = {
         **common,

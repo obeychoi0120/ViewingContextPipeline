@@ -20,7 +20,7 @@ def graph_semantic_warnings(graph):
     try:
         validate_graph_structure(graph)
     except OutputValidationError as exc:
-        return [str(exc)]
+        return exc.tags
     return []
 
 

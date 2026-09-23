@@ -13,20 +13,21 @@ class GraphParseResult:
     graph: dict[str, Any] | None
     error: str | None = None
     parse_mode: str | None = None
+    warning: tuple[str, ...] = ()
 
 
 def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Parse one JSON object, then apply one deterministic repair pass."""
     raw = str(text or "")
     if not raw.strip():
-        return GraphParseResult(graph=None, error="empty VLM output")
+        return GraphParseResult(graph=None, error="empty VLM output", warning=("MISSING_REQUIRED",))
     parsed = _load_json_dict(raw)
     if parsed is not None:
         return GraphParseResult(graph=parsed, parse_mode="native")
     repaired = repair_graph_json_once(raw)
     if repaired is not None:
         return GraphParseResult(graph=repaired, parse_mode="repaired")
-    return GraphParseResult(graph=None, error="JSON repair failed")
+    return GraphParseResult(graph=None, error="JSON repair failed", warning=("PARSE_ERROR",))
 
 
 def repair_graph_json_once(text: str) -> dict[str, Any] | None:

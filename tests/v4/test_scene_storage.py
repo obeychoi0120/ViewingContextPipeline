@@ -43,6 +43,8 @@ def test_scenes_have_explicit_indices_without_metadata(tmp_path, kind):
     expected = {"content_id", "scene_idx", field}
     if kind == "description":
         expected.add("provenance")
+    else:
+        expected.add("warning")
     assert all(set(row) == expected for row in payload)
     assert [row["scene_idx"] for row in payload] == [0, 3]
     assert not metadata_path(path).parent.exists()
@@ -59,7 +61,7 @@ def test_compact_text_graph_remains_summary_input_without_format_marker(tmp_path
     record = scene("graph")
     record.update(graph="unparsed text", parse_mode="text")
     write_scene_results(path, [record])
-    assert read_jsonl(path) == [{"content_id": "video", "scene_idx": 0,
+    assert read_jsonl(path) == [{"content_id": "video", "warning": ["PARSE_ERROR"], "scene_idx": 0,
                                "scene_graph": "unparsed text"}]
     restored = read_scene_records(path)[0]
     assert restored["graph"] == "unparsed text" and restored["parse_mode"] == "text"
@@ -81,7 +83,8 @@ def test_legacy_graph_read_and_explicit_migration(tmp_path, kind):
     restored = read_scene_records(path)
     assert restored[0]["provenance"] == row["provenance"]
     assert migrate_scene_file(path, restored)
-    assert read_jsonl(path) == [{"content_id": "video", "scene_idx": 7, "scene_graph": value}]
+    assert read_jsonl(path) == [{"content_id": "video", "warning": [] if kind == "structured" else ["PARSE_ERROR"],
+                                "scene_idx": 7, "scene_graph": value}]
     reread = read_scene_records(path)[0]
     if kind == "failed_text":
         assert reread["status"] == "raw_fallback"

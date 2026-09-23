@@ -53,6 +53,7 @@ def atomic_write_jsonl(
     rows: Iterable[dict[str, Any]],
     *,
     durable: bool,
+    sort_keys: bool = True,
 ) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +70,8 @@ def atomic_write_jsonl(
         ) as handle:
             temporary = Path(handle.name)
             for row in rows:
-                handle.write(canonical_json(row) + "\n")
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=sort_keys,
+                                        separators=(",", ":")) + "\n")
             handle.flush()
             if durable:
                 os.fsync(handle.fileno())

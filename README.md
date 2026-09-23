@@ -162,14 +162,14 @@ artifacts/
         └── diagnosis/diagnosis.json
 ```
 
-`scenes/{SCENE_ARM}/{content_id}.jsonl`은 장면당 한 줄입니다. Graph는 `content_id`, `scene_idx`, `scene_graph` 세 필드만 저장하고, Description은 기존대로 본문과 생성 provenance를 저장합니다. 아래 Description 예시는 provenance를 생략했습니다. Qwen·Gemini에 같은 형식을 적용합니다.
+`scenes/{SCENE_ARM}/{content_id}.jsonl`은 장면당 한 줄입니다. Graph는 `content_id`, `warning`, `scene_idx`, `scene_graph` 순서로 네 필드를 저장하고, Description은 기존대로 본문과 생성 provenance를 저장합니다. 아래 Description 예시는 provenance를 생략했습니다. Qwen·Gemini에 같은 형식을 적용합니다.
 
 ```json
 {"content_id":"123","scene_idx":0,"description":"A person walks outdoors."}
-{"content_id":"123","scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
+{"content_id":"123","warning":[],"scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
 ```
 
-장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 구조화 결과는 객체, 파싱 실패 원문은 문자열로 `scene_graph`에 저장하며 타입으로 구분합니다. 별도 `graph_format`은 저장하지 않습니다. 과거 실패 Raw Graph·Desc는 실패 로그를 유지하며 Summary 입력에서 제외합니다. 신규 생성 실패는 본문 대신 실패 로그에 빈 `raw_output`을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다. Graph 장면 provenance를 제거했으므로 이를 입력으로 새로 생성한 Summary는 기존 검증 정책상 다른 Run과 공유 캐시를 재사용하지 않습니다. 같은 Run의 정상 결과 재사용은 유지합니다.
+장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 구조화 결과는 객체, 파싱 실패 원문은 문자열로 `scene_graph`에 저장하며 타입으로 구분합니다. 별도 `graph_format`은 저장하지 않습니다. `warning`에는 정상 출력은 `[]`, raw 출력은 다섯 오류 태그 중 해당 항목을 기록합니다. 태그와 완화된 검증 규칙은 [Graph 규약](docs/graph_context_actions.md)을 참고하세요. 과거 실패 Raw Graph·Desc는 실패 로그를 유지하며 Summary 입력에서 제외합니다. 신규 생성 실패는 본문 대신 실패 로그에 빈 `raw_output`을 기록합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다. Graph 장면 provenance를 제거했으므로 이를 입력으로 새로 생성한 Summary는 기존 검증 정책상 다른 Run과 공유 캐시를 재사용하지 않습니다. 같은 Run의 정상 결과 재사용은 유지합니다.
 
 기존 전체 필드 JSONL과 두 필드 JSONL도 읽을 수 있습니다. 두 필드 파일은 원래 `.metadata`에서 장면 번호를 읽어야 하므로 먼저 삭제하지 마세요. 추출 재실행 또는 아래 명령으로 장면 번호를 포함한 형식으로 변환하며, 저장이 성공한 파일의 기존 메타데이터만 삭제합니다. 메타데이터가 없거나 본문과 맞지 않는 이전 파일은 장면 번호를 추측하거나 전체 재생성하지 않고 오류를 보고합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
 

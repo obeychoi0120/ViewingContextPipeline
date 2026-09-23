@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import re
 
+from extraction.graph_warnings import MISSING_REQUIRED, INVALID_ACTION_SYNTAX, PARSE_ERROR
+
 from extraction.semantic_graph.json_repair import (
     GraphParseResult,
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v6"
+GRAPH_PARSER_VERSION = "graph-text/v7"
 _REQUIRED_SECTIONS = ("Entities", "Relations", "End")
-# Context is accepted only for compatibility with earlier prompts and saved outputs.
+# Recognize both relational legacy graphs and Context + Actions graphs.
 _SECTIONS = (*_REQUIRED_SECTIONS, "Context", "Actions")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -20,7 +22,9 @@ _RELATION_MARK = re.compile(r"[<>=→⇒←↔⇐⟵⟷⟺－＞]|(?<=\s)[-–�
 
 
 class GraphTextError(ValueError):
-    pass
+    def __init__(self, message, tag=PARSE_ERROR):
+        super().__init__(message)
+        self.tag = tag
 
 
 def _header(line, *, repair):
@@ -54,7 +58,9 @@ def _entity(line, *, repair):
         raise GraphTextError("nonstandard entity delimiter")
     if repair and len(values) > 1 and not values[-1]:
         values.pop()  # One trailing delimiter; never discard an empty middle field.
-    if not values or any(not value for value in values):
+    if not values or not values[0]:
+        raise GraphTextError("missing entity kind", MISSING_REQUIRED)
+    if any(not value for value in values):
         raise GraphTextError("empty entity kind or attribute")
     return {"id": parts[0].strip(), "name": values[0], "attributes": values[1:]}
 
@@ -77,7 +83,8 @@ def _relation(line, *, repair):
 
 def _parse_lines(text, *, repair):
     first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    if _header(first, repair=repair) == "Context":
+    if (_header(first, repair=repair) == "Context"
+            or any(_header(line.strip(), repair=repair) == "Actions" for line in text.splitlines())):
         return _parse_context_actions(text, repair=repair)
     sections = {}
     current = None
@@ -113,7 +120,7 @@ def _parse_lines(text, *, repair):
     # EOF after Relations (or legacy Context) is a valid terminator. Token-limit
     # truncation is detected from backend finish reasons by the scene executor.
     if seen < len(_REQUIRED_SECTIONS) - 1:
-        raise GraphTextError(f"missing [{_REQUIRED_SECTIONS[seen]}] section or terminator")
+        raise GraphTextError(f"missing [{_REQUIRED_SECTIONS[seen]}] section or terminator", MISSING_REQUIRED)
 
     graph = {}
     for section, rows in sections.items():
@@ -138,12 +145,19 @@ def _parse_lines(text, *, repair):
                         raise GraphTextError("nonstandard empty section marker")
                     values.append(line)
             except GraphTextError as exc:
-                raise GraphTextError(f"line {number}: {exc}") from exc
+                raise GraphTextError(f"line {number}: {exc}", exc.tag) from exc
         graph[section.lower()] = values
     return graph
 
 
 def _action(line, *, repair):
+    try:
+        return _action_fields(line, repair=repair)
+    except GraphTextError as exc:
+        raise GraphTextError(str(exc), INVALID_ACTION_SYNTAX) from exc
+
+
+def _action_fields(line, *, repair):
     parts = re.split(r"[;；]" if repair else ";", line)
     if len(parts) != 2:
         raise GraphTextError("expected actor - action - target; tool (use none for missing values)")
@@ -168,6 +182,11 @@ def _action(line, *, repair):
 
 def _parse_context_actions(text, *, repair):
     required = ("Context", "Entities", "Actions")
+    headers = {_header(_BULLET.sub("", line.strip(), count=1) if repair else line.strip(),
+                       repair=repair) for line in text.splitlines()}
+    missing = [name for name in required if name not in headers]
+    if missing:
+        raise GraphTextError(f"missing [{missing[0]}]", MISSING_REQUIRED)
     order = (*required, "End")
     sections, current, seen = {}, None, 0
     for number, source in enumerate(text.splitlines(), 1):
@@ -191,15 +210,17 @@ def _parse_context_actions(text, *, repair):
         else:
             sections[current].append(line)
     if seen < len(required):
-        raise GraphTextError(f"missing [{required[seen]}]")
+        raise GraphTextError(f"missing [{required[seen]}]", MISSING_REQUIRED)
     context = {}
     for line in sections["Context"]:
         parts = re.split(r"[:：]" if repair else ":", line, maxsplit=1)
         if len(parts) != 2:
             raise GraphTextError("expected context key: value")
         key, value = (part.strip() for part in parts)
-        if key not in {"medium", "format", "topics"} or key in context or not value:
-            raise GraphTextError("missing, unknown or duplicate context field")
+        if key not in {"medium", "format", "topics"} or key in context:
+            raise GraphTextError("unknown or duplicate context field")
+        if not value:
+            raise GraphTextError("missing context value", MISSING_REQUIRED)
         if key == "topics":
             context[key] = ([] if value == "none" else
                             [part.strip() for part in re.split(r"[;；]" if repair else ";", value)])
@@ -208,7 +229,7 @@ def _parse_context_actions(text, *, repair):
         else:
             context[key] = value
     if set(context) != {"medium", "format", "topics"}:
-        raise GraphTextError("missing context field")
+        raise GraphTextError("missing context field", MISSING_REQUIRED)
     graph = dict(context)
     for section, parse in (("Entities", _entity), ("Actions", _action)):
         rows = sections[section]
@@ -228,7 +249,7 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Consume the whole response; retain JSON compatibility for complete old outputs."""
     raw = str(text or "")
     if not raw.strip():
-        return GraphParseResult(None, error="empty VLM output")
+        return GraphParseResult(None, error="empty VLM output", warning=(MISSING_REQUIRED,))
     try:
         unwrapped = _unwrap(raw)
         if unwrapped.startswith("{"):
@@ -243,4 +264,4 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
             return GraphParseResult(graph, parse_mode="repaired")
         return GraphParseResult(graph, parse_mode="native")
     except GraphTextError as exc:
-        return GraphParseResult(None, error=f"graph text repair failed: {exc}")
+        return GraphParseResult(None, error=f"graph text repair failed: {exc}", warning=(exc.tag,))
