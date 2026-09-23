@@ -1,4 +1,4 @@
-"""Shared v5 fixtures. Generation and encoding fakes never load remote/local models."""
+"""Shared current-v4 fixtures. Generation and encoding fakes never load remote/local models."""
 
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,12 +38,8 @@ possibly a casual greeting
 
 
 @pytest.fixture
-def v5_context(tmp_path):
+def current_context(tmp_path):
     config = yaml.safe_load((ROOT / "config.yaml").read_text())
-    config.pop("experiment_config_version", None)
-    config["schema_version"] = "viewing-context-config/v5"
-    config["protocol"]["description_extractors"] = ["qwen", "gemini"]
-    config["protocol"]["arms"] = ["desc_gemini", "desc_qwen", "graph_gemini", "graph_qwen", "metadata"]
     config["artifacts_root"] = "artifacts"
     config["data"].pop("titles_supplement_csv", None)
     for key in config["data"]:
@@ -69,18 +65,15 @@ def v5_context(tmp_path):
         Path(config["models"][model]).mkdir()
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(config))
     shutil.copytree(ROOT / "prompts", tmp_path / "prompts")
-    for kind in ("graph", "description"):
-        template = (tmp_path / f"prompts/summary_{kind}_v4.md").read_text()
-        (tmp_path / f"prompts/summary_{kind}_v4_meta.md").write_text(template.replace("Scene observations:", "English Title: {english_title}\n\nScene observations:"))
     return RunContext.load("test_run", root=tmp_path)
 
 
 @pytest.fixture
-def ready_context(v5_context, monkeypatch):
+def ready_context(current_context, monkeypatch):
     from preparation.steps import prepare_cohort_step
     from preparation.input_data import prepare_input_data
 
-    prepare_cohort_step(v5_context)
+    prepare_cohort_step(current_context)
     monkeypatch.setattr("extraction.data_preparation.media.probe_duration", lambda _: 10.0)
 
     def ffmpeg(args, **kwargs):
@@ -89,8 +82,8 @@ def ready_context(v5_context, monkeypatch):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("extraction.data_preparation.video_processor.subprocess.run", ffmpeg)
-    prepare_input_data(v5_context)
-    return v5_context
+    prepare_input_data(current_context)
+    return current_context
 
 
 @pytest.fixture
@@ -137,3 +130,28 @@ def fake_models(monkeypatch):
     monkeypatch.setattr("extraction.steps.GeminiWorkerPool", Gemini)
     monkeypatch.setattr("validation.features.BGETextEncoder", Encoder)
     return calls
+
+
+@pytest.fixture
+def generate_all():
+    """Generate the three scene/summary sources shared by the six current arms."""
+    from arm_registry import generation_registry
+    from extraction import steps
+
+    def generate(context, summary_model="gemini"):
+        for name, source in generation_registry(context.config).items():
+            kind = source.representation
+            getattr(steps, f"extract_{kind}_scenes")(
+                context,
+                arm=name,
+                model=source.model,
+                schema=f"prompts/scene_{kind}_v{4 if kind == 'graph' else 2}.md",
+            )
+            steps.summarize(
+                context,
+                arm=name,
+                model=summary_model,
+                schema=f"prompts/summary_{kind}_v5.md",
+            )
+
+    return generate

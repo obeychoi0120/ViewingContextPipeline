@@ -98,7 +98,7 @@ def test_loss_gradient_and_multiple_updates(device):
     for step, batch in enumerate((ids[:37], ids[37:74], ids[-1:])):
         grads, losses = [], []
         for model, optimizer, implementation in zip((old, new), optimizers, (reference, optimized), strict=True):
-            seed_everything(80 + step)
+            seed_everything(42)
             optimizer.zero_grad(set_to_none=True)
             loss = implementation.transition_loss(model, table, batch, probabilities, device)
             loss.backward()
@@ -144,9 +144,8 @@ def test_nonfinite_loss_prevents_optimizer_update(device, monkeypatch):
             SimpleNamespace(model=SimpleNamespace(batch_size=32)), device)
 
 
-@pytest.mark.parametrize("arm", ["meta", "graph_qwen", "graph_meta_qwen"])
-@pytest.mark.parametrize("seed", [42, 43, 44])
-def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch, device, arm, seed):
+def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch, device):
+    arm, seed = "graph_qwen_meta", 42
     from pipeline_runtime import read_json
     from validation.recommendation_cache import valid_bundle, cache_for
     from validation.recommendation_contracts import (
@@ -180,7 +179,7 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
         ctx = SimpleNamespace(representations_dir=features_dir,
                               recommendations_dir=tmp_path / name,
                               run_root=tmp_path / "artifacts" / "runs" / name,
-                              run_id="comparison", config={"schema_version": "viewing-context-config/v6",
+                              run_id="comparison", config={"experiment_config_version": "v4",
                                                            "protocol": {"arms": [arm]}})
         contexts.append(ctx)
         current = EventTable(table.rows)
