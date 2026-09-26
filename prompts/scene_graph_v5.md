@@ -27,7 +27,7 @@ Context has exactly three lines: medium: value, format: value, topics: value; va
 Entities use: id: kind; attribute; attribute. Omit unnecessary attributes.
 Actions use: actor - action - target; tool. Always include the tool slot, using none if absent.
 Only space-dash-space ( - ) separates the three action fields. Hyphens inside words or IDs are allowed. Do not put a separator inside a field. Semicolons separate topics, attributes, or the tool slot.
-Write none alone for an empty Entities or Actions section, and topics: none for no topic. No JSON, bullets, code fences, or additional sections. Stop after the actions or the optional [End] marker.
+Write none alone for an empty Entities or Actions section, and topics: none for no topic. No JSON, bullets, code fences, or additional sections. Stop after the actions.
 
 [Examples]
 These illustrate format and evidence handling, not content to copy.

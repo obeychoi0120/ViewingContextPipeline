@@ -38,7 +38,7 @@ Actor, target, and tool must each be a declared entity ID or none. At least acto
 
 [Output Contract]
 Output exactly three sections in order: [Context], [Entities], [Actions]. Context has exactly the three field lines above. For empty Entities or Actions, write none alone. Use topics: none if no topic is supported.
-In Actions, the exact delimiter is space-dash-space ( - ); never use arrows. Hyphens within words or IDs are allowed, but field contents must not contain the delimiter. Semicolons separate topics, entity attributes, and the action tool slot. No JSON, bullets, code fences, comments, or extra fields. [End] is optional. Keep the output compact; maximum counts are not quotas.
+In Actions, the exact delimiter is space-dash-space ( - ); never use arrows. Hyphens within words or IDs are allowed, but field contents must not contain the delimiter. Semicolons separate topics, entity attributes, and the action tool slot. No JSON, bullets, code fences, comments, or extra fields. Keep the output compact; maximum counts are not quotas.
 
 [Examples]
 Examples illustrate selection and syntax only. Do not copy unsupported content.
