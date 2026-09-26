@@ -1,0 +1,32 @@
+{
+  "sample_sha256": "7056f6568a3b84e878292287a5db323204ccb9c37dbee8cba8bd17bfdce7eb6d",
+  "reviewed_count": 73,
+  "visual_checked": [
+    [
+      "microlens_100k_00039",
+      0
+    ],
+    [
+      "microlens_100k_00269",
+      0
+    ],
+    [
+      "microlens_100k_00753",
+      0
+    ],
+    [
+      "microlens_100k_00096",
+      7
+    ],
+    [
+      "microlens_100k_00651",
+      0
+    ],
+    [
+      "microlens_100k_00850",
+      2
+    ]
+  ],
+  "prompt_v2_sha256": "cf0cebf851e2ca7cc3dbb566a3102619808d05e10a90671127e664bb675d672a",
+  "prompt_v3_sha256": "a18fd057a1e6700e055d57fe9c22ee9e5fcee4831d9e9646e6b7cf862d1daad4"
+}

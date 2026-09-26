@@ -187,7 +187,7 @@ def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, mon
     monkeypatch.setattr(
         "validation.representation_provenance.recommendation_identity", lambda *a: {}
     )
-    result = run_rolling(context)
+    result = run_rolling(context, target=list(registry(context.config)))
     assert result["skipped"] == len(protected)
     assert len(pending) == 126 - len(protected)
     assert all(path.read_bytes() == original for path, original in protected.items())
@@ -246,11 +246,11 @@ def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
     monkeypatch.setattr(
         "validation.representation_provenance.recommendation_identity", lambda *a: {}
     )
-    assert run_rolling(context, workers_per_gpu=2) == {
+    assert run_rolling(context, target=list(registry(context.config)), workers_per_gpu=2) == {
         "stage": "run-recommendation",
         "completed": 125,
         "skipped": 1,
     }
     assert reused not in dispatched[-1]
-    assert run_rolling(context, force=True, workers_per_gpu=2)["completed"] == 126
+    assert run_rolling(context, target=list(registry(context.config)), force=True, workers_per_gpu=2)["completed"] == 126
     assert reused in dispatched[-1]

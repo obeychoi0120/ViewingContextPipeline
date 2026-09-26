@@ -150,8 +150,8 @@ def test_changed_settings_retry_only_explicit_scene_and_summary_failures(
     summaries = {path: path.read_bytes() for path in summary_dir.glob("*.json")}
     failures = FailureLog(directory, scenes=True)
     failures.record(selected, 0, "previous failure", "")
-    context.config["extraction"][representation]["scene_max_new_tokens"] = 768
-    context.config["extraction"][representation]["summary_max_new_tokens"] = 768
+    context.config["extraction"][representation][model]["scene_max_new_tokens"] = 768
+    context.config["extraction"][representation]["qwen"]["summary_max_new_tokens"] = 768
     for schema in (scene_schema, summary_schema):
         path = context.prompt_path(schema)
         path.write_text(path.read_text() + "\nChanged prompt instructions.\n")
@@ -194,7 +194,8 @@ def test_changed_settings_retry_only_explicit_scene_and_summary_failures(
         path.read_bytes() == saved for path, saved in summaries.items() if path.stem != selected
     )
     arm = f"{'desc' if representation == 'description' else 'graph'}_{model}"
-    context.config["protocol"]["arms"] = [arm]
+    if representation == "description":
+        arm += "_meta"
     assert embed_representations(context, target=[arm])["generated_arms"] == [arm]
     extract(
         context,

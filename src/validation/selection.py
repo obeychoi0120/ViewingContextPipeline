@@ -19,9 +19,6 @@ def cohort_directory(context):
 
 
 def validation_arms(context, target=None):
-    configured = active_arms(context.config)
-    if target is not None and set(target) - set(configured):
-        raise ValueError("--target must be a subset of protocol.arms")
     return select_arms(context.config, target)
 
 
@@ -259,10 +256,14 @@ def diagnosis_context(context):
     if not manifest_path.is_file():
         return context
     manifest = read_json(manifest_path)
-    from arm_registry import ARM_CONTRACT, CONCAT_ARM_CONTRACT, EXPERIMENT_CONFIG_VERSION
+    from arm_registry import (
+        ARM_CONTRACT, CONCAT_ARM_CONTRACT, LEGACY_CONCAT_ARM_CONTRACT,
+        EXPERIMENT_CONFIG_VERSION,
+    )
     contract = manifest.get("arm_contract")
     settings = deepcopy(context.config)
-    if contract == CONCAT_ARM_CONTRACT:
+    if contract in {CONCAT_ARM_CONTRACT, LEGACY_CONCAT_ARM_CONTRACT}:
+        settings["historical_arm_contract"] = contract
         settings.pop("schema_version", None)
         settings["experiment_config_version"] = EXPERIMENT_CONFIG_VERSION
     elif contract == ARM_CONTRACT:
@@ -275,6 +276,9 @@ def diagnosis_context(context):
         settings["schema_version"] = "viewing-context-config/v5"
     names = manifest.get("arms") or [p.stem for p in (context.representations_dir / ".inputs").glob("*.json")]
     from arm_registry import registry
-    settings["protocol"]["arms"] = list(names) or list(registry(settings))
-    settings["protocol"]["description_extractors"] = (["qwen"] if contract == CONCAT_ARM_CONTRACT else ["qwen", "gemini"])
+    if contract == CONCAT_ARM_CONTRACT:
+        settings["protocol"].pop("arms", None)
+    else:
+        settings["protocol"]["arms"] = list(names) or list(registry(settings))
+    settings["protocol"]["description_extractors"] = (["qwen"] if contract == LEGACY_CONCAT_ARM_CONTRACT else ["qwen", "gemini"])
     return replace(context, config=settings)

@@ -1,0 +1,60 @@
+content_id_suffix	scene_idx	selection	keyframes_checked	note
+00001	0	systematic	no	Qwen의 character interaction은 장르 구분력이 낮고 Gemini는 motion comic/fantasy를 남김. 상세 인물 서사는 정답으로 취급하지 않음.
+00011	0	systematic	no	Qwen은 generic interaction 및 pulling/being pulled 표현, Gemini는 martial arts와 역할을 명시.
+00021	0	systematic	no	Qwen food preparation 대비 Gemini Korean BBQ/review가 더 구체적. 육류 종류는 미확정.
+00031	0	systematic	no	정치 영상에서 Qwen 다수 인물과 raw 행동 나열, Gemini news report/explanation. 사실 정확도는 미확정.
+00041	0	systematic	no	지리 영상에서 Qwen의 사람 엔티티와 animation 분류가 의심됨. Gemini mixed/geography.
+00051	0	systematic	no	Qwen track running 대비 Gemini sprinting/athletic training/highlights.
+00061	0	systematic	no	Qwen firing의 대상으로 총기 사용, Gemini tool로 총기 표현. Qwen raw.
+00071	0	systematic	no	Gemini가 prisoner/cage 등의 역할·상태를 더 직접적으로 보존.
+00081	0	systematic	yes	Qwen은 문을 공격 도구로 연결. 프레임은 문 앞 소모품 사용을 보여 Gemini 표현이 더 부합.
+00091	0	systematic	no	Qwen generic forest adventure 대비 Gemini logger/chainsaw 역할 구체화.
+00101	0	systematic	no	Qwen rescue mission은 추론 여부 확인 필요. Gemini는 역할·물체 위주에 Actions 없음.
+00111	0	systematic	no	Qwen 인물 세분화와 bird 대상 walking. Gemini kiss/flying/holding 표현. 방향은 미확정.
+00121	0	systematic	no	Qwen 다수 공격 연결 대비 Gemini 동결 및 화면 오버레이 구별.
+00131	0	systematic	no	자동차 영상에서 Qwen narrative 대비 Gemini review/minivans.
+00141	0	systematic	no	Qwen raw. 두 모델의 판타지 서사·변신 해석은 키프레임 미확인.
+00151	0	systematic	no	Qwen character combat 대비 Gemini MOBA와 minion wave 역할 보존.
+00161	0	systematic	no	Qwen holding building 등 대상 연결 의심. Gemini envelope와 장르 정보 보존.
+00171	0	systematic	no	Qwen floor 중심 raw 나열 대비 Gemini concrete/wooden form/wall painting 구분.
+00181	0	systematic	yes	두 사람의 코미디 분장 확인. 흰 소품이 phone인지 candle인지는 화면만으로 확정하지 않음.
+00191	0	systematic	no	Qwen office interaction 대비 Gemini period drama; 소품 묶음·인물 구분 차이.
+00201	0	systematic	yes	Gemini의 거울과 머리 손질이 후반 프레임에 부합. 책도 실제 존재하므로 Qwen book 자체를 오인으로 보지 않음.
+00211	0	systematic	no	Qwen 로봇이 무기를 공격 대상으로 연결하고 raw. CGI 장면 medium의 정답은 확정하지 않음.
+00221	0	systematic	no	Qwen rock face를 질문의 도구로 연결. Gemini phone call 등 표현; 프레임 미확인.
+00231	0	systematic	no	Gemini 게임 선택 UI와 전투 역할을 구별. Qwen 일반 공격으로 축약.
+00241	0	systematic	no	Qwen 중국어 텍스트 속성과 쇼트 간 filming 연결. Gemini entrepreneurship/vlogging.
+00251	0	systematic	yes	Qwen 세 명의 대화를 table 도구로 연결하고 black hair/red eyes를 반복. 프레임은 전통 복식 대화이며 붉은 눈 근거 없음.
+00261	0	systematic	no	Qwen glue를 tying의 tool로 연결하고 raw. Gemini adhesive application의 대상은 shoe.
+00271	0	systematic	no	Qwen 많은 등장인물을 한 인물에 연결. Gemini 전화와 서로 다른 배경을 구별.
+00281	0	systematic	no	Qwen playing 대상 table 및 실제 선수 이름 저장, raw. Gemini 탁구 선수 간 경기 관계.
+00291	0	systematic	no	Qwen 반복 캐릭터/적과 raw. Gemini MOBA/team fight 및 역할 차이.
+00301	0	systematic	no	Qwen 여러 쇼트의 인물들을 연결. Gemini school life/anime 및 빈 Actions.
+00311	0	systematic	no	Qwen raising hand 대비 Gemini grabbing wrist. 정확한 행동은 미확정.
+00321	0	systematic	no	Qwen costume interaction/narrative 대비 Gemini cosplay/roleplay/performance.
+00331	0	systematic	no	Qwen prison/escape/plan 대비 Gemini comedy sketch/prison parody. 상자 주체 차이 미확정.
+00341	0	systematic	yes	키프레임에는 구름 풍경·중앙 문구·하단 오디오 시각화가 있고 사람은 보이지 않음. Qwen person/looking at clouds는 근거 없음.
+00351	0	systematic	no	Qwen wildlife, Gemini surreal nature/duplicated visual trail. medium 판정은 유보.
+00361	0	systematic	no	Qwen combat strategy 대비 Gemini MOBA/esports/tournament. 대회 여부는 검증하지 않음.
+00371	0	systematic	no	Qwen chalkboard를 pointing 대상으로 사용. Gemini camera direction. 동일 인물 여부 미확정.
+00381	0	systematic	no	Qwen 책·컴퓨터 등을 대화/보행의 tool로 연결. Gemini school drama와 binoculars.
+00391	0	systematic	no	Qwen ring 중심 raw 나열, Gemini boxing/combat sports와 referee 역할.
+00401	0	systematic	no	Qwen raw이고 monitor/cup를 tool 슬롯에 중복 나열. Gemini customer service/clerk.
+00411	0	systematic	no	Qwen 적 10개와 공격 10회 나열. Gemini MOBA/hero build/설정 UI 및 jungle monster.
+00421	0	systematic	no	Description puzzle game, Qwen character movement, Gemini battle royale. 장르 정답 유보.
+00431	0	systematic	no	Qwen receiving award 대비 Gemini speech/microphone/award envelope. 실제 수상 동작은 미확정.
+00441	0	systematic	no	Qwen 숫자를 health로 저장하고 shield를 공격 도구로 사용. Gemini 역할·방향 구분; 세부 정답 유보.
+00451	0	systematic	no	Qwen raw이고 character interaction 중심. Gemini motion comic/fantasy. 성별·방향 정답 유보.
+00461	0	systematic	no	Qwen animation/emergency evacuation 대비 Gemini roleplay gameplay/story simulation.
+00471	0	systematic	yes	여성이 촛불을 들고 뒤의 남성이 입을 가리는 프레임 확인. Gemini 역할·방향이 더 명료. Qwen black hair/red eyes 반복은 근거 없음.
+00481	0	systematic	no	Qwen table/tea set/guitar 조합 대비 Gemini flying/emoting. 프레임 미확인으로 환각 확정하지 않음.
+00491	0	systematic	no	Qwen raw 다수 인물 연결 대비 Gemini sniper/rifle/aiming의 도구 구분.
+00008	1	regression	yes	Qwen과 Gemini 모두 sea urchin을 절단 대상으로 보존. 실제 도구는 가위로 보이며 Description과 Qwen은 knife. 여성이 젓가락으로 계란을 젓는 장면을 Qwen은 남성/웍 도구로 합침.
+00012	0	targeted	yes	귀 모형과 면봉 확인. Gemini dummy head microphone 해석은 전체 장면과 잘 부합. Qwen도 귀 청소 핵심 행동 보존.
+00012	2	targeted	yes	귀 모형·귀이개·크림 통 장면을 Qwen은 cooking/pan/stirring으로 오인. Summary에도 cooking segment가 전달됨.
+00032	1	regression	yes	가방에 태블릿과 공책을 넣는 핵심 활동을 양쪽 Graph 모두 보존. backpack을 tool로 쓰는 것은 현재 스키마의 destination 표현 한계도 반영.
+00048	0	regression	yes	Qwen 한 캐릭터를 여러 개로 늘리지 않지만 판타지 시각효과 맥락 누락. 마지막 실루엣 동일성은 확정하지 않아 Gemini의 별도 figure가 오류라고 단정하지 않음.
+00054	2	regression	yes	실제 아이템 강화 UI. Qwen null actor/upgrading은 적절하나 character portrait topic은 불일치. Description의 character enhancement도 정확하지 않음.
+00084	2	regression	yes	UI로 외형 편집. Qwen은 avatar가 head를 selecting한다고 연결. Gemini는 actor null로 편집 표현. 마지막 남성형 아바타와 이전 아바타 동일성은 유보.
+00096	0	regression	yes	화장 비교와 설명 및 머리핀 조정. 양쪽 Graph와 Summary 모두 자연스러운 옅은 화장/대상 얼굴 특징이라는 차별점을 충분히 보존하지 않음.
+00098	0	regression	yes	같은 투명 컵에 주스와 차를 붓는 장면. 두 Graph 모두 컵 중복 없음. Qwen은 raw이며 재료-동작 연결이 불분명하고 Gemini는 각각 연결.

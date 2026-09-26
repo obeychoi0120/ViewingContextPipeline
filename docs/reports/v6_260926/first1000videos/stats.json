@@ -1,0 +1,192 @@
+{
+  "scope": "first 1000 catalog videos by content_id; all expected scenes aligned",
+  "first": "microlens_100k_00001",
+  "last": "microlens_100k_01000",
+  "videos": 1000,
+  "expected_scenes": 5885,
+  "paired_scenes": 5884,
+  "paired_videos": 1000,
+  "arms": {
+    "desc_gemini": {
+      "saved_videos": 1000,
+      "saved_scenes": 5885,
+      "missing_scenes": [],
+      "raw": 0,
+      "structured": 0,
+      "warnings": {},
+      "failure_count": 0,
+      "failure_errors": {},
+      "tokens_mean": 125.8212404418012,
+      "summary_files": 0,
+      "failure_prompt_hashes": {}
+    },
+    "graph_gemini": {
+      "saved_videos": 1000,
+      "saved_scenes": 5884,
+      "missing_scenes": [
+        [
+          "microlens_100k_00888",
+          0
+        ]
+      ],
+      "raw": 53,
+      "structured": 5831,
+      "warnings": {
+        "INVALID_REFERENCE": 18,
+        "INVALID_ACTION_SYNTAX": 36
+      },
+      "failure_count": 0,
+      "failure_errors": {},
+      "tokens_mean": 90.02498300475867,
+      "summary_files": 0,
+      "failure_prompt_hashes": {}
+    }
+  },
+  "graph_paired_structured": {
+    "scenes": 5831,
+    "empty_actions": 382,
+    "entity_mean": 3.6338535414165665,
+    "actions_mean": 2.1855599382610187,
+    "formats": {
+      "narrative": 3615,
+      "demonstration": 361,
+      "other": 152,
+      "highlights": 1089,
+      "explanation": 155,
+      "performance": 185,
+      "review": 209,
+      "interview": 39,
+      "vlog": 16,
+      "unknown": 2,
+      "gameplay": 2,
+      "commentary": 3,
+      "documentary": 1,
+      "monologue": 1,
+      "simulation": 1
+    },
+    "topics": [
+      [
+        "drama",
+        533
+      ],
+      [
+        "conversation",
+        270
+      ],
+      [
+        "mobile game",
+        226
+      ],
+      [
+        "mobile moba",
+        187
+      ],
+      [
+        "food tasting",
+        173
+      ],
+      [
+        "movie scene",
+        155
+      ],
+      [
+        "confrontation",
+        152
+      ],
+      [
+        "battle royale",
+        131
+      ],
+      [
+        "motion comic",
+        128
+      ],
+      [
+        "period drama",
+        127
+      ],
+      [
+        "cartoon",
+        123
+      ],
+      [
+        "mukbang",
+        118
+      ],
+      [
+        "mobile moba game",
+        101
+      ],
+      [
+        "anime",
+        100
+      ],
+      [
+        "mobile gaming",
+        95
+      ],
+      [
+        "animated comedy",
+        92
+      ],
+      [
+        "team fight",
+        91
+      ],
+      [
+        "anime recap",
+        82
+      ],
+      [
+        "sandbox game",
+        79
+      ],
+      [
+        "anime scene",
+        77
+      ],
+      [
+        "comedy",
+        74
+      ],
+      [
+        "movie clip",
+        71
+      ],
+      [
+        "fantasy",
+        70
+      ],
+      [
+        "tokusatsu",
+        65
+      ],
+      [
+        "dining",
+        64
+      ],
+      [
+        "cooking",
+        59
+      ],
+      [
+        "martial arts",
+        59
+      ],
+      [
+        "singing",
+        55
+      ],
+      [
+        "shooter game",
+        54
+      ],
+      [
+        "eating show",
+        53
+      ]
+    ]
+  },
+  "paired_desc_words_mean": 102.53518014955813,
+  "pairs_sha256": "bfcb3ae691cc6317033881cd41ad828f6adbd75b29821da749ef968a4c24b435"
+}

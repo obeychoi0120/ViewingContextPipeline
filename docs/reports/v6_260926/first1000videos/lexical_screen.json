@@ -1,0 +1,17 @@
+{
+  "commentary_or_recap": {
+    "desc_mentions": 2246,
+    "graph_no_same_pattern": 1979,
+    "note": "lexical screening only; not semantic omission rate"
+  },
+  "comparison_or_test": {
+    "desc_mentions": 793,
+    "graph_no_same_pattern": 737,
+    "note": "lexical screening only; not semantic omission rate"
+  },
+  "visual_style": {
+    "desc_mentions": 978,
+    "graph_no_same_pattern": 974,
+    "note": "lexical screening only; not semantic omission rate"
+  }
+}

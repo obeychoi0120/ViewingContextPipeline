@@ -31,8 +31,18 @@ def shareable_document(doc):
         # Missing/failed visual inputs have a deterministic metadata-only or zero representation.
         return doc.get("summary_status") in {"missing", "failed", "not_applicable"}
     prov = doc.get("source_provenance", {})
+    if not verified_generation(prov):
+        return False
+    # Compact scenes omit generation metadata. Their content fingerprint still
+    # binds the Summary to its actual input, and semantic_documents also hashes
+    # the actual Summary text and its recorded generation settings. Never infer
+    # historical Scene prompts from the current configuration.
+    scene_hash = prov.get("scene_input_hash")
+    if (isinstance(scene_hash, str) and len(scene_hash) == 64
+            and all(char in "0123456789abcdef" for char in scene_hash)):
+        return True
     scenes = prov.get("scene_provenance")
-    return (verified_generation(prov) and isinstance(scenes, list) and bool(scenes)
+    return (isinstance(scenes, list) and bool(scenes)
             and all(verified_generation(p) for p in scenes))
 
 

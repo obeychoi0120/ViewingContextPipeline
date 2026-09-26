@@ -43,7 +43,7 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
     extraction = context.config["extraction"]
     kind = "graph" if arm.representation == "graph" else "description"
     settings = {
-        "max_new_tokens": extraction[kind][
+        "max_new_tokens": extraction[kind][source][
             "summary_max_new_tokens" if summary else "scene_max_new_tokens"
         ]
     }
@@ -119,7 +119,7 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
         rows = scene_generation_rows(
             visual,
             prompt=prompt,
-            max_new_tokens=settings[representation]["scene_max_new_tokens"],
+            max_new_tokens=settings[representation][model]["scene_max_new_tokens"],
             repetition_penalty=initial_penalty,
             scenes=scenes,
         )

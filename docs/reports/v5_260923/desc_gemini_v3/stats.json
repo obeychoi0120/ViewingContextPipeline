@@ -1,0 +1,37 @@
+{
+  "run": "v5_260923",
+  "available_video_files": 2688,
+  "video_files": 1000,
+  "scenes_in_first1000_videos": 5880,
+  "sample_scenes": 1000,
+  "selection": "content_id ascending first 1000 videos; sorted scene index at zero-based video rank modulo scene count",
+  "words": {
+    "mean": 187.73,
+    "median": 189.0,
+    "min": 63,
+    "max": 259
+  },
+  "words_over350": 0,
+  "signals_present": {
+    "shot_narration": 663,
+    "sequencing": 791,
+    "appearance": 776,
+    "text_mentions": 496,
+    "audio_claims": 62,
+    "interpretation": 107,
+    "viewer_pitch": 1,
+    "instruction_focus": 113
+  },
+  "han_present": 7,
+  "quoted_span_present": 40,
+  "signal_patterns": {
+    "shot_narration": "\\b(close[- ]up|medium shot|wide shot|camera|frame|view shifts|cuts? to|sequence begins)\\b",
+    "sequencing": "\\b(initially|subsequently|finally|then|later|transitions?|sequence begins|scene (?:begins|ends))\\b",
+    "appearance": "\\b(hair|eyes|shirt|jacket|dress|robe|wearing|clad|outfit)\\b",
+    "text_mentions": "\\b(subtitles?|captions?|on-screen text|text overlay|text overlays|watermark|written|text reads|text states)\\b",
+    "audio_claims": "\\b(narrator|narration|voiceover|voice-over|soundtrack|music|singing|says|explains|discusses)\\b",
+    "interpretation": "\\b(suggesting|suggests|implying|implies|presumably|likely|appears to|seems to|possibly)\\b",
+    "viewer_pitch": "\\b(viewers? (?:who|interested|seeking|looking)|well-suited|appeals? to|ideal for|perfect for)\\b",
+    "instruction_focus": "\\b(tutorial|demonstrat\\w+|compar\\w+|technique|beginner|customiz\\w+|upgrad\\w+|review|explain\\w+)\\b"
+  }
+}

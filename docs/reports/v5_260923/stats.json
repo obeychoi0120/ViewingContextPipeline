@@ -1,0 +1,1661 @@
+{
+  "selection": {
+    "ids": [
+      "microlens_100k_00001",
+      "microlens_100k_00002",
+      "microlens_100k_00003",
+      "microlens_100k_00004",
+      "microlens_100k_00005",
+      "microlens_100k_00006",
+      "microlens_100k_00007",
+      "microlens_100k_00008",
+      "microlens_100k_00009",
+      "microlens_100k_00010",
+      "microlens_100k_00011",
+      "microlens_100k_00012",
+      "microlens_100k_00013",
+      "microlens_100k_00014",
+      "microlens_100k_00015",
+      "microlens_100k_00016",
+      "microlens_100k_00017",
+      "microlens_100k_00018",
+      "microlens_100k_00019",
+      "microlens_100k_00020",
+      "microlens_100k_00021",
+      "microlens_100k_00022",
+      "microlens_100k_00023",
+      "microlens_100k_00024",
+      "microlens_100k_00025",
+      "microlens_100k_00026",
+      "microlens_100k_00027",
+      "microlens_100k_00028",
+      "microlens_100k_00029",
+      "microlens_100k_00030",
+      "microlens_100k_00031",
+      "microlens_100k_00032",
+      "microlens_100k_00033",
+      "microlens_100k_00034",
+      "microlens_100k_00035",
+      "microlens_100k_00036",
+      "microlens_100k_00037",
+      "microlens_100k_00038",
+      "microlens_100k_00039",
+      "microlens_100k_00040",
+      "microlens_100k_00041",
+      "microlens_100k_00042",
+      "microlens_100k_00043",
+      "microlens_100k_00044",
+      "microlens_100k_00045",
+      "microlens_100k_00046",
+      "microlens_100k_00047",
+      "microlens_100k_00048",
+      "microlens_100k_00049",
+      "microlens_100k_00050",
+      "microlens_100k_00051",
+      "microlens_100k_00052",
+      "microlens_100k_00053",
+      "microlens_100k_00054",
+      "microlens_100k_00055",
+      "microlens_100k_00056",
+      "microlens_100k_00057",
+      "microlens_100k_00058",
+      "microlens_100k_00059",
+      "microlens_100k_00060",
+      "microlens_100k_00061",
+      "microlens_100k_00062",
+      "microlens_100k_00063",
+      "microlens_100k_00064",
+      "microlens_100k_00065",
+      "microlens_100k_00066",
+      "microlens_100k_00067",
+      "microlens_100k_00068",
+      "microlens_100k_00069",
+      "microlens_100k_00070",
+      "microlens_100k_00071",
+      "microlens_100k_00072",
+      "microlens_100k_00073",
+      "microlens_100k_00074",
+      "microlens_100k_00075",
+      "microlens_100k_00076",
+      "microlens_100k_00077",
+      "microlens_100k_00078",
+      "microlens_100k_00079",
+      "microlens_100k_00080",
+      "microlens_100k_00081",
+      "microlens_100k_00082",
+      "microlens_100k_00083",
+      "microlens_100k_00084",
+      "microlens_100k_00085",
+      "microlens_100k_00086",
+      "microlens_100k_00087",
+      "microlens_100k_00088",
+      "microlens_100k_00089",
+      "microlens_100k_00090",
+      "microlens_100k_00091",
+      "microlens_100k_00092",
+      "microlens_100k_00093",
+      "microlens_100k_00094",
+      "microlens_100k_00095",
+      "microlens_100k_00096",
+      "microlens_100k_00097",
+      "microlens_100k_00098",
+      "microlens_100k_00099",
+      "microlens_100k_00100",
+      "microlens_100k_00101",
+      "microlens_100k_00102",
+      "microlens_100k_00103",
+      "microlens_100k_00104",
+      "microlens_100k_00105",
+      "microlens_100k_00106",
+      "microlens_100k_00107",
+      "microlens_100k_00108",
+      "microlens_100k_00109",
+      "microlens_100k_00110",
+      "microlens_100k_00111",
+      "microlens_100k_00112",
+      "microlens_100k_00113",
+      "microlens_100k_00114",
+      "microlens_100k_00115",
+      "microlens_100k_00116",
+      "microlens_100k_00117",
+      "microlens_100k_00118",
+      "microlens_100k_00119",
+      "microlens_100k_00120",
+      "microlens_100k_00121",
+      "microlens_100k_00122",
+      "microlens_100k_00123",
+      "microlens_100k_00124",
+      "microlens_100k_00125",
+      "microlens_100k_00126",
+      "microlens_100k_00127",
+      "microlens_100k_00128",
+      "microlens_100k_00129",
+      "microlens_100k_00130",
+      "microlens_100k_00131",
+      "microlens_100k_00132",
+      "microlens_100k_00133",
+      "microlens_100k_00134",
+      "microlens_100k_00135",
+      "microlens_100k_00136",
+      "microlens_100k_00137",
+      "microlens_100k_00138",
+      "microlens_100k_00139",
+      "microlens_100k_00140",
+      "microlens_100k_00141",
+      "microlens_100k_00142",
+      "microlens_100k_00143",
+      "microlens_100k_00144",
+      "microlens_100k_00145",
+      "microlens_100k_00146",
+      "microlens_100k_00147",
+      "microlens_100k_00148",
+      "microlens_100k_00149",
+      "microlens_100k_00150",
+      "microlens_100k_00151",
+      "microlens_100k_00152",
+      "microlens_100k_00153",
+      "microlens_100k_00154",
+      "microlens_100k_00155",
+      "microlens_100k_00156",
+      "microlens_100k_00157",
+      "microlens_100k_00158",
+      "microlens_100k_00159",
+      "microlens_100k_00160",
+      "microlens_100k_00161",
+      "microlens_100k_00162",
+      "microlens_100k_00163",
+      "microlens_100k_00164",
+      "microlens_100k_00165",
+      "microlens_100k_00166",
+      "microlens_100k_00167",
+      "microlens_100k_00168",
+      "microlens_100k_00169",
+      "microlens_100k_00170",
+      "microlens_100k_00171",
+      "microlens_100k_00172",
+      "microlens_100k_00173",
+      "microlens_100k_00174",
+      "microlens_100k_00175",
+      "microlens_100k_00176",
+      "microlens_100k_00177",
+      "microlens_100k_00178",
+      "microlens_100k_00179",
+      "microlens_100k_00180",
+      "microlens_100k_00181",
+      "microlens_100k_00182",
+      "microlens_100k_00183",
+      "microlens_100k_00184",
+      "microlens_100k_00185",
+      "microlens_100k_00186",
+      "microlens_100k_00187",
+      "microlens_100k_00188",
+      "microlens_100k_00189",
+      "microlens_100k_00190",
+      "microlens_100k_00191",
+      "microlens_100k_00192",
+      "microlens_100k_00193",
+      "microlens_100k_00194",
+      "microlens_100k_00195",
+      "microlens_100k_00196",
+      "microlens_100k_00197",
+      "microlens_100k_00198",
+      "microlens_100k_00199",
+      "microlens_100k_00200",
+      "microlens_100k_00201",
+      "microlens_100k_00202",
+      "microlens_100k_00203",
+      "microlens_100k_00204",
+      "microlens_100k_00205",
+      "microlens_100k_00206",
+      "microlens_100k_00207",
+      "microlens_100k_00208",
+      "microlens_100k_00209",
+      "microlens_100k_00210",
+      "microlens_100k_00211",
+      "microlens_100k_00212",
+      "microlens_100k_00213",
+      "microlens_100k_00214",
+      "microlens_100k_00215",
+      "microlens_100k_00216",
+      "microlens_100k_00217",
+      "microlens_100k_00218",
+      "microlens_100k_00219",
+      "microlens_100k_00220",
+      "microlens_100k_00221",
+      "microlens_100k_00222",
+      "microlens_100k_00223",
+      "microlens_100k_00224",
+      "microlens_100k_00225",
+      "microlens_100k_00226",
+      "microlens_100k_00227",
+      "microlens_100k_00228",
+      "microlens_100k_00229",
+      "microlens_100k_00230",
+      "microlens_100k_00231",
+      "microlens_100k_00232",
+      "microlens_100k_00233",
+      "microlens_100k_00234",
+      "microlens_100k_00235",
+      "microlens_100k_00236",
+      "microlens_100k_00237",
+      "microlens_100k_00238",
+      "microlens_100k_00239",
+      "microlens_100k_00240",
+      "microlens_100k_00241",
+      "microlens_100k_00242",
+      "microlens_100k_00243",
+      "microlens_100k_00244",
+      "microlens_100k_00245",
+      "microlens_100k_00246",
+      "microlens_100k_00247",
+      "microlens_100k_00248",
+      "microlens_100k_00249",
+      "microlens_100k_00250",
+      "microlens_100k_00251",
+      "microlens_100k_00252",
+      "microlens_100k_00253",
+      "microlens_100k_00254",
+      "microlens_100k_00255",
+      "microlens_100k_00256",
+      "microlens_100k_00257",
+      "microlens_100k_00258",
+      "microlens_100k_00259",
+      "microlens_100k_00260",
+      "microlens_100k_00261",
+      "microlens_100k_00262",
+      "microlens_100k_00263",
+      "microlens_100k_00264",
+      "microlens_100k_00265",
+      "microlens_100k_00266",
+      "microlens_100k_00267",
+      "microlens_100k_00268",
+      "microlens_100k_00269",
+      "microlens_100k_00270",
+      "microlens_100k_00271",
+      "microlens_100k_00272",
+      "microlens_100k_00273",
+      "microlens_100k_00274",
+      "microlens_100k_00275",
+      "microlens_100k_00276",
+      "microlens_100k_00277",
+      "microlens_100k_00278",
+      "microlens_100k_00279",
+      "microlens_100k_00280",
+      "microlens_100k_00281",
+      "microlens_100k_00282",
+      "microlens_100k_00283",
+      "microlens_100k_00284",
+      "microlens_100k_00285",
+      "microlens_100k_00286",
+      "microlens_100k_00287",
+      "microlens_100k_00288",
+      "microlens_100k_00289",
+      "microlens_100k_00290",
+      "microlens_100k_00291",
+      "microlens_100k_00292",
+      "microlens_100k_00293",
+      "microlens_100k_00294",
+      "microlens_100k_00295",
+      "microlens_100k_00296",
+      "microlens_100k_00297",
+      "microlens_100k_00298",
+      "microlens_100k_00299",
+      "microlens_100k_00300",
+      "microlens_100k_00301",
+      "microlens_100k_00302",
+      "microlens_100k_00303",
+      "microlens_100k_00304",
+      "microlens_100k_00305",
+      "microlens_100k_00306",
+      "microlens_100k_00307",
+      "microlens_100k_00308",
+      "microlens_100k_00309",
+      "microlens_100k_00310",
+      "microlens_100k_00311",
+      "microlens_100k_00312",
+      "microlens_100k_00313",
+      "microlens_100k_00314",
+      "microlens_100k_00315",
+      "microlens_100k_00316",
+      "microlens_100k_00317",
+      "microlens_100k_00318",
+      "microlens_100k_00319",
+      "microlens_100k_00320",
+      "microlens_100k_00321",
+      "microlens_100k_00322",
+      "microlens_100k_00323",
+      "microlens_100k_00324",
+      "microlens_100k_00325",
+      "microlens_100k_00326",
+      "microlens_100k_00327",
+      "microlens_100k_00328",
+      "microlens_100k_00329",
+      "microlens_100k_00330",
+      "microlens_100k_00331",
+      "microlens_100k_00332",
+      "microlens_100k_00333",
+      "microlens_100k_00334",
+      "microlens_100k_00335",
+      "microlens_100k_00336",
+      "microlens_100k_00337",
+      "microlens_100k_00338",
+      "microlens_100k_00339",
+      "microlens_100k_00340",
+      "microlens_100k_00341",
+      "microlens_100k_00342",
+      "microlens_100k_00343",
+      "microlens_100k_00344",
+      "microlens_100k_00345",
+      "microlens_100k_00346",
+      "microlens_100k_00347",
+      "microlens_100k_00348",
+      "microlens_100k_00349",
+      "microlens_100k_00350",
+      "microlens_100k_00351",
+      "microlens_100k_00352",
+      "microlens_100k_00353",
+      "microlens_100k_00354",
+      "microlens_100k_00355",
+      "microlens_100k_00356",
+      "microlens_100k_00357",
+      "microlens_100k_00358",
+      "microlens_100k_00359",
+      "microlens_100k_00360",
+      "microlens_100k_00361",
+      "microlens_100k_00362",
+      "microlens_100k_00363",
+      "microlens_100k_00364",
+      "microlens_100k_00365",
+      "microlens_100k_00366",
+      "microlens_100k_00367",
+      "microlens_100k_00368",
+      "microlens_100k_00369",
+      "microlens_100k_00370",
+      "microlens_100k_00371",
+      "microlens_100k_00372",
+      "microlens_100k_00373",
+      "microlens_100k_00374",
+      "microlens_100k_00375",
+      "microlens_100k_00376",
+      "microlens_100k_00377",
+      "microlens_100k_00378",
+      "microlens_100k_00379",
+      "microlens_100k_00380",
+      "microlens_100k_00381",
+      "microlens_100k_00382",
+      "microlens_100k_00383",
+      "microlens_100k_00384",
+      "microlens_100k_00385",
+      "microlens_100k_00386",
+      "microlens_100k_00387",
+      "microlens_100k_00388",
+      "microlens_100k_00389",
+      "microlens_100k_00390",
+      "microlens_100k_00391",
+      "microlens_100k_00392",
+      "microlens_100k_00393",
+      "microlens_100k_00394",
+      "microlens_100k_00395",
+      "microlens_100k_00396",
+      "microlens_100k_00397",
+      "microlens_100k_00398",
+      "microlens_100k_00399",
+      "microlens_100k_00400",
+      "microlens_100k_00401",
+      "microlens_100k_00402",
+      "microlens_100k_00403",
+      "microlens_100k_00404",
+      "microlens_100k_00405",
+      "microlens_100k_00406",
+      "microlens_100k_00407",
+      "microlens_100k_00408",
+      "microlens_100k_00409",
+      "microlens_100k_00410",
+      "microlens_100k_00411",
+      "microlens_100k_00412",
+      "microlens_100k_00413",
+      "microlens_100k_00414",
+      "microlens_100k_00415",
+      "microlens_100k_00416",
+      "microlens_100k_00417",
+      "microlens_100k_00418",
+      "microlens_100k_00419",
+      "microlens_100k_00420",
+      "microlens_100k_00421",
+      "microlens_100k_00422",
+      "microlens_100k_00423",
+      "microlens_100k_00424",
+      "microlens_100k_00425",
+      "microlens_100k_00426",
+      "microlens_100k_00427",
+      "microlens_100k_00428",
+      "microlens_100k_00429",
+      "microlens_100k_00430",
+      "microlens_100k_00431",
+      "microlens_100k_00432",
+      "microlens_100k_00433",
+      "microlens_100k_00434",
+      "microlens_100k_00435",
+      "microlens_100k_00436",
+      "microlens_100k_00437",
+      "microlens_100k_00438",
+      "microlens_100k_00439",
+      "microlens_100k_00440",
+      "microlens_100k_00441",
+      "microlens_100k_00442",
+      "microlens_100k_00443",
+      "microlens_100k_00444",
+      "microlens_100k_00445",
+      "microlens_100k_00446",
+      "microlens_100k_00447",
+      "microlens_100k_00448",
+      "microlens_100k_00449",
+      "microlens_100k_00450",
+      "microlens_100k_00451",
+      "microlens_100k_00452",
+      "microlens_100k_00453",
+      "microlens_100k_00454",
+      "microlens_100k_00455",
+      "microlens_100k_00456",
+      "microlens_100k_00457",
+      "microlens_100k_00458",
+      "microlens_100k_00459",
+      "microlens_100k_00460",
+      "microlens_100k_00461",
+      "microlens_100k_00462",
+      "microlens_100k_00463",
+      "microlens_100k_00464",
+      "microlens_100k_00465",
+      "microlens_100k_00466",
+      "microlens_100k_00467",
+      "microlens_100k_00468",
+      "microlens_100k_00469",
+      "microlens_100k_00470",
+      "microlens_100k_00471",
+      "microlens_100k_00472",
+      "microlens_100k_00473",
+      "microlens_100k_00474",
+      "microlens_100k_00475",
+      "microlens_100k_00476",
+      "microlens_100k_00477",
+      "microlens_100k_00478",
+      "microlens_100k_00479",
+      "microlens_100k_00480",
+      "microlens_100k_00481",
+      "microlens_100k_00482",
+      "microlens_100k_00483",
+      "microlens_100k_00484",
+      "microlens_100k_00485",
+      "microlens_100k_00486",
+      "microlens_100k_00487",
+      "microlens_100k_00488",
+      "microlens_100k_00489",
+      "microlens_100k_00490",
+      "microlens_100k_00491",
+      "microlens_100k_00492",
+      "microlens_100k_00493",
+      "microlens_100k_00494",
+      "microlens_100k_00495",
+      "microlens_100k_00496",
+      "microlens_100k_00497",
+      "microlens_100k_00498",
+      "microlens_100k_00499",
+      "microlens_100k_00500"
+    ],
+    "count": 500,
+    "order": "catalog content_id ascending"
+  },
+  "expected_scenes": 2892,
+  "arms": {
+    "desc_qwen": {
+      "scene_files": 500,
+      "saved_scenes": 2892,
+      "missing_scenes": [],
+      "extra_scenes": [],
+      "raw_scenes": 0,
+      "structured_scenes": 0,
+      "videos_with_raw": 0,
+      "warning_tags": {},
+      "scene_output_tokens": {
+        "n": 0
+      },
+      "failure_count": 0,
+      "failure_errors": {},
+      "summary_count": 500,
+      "summary_status": {
+        "complete": 499,
+        "failed": 1
+      },
+      "summary_words": {
+        "n": 499,
+        "mean": 196.13,
+        "median": 201,
+        "p90": 246,
+        "p95": 257,
+        "max": 290
+      },
+      "summary_tokens": {
+        "n": 0
+      },
+      "summary_models": {
+        "gemini-3.8-flash": 500
+      },
+      "summary_prompt_hashes": {
+        "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23": 500
+      },
+      "summary_source_runs": {
+        "v4_260922": 500
+      },
+      "summary_provenance_raw_total": 0,
+      "summary_over_350_words": 0,
+      "summary_noncomplete_ids": [
+        "microlens_100k_00470"
+      ],
+      "cjk_output_scenes": 1570,
+      "failure_max_new_tokens": {}
+    },
+    "graph_qwen": {
+      "scene_files": 500,
+      "saved_scenes": 2885,
+      "missing_scenes": [
+        [
+          "microlens_100k_00013",
+          1
+        ],
+        [
+          "microlens_100k_00047",
+          0
+        ],
+        [
+          "microlens_100k_00061",
+          3
+        ],
+        [
+          "microlens_100k_00266",
+          2
+        ],
+        [
+          "microlens_100k_00298",
+          2
+        ],
+        [
+          "microlens_100k_00402",
+          1
+        ],
+        [
+          "microlens_100k_00479",
+          3
+        ]
+      ],
+      "extra_scenes": [],
+      "raw_scenes": 1172,
+      "structured_scenes": 1713,
+      "videos_with_raw": 398,
+      "warning_tags": {
+        "INVALID_ACTION_SYNTAX": 1142,
+        "INVALID_REFERENCE": 29,
+        "DUPLICATE_ENTITY_ID": 1
+      },
+      "scene_output_tokens": {
+        "n": 2885,
+        "mean": 97.94,
+        "median": 87,
+        "p90": 158,
+        "p95": 176,
+        "max": 256
+      },
+      "failure_count": 7,
+      "failure_errors": {
+        "graph: output truncated at token limit": 7
+      },
+      "summary_count": 500,
+      "summary_status": {
+        "complete": 500
+      },
+      "summary_words": {
+        "n": 500,
+        "mean": 132.08,
+        "median": 137.0,
+        "p90": 184,
+        "p95": 193,
+        "max": 241
+      },
+      "summary_tokens": {
+        "n": 500,
+        "mean": 161.31,
+        "median": 169.0,
+        "p90": 226,
+        "p95": 240,
+        "max": 289
+      },
+      "summary_models": {
+        "gemini-3.8-flash": 500
+      },
+      "summary_prompt_hashes": {
+        "76c85a9e01e58dca7dff3a7d7b45dbfe3b5b67077a5ab8e1bd907c250a4956fe": 500
+      },
+      "summary_source_runs": {
+        "v5_260923": 500
+      },
+      "summary_provenance_raw_total": 1172,
+      "summary_over_350_words": 0,
+      "entity_counts": {
+        "n": 1713,
+        "mean": 4.37,
+        "median": 4,
+        "p90": 8,
+        "p95": 9,
+        "max": 15
+      },
+      "action_counts": {
+        "n": 1713,
+        "mean": 2.63,
+        "median": 2,
+        "p90": 6,
+        "p95": 6,
+        "max": 12
+      },
+      "empty_actions": 0,
+      "actions_total": 4509,
+      "actions_with_tool": 1547,
+      "actions_null_actor": 20,
+      "actions_null_target": 305,
+      "entity_names": [
+        [
+          "person",
+          2492
+        ],
+        [
+          "character",
+          736
+        ],
+        [
+          "enemy",
+          300
+        ],
+        [
+          "player",
+          228
+        ],
+        [
+          "weapon",
+          186
+        ],
+        [
+          "woman",
+          89
+        ],
+        [
+          "table",
+          79
+        ],
+        [
+          "car",
+          78
+        ],
+        [
+          "man",
+          70
+        ],
+        [
+          "bowl",
+          65
+        ],
+        [
+          "game item",
+          64
+        ],
+        [
+          "sword",
+          64
+        ],
+        [
+          "food",
+          61
+        ],
+        [
+          "chopsticks",
+          54
+        ],
+        [
+          "door",
+          46
+        ],
+        [
+          "text",
+          42
+        ],
+        [
+          "phone",
+          41
+        ],
+        [
+          "shield",
+          37
+        ],
+        [
+          "robot",
+          37
+        ],
+        [
+          "microphone",
+          34
+        ],
+        [
+          "plate",
+          33
+        ],
+        [
+          "enemy unit",
+          32
+        ],
+        [
+          "hero",
+          30
+        ],
+        [
+          "object",
+          30
+        ],
+        [
+          "child",
+          30
+        ],
+        [
+          "item",
+          27
+        ],
+        [
+          "vehicle",
+          26
+        ],
+        [
+          "building",
+          25
+        ],
+        [
+          "window",
+          24
+        ],
+        [
+          "rifle",
+          24
+        ]
+      ],
+      "action_names": [
+        [
+          "speaking",
+          539
+        ],
+        [
+          "attacking",
+          501
+        ],
+        [
+          "looking at",
+          320
+        ],
+        [
+          "holding",
+          256
+        ],
+        [
+          "eating",
+          254
+        ],
+        [
+          "standing",
+          180
+        ],
+        [
+          "walking",
+          104
+        ],
+        [
+          "selecting",
+          84
+        ],
+        [
+          "running",
+          69
+        ],
+        [
+          "talking",
+          68
+        ],
+        [
+          "moving",
+          68
+        ],
+        [
+          "aiming",
+          53
+        ],
+        [
+          "dancing",
+          51
+        ],
+        [
+          "pointing",
+          48
+        ],
+        [
+          "placing",
+          47
+        ],
+        [
+          "looking at p1",
+          47
+        ],
+        [
+          "using",
+          46
+        ],
+        [
+          "driving",
+          45
+        ],
+        [
+          "listening",
+          44
+        ],
+        [
+          "picking up",
+          42
+        ],
+        [
+          "throwing",
+          40
+        ],
+        [
+          "sitting",
+          38
+        ],
+        [
+          "stirring",
+          35
+        ],
+        [
+          "falling",
+          34
+        ],
+        [
+          "pulling",
+          33
+        ]
+      ],
+      "topics": [
+        [
+          "character interaction",
+          242
+        ],
+        [
+          "character combat",
+          68
+        ],
+        [
+          "food tasting",
+          36
+        ],
+        [
+          "character movement",
+          32
+        ],
+        [
+          "food preparation",
+          27
+        ],
+        [
+          "combat strategy",
+          25
+        ],
+        [
+          "character action",
+          24
+        ],
+        [
+          "food eating",
+          20
+        ],
+        [
+          "character portrait",
+          17
+        ],
+        [
+          "character selection",
+          16
+        ],
+        [
+          "mushroom identification",
+          12
+        ],
+        [
+          "cooking preparation",
+          10
+        ],
+        [
+          "character transformation",
+          10
+        ],
+        [
+          "team combat",
+          9
+        ],
+        [
+          "boxing match",
+          9
+        ],
+        [
+          "food review",
+          8
+        ],
+        [
+          "character interaction, emotional expression",
+          8
+        ],
+        [
+          "character introduction",
+          7
+        ],
+        [
+          "character dialogue",
+          6
+        ],
+        [
+          "card collecting",
+          6
+        ],
+        [
+          "character expression",
+          6
+        ],
+        [
+          "makeup application",
+          6
+        ],
+        [
+          "game strategy",
+          6
+        ],
+        [
+          "character emotion",
+          6
+        ],
+        [
+          "family interaction",
+          5
+        ],
+        [
+          "camping setup",
+          5
+        ],
+        [
+          "equipment selection",
+          4
+        ],
+        [
+          "eating food",
+          4
+        ],
+        [
+          "meat preparation",
+          4
+        ],
+        [
+          "character portrayal",
+          4
+        ],
+        [
+          "track running",
+          4
+        ],
+        [
+          "character customization",
+          4
+        ],
+        [
+          "game mechanics",
+          4
+        ],
+        [
+          "resource gathering",
+          4
+        ],
+        [
+          "romantic interaction",
+          4
+        ]
+      ],
+      "media": {
+        "animation": 492,
+        "live_action": 846,
+        "gameplay": 363,
+        "screen_recording": 11,
+        "performance": 1
+      },
+      "formats": {
+        "narrative": 1104,
+        "demonstration": 392,
+        "review": 52,
+        "performance": 46,
+        "interview": 50,
+        "explanation": 56,
+        "unknown": 4,
+        "highlights": 5,
+        "other": 4
+      },
+      "self_actions": 75,
+      "exact_entity_duplicate_scenes": 228,
+      "summary_noncomplete_ids": [],
+      "cjk_output_scenes": 70,
+      "raw_parser_replay": {
+        "graph text repair failed: expected actor - action - target; tool (use none for missing values)": 830,
+        "graph text repair failed: expected endpoint IDs or none": 295,
+        "parsed; downstream validation failed": 34,
+        "graph text repair failed: expected exactly two unambiguous relation delimiters": 11,
+        "graph text repair failed: incomplete or ambiguous relation; expected subject -> relation -> object": 2
+      },
+      "raw_multiple_actions_same_line_candidates": 920,
+      "raw_missing_tool_separator_candidates": 137,
+      "failure_max_new_tokens": {
+        "256": 7
+      }
+    },
+    "graph_gemini": {
+      "scene_files": 500,
+      "saved_scenes": 2891,
+      "missing_scenes": [
+        [
+          "microlens_100k_00385",
+          2
+        ]
+      ],
+      "extra_scenes": [],
+      "raw_scenes": 25,
+      "structured_scenes": 2866,
+      "videos_with_raw": 24,
+      "warning_tags": {
+        "INVALID_ACTION_SYNTAX": 15,
+        "INVALID_REFERENCE": 10
+      },
+      "scene_output_tokens": {
+        "n": 2891,
+        "mean": 90.49,
+        "median": 91,
+        "p90": 115,
+        "p95": 122,
+        "max": 172
+      },
+      "failure_count": 1,
+      "failure_errors": {
+        "graph: output truncated at token limit": 1
+      },
+      "summary_count": 500,
+      "summary_status": {
+        "complete": 500
+      },
+      "summary_words": {
+        "n": 500,
+        "mean": 138.8,
+        "median": 142.0,
+        "p90": 195,
+        "p95": 211,
+        "max": 248
+      },
+      "summary_tokens": {
+        "n": 500,
+        "mean": 168.29,
+        "median": 172.0,
+        "p90": 237,
+        "p95": 254,
+        "max": 307
+      },
+      "summary_models": {
+        "gemini-3.8-flash": 500
+      },
+      "summary_prompt_hashes": {
+        "76c85a9e01e58dca7dff3a7d7b45dbfe3b5b67077a5ab8e1bd907c250a4956fe": 500
+      },
+      "summary_source_runs": {
+        "v5_260923": 500
+      },
+      "summary_provenance_raw_total": 25,
+      "summary_over_350_words": 0,
+      "entity_counts": {
+        "n": 2866,
+        "mean": 3.67,
+        "median": 4.0,
+        "p90": 5,
+        "p95": 6,
+        "max": 9
+      },
+      "action_counts": {
+        "n": 2866,
+        "mean": 2.19,
+        "median": 2.0,
+        "p90": 3,
+        "p95": 4,
+        "max": 5
+      },
+      "empty_actions": 191,
+      "actions_total": 6265,
+      "actions_with_tool": 888,
+      "actions_null_actor": 351,
+      "actions_null_target": 1311,
+      "entity_names": [
+        [
+          "man",
+          1065
+        ],
+        [
+          "woman",
+          810
+        ],
+        [
+          "person",
+          688
+        ],
+        [
+          "game character",
+          385
+        ],
+        [
+          "cartoon character",
+          288
+        ],
+        [
+          "player character",
+          253
+        ],
+        [
+          "character",
+          161
+        ],
+        [
+          "chopsticks",
+          111
+        ],
+        [
+          "boy",
+          102
+        ],
+        [
+          "animated character",
+          98
+        ],
+        [
+          "soldier",
+          98
+        ],
+        [
+          "girl",
+          96
+        ],
+        [
+          "male character",
+          89
+        ],
+        [
+          "female character",
+          81
+        ],
+        [
+          "smartphone",
+          81
+        ],
+        [
+          "young man",
+          81
+        ],
+        [
+          "anime character",
+          62
+        ],
+        [
+          "young woman",
+          61
+        ],
+        [
+          "enemy character",
+          57
+        ],
+        [
+          "car",
+          55
+        ],
+        [
+          "player avatar",
+          55
+        ],
+        [
+          "child",
+          54
+        ],
+        [
+          "microphone",
+          50
+        ],
+        [
+          "basketball player",
+          49
+        ],
+        [
+          "food",
+          45
+        ],
+        [
+          "table tennis player",
+          38
+        ],
+        [
+          "bowl",
+          34
+        ],
+        [
+          "game avatar",
+          33
+        ],
+        [
+          "elderly man",
+          33
+        ],
+        [
+          "older man",
+          33
+        ]
+      ],
+      "action_names": [
+        [
+          "holding",
+          549
+        ],
+        [
+          "talking to",
+          340
+        ],
+        [
+          "attacking",
+          238
+        ],
+        [
+          "eating",
+          171
+        ],
+        [
+          "confronting",
+          112
+        ],
+        [
+          "looking at",
+          98
+        ],
+        [
+          "speaking to",
+          78
+        ],
+        [
+          "aiming",
+          73
+        ],
+        [
+          "displaying",
+          66
+        ],
+        [
+          "approaching",
+          66
+        ],
+        [
+          "facing",
+          63
+        ],
+        [
+          "opening",
+          52
+        ],
+        [
+          "carrying",
+          52
+        ],
+        [
+          "driving",
+          47
+        ],
+        [
+          "speaking",
+          46
+        ],
+        [
+          "shooting",
+          45
+        ],
+        [
+          "eating from",
+          44
+        ],
+        [
+          "fighting",
+          44
+        ],
+        [
+          "placing",
+          40
+        ],
+        [
+          "showing",
+          39
+        ],
+        [
+          "aiming at",
+          38
+        ],
+        [
+          "singing into",
+          36
+        ],
+        [
+          "riding",
+          35
+        ],
+        [
+          "touching",
+          34
+        ],
+        [
+          "gesturing",
+          34
+        ]
+      ],
+      "topics": [
+        [
+          "drama",
+          213
+        ],
+        [
+          "mobile game",
+          122
+        ],
+        [
+          "conversation",
+          116
+        ],
+        [
+          "mobile moba",
+          105
+        ],
+        [
+          "battle royale",
+          95
+        ],
+        [
+          "motion comic",
+          84
+        ],
+        [
+          "cartoon",
+          75
+        ],
+        [
+          "food tasting",
+          71
+        ],
+        [
+          "confrontation",
+          64
+        ],
+        [
+          "period drama",
+          61
+        ],
+        [
+          "movie scene",
+          60
+        ],
+        [
+          "animated comedy",
+          56
+        ],
+        [
+          "team fight",
+          51
+        ],
+        [
+          "mukbang",
+          50
+        ],
+        [
+          "mobile moba game",
+          44
+        ],
+        [
+          "anime",
+          41
+        ],
+        [
+          "anime recap",
+          40
+        ],
+        [
+          "cooking",
+          37
+        ],
+        [
+          "fantasy",
+          36
+        ],
+        [
+          "comedy",
+          35
+        ],
+        [
+          "fantasy animation",
+          34
+        ],
+        [
+          "eating show",
+          34
+        ],
+        [
+          "sandbox game",
+          33
+        ],
+        [
+          "mobile shooter game",
+          32
+        ],
+        [
+          "school life",
+          31
+        ],
+        [
+          "fantasy battle",
+          30
+        ],
+        [
+          "daily life",
+          30
+        ],
+        [
+          "shooter game",
+          30
+        ],
+        [
+          "rural life",
+          28
+        ],
+        [
+          "food preparation",
+          27
+        ],
+        [
+          "dining",
+          27
+        ],
+        [
+          "mobile gaming",
+          27
+        ],
+        [
+          "vlog",
+          27
+        ],
+        [
+          "honor of kings",
+          27
+        ],
+        [
+          "romance",
+          26
+        ]
+      ],
+      "media": {
+        "animation": 736,
+        "live_action": 1405,
+        "mixed": 144,
+        "screen_recording": 23,
+        "gameplay": 553,
+        "unknown": 5
+      },
+      "formats": {
+        "narrative": 1760,
+        "demonstration": 190,
+        "other": 76,
+        "highlights": 560,
+        "explanation": 72,
+        "performance": 90,
+        "review": 85,
+        "interview": 24,
+        "vlog": 6,
+        "unknown": 2,
+        "presentation": 1
+      },
+      "self_actions": 71,
+      "exact_entity_duplicate_scenes": 50,
+      "summary_noncomplete_ids": [],
+      "cjk_output_scenes": 2,
+      "raw_parser_replay": {
+        "graph text repair failed: expected endpoint IDs or none": 4,
+        "parsed; downstream validation failed": 19,
+        "graph text repair failed: expected exactly two unambiguous relation delimiters": 2
+      },
+      "raw_multiple_actions_same_line_candidates": 0,
+      "raw_missing_tool_separator_candidates": 0,
+      "failure_max_new_tokens": {
+        "256": 1
+      }
+    }
+  },
+  "graph_pair": {
+    "aligned": 2884,
+    "both_structured": 1697,
+    "medium_agreement": 1551,
+    "format_agreement": 1125,
+    "paired_metrics": {
+      "graph_qwen": {
+        "scenes": 1697,
+        "mean_entities": 4.37,
+        "mean_actions": 2.63,
+        "empty_actions": 0,
+        "exact_entity_duplicate_scenes": 226,
+        "actions_total": 4461,
+        "actions_with_tool": 1542,
+        "exact_character_interaction_topic": 241,
+        "black_hair_red_eyes_scenes": 241,
+        "prompt_limit_exceeded_scenes": 520
+      },
+      "graph_gemini": {
+        "scenes": 1697,
+        "mean_entities": 3.51,
+        "mean_actions": 2.09,
+        "empty_actions": 149,
+        "exact_entity_duplicate_scenes": 29,
+        "actions_total": 3543,
+        "actions_with_tool": 561,
+        "exact_character_interaction_topic": 5,
+        "black_hair_red_eyes_scenes": 0,
+        "prompt_limit_exceeded_scenes": 17
+      }
+    },
+    "format_disagreements": [
+      {
+        "qwen": "demonstration",
+        "gemini": "highlights",
+        "count": 165
+      },
+      {
+        "qwen": "narrative",
+        "gemini": "highlights",
+        "count": 116
+      },
+      {
+        "qwen": "demonstration",
+        "gemini": "narrative",
+        "count": 28
+      },
+      {
+        "qwen": "demonstration",
+        "gemini": "performance",
+        "count": 26
+      },
+      {
+        "qwen": "narrative",
+        "gemini": "other",
+        "count": 24
+      },
+      {
+        "qwen": "demonstration",
+        "gemini": "other",
+        "count": 23
+      },
+      {
+        "qwen": "demonstration",
+        "gemini": "review",
+        "count": 21
+      },
+      {
+        "qwen": "interview",
+        "gemini": "narrative",
+        "count": 18
+      },
+      {
+        "qwen": "performance",
+        "gemini": "highlights",
+        "count": 16
+      },
+      {
+        "qwen": "demonstration",
+        "gemini": "explanation",
+        "count": 13
+      },
+      {
+        "qwen": "narrative",
+        "gemini": "demonstration",
+        "count": 13
+      },
+      {
+        "qwen": "explanation",
+        "gemini": "narrative",
+        "count": 11
+      },
+      {
+        "qwen": "narrative",
+        "gemini": "review",
+        "count": 9
+      },
+      {
+        "qwen": "explanation",
+        "gemini": "demonstration",
+        "count": 9
+      },
+      {
+        "qwen": "narrative",
+        "gemini": "performance",
+        "count": 8
+      }
+    ]
+  },
+  "desc_v4_byte_identical": {
+    "scenes": 500,
+    "summaries": 500
+  }
+}

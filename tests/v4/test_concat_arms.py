@@ -18,16 +18,12 @@ from arm_registry import (
 from extraction import steps
 from pipeline_runtime import read_json, read_jsonl, write_json, write_jsonl
 from validation.representation_inputs import documents_for_arm
-from validation.representation_provenance import read_state
+from validation.representation_provenance import read_state, state_path
 from validation.steps import embed_representations
 
 NAMES = [
-    "meta",
-    "graph_qwen",
-    "desc_qwen",
-    "graph_qwen_meta",
-    "desc_qwen_meta",
-    "graph_gemini_meta",
+    "meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta",
+    "desc_qwen_meta", "desc_gemini_meta",
 ]
 
 
@@ -49,6 +45,7 @@ def test_registry_and_config(ready_context):
         "graph_qwen",
         "desc_qwen",
         "graph_gemini",
+        "desc_gemini",
     ]
     for name in ["graph_gemini", "desc_gemini", "graph_meta_qwen", "desc_meta_qwen"]:
         with pytest.raises(ValueError):
@@ -72,12 +69,12 @@ def test_registry_and_config(ready_context):
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
 def test_shared_title_free_generation(ready_context, fake_models, model, generate_all):
     generate_all(ready_context, model)
-    assert len(fake_models) == 6
+    assert len(fake_models) == 8
     assert {p.name for p in (ready_context.run_root / "extraction/summaries").iterdir()} == set(
         generation_registry(ready_context.config)
     )
     for tasks in fake_models[1::2]:
-        assert all(t.max_new_tokens == 2048 for t in tasks)
+        assert all(t.max_new_tokens == 1024 for t in tasks)
         assert all(
             "First title" not in t.prompt and "English Title:" not in t.prompt for t in tasks
         )
@@ -108,10 +105,10 @@ def test_composition_cases_and_zero_vectors(ready_context, fake_models, generate
     plain = documents_for_arm(ready_context, cohort, registry(ready_context.config)["graph_qwen"])
     assert docs[0]["text"] == "Title\ninside\n\n" + plain[0]["text"]
     assert plain[2]["text"] == plain[3]["text"] == ""
-    result = embed_representations(ready_context)
+    result = embed_representations(ready_context, target=list(registry(ready_context.config)))
     assert result["generated_arms"] == NAMES
-    # Compact Graph scenes no longer carry verifiable generation provenance.
-    assert not read_state(ready_context, arm.name)["shareable"]
+    # Compact scenes are identified by the Summary's actual Scene input hash.
+    assert read_state(ready_context, arm.name)["shareable"]
     with np.load(ready_context.representations_dir / f"{arm.name}_embeddings.npz") as data:
         assert data["values"][2].any() and not data["values"][3].any()
     from validation.diagnosis_representations import representation_report
@@ -156,31 +153,32 @@ def test_reject_title_conditioned_summary(ready_context, fake_models, generate_a
 
 def test_cache_invalidation_and_run_rename(ready_context, fake_models, monkeypatch, generate_all):
     generate_all(ready_context)
-    embed_representations(ready_context)
+    embed_representations(ready_context, target=list(registry(ready_context.config)))
     other = replace(
         ready_context, run_id="renamed", run_root=ready_context.run_root.parent / "renamed"
     )
     shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
 
-    result = embed_representations(other)
-    assert result["reuse"]["shared"] == ["meta"]
-    assert result["generated_arms"] == ["graph_qwen", "desc_qwen", "graph_qwen_meta", "desc_qwen_meta", "graph_gemini_meta"]
+    result = embed_representations(other, target=list(registry(other.config)))
+    assert result["reuse"]["shared"] == NAMES
+    assert result["generated_arms"] == []
     titles = read_jsonl(ready_context.cohort_dir / "metadata_titles.jsonl")
     titles[0]["title"] = "Changed title"
     write_jsonl(ready_context.cohort_dir / "metadata_titles.jsonl", titles)
-    result = embed_representations(other)
+    result = embed_representations(other, target=list(registry(other.config)))
     assert result["generated_arms"] == [
         "meta",
         "graph_qwen_meta",
-        "desc_qwen_meta",
         "graph_gemini_meta",
+        "desc_qwen_meta",
+        "desc_gemini_meta",
     ]
     path = next(other.summary_arm_dir("graph_qwen").glob("*.json"))
     doc = read_json(path)
     doc["text"] += " Additional grounded detail."
     doc["word_count"] = len(doc["text"].split())
     write_json(path, doc)
-    result = embed_representations(other)
+    result = embed_representations(other, target=list(registry(other.config)))
     assert result["generated_arms"] == ["graph_qwen", "graph_qwen_meta"]
 
 
@@ -192,7 +190,7 @@ def test_comparisons_and_partial_targets(ready_context):
     assert {k: len(v) for k, v in families.items()} == {
         "metadata_baseline": 5,
         "representation": 2,
-        "title_input": 2,
+        "title_input": 1,
     }
     settings = SimpleNamespace(familywise_alpha=0.05)
     result = comparisons(
@@ -232,18 +230,28 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
     from validation.selection import load_validation_cohort
 
     generate_all(ready_context)
-    embed_representations(ready_context)
+    embed_representations(ready_context, target=list(registry(ready_context.config)))
 
     def tiny(config, *, item_count, branch, features, device):
         return SASRec(item_count, 10, 8, 1, 2, 0, arm=branch, item_features=features).to(device)
 
     monkeypatch.setattr("validation.rolling_recommendation._new_model", tiny)
     monkeypatch.setattr("validation.rolling_recommendation.worker_devices", lambda *args: ["cpu"])
+    # Old local-only artifacts can be published under the new eligibility rule
+    # without changing their recommendation identity or repeating training.
+    for arm in NAMES[1:]:
+        state = read_state(ready_context, arm)
+        state["shareable"] = False
+        write_json(state_path(ready_context, arm), state)
     previous = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
-        assert run_rolling(ready_context)["completed"] == 126
-        assert diagnose(ready_context)["status"] == "pass"
+        assert run_rolling(ready_context, target=list(registry(ready_context.config)))["completed"] == 126
+        assert embed_representations(ready_context, target=list(registry(ready_context.config)))["reuse"]["local"] == NAMES
+        assert run_rolling(ready_context, target=list(registry(ready_context.config))) == {
+            "stage": "run-recommendation", "completed": 0, "skipped": 126,
+        }
+        assert diagnose(ready_context, target=list(registry(ready_context.config)))["status"] == "pass"
         doc = read_json(ready_context.diagnosis_path)
         assert doc["statistics"]["comparisons"]["graph_qwen_meta-meta"]["primary"]
         assert len(doc["statistics"]["comparisons"]) == 10
@@ -256,13 +264,15 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         )
         shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
 
-        assert embed_representations(other)["reuse"]["shared"] == [
-            "meta"
-        ]
-        result = run_rolling(other)
-        assert result["skipped"] == 21
-        assert result["completed"] == 105
-        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 21
+        assert embed_representations(other, target=list(registry(other.config)))["reuse"]["shared"] == NAMES
+        monkeypatch.setattr(
+            "validation.rolling_recommendation.worker_devices",
+            lambda *args: pytest.fail("shared reuse must not initialize training workers"),
+        )
+        result = run_rolling(other, target=list(registry(other.config)))
+        assert result["skipped"] == 126
+        assert result["completed"] == 0
+        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 126
         checkpoints = list(ready_context.recommendations_dir.rglob("sasrec.pt"))
         assert len(checkpoints) == 126
         shared_checkpoints = 0
@@ -279,8 +289,8 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
                 torch.equal(value, reused["state_dict"][key])
                 for key, value in original["state_dict"].items()
             )
-        assert shared_checkpoints == 21
-        assert diagnose(other)["status"] == "pass"
+        assert shared_checkpoints == 126
+        assert diagnose(other, target=list(registry(other.config)))["status"] == "pass"
     finally:
         torch.set_num_threads(previous)
 

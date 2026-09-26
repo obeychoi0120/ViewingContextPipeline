@@ -10,9 +10,9 @@
 
 각 날짜·seed·Arm은 독립 모델입니다. 평가 전날 이전 사건으로 학습하고 전날 validation NDCG@10으로 epoch를 선택합니다. 동일 seed의 새 모델을 평가일 이전 사건으로 선택 epoch 수만큼 refit하고 평가일을 test합니다. Test 중 파라미터를 갱신하지 않으며 당일의 앞선 사건도 이력에 반영합니다. 전체 catalog를 점수화하고 과거 관측 아이템은 정답을 제외하고 마스킹합니다.
 
-BGE 1,024차원 특징은 고정하고 projection과 SASRec을 학습합니다. 별도 item ID embedding을 더하지 않습니다. SASRec은 hidden 512, 2 blocks, 2 heads, sequence 10, batch 256, 기본 seeds 42·43·44입니다. Item/User residual MLP는 모두 512→512→512이며 활성화는 각각 ReLU/GELU입니다. Transformer 내부 FFN은 512→2048→512입니다. 모델 버전은 `sasrec-content-v3`이며 이전 구조의 추천 결과는 재사용하지 않습니다. 6개 Arm은 7일 × 3 seeds × 6 = 126개 조합입니다. `--target`은 embedding·추천·진단에서 동일하게 지원합니다.
+BGE 1,024차원 특징은 고정하고 projection과 SASRec을 학습합니다. 별도 item ID embedding을 더하지 않습니다. SASRec은 hidden 512, 2 blocks, 2 heads, sequence 10, batch 256, 기본 seeds 42·43·44입니다. Item/User residual MLP는 모두 512→512→512이며 활성화는 각각 ReLU/GELU입니다. Transformer 내부 FFN은 512→2048→512입니다. 모델 버전은 `sasrec-content-v3`이며 이전 구조의 추천 결과는 재사용하지 않습니다. 6개 Arm은 7일 × 3 seeds × 6 = 126개 조합입니다. `protocol.arms` 설정은 없으며 `--target`은 embedding·추천·진단에서 필수입니다. 실행 Arm 기본값은 없습니다.
 
-추천도 `CUDA_VISIBLE_DEVICES`에서 보이는 모든 GPU를 자동으로 사용하며 `--gpus`는 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m validation run-recommendation --run-id "$RUN_ID"`는 물리 GPU 0·2에서 날짜 × seed × Arm 조합을 병렬 학습합니다. 환경 변수를 생략하면 CUDA에서 보이는 모든 GPU를 사용합니다. 기본 GPU당 동시 작업은 1개이며 `--workers-per-gpu 2`이면 각 GPU에 2개씩 배치합니다. 남은 작업이 적으면 필요한 수의 워커만 실행합니다. GPU가 없으면 기본 설정에서 CPU로 실행하고, 이때 `--workers-per-gpu`가 1보다 크면 오류를 냅니다.
+추천도 `CUDA_VISIBLE_DEVICES`에서 보이는 모든 GPU를 자동으로 사용하며 `--gpus`는 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_qwen_meta`는 물리 GPU 0·2에서 날짜 × seed × Arm 조합을 병렬 학습합니다. 환경 변수를 생략하면 CUDA에서 보이는 모든 GPU를 사용합니다. 기본 GPU당 동시 작업은 1개이며 `--workers-per-gpu 2`이면 각 GPU에 2개씩 배치합니다. 남은 작업이 적으면 필요한 수의 워커만 실행합니다. GPU가 없으면 기본 설정에서 CPU로 실행하고, 이때 `--workers-per-gpu`가 1보다 크면 오류를 냅니다.
 
 ## 통계 계약
 
@@ -21,8 +21,8 @@ BGE 1,024차원 특징은 고정하고 projection과 SASRec을 학습합니다. 
 | 비교군 | 사전 지정 비교 | 보정 분모 |
 | --- | --- | --- |
 | Meta 대비 | 나머지 5개 Arm 각각 − Meta | 5 |
-| 표현 방식 | Qwen의 제목 유무별 Graph−Desc | 2 |
-| 제목 추가 | Qwen Graph·Description의 결합−단독 | 2 |
+| 표현 방식 | 제목을 결합한 Qwen·Gemini 각각 Graph−Desc | 2 |
+| 제목 추가 | Qwen Graph의 결합−단독 | 1 |
 
 각 비교군은 α=0.05, Bonferroni 양측 구간을 사용합니다. 부분 target에서는 필요한 Arm이 없는 비교를 사유와 함께 생략하고 분모는 유지합니다. 주 효과는 절대 NDCG 차이입니다. 기준값 0이면 상대 차이는 정의되지 않은 값으로 남깁니다. 구간 하한이 0보다 클 때만 우월성을 표시합니다. 기존 5% 비열등성 규칙은 제거했습니다.
 
@@ -113,12 +113,12 @@ best_epoch, optimizer 갱신 횟수가 일치했습니다. 실행 정보가 없�
 
 ## 환경 간 전달
 
-GPU와 Gemini 장비에서는 공유 `artifacts/preparation/cohort/`, `artifacts/preparation/resized_keyframes/`, `artifacts/preparation/source_assets/`를 배치하고 Gemini Graph 결과를 `extraction/scenes/graph_gemini`로 돌려보냅니다. v7의 생성 소스는 `graph_qwen`, `desc_qwen`, `graph_gemini` 3개입니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
+GPU와 Gemini 장비에서는 공유 `artifacts/preparation/cohort/`, `artifacts/preparation/resized_keyframes/`, `artifacts/preparation/source_assets/`를 배치하고 Gemini Graph 결과를 `extraction/scenes/graph_gemini`로 돌려보냅니다. v7의 생성 소스는 `graph_qwen`, `desc_qwen`, `graph_gemini`, `desc_gemini` 4개입니다. 새 장면 형식에는 `.metadata`가 필요 없으며 경로·설정 변경으로 성공 결과를 재생성하지 않습니다. 이전 두 필드 파일을 전달할 때는 변환 전까지 원래 `.metadata`도 함께 보존해야 합니다. 생성 journal·cursor는 사용하지 않습니다.
 
-과거 v5 → v6 생성 결과 변환은 `migrate-arm-layout --summary-model qwen|gemini`로 명시적으로 복사합니다. 원본을 보존하고 제목 사용 provenance가 확인된 Summary만 `*_meta_*`로 옮깁니다. embedding·추천은 `shared_cache/v2/`에서 자동 재사용합니다. 과거 archive와 과거 run은 자동 정리하지 않습니다.
+과거 v5 → v6 생성 결과 변환은 `migrate-arm-layout --summary-model qwen|gemini`로 명시적으로 복사합니다. 원본을 보존하고 제목 사용 provenance가 확인된 Summary만 `*_meta_*`로 옮깁니다. embedding·추천은 `shared_cache/{embeddings,recommendations}/`에서 자동 재사용합니다. Scene·Summary는 다른 Run에서 자동으로 가져오지 않습니다. Scene 생성 provenance가 없어도 Summary 생성 provenance와 `scene_input_hash`가 있으면 실제 텍스트·입력 해시·설정을 기준으로 공유할 수 있습니다. 기존 로컬 결과는 원본 Run에서 embedding·추천 명령을 순서대로 재실행하면 재계산 없이 공유 캐시에 등록합니다(입력·학습 조건 동일, `--force` 없음). 과거 archive와 과거 run은 자동 정리하지 않습니다.
 
 ## v7 입력과 누락 처리
 
-추천 Arm은 `meta`, `graph_qwen`, `desc_qwen`, `graph_qwen_meta`, `desc_qwen_meta`, `graph_gemini_meta`입니다. 제목 없는 Summary를 소스별로 한 번 생성하고 결합 Arm은 임베딩 직전에 제목 + `"\n\n"` + Summary를 구성합니다. 하나만 있으면 그것만 임베딩하고 둘 다 없으면 영벡터입니다. 단독 Arm은 다른 입력으로 대체하지 않습니다. Summary 실패·누락과 손상·출처 오류를 구분하며 후자는 실행 오류입니다.
+추천 Arm은 `meta`, `graph_qwen`, `graph_qwen_meta`, `graph_gemini_meta`, `desc_qwen_meta`, `desc_gemini_meta`입니다. 제목 없는 Summary를 소스별로 한 번 생성하고 결합 Arm은 임베딩 직전에 제목 + `"\n\n"` + Summary를 구성합니다. 하나만 있으면 그것만 임베딩하고 둘 다 없으면 영벡터입니다. 단독 Arm은 다른 입력으로 대체하지 않습니다. Summary 실패·누락과 손상·출처 오류를 구분하며 후자는 실행 오류입니다.
 
 진단에는 네 가지 입력 구성별 건수, 시각 Summary 확보율, 실패·누락 상태, BGE 잘림 건수를 기록합니다. v5/v6 산출물을 새 결합 Arm으로 자동 변환하지 않으며 과거 Run 진단은 저장된 계약으로 읽습니다.

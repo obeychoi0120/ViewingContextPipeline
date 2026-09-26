@@ -1,0 +1,127 @@
+{
+  "scope": "first 1000 common scenes sorted by content_id, scene_idx",
+  "scenes": 1000,
+  "videos": 163,
+  "last": [
+    "microlens_100k_00164",
+    3
+  ],
+  "availability": {
+    "desc_gemini": {
+      "videos": 228,
+      "scenes": 1318
+    },
+    "graph_gemini": {
+      "videos": 195,
+      "scenes": 1140
+    }
+  },
+  "structured": 994,
+  "raw": 6,
+  "warnings": {
+    "INVALID_REFERENCE": 3,
+    "INVALID_ACTION_SYNTAX": 3
+  },
+  "desc_words_mean": 101.904,
+  "tokens_mean": {
+    "desc_gemini": 124.991,
+    "graph_gemini": 90.032
+  },
+  "entities_mean": 3.640845070422535,
+  "actions_mean": 2.209255533199195,
+  "empty_actions": 68,
+  "formats": {
+    "narrative": 545,
+    "demonstration": 73,
+    "other": 29,
+    "highlights": 214,
+    "explanation": 27,
+    "performance": 37,
+    "review": 44,
+    "interview": 21,
+    "vlog": 4
+  },
+  "topics": [
+    [
+      "drama",
+      61
+    ],
+    [
+      "battle royale",
+      51
+    ],
+    [
+      "motion comic",
+      40
+    ],
+    [
+      "food tasting",
+      39
+    ],
+    [
+      "conversation",
+      38
+    ],
+    [
+      "mobile game",
+      37
+    ],
+    [
+      "mukbang",
+      29
+    ],
+    [
+      "cartoon",
+      26
+    ],
+    [
+      "confrontation",
+      23
+    ],
+    [
+      "eating show",
+      21
+    ],
+    [
+      "cooking",
+      20
+    ],
+    [
+      "dining",
+      20
+    ],
+    [
+      "movie scene",
+      17
+    ],
+    [
+      "anime",
+      16
+    ],
+    [
+      "mobile MOBA",
+      16
+    ],
+    [
+      "animated comedy",
+      15
+    ],
+    [
+      "fantasy",
+      14
+    ],
+    [
+      "square dancing",
+      14
+    ],
+    [
+      "fantasy drama",
+      13
+    ],
+    [
+      "shooter game",
+      13
+    ]
+  ],
+  "sample_sha256": "494b527cb903fbe73ca7d869b4a5bf7fb76378ca3afca1cb8f154d9713c22e48"
+}

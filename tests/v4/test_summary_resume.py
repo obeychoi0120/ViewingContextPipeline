@@ -39,7 +39,7 @@ def summary_case(request, ready_context, fake_models):
         )
 
     def documents():
-        return documents_for_arm(context, cohort, registry(context.config)[arm_name])
+        return documents_for_arm(context, cohort, registry(context.config)[arm_name if arm_name == "graph_qwen" else f"{arm_name}_meta"])
 
     return context, ids, directory, run, documents
 
