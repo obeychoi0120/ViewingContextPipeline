@@ -15,11 +15,11 @@ python -m preparation prepare-input-data --run-id $RUN_ID
 ## Graph, Description Extraction
 ## Device
 CUDA_VISIBLE_DEVICES=$GPU python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen --arm desc_qwen
-CUDA_VISIBLE_DEVICES=$GPU python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v6_refined.md --model qwen --arm graph_qwen
+CUDA_VISIBLE_DEVICES=$GPU python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v6.md --model qwen --arm graph_qwen
 
 ## Cloud API
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v6_refined.md --model gemini --arm graph_gemini
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v6.md --model gemini --arm graph_gemini
 
 ## Summary (Cloud API)
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v6.md --model gemini --arm graph_gemini

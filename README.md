@@ -1,6 +1,6 @@
 # ViewingContextPipeline v4
 
-![ViewingContextPipeline v4 구성도](docs/design/Diagram_preview.png)
+![ViewingContextPipeline v4 구성도](docs/design/Diagram.png)
 
 생성 소스 4개에서 제목 없는 Summary를 만들고, 제목과의 결합 여부에 따라 6개 Arm을 평가합니다. 제목은 BGE 임베딩 직전에 결합합니다.
 
