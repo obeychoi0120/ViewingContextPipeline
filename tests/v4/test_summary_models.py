@@ -25,7 +25,6 @@ def case(request, ready_context, fake_models):
     )
     cohort = ctx.require_ready_cohort()
     arm = generated_arm(ctx.config, representation, source)
-    ctx.config["protocol"]["arms"] = [arm.name]
     directory = ctx.summary_arm_dir(arm.name)
 
     def run(model="gemini", **kwargs):
@@ -63,7 +62,7 @@ def test_gemini_text_only_and_reuse(case, monkeypatch):
             assert "Scene observations:" in prompt
             assert (
                 max_new_tokens
-                == case.ctx.config["extraction"][case.arm.representation]["summary_max_new_tokens"]
+                == case.ctx.config["extraction"][case.arm.representation]["gemini"]["summary_max_new_tokens"]
             )
             calls.append(prompt)
             return "A person waves."
@@ -82,7 +81,7 @@ def test_gemini_text_only_and_reuse(case, monkeypatch):
     assert doc["provenance"]["summary_model"] == "gemini"
     assert doc["provenance"]["settings"] == {
         "backend": "gemini",
-        "max_new_tokens": case.ctx.config["extraction"][case.arm.representation][
+        "max_new_tokens": case.ctx.config["extraction"][case.arm.representation]["gemini"][
             "summary_max_new_tokens"
         ],
     }

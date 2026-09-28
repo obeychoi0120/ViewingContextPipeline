@@ -253,14 +253,15 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "dataset": "microlens_100k", "modality": "visual_only", "sampling": "fixed_windows",
         "cohort_sampling": "full_rolling", "catalog_scope": "full_source_catalog",
         "graph_extractors": ["qwen", "gemini"],
-        "description_extractors": (["qwen"] if value.get("experiment_config_version") == EXPERIMENT_CONFIG_VERSION
-                                   else ["qwen", "gemini"]),
+        "description_extractors": ["qwen", "gemini"],
     }
-    if set(protocol) - {"graph_summarizer"} != set(expected) | {"arms"}:
+    if set(protocol) - {"graph_summarizer", "arms"} != set(expected):
         raise ConfigError("invalid protocol keys")
     if "graph_summarizer" in protocol and protocol["graph_summarizer"] not in {"qwen", "gemini"}:
         raise ConfigError("protocol.graph_summarizer must be qwen or gemini (legacy, ignored)")
     for key, setting in expected.items():
+        if key == "description_extractors" and "arms" in protocol and protocol.get(key) == ["qwen"]:
+            continue  # Historical v4 configuration.
         if protocol.get(key) != setting:
             raise ConfigError(f"protocol.{key} must be {setting!r}")
     try:
@@ -353,14 +354,19 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         "summary_max_new_tokens",
     }
     for arm in ("graph", "description"):
-        settings = _require_mapping(extraction, arm)
-        expected = generation_keys
-        if set(settings) != expected:
-            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected)}")
-        for key in ("scene_max_new_tokens", "summary_max_new_tokens"):
-            setting = settings.get(key)
-            if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
-                raise ConfigError(f"extraction.{arm}.{key} must be a positive integer")
+        models = _require_mapping(extraction, arm)
+        if set(models) != {"qwen", "gemini"}:
+            raise ConfigError(f"extraction.{arm} must contain exactly qwen and gemini")
+        for model in ("qwen", "gemini"):
+            settings = _require_mapping(models, model)
+            if set(settings) != generation_keys:
+                raise ConfigError(
+                    f"extraction.{arm}.{model} must contain exactly {sorted(generation_keys)}"
+                )
+            for key in generation_keys:
+                setting = settings.get(key)
+                if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
+                    raise ConfigError(f"extraction.{arm}.{model}.{key} must be a positive integer")
     gemini = _require_mapping(extraction, "gemini")
     if set(gemini) != {"threads"}:
         raise ConfigError("extraction.gemini must contain exactly threads")

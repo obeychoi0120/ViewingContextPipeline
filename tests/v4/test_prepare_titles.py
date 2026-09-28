@@ -19,7 +19,6 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     current_context, monkeypatch, fake_models
 ):
     context = current_context
-    context.config["protocol"]["arms"] = ["meta"]
     primary, supplement = configure_titles(context)
     originals = {p: p.read_bytes() for p in (primary, supplement)}
     monkeypatch.setattr("preparation.cli.RunContext.load", lambda _: context)

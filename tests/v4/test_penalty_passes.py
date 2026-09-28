@@ -72,7 +72,7 @@ def test_scene_passes_retry_only_failures_and_preserve_graph_cutoff_text(
 
     errors = []
     _, _, valid = _scene_arm_contract(
-        f"{'graph' if representation == 'graph' else 'desc'}_qwen",
+        "graph_qwen" if representation == "graph" else "desc_qwen_meta",
         context.run_root,
         ids,
         {(cid, 0) for cid in ids},

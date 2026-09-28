@@ -9,8 +9,11 @@ def comparison_families(config=None):
     if concat_layout(config or DEFAULT_PROTOCOL):
         return {
             "metadata_baseline": [(name, "meta") for name in arms if name != "meta"],
-            "representation": [("graph_qwen", "desc_qwen"), ("graph_qwen_meta", "desc_qwen_meta")],
-            "title_input": [("graph_qwen_meta", "graph_qwen"), ("desc_qwen_meta", "desc_qwen")],
+            "representation": ([("graph_qwen", "desc_qwen"), ("graph_qwen_meta", "desc_qwen_meta")]
+                               if "desc_qwen" in arms else
+                               [("graph_qwen_meta", "desc_qwen_meta"), ("graph_gemini_meta", "desc_gemini_meta")]),
+            "title_input": ([("graph_qwen_meta", "graph_qwen"), ("desc_qwen_meta", "desc_qwen")]
+                            if "desc_qwen" in arms else [("graph_qwen_meta", "graph_qwen")]),
         }
     from arm_registry import legacy_layout
     old = legacy_layout(config or DEFAULT_PROTOCOL)

@@ -30,7 +30,7 @@ def step_settings(context, step, **options):
             output_dir=((context.summary_dir(arm.representation, source, options["model"])
                          if legacy_layout(context.config) else context.summary_arm_dir(arm.name))
                         if summary else context.extraction_dir(arm.representation, source, phase)),
-            max_new_tokens=context.config["extraction"][kind][
+            max_new_tokens=context.config["extraction"][kind][options["model"] if summary else source][
                 "summary_max_new_tokens" if summary else "scene_max_new_tokens"
             ],
         )

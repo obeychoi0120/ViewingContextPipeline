@@ -159,7 +159,7 @@ def run_summary_stage(
     normalize = minimal_graph_records if graph else minimal_description_records
     build_prompt = graph_summary_prompt if graph else description_summary_prompt
     settings = context.config["extraction"]
-    max_tokens = settings["graph" if graph else "description"]["summary_max_new_tokens"]
+    max_tokens = settings["graph" if graph else "description"][model]["summary_max_new_tokens"]
     schedule = penalty_schedule(settings["summary_repetition_penalty"]) if model == "qwen" else [1.0]
     if any(left >= right for left, right in zip(schedule, schedule[1:])):
         raise ExtractionStepError("summary repetition penalties must be strictly increasing")

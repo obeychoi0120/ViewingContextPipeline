@@ -23,7 +23,7 @@ def test_full_catalog_applies_to_all_targets_and_preserves_shared_data(summaries
     for path in context.summary_arm_dir("graph_qwen").glob("*.json"):
         path.unlink()
     before = context.require_ready_cohort()
-    embed_representations(context)
+    embed_representations(context, target=list(registry(context.config)))
     cohort = load_validation_cohort(context)
     assert len(cohort["catalog"]) == 4 and not cohort["excluded"]
     assert cohort["events"] == read_jsonl(context.cohort_dir / "events.jsonl")

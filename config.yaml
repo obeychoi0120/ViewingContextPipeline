@@ -8,15 +8,9 @@ protocol:
   graph_extractors:
   - qwen
   - gemini
-  arms:
-  - meta
-  - graph_qwen
-  - desc_qwen
-  - graph_qwen_meta
-  - desc_qwen_meta
-  - graph_gemini_meta
   description_extractors:
   - qwen
+  - gemini
 artifacts_root: artifacts
 data:
   pairs_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_pairs.csv
@@ -73,12 +67,20 @@ extraction:
     temperature: 0.2
     top_p: 0.8
     top_k: 20
-  graph:
-    scene_max_new_tokens: 256
-    summary_max_new_tokens: 2048
   description:
-    scene_max_new_tokens: 512
-    summary_max_new_tokens: 2048
+    qwen:
+      scene_max_new_tokens: 512
+      summary_max_new_tokens: 512
+    gemini:
+      scene_max_new_tokens: 1024
+      summary_max_new_tokens: 1024
+  graph:
+    qwen:
+      scene_max_new_tokens: 256
+      summary_max_new_tokens: 512
+    gemini:
+      scene_max_new_tokens: 1024
+      summary_max_new_tokens: 1024
 validation:
   cohort:
     mode: full_rolling

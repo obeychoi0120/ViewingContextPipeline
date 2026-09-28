@@ -76,7 +76,7 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
     from validation.diagnosis_statistics import comparison_families
     from validation.recommendation_contracts import DEFAULT_PROTOCOL
     configured = registry(config or DEFAULT_PROTOCOL)
-    names = list(resolve_target_arms(config=config) if arms is None else arms)
+    names = list(configured if arms is None else arms)
     indices = {name: index for index, name in enumerate(names)}
     if len(observed) != len(names) or draws.shape[1] != len(names):
         raise ValueError("arm/metric dimension mismatch")
@@ -150,7 +150,7 @@ def diagnosis_training(directory, identity, expected_count, *, architecture_vers
 
 
 def collect_metrics(context, config, cohort, *, arms=None):
-    selected = resolve_target_arms(config=context.config) if arms is None else arms
+    selected = registry(context.config) if arms is None else arms
     cohort = load_validation_cohort(context)
     table = EventTable(cohort["events"])
     training_input_hash = training_signature(context, cohort, config)

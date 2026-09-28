@@ -167,7 +167,7 @@ def test_summary_receives_raw_but_does_not_count_it_as_structured(ready_context,
 
         def generate(self, tasks, callback, **kwargs):
             for task in tasks:
-                assert task.max_new_tokens == 2048
+                assert task.max_new_tokens == 1024
                 assert '"target": "food-1"' in task.prompt
                 assert "unstructured observation" in task.prompt
                 callback(GeminiGenerationOutcome(task.task_id, "A seafood preparation demonstration."))

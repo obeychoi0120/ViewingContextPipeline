@@ -87,6 +87,8 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
 
 
 def embed_representations(context, *, summary_source=None, force=False, target=None):
+    if target is None:
+        raise ValueError("--target is required; select arms explicitly")
     from arm_registry import legacy_layout
     legacy = legacy_layout(context.config)
     if legacy and summary_source is None:
@@ -222,6 +224,8 @@ def _encode_arm(context, config, name, docs, encoder):
 
 
 def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):
+    if target is None:
+        raise ValueError("--target is required; select arms explicitly")
     from validation.rolling_recommendation import run_rolling
 
     log_step_start(
@@ -238,6 +242,8 @@ def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):
 
 
 def run_diagnosis(context, *, force=False, target=None, compare_run_id=None):
+    if target is None:
+        raise ValueError("--target is required; select arms explicitly")
     from validation.rolling_diagnosis import diagnose
 
     log_step_start(context, "run-diagnosis", force=force, target=target)
