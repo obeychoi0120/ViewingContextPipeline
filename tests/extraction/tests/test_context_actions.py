@@ -33,14 +33,15 @@ def parsed(text=TEXT):
     return result
 
 
-@pytest.mark.parametrize("separator,mode", [(" - ", "native"), (" -> ", "repaired"),
+@pytest.mark.parametrize("separator,mode", [(" - ", "repaired"), (" -> ", "repaired"),
                                             (" → ", "repaired"), (" ⇒ ", "repaired")])
 def test_direction_and_internal_hyphens(separator, mode):
     result = parsed(TEXT.replace(" - ", separator))
     assert result.parse_mode == mode
     assert result.graph["topics"] == ["seafood preparation", "cooking"]
     assert result.graph["actions"] == [{"actor": "person-1", "action": "cross-cutting",
-                                       "target": "food-1", "tool": "knife-1"}]
+                                       "target": "food-1", "tool": "knife-1",
+                                       "receiver": None, "location": "unknown"}]
     assert "context" not in result.graph  # Context fields are top-level in storage.
 
 

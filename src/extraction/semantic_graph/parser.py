@@ -11,7 +11,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v7"
+GRAPH_PARSER_VERSION = "graph-text/v8"
 _REQUIRED_SECTIONS = ("Entities", "Relations", "End")
 # Recognize both relational legacy graphs and Context + Actions graphs.
 _SECTIONS = (*_REQUIRED_SECTIONS, "Context", "Actions")
@@ -159,9 +159,14 @@ def _action(line, *, repair):
 
 def _action_fields(line, *, repair):
     parts = re.split(r"[;；]" if repair else ";", line)
-    if len(parts) != 2:
-        raise GraphTextError("expected actor - action - target; tool (use none for missing values)")
-    body, tool = (part.strip() for part in parts)
+    if not 2 <= len(parts) <= 4:
+        raise GraphTextError("expected actor - action - target; tool; receiver; location")
+    body, tool = (part.strip() for part in parts[:2])
+    optional = [part.strip() for part in parts[2:]]
+    if not repair and (len(optional) != 2 or not all(optional)):
+        raise GraphTextError("receiver/location defaults required")
+    receiver = optional[0] if optional and optional[0] else "none"
+    location = optional[1] if len(optional) > 1 and optional[1] else "unknown"
     if repair:
         relation = _relation(body, repair=True)
         actor, action, target = (relation[key] for key in ("subject_id", "predicate", "object_id"))
@@ -172,12 +177,14 @@ def _action_fields(line, *, repair):
         actor, action, target = (part.strip() for part in fields)
         if not action or _RELATION_MARK.search(action):
             raise GraphTextError("empty or ambiguous action")
-    if any(not _ID.fullmatch(value) for value in (actor, target, tool)):
-        raise GraphTextError("expected endpoint IDs or none")
+    if any(not _ID.fullmatch(value) for value in (actor, target, tool, receiver, location)):
+        raise GraphTextError("expected endpoint IDs, none, or unknown")
     def reference(value):
-        return None if value == "none" or repair and value.casefold() == "none" else value
+        token = value.casefold() if repair else value
+        return None if token == "none" else "unknown" if token == "unknown" else value
     return {"actor": reference(actor), "action": action,
-            "target": reference(target), "tool": reference(tool)}
+            "target": reference(target), "tool": reference(tool),
+            "receiver": reference(receiver), "location": reference(location)}
 
 
 def _parse_context_actions(text, *, repair):
@@ -245,6 +252,20 @@ def _parse_context_actions(text, *, repair):
     return graph
 
 
+def _restore_action_defaults(graph):
+    """Normalize optional action slots only; leave malformed values for validation."""
+    actions = graph.get("actions")
+    changed = False
+    if isinstance(actions, list):
+        for action in actions:
+            if isinstance(action, dict):
+                for key, default in (("receiver", None), ("location", "unknown")):
+                    if key not in action:
+                        action[key] = default
+                        changed = True
+    return changed
+
+
 def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Consume the whole response; retain JSON compatibility for complete old outputs."""
     raw = str(text or "")
@@ -254,8 +275,10 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
         unwrapped = _unwrap(raw)
         if unwrapped.startswith("{"):
             parsed = parse_json_graph(unwrapped)
-            if parsed.graph is not None and unwrapped != raw.strip():
-                return GraphParseResult(parsed.graph, parse_mode="repaired")
+            if parsed.graph is not None:
+                defaulted = _restore_action_defaults(parsed.graph)
+                if defaulted or unwrapped != raw.strip():
+                    return GraphParseResult(parsed.graph, parse_mode="repaired")
             return parsed
         try:
             graph = _parse_lines(raw, repair=False)

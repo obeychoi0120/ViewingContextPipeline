@@ -9,11 +9,11 @@ from extraction.graph_warnings import (
 )
 
 
-def _object(properties):
+def _object(properties, *, optional=()):
     return {
         "type": "object",
         "properties": properties,
-        "required": list(properties),
+        "required": [key for key in properties if key not in optional],
         "additionalProperties": False,
     }
 
@@ -48,7 +48,8 @@ GRAPH_JSON_SCHEMA = _object({
     })),
     "actions": _array(_object({
         "actor": REFERENCE, "action": STRING, "target": REFERENCE, "tool": REFERENCE,
-    })),
+        "receiver": REFERENCE, "location": REFERENCE,
+    }, optional=("receiver", "location"))),
 })
 
 
@@ -81,13 +82,14 @@ def _validate_shape(value, schema, path):
     if not isinstance(value, expected):
         raise OutputValidationError(f"{path}: expected {kind}")
     if kind == "object":
-        if set(schema["properties"]) - set(value):
+        if set(schema["required"]) - set(value):
             tag = INVALID_ACTION_SYNTAX if ".actions[" in path else MISSING_REQUIRED
             raise OutputValidationError(f"{path}: missing required fields", (tag,))
         if set(value) - set(schema["properties"]):
             raise OutputValidationError(f"{path}: extra fields")
         for key, child in schema["properties"].items():
-            _validate_shape(value[key], child, f"{path}.{key}")
+            if key in value:
+                _validate_shape(value[key], child, f"{path}.{key}")
     elif kind == "array":
         if len(value) > schema.get("maxItems", len(value)):
             raise OutputValidationError(f"{path}: too many items")
@@ -109,18 +111,20 @@ def _validate_actions(graph, path):
 
     for entity in graph["entities"]:
         identifier = entity["id"]
-        if not re.fullmatch(r"[\w.-]+", identifier) or identifier.casefold() == "none":
+        if not re.fullmatch(r"[\w.-]+", identifier) or identifier.casefold() in {"none", "unknown"}:
             report(PARSE_ERROR, f"invalid entity ID {identifier!r}")
         if identifier in ids:
             report(DUPLICATE_ENTITY_ID, f"duplicate entity ID {identifier!r}")
         ids.add(identifier)
     for action in graph["actions"]:
-        if action["actor"] is None and action["target"] is None:
-            report(INVALID_ACTION_SYNTAX, "action requires an actor or target")
+        if not any(action[field] in ids and action[field] not in {"none", "unknown"}
+                   for field in ("actor", "target")):
+            report(INVALID_ACTION_SYNTAX, "action requires a declared actor or target")
         if any(mark in action["action"] for mark in (" - ", "->", "→", "⇒", ";", "\n")):
             report(INVALID_ACTION_SYNTAX, "ambiguous action phrase")
-        for field in ("actor", "target", "tool"):
-            if action[field] is not None and action[field] not in ids:
-                report(INVALID_REFERENCE, f"undeclared {field} {action[field]!r}")
+        for field in ("actor", "target", "tool", "receiver", "location"):
+            value = action.get(field)
+            if value not in (None, "unknown") and value not in ids:
+                report(INVALID_REFERENCE, f"undeclared {field} {value!r}")
     if tags:
         raise OutputValidationError(f"{path}: " + "; ".join(messages), tags)
