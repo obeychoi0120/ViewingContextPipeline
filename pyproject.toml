@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 qwen = ["torch", "transformers", "vllm==0.28.0; sys_platform == 'linux'"]
 train = ["torch"]
+embedding = ["torch", "transformers"]
 gemini = ["google-genai"]
 dev = ["pytest", "ruff"]
 

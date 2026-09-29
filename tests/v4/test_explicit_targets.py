@@ -28,8 +28,8 @@ def test_cli_passes_only_explicit_selection(step, ready_context, monkeypatch):
     monkeypatch.setattr('validation.cli.RunContext.load', lambda _: ready_context)
     monkeypatch.setitem(cli.STEP_HANDLERS,
                         step, lambda ctx, **kw: calls.append(kw))
-    assert main([step, '--run-id', 'test', '--target', 'desc_gemini_meta']) == 0
-    assert calls == [{'force': False, 'target': ['desc_gemini_meta']}]
+    assert main([step, '--run-id', 'test', '--target', 'desc_gemini_meta', '--representation-mode', 'text']) == 0
+    assert calls == [{'force': False, 'target': ['desc_gemini_meta'], 'representation_mode': 'text'}]
 
 
 def test_config_without_arms_and_gemini_description_source(ready_context):

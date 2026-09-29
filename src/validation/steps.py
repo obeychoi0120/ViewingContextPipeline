@@ -86,7 +86,14 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def embed_representations(context, *, summary_source=None, force=False, target=None):
+def embed_representations(context, *, summary_source=None, force=False, target=None, representation_mode="text"):
+    from validation.graph_context import graph_context, validate_mode
+    validate_mode(representation_mode, None, "embed-representations", target)
+    if representation_mode == "graph":
+        from validation.graph_inputs import prepare
+        if not target:
+            raise ValueError("--target is required")
+        return prepare(graph_context(context), target=target, force=force)
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
     from arm_registry import legacy_layout
@@ -223,7 +230,12 @@ def _encode_arm(context, config, name, docs, encoder):
     _write_embedding(path, matrix)
 
 
-def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):
+def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None,
+                       representation_mode="text", scene_aggregation=None):
+    from validation.graph_context import graph_context, validate_mode
+    validate_mode(representation_mode, scene_aggregation, "run-recommendation", target)
+    if representation_mode == "graph":
+        context = graph_context(context, scene_aggregation)
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
     from validation.rolling_recommendation import run_rolling
@@ -241,7 +253,15 @@ def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):
     )
 
 
-def run_diagnosis(context, *, force=False, target=None, compare_run_id=None):
+def run_diagnosis(context, *, force=False, target=None, compare_run_id=None,
+                  representation_mode="text", scene_aggregation=None):
+    from validation.graph_context import graph_context, validate_mode
+    validate_mode(representation_mode, scene_aggregation, "run-diagnosis", target)
+    if representation_mode == "graph":
+        from validation.graph_diagnosis import diagnose_graph
+        if not target:
+            raise ValueError("--target is required")
+        return diagnose_graph(graph_context(context, scene_aggregation), target=target, compare_run_id=compare_run_id)
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
     from validation.rolling_diagnosis import diagnose

@@ -28,8 +28,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Independent combination processes per GPU (run-recommendation only; default: one).",
     )
     parser.add_argument("--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only).")
+    parser.add_argument("--representation-mode", choices=("text", "graph"), required=True)
+    parser.add_argument("--scene-aggregation", choices=("mean", "attention"))
     args = parser.parse_args(argv)
     try:
+        from validation.graph_context import validate_mode
+        validate_mode(args.representation_mode, args.scene_aggregation, args.step, args.target)
         if args.compare_run_id is not None and args.step != "run-diagnosis":
             raise ValueError("--compare-run-id is only supported by run-diagnosis")
         if args.target is not None and args.step not in {"embed-representations", "run-recommendation", "run-diagnosis"}:
@@ -37,7 +41,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.workers_per_gpu is not None and args.step != "run-recommendation":
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")
         context = RunContext.load(args.run_id)
-        kwargs = {"force": args.force}
+        kwargs = {"force": args.force, "representation_mode": args.representation_mode}
+        if args.scene_aggregation is not None:
+            kwargs["scene_aggregation"] = args.scene_aggregation
         if args.compare_run_id is not None:
             kwargs["compare_run_id"] = args.compare_run_id
         if args.step == "run-diagnosis":

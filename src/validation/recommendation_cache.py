@@ -15,10 +15,15 @@ from validation.shared_cache import SharedCache, checksum
 FILES = ['sasrec.pt', 'training.json', 'per_event_metrics.jsonl', 'complete.json']
 
 
+def bundle_files(identity):
+    from validation.rolling_recommendation import result_files
+    return result_files(identity) + ['complete.json']
+
+
 def cache_for(context, identity):
     key = fingerprint({'identity': {k: v for k, v in identity.items() if k != 'run_id'},
                        'implementation': TRAINING_IMPLEMENTATION_VERSION,
-                       'architecture': ARCHITECTURE_VERSION})
+                       'architecture': identity.get('graph_architecture', ARCHITECTURE_VERSION)})
     return SharedCache(context, 'recommendations', key)
 
 
@@ -44,7 +49,7 @@ def valid_bundle(directory, identity, table, split):
         checkpoint = torch.load(directory / 'sasrec.pt', map_location='cpu', weights_only=True)
         metadata = checkpoint['metadata']
         return (not expected and bool(checkpoint['state_dict'])
-                and metadata.get('architecture_version') == ARCHITECTURE_VERSION
+                and metadata.get('architecture_version') == identity.get('graph_architecture', ARCHITECTURE_VERSION)
                 and metadata.get('catalog_size') == len(table.items)
                 and metadata.get('best_epoch') == training.get('best_epoch')
                 and all(metadata.get(k) == v for k, v in identity.items()))
@@ -89,16 +94,16 @@ def _restore(context, directory, identity, table, split):
         checkpoint['metadata'].update(identity)
         checkpoint['metadata']['reused_from'] = provenance
         torch.save(checkpoint, temporary / 'sasrec.pt')
-        complete['checksums'] = {name: checksum(temporary / name) for name in FILES[:-1]}
+        complete['checksums'] = {name: checksum(temporary / name) for name in bundle_files(identity)[:-1]}
         write_json(temporary / 'complete.json', complete)
         directory.mkdir(parents=True, exist_ok=True)
         (directory / 'complete.json').unlink(missing_ok=True)
-        for name in FILES:
+        for name in bundle_files(identity):
             shutil.copy2(temporary / name, directory / name)
     return True
 
 
 def publish(context, directory, identity, table, split, *, force=False):
     if valid_bundle(directory, identity, table, split):
-        cache_for(context, identity).publish(directory, FILES, origin={'run_id': context.run_id},
+        cache_for(context, identity).publish(directory, bundle_files(identity), origin={'run_id': context.run_id},
                                                    replace_corrupt=not force)

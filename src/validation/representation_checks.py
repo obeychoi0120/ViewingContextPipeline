@@ -7,6 +7,10 @@ from validation.representation_provenance import matrix_hash, pending_write, rea
 
 
 def verify_representations(context, cohort=None, *, arms=None):
+    from validation.graph_context import is_graph
+    if is_graph(context):
+        from validation.graph_inputs import verify
+        return verify(context, cohort or load_validation_cohort(context), arms)
     from validation.steps import _representations_match_catalog
 
     cohort = load_validation_cohort(context)

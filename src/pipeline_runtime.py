@@ -195,15 +195,15 @@ class RunContext:
 
     @property
     def representations_dir(self) -> Path:
-        return self.run_root / "validation" / "representations"
+        return self.run_root / "validation" / "representations" / "text"
 
     @property
     def recommendations_dir(self) -> Path:
-        return self.run_root / "validation" / "recommendations"
+        return self.run_root / "validation" / "recommendations" / "text"
 
     @property
     def diagnosis_path(self) -> Path:
-        return self.run_root / "validation" / "diagnosis" / "diagnosis.json"
+        return self.run_root / "validation" / "diagnosis" / "text_diagnosis.json"
 
     def config_path(self, *keys: str) -> Path:
         value: Any = self.config

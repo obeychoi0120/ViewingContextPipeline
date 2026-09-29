@@ -15,6 +15,17 @@ def state_path(context, branch):
 
 
 def read_state(context, branch):
+    from validation.graph_context import is_graph
+    if is_graph(context):
+        from pipeline_runtime import read_json
+        from extraction.recovery import fingerprint
+        root = context.representations_dir / f"{branch}_embeddings"
+        manifest = read_json(root / "manifest.json")
+        return {"input_hash": manifest["input_hash"], "shareable": True,
+                "recommendation_hash": fingerprint(manifest),
+                "sources": [{"arm": branch, "input_hash": manifest["input_hash"],
+                             "version": manifest["version"]}],
+                "statistics": read_json(root / "statistics.json")}
     path = state_path(context, branch)
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
@@ -67,4 +78,9 @@ def recommendation_identity(context, branch):
     value = read_state(context, branch).get("recommendation_hash")
     if value is None:
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
+    from validation.graph_context import is_graph, GRAPH_MODEL, GRAPH_ARCHITECTURE
+    if is_graph(context):
+        return {"embedding_hash": value, "representation_mode": "graph",
+                "scene_aggregation": context.scene_aggregation,
+                "graph_model": GRAPH_MODEL, "graph_architecture": GRAPH_ARCHITECTURE}
     return {"embedding_hash": value}

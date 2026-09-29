@@ -69,9 +69,9 @@ python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_descr
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_qwen
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v5.md --model qwen --arm graph_gemini
 
-python -m validation embed-representations --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
-python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
-python -m validation run-diagnosis --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation embed-representations --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --representation-mode text
+python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --representation-mode text
+python -m validation run-diagnosis --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --representation-mode text
 ```
 
 `prepare-cohort` 한 번으로 required items 생성 → 원본·보완 CSV의 제목 병합 → 영상·제목 검증을 완료합니다. 원본의 비어 있지 않은 제목을 우선하고, 필요한 아이템의 빈 제목·누락 행만 보완합니다. 끝내 찾지 못한 제목은 빈 값으로 저장해 Metadata embedding에서 영벡터로 처리합니다. 보완 CSV 자체가 없거나 손상된 경우에는 실패합니다.
@@ -93,16 +93,16 @@ Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용�
 일부 Arm만 실행하는 예:
 
 ```bash
-python -m validation embed-representations --run-id "$RUN_ID" --target desc_qwen_meta graph_qwen_meta meta
-python -m validation run-recommendation --run-id "$RUN_ID" --target desc_qwen_meta graph_qwen_meta meta
-python -m validation run-diagnosis --run-id "$RUN_ID" --target desc_qwen_meta graph_qwen_meta meta
+python -m validation embed-representations --run-id "$RUN_ID" --target desc_qwen_meta graph_qwen_meta meta --representation-mode text
+python -m validation run-recommendation --run-id "$RUN_ID" --target desc_qwen_meta graph_qwen_meta meta --representation-mode text
+python -m validation run-diagnosis --run-id "$RUN_ID" --target desc_qwen_meta graph_qwen_meta meta --representation-mode text
 ```
 
 Validation은 preparation의 전체 catalog·item 순서·events·평가 구간을 Run별 `validation/cohort/`에 저장합니다. Summary 실패나 누락으로 아이템·interaction을 삭제하지 않습니다. 기존 이력 마스킹과 평가 이벤트 자격 규칙을 유지합니다. `--target`은 처리 Arm만 제한합니다.
 
 일부 Scene이 실패하면 성공 장면만 Summary에 사용합니다. 성공 장면이 없거나 Summary가 최종 실패하면 `status="failed", text="", word_count=0`을 저장합니다. 실패 로그의 새 `raw_output`은 빈 문자열입니다. 기존 `raw_fallback`은 빈 표현으로 읽고 기존 파일은 일괄 변경하지 않습니다. Summary 파일 부재는 `missing`, 손상·잘못된 Arm/모델 provenance는 오류입니다. 빈 표현은 인코더에 보내지 않고 영벡터로 유지하며 고유 item ID와 추천 후보 자격을 보존합니다.
 
-모든 Arm의 embedding과 완료된 추천 결과는 **현재 Run → 공유 캐시 → 새 계산** 순서로 처리합니다. 공유 캐시는 `<artifacts_root>/shared_cache/{embeddings,recommendations}/`에 저장하며 다른 Run 지정이 필요 없습니다. Scene·Summary를 다른 Run에서 자동으로 가져오지는 않습니다. `--force`는 선택한 단계의 로컬·공유 읽기를 우회하고 기존 공유 엔트리를 덮어쓰지 않습니다.
+모든 Arm의 embedding과 완료된 추천 결과는 **현재 Run → 공유 캐시 → 새 계산** 순서로 처리합니다. 공유 캐시는 `<artifacts_root>/shared_cache/{embeddings,graph_inputs,recommendations}/`에 저장하며 다른 Run 지정이 필요 없습니다. Scene·Summary를 다른 Run에서 자동으로 가져오지는 않습니다. `--force`는 선택한 단계의 로컬·공유 읽기를 우회하고 기존 공유 엔트리를 덮어쓰지 않습니다.
 
 공통 데이터 키는 순서가 있는 item/content 매핑·전체 events·평가 구간입니다. Embedding 키는 해당 Arm의 실제 입력 텍스트·빈 위치, 인코더/토크나이저 식별자·설정, 표현 계약과 생성 provenance입니다. Summary 프롬프트와 기록된 Scene 프롬프트는 파일명이 아닌 본문 해시로 구분합니다. Summary의 생성 provenance(프롬프트·모델·설정)와 `scene_input_hash`가 있으면 Scene 생성 provenance가 없는 간결한 형식도 Run 간 재사용할 수 있습니다. 입력 해시가 없는 과거 Summary는 검증 가능한 Scene 생성 provenance가 있어야 공유하며, 둘 다 없으면 Run 내부에서만 사용합니다. 과거 생성 결과에 현재 프롬프트나 설정을 소급하지 않습니다. Metadata 제목·인코더가 같으면 시각 Arm의 변경과 무관하게 embedding을 재사용합니다.
 
@@ -112,7 +112,7 @@ Validation은 preparation의 전체 catalog·item 순서·events·평가 구간�
 
 새 계약은 `full-catalog-zero-vector/v2`, `shared-scenes-representation/v3`, `sasrec-rolling-combination/v3`입니다. 기존 교집합 실험은 읽기 전용 진단을 지원하지만 새 공유 캐시로 소급 승격하지 않습니다. 기존 실험을 보존하려면 새 Run에서 첫 전체 데이터 결과를 만든 뒤 후속 Run에서 재사용하세요. Arm별 정상·실패·누락·영벡터 수와 embedding 재사용 출처는 `.inputs/{arm}.json` 및 진단에, 추천의 최근 실행 재사용 건수는 `recommendations/reuse.json`에 기록합니다.
 
-`diagnosis.json`의 `rolling-diagnosis/v3`는 아이템별 출처 전체 대신 arm별 해시·truncation·출처 분포·단어 수 요약을 저장합니다. 예외와 Gemini fallback 예시는 각각 최대 10개이며 전체 건수와 생략 건수를 함께 기록합니다. 출처 분포도 빈도순 최대 10개 값과 생략된 레코드 수를 기록합니다. `details_path`는 run 디렉터리 기준 상대경로이며, 상세 기록은 `validation/representations/.inputs/{arm}.json`의 `sources`에 보존됩니다. 결과를 옮길 때 상세 추적이 필요하면 이 숨김 디렉터리도 함께 복사하세요. v2의 `representations.*.sources`는 `sources_summary`와 `details_path`로, `gemini_summary_fallbacks.*` 배열은 `count`·`examples`·`omitted_count`·`details_path` 객체로 변경되었습니다.
+`text_diagnosis.json`의 `rolling-diagnosis/v3`는 아이템별 출처 전체 대신 arm별 해시·truncation·출처 분포·단어 수 요약을 저장합니다. 예외와 Gemini fallback 예시는 각각 최대 10개이며 전체 건수와 생략 건수를 함께 기록합니다. 출처 분포도 빈도순 최대 10개 값과 생략된 레코드 수를 기록합니다. `details_path`는 run 디렉터리 기준 상대경로이며, 상세 기록은 `validation/representations/text/.inputs/{arm}.json`의 `sources`에 보존됩니다. 결과를 옮길 때 상세 추적이 필요하면 이 숨김 디렉터리도 함께 복사하세요. v2의 `representations.*.sources`는 `sources_summary`와 `details_path`로, `gemini_summary_fallbacks.*` 배열은 `count`·`examples`·`omitted_count`·`details_path` 객체로 변경되었습니다.
 
 진단은 저장된 `sasrec-content-v2`와 `sasrec-content-v3` 추천 결과를 지원하며, 실제 버전을 `recommendations.architecture_version`에 기록합니다. 선택한 날짜·seed·arm에 서로 다른 버전이 섞이면 집계하지 않습니다. 추천 학습 재개는 현재 코드의 모델 버전만 재사용하므로, 과거 버전의 결과를 진단할 때는 `run-diagnosis`만 실행하면 됩니다.
 
@@ -121,10 +121,10 @@ Validation은 preparation의 전체 catalog·item 순서·events·평가 구간�
 비교할 프롬프트마다 별도의 Run을 사용하고 동일한 cohort·catalog·평가 날짜·학습 설정·seed를 유지합니다. 각 Run에서 장면 추출 → 요약 → embedding → 추천을 완료한 뒤 비교합니다.
 
 ```bash
-python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference_run --target graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference_run --target graph_qwen graph_qwen_meta graph_gemini_meta --representation-mode text
 ```
 
-현재 Run에서 reference Run을 뺀 NDCG@10 차이를 `validation/diagnosis/diagnosis.json`의 `run_comparison`에 기록합니다. Run별 사건·catalog·평가 날짜·seed와 사건 수가 일치해야 하며 두 Run의 추천 캐시도 검증합니다. 새 Graph 3개 Arm의 Run 간 비교에는 Bonferroni 보정을 적용합니다. 프롬프트·모델·요약 정책·fallback의 차이가 함께 포함될 수 있으므로 출처를 확인합니다.
+현재 Run에서 reference Run을 뺀 NDCG@10 차이를 `validation/diagnosis/text_diagnosis.json`의 `run_comparison`에 기록합니다. Run별 사건·catalog·평가 날짜·seed와 사건 수가 일치해야 하며 두 Run의 추천 캐시도 검증합니다. 새 Graph 3개 Arm의 Run 간 비교에는 Bonferroni 보정을 적용합니다. 프롬프트·모델·요약 정책·fallback의 차이가 함께 포함될 수 있으므로 출처를 확인합니다.
 
 `--schema`는 프롬프트 선택이며 Python 출력 검증 계약을 바꾸지 않습니다. 다른 본문 구조의 과거 Graph나 Summary를 그대로 입력하는 ASIS 전용 경로·본문 자동 변환은 제공하지 않습니다. 기존 artifact를 수동 재사용하려면 현재 계약과 provenance를 충족해야 합니다.
 
@@ -144,14 +144,14 @@ python -m extraction migrate-arm-layout --run-id "$RUN_ID" --summary-model qwen
 python -m extraction.normalize_summary_arms --run-id "$RUN_ID"
 ```
 
-제목 없는 Summary는 공유 Scene에서 새로 생성합니다. Validation 파일은 변환하지 않으며 embedding부터 다시 실행합니다. 기존 5개 Arm의 캐시는 새 공유 캐시에 자동 승격하지 않습니다. 기존 계약의 진단은 원래 Arm 이름과 경로로 읽습니다.
+제목 없는 Summary는 공유 Scene에서 새로 생성합니다. Validation 파일은 변환하지 않으며 embedding부터 다시 실행합니다. 기존 5개 Arm의 캐시는 새 공유 캐시에 자동 승격하지 않습니다. 기존 계약의 진단은 원래 Arm 이름을 사용하며, validation 저장 위치는 아래 모드별 경로를 따릅니다.
 
 ## Artifact 구조
 
 ```text
 artifacts/
 ├── preparation/{cohort,resized_keyframes,source_assets}/
-├── shared_cache/{embeddings,recommendations}/
+├── shared_cache/{embeddings,graph_inputs,recommendations}/
 └── runs/{RUN_ID}/
     ├── extraction/
     │   ├── scenes/{SCENE_ARM}/{content_id}.jsonl
@@ -161,10 +161,18 @@ artifacts/
     │   └── arm-layout-migration.json
     └── validation/
         ├── cohort/
-        ├── representations/{arm}_embeddings.npz
-        ├── recommendations/{date}/seed_{seed}/{arm}/
-        └── diagnosis/diagnosis.json
+        ├── representations/
+        │   ├── text/{arm}_embeddings.npz
+        │   └── graph/{arm}_embeddings/
+        ├── recommendations/
+        │   ├── text/{date}/seed_{seed}/{arm}/
+        │   └── graph/{mean|attention}/{date}/seed_{seed}/{arm}/
+        └── diagnosis/
+            ├── text_diagnosis.json
+            └── graph_{mean|attention}_diagnosis.json
 ```
+
+Text 임베딩은 `.npz` 파일이고 Graph 임베딩 입력은 여러 `.npy` 배열을 담는 `{arm}_embeddings/` 디렉터리입니다. 기존 Run 내부 파일은 자동 이동하지 않습니다. 새 경로에서 다시 실행하면 유효한 공유 캐시를 복구하고, 캐시가 없으면 재계산합니다.
 
 `scenes/{SCENE_ARM}/{content_id}.jsonl`은 장면당 한 줄입니다. Graph는 `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph` 순서로, Description은 `content_id`, `scene_idx`, `tokens`, `description` 순서로 저장합니다. Scene 본문에는 provenance를 저장하지 않습니다. Qwen·Gemini에 같은 형식을 적용합니다.
 
@@ -233,3 +241,15 @@ ruff check --config pyproject.toml src tests benchmarks
 ```
 
 v5/v6 호환 회귀 테스트와 v4 입력·캐시·진단 테스트, 작은 CPU 추천 학습을 사용합니다. 실제 모델/API 호출과 전체 데이터 Run은 별도로 실행합니다.
+
+### Scene Graph 직접 학습
+
+모든 validation 명령에 `--representation-mode text|graph`가 필수입니다. Graph 모드는 Scene Graph의 entity·action·Context를 고정 BGE 특징으로 준비한 뒤 역할별 encoder와 SASRec을 공동 학습합니다. Graph 추천·진단에는 `--scene-aggregation mean|attention`을 지정합니다. 입력 준비는 두 pooling 방식이 공유합니다.
+
+```bash
+python -m validation embed-representations --run-id 260928_v7 --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-recommendation --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+```
+
+attention 실험에서는 추천·진단의 `mean`을 `attention`으로 바꿉니다. GPU당 독립 작업 하나가 기본입니다. 전체 실행 순서, 저장 형식, 결측 처리와 재개 규칙은 [직접 Graph 학습 문서](docs/graph_training.md), 후속 작업은 [프로젝트 이정표](docs/TODO.md)를 참고합니다.

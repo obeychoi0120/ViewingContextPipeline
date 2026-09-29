@@ -17,6 +17,9 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     if reference_run_id == context.run_id:
         raise ValueError("comparison requires two different run IDs")
     reference = RunContext.load(reference_run_id, root=context.root)
+    from validation.graph_context import is_graph, graph_context
+    if is_graph(context):
+        reference = graph_context(reference, context.scene_aggregation)
     from validation.selection import diagnosis_context
     if hasattr(context, "run_root"):
         context = diagnosis_context(context)
@@ -88,7 +91,11 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         "comparisons": results,
         "model_interaction": interaction,
         **({"model_interactions": interactions} if not old else {}),
-        "interpretation": "Includes differences in extraction, summary prompts, models and fallback; inspect provenance.",
+        "interpretation": ("Includes extraction and direct-graph training differences; identical pooling mode required."
+                           if is_graph(context) else
+                           "Includes differences in extraction, summary prompts, models and fallback; inspect provenance."),
+        **({"representation_mode": "graph", "scene_aggregation": context.scene_aggregation}
+           if is_graph(context) else {}),
         "sources": {
             ctx.run_id: {name: read_state(ctx, name).get("sources", []) for name in names}
             for ctx in (context, reference)

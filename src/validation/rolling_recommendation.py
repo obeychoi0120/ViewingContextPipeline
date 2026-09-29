@@ -37,6 +37,8 @@ def transition_loss(model, table, ids, probabilities, device):
     target_ids = table.targets[ids]
     targets = torch.as_tensor(target_ids, dtype=torch.long, device=device)
     inputs = execution.inputs(ids, model.max_length, device)
+    if hasattr(model, "prepare_items"):
+        model.prepare_items(torch.cat([inputs.reshape(-1), targets]))
     users = model.user_vectors(inputs)
     logits = users @ model.item_vectors(targets).T
     logs = execution.log_probabilities(probabilities, target_ids, device, logits.dtype)
@@ -61,6 +63,8 @@ def train_epoch(model, optimizer, table, ids, probabilities, rng, config, device
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         optimizer.step()
+        if hasattr(model, "clear_item_cache"):
+            model.clear_item_cache()
         total += loss.detach().to(torch.float64) * len(batch)
         updates += 1
     if not len(ids):
@@ -107,12 +111,19 @@ def combination_dir(context, date, seed, arm):
     return context.recommendations_dir / date / f"seed_{seed}" / arm.lower()
 
 
+def result_files(identity):
+    names = ["sasrec.pt", "training.json", "per_event_metrics.jsonl"]
+    if identity.get("representation_mode") == "graph":
+        names.append("catalog_vectors.npy")
+    return names
+
+
 def combination_complete(directory, identity, expected_count, *, architecture_version=None):
     # Resume always requires the current architecture unless a read-only caller
     # explicitly selects a supported historical version.
     read_only = architecture_version is not None
     if architecture_version is None:
-        architecture_version = ARCHITECTURE_VERSION
+        architecture_version = identity.get("graph_architecture", ARCHITECTURE_VERSION)
     try:
         complete = read_json(directory / "complete.json")
         schema = complete.get("schema_version")
@@ -122,7 +133,7 @@ def combination_complete(directory, identity, expected_count, *, architecture_ve
             return False
         if complete.get("event_count") != expected_count:
             return False
-        names = {"sasrec.pt", "training.json", "per_event_metrics.jsonl"}
+        names = set(result_files(identity))
         if not all((directory / name).is_file() and (directory / name).stat().st_size for name in names):
             return False
         if schema in {SCHEMA, "sasrec-rolling-combination/v2"}:
@@ -174,17 +185,21 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     for phase in ("selection", "refit"):
         execution.log_probabilities(probabilities[phase], table.targets[ids[phase]], device, torch.float32)
     timings["preparation"] = time.monotonic() - started
-    with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
-        features = data["values"]
+    from validation.graph_context import is_graph
+    features = None
+    if not is_graph(context):
+        with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
+            features = data["values"]
+
+    def create_model():
+        if is_graph(context):
+            from validation.graph_model import new_graph_model
+            return new_graph_model(context, config, branch, device)
+        return _new_model(config, item_count=len(table.items), branch=branch,
+                          features=features, device=device)
     seed_everything(seed)
     rng = np.random.default_rng(seed)
-    model = _new_model(
-        config,
-        item_count=len(table.items),
-        branch=branch,
-        features=features,
-        device=device,
-    )
+    model = create_model()
     optimizer = _optimizer(model, config)
     selection = []
     best_epoch, best_score = 0, -math.inf
@@ -216,13 +231,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     del model, optimizer
     seed_everything(seed)
     rng = np.random.default_rng(seed)
-    model = _new_model(
-        config,
-        item_count=len(table.items),
-        branch=branch,
-        features=features,
-        device=device,
-    )
+    model = create_model()
     optimizer = _optimizer(model, config)
     print(f"[Rolling] {date} {arm} seed={seed} refit epochs={best_epoch} device={device}", flush=True)
     refit = []
@@ -265,10 +274,14 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     timings["test"] = time.monotonic() - phase_started
     metadata = {
         **identity,
-        "architecture_version": ARCHITECTURE_VERSION,
+        "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
         "best_epoch": best_epoch,
         "catalog_size": len(table.items),
     }
+    if is_graph(context):
+        model.eval()
+        with torch.no_grad():
+            np.save(directory / "catalog_vectors.npy", model.catalog_vectors().cpu().numpy())
     save_checkpoint(directory / "sasrec.pt", model, metadata)
     write_json(
         directory / "training.json",
@@ -299,8 +312,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
             "schema_version": SCHEMA,
             "identity": identity,
             "event_count": count,
-            "checksums": {name: checksum(directory / name) for name in (
-                "sasrec.pt", "training.json", "per_event_metrics.jsonl")},
+            "checksums": {name: checksum(directory / name) for name in result_files(identity)},
         },
     )
     # Publish each completed unit, including in spawned workers, so interruption

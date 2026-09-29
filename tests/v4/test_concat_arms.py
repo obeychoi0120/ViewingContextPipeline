@@ -350,9 +350,9 @@ def test_cli_source_and_target_contract(ready_context, fake_models, monkeypatch,
         )
         == 1
     )
-    assert validate(["embed-representations", "--run-id", "new", "--target", "graph_gemini"]) == 1
+    assert validate(["embed-representations", "--representation-mode", "text", "--run-id", "new", "--target", "graph_gemini"]) == 1
     assert (
-        validate(["embed-representations", "--run-id", "new", "--target", "graph_gemini_meta"]) == 0
+        validate(["embed-representations", "--representation-mode", "text", "--run-id", "new", "--target", "graph_gemini_meta"]) == 0
     )
 
 

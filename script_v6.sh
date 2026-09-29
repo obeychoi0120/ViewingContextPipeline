@@ -28,6 +28,6 @@ python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_descr
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen
 
 ### Recommendation (Device)
-CUDA_VISIBLE_DEVICES=$GPU python -m validation embed-representations --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
-CUDA_VISIBLE_DEVICES=$GPU python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --workers-per-gpu 8
-CUDA_VISIBLE_DEVICES=$GPU python -m validation run-diagnosis --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+CUDA_VISIBLE_DEVICES=$GPU python -m validation embed-representations --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --representation-mode text
+CUDA_VISIBLE_DEVICES=$GPU python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --workers-per-gpu 8 --representation-mode text
+CUDA_VISIBLE_DEVICES=$GPU python -m validation run-diagnosis --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta --representation-mode text
