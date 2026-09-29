@@ -1,0 +1,50 @@
+{
+  "schema_version": "video-summary/v5",
+  "content_id": "microlens_100k_01189",
+  "tokens": null,
+  "arm": "desc_qwen",
+  "status": "failed",
+  "text": "",
+  "scene_count": 7,
+  "word_count": 0,
+  "violations": [
+    "empty",
+    "GeminiEmptyResponseError: Gemini returned an empty response"
+  ],
+  "correction_count": 0,
+  "provenance": {
+    "uses_title": false,
+    "scene_arm": "desc_qwen",
+    "representation": "description",
+    "prompt_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/prompts/summary_description_v5.md",
+    "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+    "model": {
+      "project_id": "insight-dev-490002",
+      "location": "global",
+      "model_id": "gemini-3.8-flash",
+      "temperature": 0.0,
+      "thinking_level": "low",
+      "media_resolution": "MEDIA_RESOLUTION_LOW"
+    },
+    "settings": {
+      "max_new_tokens": 1024,
+      "backend": "gemini"
+    },
+    "summary_model": "gemini",
+    "schema_contract": "summary/v5",
+    "scene_provenance": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "scene_input_hash": "a7250f9fcbfed01bc807b24c5fadab4ab34057396d886be09e708cd48263c23d",
+    "scene_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/v6_260926/extraction/scenes/desc_qwen/microlens_100k_01189.jsonl",
+    "normal_scene_count": 7,
+    "raw_scene_count": 0,
+    "input_hash": "ac3a7b873027fa73b321acee8fcc19b815b430dab35d501f3c24377a56a28485"
+  }
+}

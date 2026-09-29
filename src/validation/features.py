@@ -10,7 +10,7 @@ class FeatureError(RuntimeError):
     pass
 
 
-def _load_bge_runtime(settings: EncoderConfig):
+def _load_bge_runtime(settings: EncoderConfig, device=None):
     if not settings.model_path.is_dir():
         raise FeatureError(f"local encoder path does not exist: {settings.model_path}")
     try:
@@ -21,7 +21,7 @@ def _load_bge_runtime(settings: EncoderConfig):
 
     tokenizer = AutoTokenizer.from_pretrained(str(settings.model_path), local_files_only=True)
     model = AutoModel.from_pretrained(str(settings.model_path), local_files_only=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device).eval()
     return torch, tokenizer, model, device
 
@@ -29,15 +29,19 @@ def _load_bge_runtime(settings: EncoderConfig):
 class BGETextEncoder:
     """Load one local BGE runtime and reuse it across representation branches."""
 
-    def __init__(self, settings: EncoderConfig):
+    def __init__(self, settings: EncoderConfig, *, device=None):
         self.settings = settings
         self.last_truncation = {"text_count": 0, "truncated_count": 0}
-        self._torch, self.tokenizer, self.model, self.device = _load_bge_runtime(settings)
+        self._torch, self.tokenizer, self.model, self.device = (
+            _load_bge_runtime(settings) if device is None else _load_bge_runtime(settings, device)
+        )
 
     def _encode_batch(self, texts: list[str]) -> np.ndarray:
         lengths = self.tokenizer(texts, truncation=False, padding=False)["input_ids"]
         self.last_truncation["text_count"] += len(texts)
-        self.last_truncation["truncated_count"] += sum(len(ids) > self.settings.max_length for ids in lengths)
+        self.last_truncation["truncated_count"] += sum(
+            len(ids) > self.settings.max_length for ids in lengths
+        )
         encoded = self.tokenizer(
             texts,
             padding=True,
@@ -54,11 +58,10 @@ class BGETextEncoder:
         self.last_truncation = {"text_count": 0, "truncated_count": 0}
         batches: list[np.ndarray] = []
         with self._torch.no_grad():
-            for start in tqdm(range(0, len(texts), self.settings.batch_size),
-                              desc="BGE embeddings", unit="batch"):
-                batches.append(
-                    self._encode_batch(texts[start : start + self.settings.batch_size])
-                )
+            for start in tqdm(
+                range(0, len(texts), self.settings.batch_size), desc="BGE embeddings", unit="batch"
+            ):
+                batches.append(self._encode_batch(texts[start : start + self.settings.batch_size]))
         matrix = (
             np.concatenate(batches, axis=0)
             if batches

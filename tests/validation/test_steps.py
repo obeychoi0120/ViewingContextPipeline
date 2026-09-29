@@ -1,7 +1,7 @@
 import numpy as np
 
 from validation.steps import _representations_match_catalog
-from pipeline_runtime import write_json
+from artifact_io import write_json
 
 
 def test_representation_cache_must_match_full_catalog(tmp_path) -> None:

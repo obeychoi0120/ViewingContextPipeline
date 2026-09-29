@@ -1,16 +1,12 @@
 """Run-local validation cohort shared by every configured arm."""
 
-from collections import Counter
 from copy import deepcopy
-
 from arm_registry import active_arms, select_arms
 from artifact_io import atomic_write_json, atomic_write_jsonl
-from extraction.recovery import fingerprint
-from extraction.summary_executor import summary_failure_rows
-from pipeline_runtime import read_json, read_jsonl
+from artifact_io import fingerprint
+from artifact_io import read_json, read_jsonl
 from validation.rolling_data import EventTable
 
-LEGACY_POLICY = "complete-summary-intersection/v1"
 POLICY = "full-catalog-zero-vector/v2"
 
 
@@ -33,166 +29,63 @@ def recount_splits(table, splits):
     return result
 
 
-def _build_legacy_selection(context, summary_source):
-    from validation.representation_inputs import documents_for_arm
-
-    if summary_source not in {"qwen", "gemini"}:
-        raise ValueError("summary_source must be qwen or gemini")
-    source = context.require_ready_cohort()
-    events = read_jsonl(context.cohort_dir / "events.jsonl")
-    arms = validation_arms(context)
-    failures = {
-        name: summary_failure_rows(
-            context.summary_dir(arm.representation, arm.model, summary_source)
-        )
-        for name, arm in arms.items()
-        if name != "metadata"
-    }
-    excluded, included, evidence = [], [], []
-    counts = {name: Counter() for name in failures}
-    for item in source["catalog"]:
-        cid = str(item["content_id"])
-        reasons = []
-        for name, arm in arms.items():
-            if name == "metadata":
-                continue
-            path = (
-                context.summary_dir(arm.representation, arm.model, summary_source) / f"{cid}.json"
-            )
-            reason = None
-            if cid in failures[name]:
-                reason = "failed"
-            elif not path.is_file():
-                reason = "missing"
-            else:
-                try:
-                    doc = read_json(path)
-                    if isinstance(doc, dict) and doc.get("status") == "raw_fallback":
-                        reason = "raw_fallback"
-                    else:
-                        docs = documents_for_arm(
-                            context,
-                            {"catalog": [item]},
-                            arm,
-                            summary_source=summary_source,
-                            strict=True, legacy=True,
-                            failure_rows=failures[name],
-                        )
-                        evidence.append([name, cid, docs[0]["document_hash"]])
-                except (OSError, ValueError, RuntimeError, KeyError, TypeError, AttributeError):
-                    reason = "invalid"
-            if reason:
-                reasons.append({"arm": name, "reason": reason})
-                counts[name][reason] += 1
-        if reasons:
-            excluded.append({**item, "reasons": reasons})
-        else:
-            included.append(item)
-    if not included:
-        raise ValueError("summary intersection is empty; no validation items")
-    item_ids = {r["item_id"] for r in included}
-    retained = [
-        {**row, "event_id": i, "source_event_id": row["event_id"]}
-        for i, row in enumerate(r for r in events if r["item_id"] in item_ids)
-    ]
-    table = EventTable(retained)
-    splits = recount_splits(table, source["plan"]["splits"])
-    if any(p["eligible_count"] == 0 for s in splits for p in s["phases"].values()):
-        raise ValueError("summary intersection leaves a rolling partition with no eligible events")
-    original_table = EventTable(events)
-    lost_history = 0
-    for split in splits:
-        phase = split["phases"]["test"]
-        for event in table.select(phase["start_ms"], phase["end_ms"], eligible=False):
-            if (
-                table.history_ends[event] == 0
-                and original_table.history_ends[retained[event]["source_event_id"]] > 0
-            ):
-                lost_history += 1
-    plan = {
-        **source["plan"],
-        "schema_version": LEGACY_POLICY,
-        "user_count": len(table.users),
-        "interaction_count": len(retained),
-        "item_count": len(included),
-        "splits": splits,
-        "no_history_count": int((table.history_ends == 0).sum()),
-        "duplicate_rows_preserved": len(retained)
-        - len({(r["user_id"], r["item_id"], r["timestamp"]) for r in retained}),
-        "eligible_test_count": sum(s["phases"]["test"]["eligible_count"] for s in splits),
-    }
-    start = splits[0]["phases"]["test"]["start_ms"]
-    end = splits[-1]["phases"]["test"]["end_ms"]
-    plan["outside_evaluation"] = {
-        "before_window": len(table.select(end=start, eligible=False)),
-        "final_observed_day": len(table.select(start=end, eligible=False)),
-    }
-    payload = {
-        "catalog": included,
-        "metadata_titles": [r for r in source["metadata_titles"] if r["item_id"] in item_ids],
-        "events": retained,
-        "plan": plan,
-        "excluded": excluded,
-    }
-    manifest = {
-        "policy": LEGACY_POLICY,
-        "arms": list(arms),
-        "summary_source": summary_source,
-        "included_item_ids": [r["item_id"] for r in included],
-        "source_hash": fingerprint({"cohort": source, "events": events}),
-        "summary_inputs_hash": fingerprint(evidence),
-        "data_hash": fingerprint(payload),
-        "statistics": {
-            "original_item_count": len(source["catalog"]),
-            "included_item_count": len(included),
-            "excluded_item_count": len(excluded),
-            "removed_event_count": len(events) - len(retained),
-            "lost_history_test_event_count": lost_history,
-            "excluded_by_arm": {name: dict(values) for name, values in counts.items()},
-        },
-        "excluded_details_path": "validation/cohort/excluded.jsonl",
-    }
-    manifest["selection_hash"] = fingerprint(manifest)
-    return {**payload, "manifest": manifest}
-
-
 def data_identity(cohort):
-    return {"policy": POLICY, "catalog": [{k: row[k] for k in ("item_id", "content_id")}
-                                       for row in cohort["catalog"]], "events": cohort["events"],
-            "splits": cohort["plan"]["splits"]}
+    return {
+        "policy": POLICY,
+        "catalog": [{k: row[k] for k in ("item_id", "content_id")} for row in cohort["catalog"]],
+        "events": cohort["events"],
+        "splits": cohort["plan"]["splits"],
+    }
 
 
-def build_selection(context, summary_source=None):
-    if summary_source not in {None, "qwen", "gemini"}:
-        raise ValueError("summary_source must be qwen or gemini")
+def build_selection(context):
     source = context.require_ready_cohort()
     events = read_jsonl(context.cohort_dir / "events.jsonl")
     table = EventTable(events)
     if [str(r["item_id"]) for r in source["catalog"]] != table.items:
         raise ValueError("catalog must match the ordered event item universe")
-    plan = {**source["plan"], "schema_version": POLICY,
-            "splits": recount_splits(table, source["plan"]["splits"])}
-    plan["eligible_test_count"] = sum(s["phases"]["test"]["eligible_count"] for s in plan["splits"])
-    payload = {"catalog": source["catalog"], "metadata_titles": source["metadata_titles"],
-               "events": events, "plan": plan, "excluded": []}
+    plan = {
+        **source["plan"],
+        "schema_version": POLICY,
+        "splits": recount_splits(table, source["plan"]["splits"]),
+    }
+    plan["eligible_test_count"] = sum(
+        (s["phases"]["test"]["eligible_count"] for s in plan["splits"])
+    )
+    payload = {
+        "catalog": source["catalog"],
+        "metadata_titles": source["metadata_titles"],
+        "events": events,
+        "plan": plan,
+        "excluded": [],
+    }
     count = len(source["catalog"])
-    from arm_registry import legacy_layout, arm_contract, concat_layout
-    manifest = {**({"arm_contract": arm_contract(context.config)} if not legacy_layout(context.config) else {}),
-                **({"arms": list(active_arms(context.config))} if concat_layout(context.config) else {}),
-                "policy": POLICY, "data_hash": fingerprint(payload),
-                "selection_hash": fingerprint(data_identity(payload)),
-                "included_item_ids": [r["item_id"] for r in source["catalog"]],
-                "statistics": {"original_item_count": count, "included_item_count": count,
-                               "excluded_item_count": 0, "removed_event_count": 0,
-                               "lost_history_test_event_count": 0, "excluded_by_arm": {}}}
+    from arm_registry import arm_contract
+
+    manifest = {
+        "arm_contract": arm_contract(context.config),
+        "arms": list(active_arms(context.config)),
+        "policy": POLICY,
+        "data_hash": fingerprint(payload),
+        "selection_hash": fingerprint(data_identity(payload)),
+        "included_item_ids": [r["item_id"] for r in source["catalog"]],
+        "statistics": {
+            "original_item_count": count,
+            "included_item_count": count,
+            "excluded_item_count": 0,
+            "removed_event_count": 0,
+            "lost_history_test_event_count": 0,
+            "excluded_by_arm": {},
+        },
+    }
     return {**payload, "manifest": manifest}
 
 
-def prepare_validation_cohort(context, summary_source=None):
-    cohort = build_selection(context, summary_source)
+def prepare_validation_cohort(context):
+    cohort = build_selection(context)
     directory = cohort_directory(context)
     directory.mkdir(parents=True, exist_ok=True)
-    # Publish the manifest last; a partial write never validates against an old manifest.
+    # Publish the manifest last so partially written data cannot pass validation.
     for key in ("catalog", "metadata_titles", "events", "excluded"):
         atomic_write_jsonl(directory / f"{key}.jsonl", cohort[key], durable=True)
     atomic_write_json(directory / "plan.json", cohort["plan"], durable=True)
@@ -214,16 +107,13 @@ def load_validation_cohort(context, *, verify_current=True):
             for key in ("catalog", "metadata_titles", "events", "excluded")
         }
         cohort["plan"] = read_json(directory / "plan.json")
-        legacy = manifest["policy"] == LEGACY_POLICY
-        if manifest["policy"] not in {POLICY, LEGACY_POLICY} or fingerprint(cohort) != manifest["data_hash"]:
+        if manifest["policy"] != POLICY or fingerprint(cohort) != manifest["data_hash"]:
             raise ValueError("invalid selection manifest")
-        expected = (fingerprint({k: v for k, v in manifest.items() if k != "selection_hash"})
-                    if legacy else fingerprint(data_identity(cohort)))
+        expected = fingerprint(data_identity(cohort))
         if expected != manifest["selection_hash"]:
             raise ValueError("invalid selection manifest")
         if verify_current:
-            current = (_build_legacy_selection(context, manifest["summary_source"]) if legacy
-                       else build_selection(context, "qwen"))
+            current = build_selection(context)
             if current["manifest"] != manifest:
                 raise ValueError("selection inputs changed")
         return {**cohort, "manifest": manifest}
@@ -235,50 +125,15 @@ def load_validation_cohort(context, *, verify_current=True):
 
 def training_signature(context, cohort, config):
     from validation.recommendation_contracts import TRAINING_IMPLEMENTATION_VERSION
+
     return fingerprint(
         {
-            **({"implementation": TRAINING_IMPLEMENTATION_VERSION if cohort["manifest"].get("arm_contract")
-               else "full-catalog-training-evaluation/v2"}
-               if cohort["manifest"]["policy"] != LEGACY_POLICY else {}),
+            "implementation": TRAINING_IMPLEMENTATION_VERSION,
             "events": cohort["events"],
             "selection_hash": cohort["manifest"]["selection_hash"],
-            "model": (context.config["validation"]["model"] if cohort["manifest"]["policy"] == LEGACY_POLICY
-                      else {k: v for k, v in context.config["validation"]["model"].items() if k != "seeds"}),
+            "model": {
+                k: v for k, v in context.config["validation"]["model"].items() if k != "seeds"
+            },
             "cutoffs": config.evaluation.cutoffs,
         }
     )
-
-
-def diagnosis_context(context):
-    """Bind historical artifacts to their original vocabulary without rewriting them."""
-    from dataclasses import replace
-    manifest_path = cohort_directory(context) / "manifest.json"
-    if not manifest_path.is_file():
-        return context
-    manifest = read_json(manifest_path)
-    from arm_registry import (
-        ARM_CONTRACT, CONCAT_ARM_CONTRACT, LEGACY_CONCAT_ARM_CONTRACT,
-        EXPERIMENT_CONFIG_VERSION,
-    )
-    contract = manifest.get("arm_contract")
-    settings = deepcopy(context.config)
-    if contract in {CONCAT_ARM_CONTRACT, LEGACY_CONCAT_ARM_CONTRACT}:
-        settings["historical_arm_contract"] = contract
-        settings.pop("schema_version", None)
-        settings["experiment_config_version"] = EXPERIMENT_CONFIG_VERSION
-    elif contract == ARM_CONTRACT:
-        settings.pop("experiment_config_version", None)
-        settings["schema_version"] = "viewing-context-config/v6"
-    elif contract:
-        raise ValueError(f"unknown historical arm contract: {contract}")
-    else:
-        settings.pop("experiment_config_version", None)
-        settings["schema_version"] = "viewing-context-config/v5"
-    names = manifest.get("arms") or [p.stem for p in (context.representations_dir / ".inputs").glob("*.json")]
-    from arm_registry import registry
-    if contract == CONCAT_ARM_CONTRACT:
-        settings["protocol"].pop("arms", None)
-    else:
-        settings["protocol"]["arms"] = list(names) or list(registry(settings))
-    settings["protocol"]["description_extractors"] = (["qwen"] if contract == LEGACY_CONCAT_ARM_CONTRACT else ["qwen", "gemini"])
-    return replace(context, config=settings)

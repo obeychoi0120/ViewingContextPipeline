@@ -3,10 +3,9 @@ import os
 from pathlib import Path
 import tempfile
 import numpy as np
-
 from validation.selection import prepare_validation_cohort, validation_arms
 from pipeline_logging import log_step_start
-from pipeline_runtime import read_json, read_jsonl, write_json
+from artifact_io import read_json, write_json
 from validation.config import build_validation_config
 from validation.representation_inputs import documents_for_arm, representation_signature
 from validation.representation_provenance import (
@@ -36,21 +35,6 @@ def _embedding_path(context, branch):
     return context.representations_dir / f"{branch}_embeddings.npz"
 
 
-def _metadata_titles_match_catalog(path, catalog, *, allow_blank=False):
-    try:
-        titles = read_jsonl(path)
-        return len(titles) == len(catalog) and all(
-            set(t) == {"item_id", "content_id", "title"}
-            and str(t["item_id"]) == str(c["item_id"])
-            and str(t["content_id"]) == str(c["content_id"])
-            and isinstance(t["title"], str)
-            and (allow_blank or bool(t["title"].strip()))
-            for t, c in zip(titles, catalog, strict=True)
-        )
-    except (OSError, ValueError):
-        return False
-
-
 def _representations_match_catalog(item_index_path, outputs, catalog, embedding_dim):
     try:
         if read_json(item_index_path) != {str(row["item_id"]): i for i, row in enumerate(catalog)}:
@@ -70,11 +54,7 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            "wb",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".npz",
-            delete=False,
+            "wb", dir=path.parent, prefix=f".{path.name}.", suffix=".npz", delete=False
         ) as handle:
             temporary = Path(handle.name)
             np.savez_compressed(handle, values=matrix)
@@ -86,23 +66,25 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             temporary.unlink()
 
 
-def embed_representations(context, *, summary_source=None, force=False, target=None):
+def embed_representations(context, *, force=False, target=None, representation_mode="text"):
+    from validation.graph_context import graph_context, validate_mode
+
+    validate_mode(representation_mode, None, "embed-representations", target)
+    if representation_mode == "graph":
+        from validation.graph_inputs import prepare
+
+        if not target:
+            raise ValueError("--target is required")
+        return prepare(graph_context(context), target=target, force=force)
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
-    from arm_registry import legacy_layout
-    legacy = legacy_layout(context.config)
-    if legacy and summary_source is None:
-        summary_source = "qwen"
-    if summary_source not in {None, "qwen", "gemini"}:
-        raise ValueError("summary_source must be qwen or gemini")
     from validation.features import BGETextEncoder
     from validation.representation_checks import verify_representations
 
-    log_step_start(context, "embed-representations", force=force, target=target,
-                   summary_source=summary_source)
+    log_step_start(context, "embed-representations", force=force, target=target)
     context.initialize()
     arms = validation_arms(context, target)
-    cohort = prepare_validation_cohort(context, summary_source)
+    cohort = prepare_validation_cohort(context)
     config = validation_config(context)
     catalog = cohort["catalog"]
     from validation.shared_cache import SharedCache
@@ -111,12 +93,12 @@ def embed_representations(context, *, summary_source=None, force=False, target=N
     pending = []
     reused = {"local": [], "shared": []}
     encoder = None
-    # Validate all selected input documents before loading the encoder or writing results.
     inputs = {}
     for name, arm in arms.items():
-        docs = documents_for_arm(context, cohort, arm, summary_source=summary_source, strict=True)
-        signature = representation_signature(context, catalog, arm, docs,
-                                             selection_hash=cohort["manifest"]["selection_hash"])
+        docs = documents_for_arm(context, cohort, arm)
+        signature = representation_signature(
+            context, catalog, arm, docs, selection_hash=cohort["manifest"]["selection_hash"]
+        )
         inputs[name] = (docs, signature)
         state = read_state(context, name)
         path = _embedding_path(context, name)
@@ -129,10 +111,10 @@ def embed_representations(context, *, summary_source=None, force=False, target=N
         if (
             force
             or not matches
-            or not state
+            or (not state)
             or pending_write(context, name).exists()
-            or state.get("input_hash") != signature
-            or state.get("embedding_hash") != matrix_hash(path)
+            or (state.get("input_hash") != signature)
+            or (state.get("embedding_hash") != matrix_hash(path))
         ):
             pending.append(name)
         else:
@@ -140,13 +122,17 @@ def embed_representations(context, *, summary_source=None, force=False, target=N
     generated = []
     for name in arms:
         docs, signature = inputs[name]
-        eligible = name in {"meta", "metadata"} or all(shareable_document(d) for d in docs)
+        eligible = name in {"meta", "metadata"} or all((shareable_document(d) for d in docs))
         cache = SharedCache(context, "embeddings", signature)
         state = read_state(context, name)
         truncation = state.get("truncation")
-        origin = {"run_id": context.run_id, "kind": "local", "key": signature,
-                  "reused_from": ((state.get("cache") or {}).get("reused_from")
-                                  or (state.get("cache") if (state.get("cache") or {}).get("kind") == "shared" else None))}
+        origin = {
+            "run_id": context.run_id,
+            "kind": "local",
+            "key": signature,
+            "reused_from": (state.get("cache") or {}).get("reused_from")
+            or (state.get("cache") if (state.get("cache") or {}).get("kind") == "shared" else None),
+        }
         if name in pending:
             restored = None
             if not force and eligible:
@@ -157,10 +143,17 @@ def embed_representations(context, *, summary_source=None, force=False, target=N
                         try:
                             with np.load(temporary / "values.npz") as arrays:
                                 matrix = arrays["values"]
-                                valid = (matrix.shape == (len(catalog), config.encoder.embedding_dim)
-                                         and np.isfinite(matrix).all()
-                                         and all(np.all(matrix[i] == 0) for i, d in enumerate(docs)
-                                                 if not d["text"].strip()))
+                                valid = (
+                                    matrix.shape == (len(catalog), config.encoder.embedding_dim)
+                                    and np.isfinite(matrix).all()
+                                    and all(
+                                        (
+                                            np.all(matrix[i] == 0)
+                                            for i, d in enumerate(docs)
+                                            if not d["text"].strip()
+                                        )
+                                    )
+                                )
                             if valid:
                                 _write_embedding(_embedding_path(context, name), matrix)
                             else:
@@ -174,30 +167,47 @@ def embed_representations(context, *, summary_source=None, force=False, target=N
             else:
                 generated.append(name)
                 origin = {"run_id": context.run_id, "kind": "generated", "key": signature}
-                if encoder is None and any(d["text"].strip() for d in docs):
+                if encoder is None and any((d["text"].strip() for d in docs)):
                     encoder = BGETextEncoder(config.encoder)
                 _encode_arm(context, config, name, docs, encoder)
-                truncation = (getattr(encoder, "last_truncation", None)
-                              if any(d["text"].strip() for d in docs)
-                              else {"text_count": 0, "truncated_count": 0})
+                truncation = (
+                    getattr(encoder, "last_truncation", None)
+                    if any((d["text"].strip() for d in docs))
+                    else {"text_count": 0, "truncated_count": 0}
+                )
         finish_write(
-            context, name, signature, None,
-            sources=[{**{k: v for k, v in d.items() if k != "text"},
-                      "empty": not d["text"].strip()} for d in docs],
+            context,
+            name,
+            signature,
+            None,
+            sources=[
+                {**{k: v for k, v in d.items() if k != "text"}, "empty": not d["text"].strip()}
+                for d in docs
+            ],
             selection_hash=cohort["manifest"]["selection_hash"],
-            summary_source=summary_source if legacy and name != "metadata" else None,
-            cache=origin, shareable=eligible,
+            cache=origin,
+            shareable=eligible,
             truncation=truncation,
         )
         if eligible:
-            cache.publish(context.representations_dir, {"values.npz": f"{name}_embeddings.npz"},
-                          origin={"run_id": context.run_id, "truncation": truncation},
-                          replace_corrupt=not force)
-    write_json(context.representations_dir / "item_index.json",
-               {str(row["item_id"]): i for i, row in enumerate(catalog)})
+            cache.publish(
+                context.representations_dir,
+                {"values.npz": f"{name}_embeddings.npz"},
+                origin={"run_id": context.run_id, "truncation": truncation},
+                replace_corrupt=not force,
+            )
+    write_json(
+        context.representations_dir / "item_index.json",
+        {str(row["item_id"]): i for i, row in enumerate(catalog)},
+    )
     verify_representations(context, cohort, arms={name: name for name in arms})
-    return {"stage": "embed-representations", "content_count": len(catalog),
-            "generated_arms": generated, "selected_arms": list(arms), "reuse": reused}
+    return {
+        "stage": "embed-representations",
+        "content_count": len(catalog),
+        "generated_arms": generated,
+        "selected_arms": list(arms),
+        "reuse": reused,
+    }
 
 
 def _encode_arm(context, config, name, docs, encoder):
@@ -205,9 +215,7 @@ def _encode_arm(context, config, name, docs, encoder):
     indices = [i for i, row in enumerate(docs) if row["text"].strip()]
     matrix = np.zeros((len(catalog), config.encoder.embedding_dim), dtype=np.float32)
     if indices:
-        encoded = np.asarray(
-            encoder.encode([docs[i]["text"] for i in indices]), dtype=np.float32
-        )
+        encoded = np.asarray(encoder.encode([docs[i]["text"] for i in indices]), dtype=np.float32)
         if (
             encoded.shape != (len(indices), config.encoder.embedding_dim)
             or not np.isfinite(encoded).all()
@@ -223,25 +231,51 @@ def _encode_arm(context, config, name, docs, encoder):
     _write_embedding(path, matrix)
 
 
-def run_recommendation(context, *, force=False, workers_per_gpu=1, target=None):
+def run_recommendation(
+    context,
+    *,
+    force=False,
+    workers_per_gpu=1,
+    target=None,
+    representation_mode="text",
+    scene_aggregation=None,
+):
+    from validation.graph_context import graph_context, validate_mode
+
+    validate_mode(representation_mode, scene_aggregation, "run-recommendation", target)
+    if representation_mode == "graph":
+        context = graph_context(context, scene_aggregation)
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
     from validation.rolling_recommendation import run_rolling
 
     log_step_start(
-        context,
-        "run-recommendation",
-        force=force,
-        target=target,
-        workers_per_gpu=workers_per_gpu,
+        context, "run-recommendation", force=force, target=target, workers_per_gpu=workers_per_gpu
     )
     context.initialize()
-    return run_rolling(
-        context, force=force, workers_per_gpu=workers_per_gpu, target=target
-    )
+    return run_rolling(context, force=force, workers_per_gpu=workers_per_gpu, target=target)
 
 
-def run_diagnosis(context, *, force=False, target=None, compare_run_id=None):
+def run_diagnosis(
+    context,
+    *,
+    force=False,
+    target=None,
+    compare_run_id=None,
+    representation_mode="text",
+    scene_aggregation=None,
+):
+    from validation.graph_context import graph_context, validate_mode
+
+    validate_mode(representation_mode, scene_aggregation, "run-diagnosis", target)
+    if representation_mode == "graph":
+        from validation.graph_diagnosis import diagnose_graph
+
+        if not target:
+            raise ValueError("--target is required")
+        return diagnose_graph(
+            graph_context(context, scene_aggregation), target=target, compare_run_id=compare_run_id
+        )
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
     from validation.rolling_diagnosis import diagnose

@@ -1,31 +1,21 @@
 from __future__ import annotations
-
 import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
-
 from extraction.scene_storage import read_scene_records
 from visual_sampling import truncate_timestamp, timestamp_filename
-
-from .diagnosis_support import (
-    _bounded_examples,
-    _error,
-    _read_json,
-    _read_jsonl,
-)
+from .diagnosis_support import _bounded_examples, _error, _read_json, _read_jsonl
 
 
 def scene_arms(config):
     from arm_registry import registry
-    from arm_registry import legacy_layout
-    if legacy_layout(config):
-        return {name: (f"extraction/{arm.representation}/{arm.model}/scenes",
-                       f"extraction/{arm.representation}/{arm.model}/scenes/failures")
-                for name, arm in registry(config).items() if arm.model}
-    return {name: (f"extraction/scenes/{arm.scene_arm}",
-                   f"extraction/scenes/{arm.scene_arm}/failures")
-            for name, arm in registry(config).items() if arm.model}
+
+    return {
+        name: (f"extraction/scenes/{arm.scene_arm}", f"extraction/scenes/{arm.scene_arm}/failures")
+        for name, arm in registry(config).items()
+        if arm.model
+    }
 
 
 def _expected_scenes(
@@ -34,7 +24,8 @@ def _expected_scenes(
     errors: list[dict[str, Any]],
     scene_duration: int = 30,
     num_keyframes: int = 6,
-    *, source_assets_dir=None,
+    *,
+    source_assets_dir=None,
 ) -> tuple[set[tuple[str, int]], bool]:
     expected: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
@@ -46,10 +37,7 @@ def _expected_scenes(
             / timestamp_filename(scene_duration, num_keyframes)
         )
         value, loaded = _read_json(
-            path,
-            "fixed-window timestamp artifact",
-            errors,
-            report_error=False,
+            path, "fixed-window timestamp artifact", errors, report_error=False
         )
         if not loaded:
             issues["missing_or_invalid_timestamp"] += 1
@@ -76,7 +64,7 @@ def _expected_scenes(
                 continue
             seen.add(scene_idx)
             expected.add((content_id, scene_idx))
-    valid = bool(expected) and not issues
+    valid = bool(expected) and (not issues)
     if issues:
         _error(
             errors,
@@ -87,7 +75,7 @@ def _expected_scenes(
         )
     if not expected:
         _error(errors, "empty_scene_denominator", "fixed-window scene denominator is empty")
-    return expected, valid
+    return (expected, valid)
 
 
 def _nonempty_timestamp_list(value: Any) -> bool:
@@ -95,26 +83,25 @@ def _nonempty_timestamp_list(value: Any) -> bool:
         isinstance(value, list)
         and bool(value)
         and all(
-            type(item) in (int, float)
-            and math.isfinite(item)
-            and item >= 0
-            and truncate_timestamp(item) == item
-            for item in value
+            (
+                type(item) in (int, float)
+                and math.isfinite(item)
+                and (item >= 0)
+                and (truncate_timestamp(item) == item)
+                for item in value
+            )
         )
-        and value == sorted(set(value))
+        and (value == sorted(set(value)))
     )
 
 
-def _success_scene_row_issues(
-    arm: str,
-    row: dict[str, Any],
-    content_id: str,
-) -> list[str]:
+def _success_scene_row_issues(arm: str, row: dict[str, Any], content_id: str) -> list[str]:
     invalid: list[str] = []
-    if row.get("keyframes") != [] and not _nonempty_timestamp_list(row.get("keyframes")):
+    if row.get("keyframes") != [] and (not _nonempty_timestamp_list(row.get("keyframes"))):
         invalid.append("invalid_success_keyframes")
     if arm.startswith("graph_"):
         from extraction.raw_output import is_raw_graph, valid_raw_graph
+
         if is_raw_graph(row):
             if not valid_raw_graph(row):
                 invalid.append("invalid_raw_graph_scene")
@@ -128,6 +115,7 @@ def _success_scene_row_issues(
         }:
             invalid.append("invalid_graph_scene_fields")
         from extraction.structured_output import validate_graph_structure, OutputValidationError
+
         try:
             if not (row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)):
                 validate_graph_structure(row.get("graph"))
@@ -165,7 +153,8 @@ def _scene_arm_contract(
     expected: set[tuple[str, int]],
     errors: list[dict[str, Any]],
     paths,
-    *, excluded_content_ids=(),
+    *,
+    excluded_content_ids=(),
 ) -> tuple[dict[str, Any], set[tuple[str, int]], bool]:
     scene_relative, failure_relative = paths[arm]
     scene_dir = run_root / scene_relative
@@ -178,10 +167,13 @@ def _scene_arm_contract(
     semantic_warning_scenes: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
     examples: list[dict[str, Any]] = []
-
     existing_scene_files = set()
     if scene_dir.is_dir():
-        existing_scene_files = {path.stem for path in scene_dir.glob("*.jsonl") if path.name not in {"failure.jsonl", "failures.jsonl"}}
+        existing_scene_files = {
+            path.stem
+            for path in scene_dir.glob("*.jsonl")
+            if path.name not in {"failure.jsonl", "failures.jsonl"}
+        }
     else:
         issues["missing_scene_directory"] += 1
         examples.append({"path": str(scene_dir)})
@@ -189,22 +181,25 @@ def _scene_arm_contract(
     extra_scene_files = sorted(existing_scene_files - catalog_contents - excluded_contents)
     if extra_scene_files:
         issues["extra_scene_files"] += len(extra_scene_files)
-        examples.extend({"content_id": value} for value in _bounded_examples(extra_scene_files))
-
+        examples.extend(({"content_id": value} for value in _bounded_examples(extra_scene_files)))
     failures_by_content = {}
     for failure_path in sorted(failure_dir.glob("*.jsonl")):
         if failure_path.stem in excluded_contents:
             continue
         rows, failure_loaded = _read_jsonl(
-            failure_path, f"{arm} failure outcomes", errors, report_error=False,
+            failure_path, f"{arm} failure outcomes", errors, report_error=False
         )
         if not failure_loaded:
             issues["invalid_failure_file"] += 1
         for row in rows:
             cid = row.get("content_id")
-            if (set(row) - {"provenance", "tokens"} != {"content_id", "scene_idx", "error", "raw_output"}
-                    or not isinstance(row.get("error"), str) or not row["error"].strip()
-                    or not isinstance(row.get("raw_output"), str)):
+            if (
+                set(row) - {"provenance", "tokens"}
+                != {"content_id", "scene_idx", "error", "raw_output"}
+                or not isinstance(row.get("error"), str)
+                or (not row["error"].strip())
+                or (not isinstance(row.get("raw_output"), str))
+            ):
                 issues["invalid_failure_fields"] += 1
                 continue
             if cid != failure_path.stem:
@@ -214,7 +209,6 @@ def _scene_arm_contract(
                 issues["unexpected_failure_content"] += 1
                 continue
             failures_by_content.setdefault(cid, []).append(row)
-
     for content_id in content_ids:
         scene_rows, scene_loaded = _read_jsonl(
             scene_dir / f"{content_id}.jsonl",
@@ -283,23 +277,24 @@ def _scene_arm_contract(
                     warnings = row["semantic_warnings"]
                     if warnings:
                         semantic_warning_scenes.add(key)
-
-    # A raw payload may have a matching explicit failure record; it is never success.
     overlap = success & (failures | raw_scenes)
     missing = expected - (success | failures | raw_scenes)
     if overlap:
         issues["success_failure_overlap"] += len(overlap)
         examples.extend(
-            {"content_id": content_id, "scene_idx": scene_idx}
-            for content_id, scene_idx in _bounded_examples(sorted(overlap))
+            (
+                {"content_id": content_id, "scene_idx": scene_idx}
+                for content_id, scene_idx in _bounded_examples(sorted(overlap))
+            )
         )
     if missing:
         issues["missing_scene_outcome"] += len(missing)
         examples.extend(
-            {"content_id": content_id, "scene_idx": scene_idx}
-            for content_id, scene_idx in _bounded_examples(sorted(missing))
+            (
+                {"content_id": content_id, "scene_idx": scene_idx}
+                for content_id, scene_idx in _bounded_examples(sorted(missing))
+            )
         )
-
     denominator = len(expected)
     success_count = len(success)
     failure_count = len(failures | raw_scenes)
@@ -324,7 +319,7 @@ def _scene_arm_contract(
         document["semantic_warning_rate_among_successes"] = (
             len(semantic_warning_scenes) / success_count if success_count else 0.0
         )
-    valid = bool(expected) and not issues
+    valid = bool(expected) and (not issues)
     if issues:
         _error(
             errors,
@@ -334,7 +329,7 @@ def _scene_arm_contract(
             issue_counts=dict(sorted(issues.items())),
             examples=_bounded_examples(examples),
         )
-    return document, success, valid
+    return (document, success, valid)
 
 
 def _scene_coverage(
@@ -345,16 +340,27 @@ def _scene_coverage(
     settings,
     decision_config_valid,
     runtime_paths_valid,
-    *, branches=None, config=None, excluded_content_ids=(), source_assets_dir=None, informational=False,
+    *,
+    branches=None,
+    config=None,
+    excluded_content_ids=(),
+    source_assets_dir=None,
+    informational=False,
 ):
     from validation.recommendation_contracts import DEFAULT_PROTOCOL
+
     original_errors = errors
     if informational:
         errors = []
     paths = scene_arms(config or DEFAULT_PROTOCOL)
     selected = [arm for arm in paths if branches is None or arm in branches]
     if not selected:
-        return {"status": "not_applicable", "reason": "no visual source selected", "arms": {}}, True, True, True
+        return (
+            {"status": "not_applicable", "reason": "no visual source selected", "arms": {}},
+            True,
+            True,
+            True,
+        )
     expected_scenes, scene_denominator_valid = _expected_scenes(
         run_root,
         content_ids,
@@ -368,26 +374,30 @@ def _scene_coverage(
     scene_arm_valid: dict[str, bool] = {}
     for arm in selected:
         document, success, valid = _scene_arm_contract(
-            arm, run_root, content_ids, expected_scenes, errors, paths,
+            arm,
+            run_root,
+            content_ids,
+            expected_scenes,
+            errors,
+            paths,
             excluded_content_ids=excluded_content_ids,
         )
         scene_documents[arm] = document
         successful_scenes[arm] = success
         scene_arm_valid[arm] = valid
-
     coverages = [float(document["success_coverage"]) for document in scene_documents.values()]
     observed_gap = max(coverages) - min(coverages) if coverages else 1.0
     minimum_scene_coverage_met = (
         decision_config_valid
         and scene_denominator_valid
-        and all(value >= float(settings["min_scene_coverage"]) for value in coverages)
+        and all((value >= float(settings["min_scene_coverage"]) for value in coverages))
     )
     coverage_gap_within_limit = (
         decision_config_valid
         and scene_denominator_valid
-        and observed_gap <= float(settings["max_arm_coverage_gap"])
+        and (observed_gap <= float(settings["max_arm_coverage_gap"]))
     )
-    if not minimum_scene_coverage_met and not informational:
+    if not minimum_scene_coverage_met and (not informational):
         _error(
             errors,
             "minimum_scene_coverage_not_met",
@@ -395,7 +405,7 @@ def _scene_coverage(
             minimum=settings.get("min_scene_coverage"),
             observed={arm: value["success_coverage"] for arm, value in scene_documents.items()},
         )
-    if not coverage_gap_within_limit and not informational:
+    if not coverage_gap_within_limit and (not informational):
         _error(
             errors,
             "arm_scene_coverage_gap_exceeded",
@@ -414,18 +424,20 @@ def _scene_coverage(
         "maximum_arm_coverage_gap": settings.get("max_arm_coverage_gap"),
         "observed_arm_coverage_gap": observed_gap,
         "common_success_scene_count": len(common_success),
-        "common_success_coverage": (
-            len(common_success) / len(expected_scenes) if expected_scenes else 0.0
-        ),
+        "common_success_coverage": len(common_success) / len(expected_scenes)
+        if expected_scenes
+        else 0.0,
         "common_scene_intersection_required": False,
         "arms": scene_documents,
     }
-
     if informational:
         scene_coverage["informational_errors"] = errors
         for error in errors:
             issues = error.get("issue_counts", {})
-            if error.get("code") == "invalid_scene_outcomes" and set(issues) - {"missing_scene_outcome", "missing_scene_directory"}:
+            if error.get("code") == "invalid_scene_outcomes" and set(issues) - {
+                "missing_scene_outcome",
+                "missing_scene_directory",
+            }:
                 original_errors.append(error)
     return (
         scene_coverage,

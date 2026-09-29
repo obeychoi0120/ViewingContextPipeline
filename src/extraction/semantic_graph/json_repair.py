@@ -79,7 +79,7 @@ def _normalize_punctuation(text):
         elif char in ('"', "'", "“", "‘"):
             closing, quote = {"“": ("”", '"'), "‘": ("’", "'")}.get(char, (char, char))
             output.append(quote)
-        elif char == "," and text[index + 1:].lstrip().startswith(("}", "]")):
+        elif char == "," and text[index + 1 :].lstrip().startswith(("}", "]")):
             continue
         else:
             output.append(char)

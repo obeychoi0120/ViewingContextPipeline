@@ -2,10 +2,9 @@
 
 import json
 from pathlib import Path
-import shutil
 
 from artifact_io import atomic_write_jsonl
-from pipeline_runtime import read_jsonl
+from artifact_io import read_jsonl
 from extraction.token_usage import validate_tokens
 
 
@@ -16,46 +15,37 @@ class FailureLog:
         self.path = directory / ("failures" if scenes else "failures.jsonl")
         self.rows = {}
         self.by_content = {}
-        # Read the current layout last so an interrupted migration cannot restore stale rows.
-        per_content = sorted((directory / "failures").glob("*.jsonl"))
-        sources = [directory / "failure.jsonl"]
-        sources.extend([directory / "failures.jsonl", *per_content] if scenes
-                       else [*per_content, directory / "failures.jsonl"])
-        existing = {}
+        sources = sorted(self.path.glob("*.jsonl")) if scenes else [self.path]
         for path in sources:
             if not path.is_file():
                 continue
-            existing[path] = read_jsonl(path)
-            for row in existing[path]:
-                self._remember(row.get("content_id", path.stem), row.get("scene_idx"),
-                               row.get("error") or "generation failed",
-                               row.get("raw_output", row.get("raw_response", "")),
-                               repetition_penalty=row.get("repetition_penalty"),
-                               summary_model=row.get("summary_model"), provenance=row.get("provenance"),
-                               tokens=row.get("tokens"))
-        targets = ({self.path_for(cid): list(rows.values()) for cid, rows in self.by_content.items()}
-                   if scenes else {self.path: list(self.rows.values())})
-        for path, rows in targets.items():
-            if existing.get(path, []) != rows:
-                self._write(path, rows)
-        # Remove old paths only after all migrated records have been published.
-        for path in existing:
-            if path not in targets:
-                path.unlink()
-        if not scenes and (directory / "failures").is_dir():
-            shutil.rmtree(directory / "failures")
-        # The one-attempt policy deliberately discards unfinished generation/repair state.
-        for name in (".recovery", ".pending", ".checkpoints"):
-            path = directory / name
-            if path.is_dir():
-                shutil.rmtree(path)
-        for name in (".pending-contents.json", ".completed-contents.json"):
-            (directory / name).unlink(missing_ok=True)
+            for row in read_jsonl(path):
+                self._remember(
+                    row.get("content_id", path.stem),
+                    row.get("scene_idx"),
+                    row.get("error") or "generation failed",
+                    row.get("raw_output", ""),
+                    repetition_penalty=row.get("repetition_penalty"),
+                    summary_model=row.get("summary_model"),
+                    provenance=row.get("provenance"),
+                    tokens=row.get("tokens"),
+                )
 
     def path_for(self, content_id):
         return self.path / f"{content_id}.jsonl" if self.scenes else self.path
 
-    def _remember(self, content_id, scene_idx, error, raw_output, *, repetition_penalty=None, summary_model=None, provenance=None, tokens=None):
+    def _remember(
+        self,
+        content_id,
+        scene_idx,
+        error,
+        raw_output,
+        *,
+        repetition_penalty=None,
+        summary_model=None,
+        provenance=None,
+        tokens=None,
+    ):
         cid = str(content_id)
         row = {"content_id": cid}
         if self.scenes:
@@ -92,16 +82,26 @@ class FailureLog:
         key = (cid, scene_idx)
         if key not in self.rows:
             return
-        rows = (self.by_content[cid].values() if self.scenes else self.rows.values())
-        remaining = [row for row in rows
-                     if (row["content_id"], row.get("scene_idx")) != key]
+        rows = self.by_content[cid].values() if self.scenes else self.rows.values()
+        remaining = [row for row in rows if (row["content_id"], row.get("scene_idx")) != key]
         self._write(self.path_for(cid), remaining)
         del self.rows[key]
         del self.by_content[cid][scene_idx]
         if not self.by_content[cid]:
             del self.by_content[cid]
 
-    def record(self, content_id, scene_idx, error, raw_output="", *, repetition_penalty=None, summary_model=None, provenance=None, tokens=None):
+    def record(
+        self,
+        content_id,
+        scene_idx,
+        error,
+        raw_output="",
+        *,
+        repetition_penalty=None,
+        summary_model=None,
+        provenance=None,
+        tokens=None,
+    ):
         cid = str(content_id)
         previous = self.rows.get((cid, scene_idx))
         if repetition_penalty is None and previous is not None:
@@ -110,8 +110,16 @@ class FailureLog:
             summary_model = previous.get("summary_model")
         if provenance is None and previous is not None:
             provenance = previous.get("provenance")
-        row = self._remember(cid, scene_idx, error, raw_output,
-                             repetition_penalty=repetition_penalty, summary_model=summary_model, provenance=provenance, tokens=tokens)
+        row = self._remember(
+            cid,
+            scene_idx,
+            error,
+            raw_output,
+            repetition_penalty=repetition_penalty,
+            summary_model=summary_model,
+            provenance=provenance,
+            tokens=tokens,
+        )
         if previous == row:
             return
         path = self.path_for(cid)

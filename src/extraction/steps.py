@@ -1,16 +1,14 @@
 from __future__ import annotations
-
 from typing import Any
-
+from functools import partial
 from tqdm import tqdm
-
-from arm_registry import generated_arm, generation_registry, resolve_generation_arm, legacy_layout
+from arm_registry import generation_registry, resolve_generation_arm
 from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
-from extraction.arm_migration import migrate_arm_layout
 from extraction.qwen_runtime import QwenRuntime
-from extraction.recovery import file_fingerprint, penalty_schedule
+from artifact_io import file_fingerprint
+from extraction.qwen_config import penalty_schedule
 from extraction.failures import FailureLog
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -24,7 +22,7 @@ from extraction.step_support import (
     visual_rows,
 )
 from extraction.summary_executor import run_summary_stage, qwen_generator
-from extraction.scene_storage import read_scene_records, migrate_scene_schema, migrate_scene_file
+from extraction.scene_storage import read_scene_records
 from extraction.raw_output import is_raw_graph
 from pipeline_logging import log_step_start
 from pipeline_runtime import RunContext
@@ -70,7 +68,11 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         if arm.representation == "graph":
             settings["response_parser"] = GRAPH_PARSER_VERSION
     return {
-        **({"uses_title": arm.uses_title, "scene_arm": arm.scene_arm} if summary else {"scene_arm": arm.name}),
+        **(
+            {"uses_title": arm.uses_title, "scene_arm": arm.scene_arm}
+            if summary
+            else {"scene_arm": arm.name}
+        ),
         "representation": arm.representation,
         "prompt_path": str(path),
         "prompt_hash": file_fingerprint(path),
@@ -79,8 +81,9 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         **({"summary_model": source} if summary else {}),
         "schema_contract": "summary/v5"
         if summary
-        else (("graph/v4" if "[Actions]" in path.read_text(encoding="utf-8") else "graph/v3")
-              if arm.representation == "graph" else "description/v2"),
+        else ("graph/v4" if "[Actions]" in path.read_text(encoding="utf-8") else "graph/v3")
+        if arm.representation == "graph"
+        else "description/v2",
     }
 
 
@@ -92,11 +95,65 @@ def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
     return generation
 
 
+def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *, force):
+    existing, planned = {}, []
+    for visual in visuals:
+        cid = visual["content_id"]
+        output = scene_dir / f"{cid}.jsonl"
+        rows = prepare_rows(visual)
+        try:
+            cached = (
+                normalize(read_scene_records(output), output)
+                if output.is_file() and (not force)
+                else []
+            )
+        except (ValueError, ExtractionStepError) as exc:
+            raise ExtractionStepError(
+                f"cannot safely identify existing scenes: {output}: {exc}"
+            ) from exc
+        by_index = {r["scene_idx"]: r for r in cached}
+        if len(by_index) != len(cached):
+            raise ExtractionStepError(f"duplicate cached scenes: {output}")
+        retained, missing = ([], [])
+        for row in rows:
+            saved = by_index.get(row["scene_idx"])
+            reusable = saved is not None
+            if reusable and is_raw_graph(saved) and (not failures.contains(cid, row["scene_idx"])):
+                failures.record(
+                    cid,
+                    row["scene_idx"],
+                    "graph validation failed; raw response retained",
+                    saved["raw_response"],
+                )
+            if failures.contains(cid, row["scene_idx"]):
+                missing.append(row)
+            elif reusable:
+                retained.append(saved)
+            elif not failures.contains(cid, row["scene_idx"]):
+                missing.append(row)
+        existing[cid] = retained
+        if missing:
+            planned.append(
+                (
+                    visual,
+                    [
+                        {
+                            "scene_idx": row["scene_idx"],
+                            "keyframes": row["keyframes"],
+                            "scene_start": row.get("scene_start_seconds"),
+                            "scene_end": row.get("scene_end_seconds"),
+                        }
+                        for row in missing
+                    ],
+                )
+            )
+    return existing, planned
+
+
 def _extract(context, *, representation, model, schema, force=False, arm=None):
-    if arm is None and not legacy_layout(context.config):
+    if arm is None:
         raise ValueError("extraction requires --arm")
-    arm = (resolve_generation_arm(context.config, arm, representation, model) if arm
-           else generated_arm(context.config, representation, model))
+    arm = resolve_generation_arm(context.config, arm, representation, model)
     stage = f"extract-{representation}-scenes"
     path = context.prompt_path(schema)
     log_step_start(context, stage, model=model, schema=path, force=force, arm=arm.name)
@@ -109,70 +166,31 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
     failures = FailureLog(scene_dir, scenes=True)
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
-    existing = {}
     content_ids = [visual["content_id"] for visual in visuals]
     if force:
         failures.clear_contents(content_ids)
-    initial_penalty = penalty_schedule(penalties)[0]
-
-    def prepare_rows(visual, *, scenes=None):
-        rows = scene_generation_rows(
-            visual,
-            prompt=prompt,
-            max_new_tokens=settings[representation][model]["scene_max_new_tokens"],
-            repetition_penalty=initial_penalty,
-            scenes=scenes,
-        )
-        return rows
-
-    def plan_contents():
-        for visual in visuals:
-            cid = visual["content_id"]
-            output = scene_dir / f"{cid}.jsonl"
-            rows = prepare_rows(visual)
-            try:
-                cached = normalize(read_scene_records(output), output) if output.is_file() and not force else []
-            except (ValueError, ExtractionStepError) as exc:
-                raise ExtractionStepError(f"cannot safely identify existing scenes: {output}: {exc}") from exc
-            if output.is_file() and not force:
-                migrate_scene_file(output, cached)
-            by_index = {r["scene_idx"]: r for r in cached}
-            if len(by_index) != len(cached):
-                raise ExtractionStepError(f"duplicate cached scenes: {output}")
-            retained, missing = [], []
-            for row in rows:
-                saved = by_index.get(row["scene_idx"])
-                # Successful scenes are reusable regardless of generation settings.
-                reusable = saved is not None
-                if reusable and is_raw_graph(saved) and not failures.contains(cid, row["scene_idx"]):
-                    failures.record(cid, row["scene_idx"], "graph validation failed; raw response retained",
-                                    saved["raw_response"])
-                if failures.contains(cid, row["scene_idx"]):
-                    missing.append(row)
-                elif reusable:
-                    retained.append(saved)
-                elif not failures.contains(cid, row["scene_idx"]):
-                    missing.append(row)
-            existing[cid] = retained
-            if missing:
-                # Retain compact scene metadata, not tasks or image paths.
-                # Inference can then build tasks lazily without rereading assets.
-                yield visual, [
-                    {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"],
-                     "scene_start": row.get("scene_start_seconds"),
-                     "scene_end": row.get("scene_end_seconds")}
-                    for row in missing
-                ]
-
+    prepare_rows = partial(
+        scene_generation_rows,
+        prompt=prompt,
+        max_new_tokens=settings[representation][model]["scene_max_new_tokens"],
+        repetition_penalty=penalty_schedule(penalties)[0],
+    )
     print("[PREPARE] Counting pending scenes and checking cached outputs...", flush=True)
-    planned = list(plan_contents())
-    total = sum(len(scenes) for _, scenes in planned)
-    reused = sum(len(records) for records in existing.values())
+    existing, planned = prepare_scene_batch(
+        visuals,
+        scene_dir,
+        failures,
+        prepare_rows,
+        normalize,
+        force=force,
+    )
+    total = sum((len(scenes) for _, scenes in planned))
+    reused = sum((len(records) for records in existing.values()))
 
     def pending_contents():
         for visual, scenes in planned:
             missing = prepare_rows(visual, scenes=scenes)
-            yield visual, missing
+            yield (visual, missing)
 
     with InferenceProgress(
         total=total,
@@ -215,23 +233,25 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
                 progress=progress,
                 arm=representation,
             )
-    return result(f"{stage}-{model}", content_count=len(visuals),
-                  failure_count=failures.count(content_ids))
+    return result(
+        f"{stage}-{model}", content_count=len(visuals), failure_count=failures.count(content_ids)
+    )
 
 
-def _summarize(context, *, representation, source=None, model, schema, force=False, arm=None):
+def _summarize(context, *, representation, model, schema, force=False, arm=None):
     if model not in GRAPH_SOURCES:
         raise ValueError("summary model must be qwen or gemini")
-    if arm is None and not legacy_layout(context.config):
+    if arm is None:
         raise ValueError("summarization requires --arm")
-    arm = (resolve_generation_arm(context.config, arm, representation, model, summary=True) if arm
-           else generated_arm(context.config, representation, source))
+    arm = resolve_generation_arm(context.config, arm, representation, model, summary=True)
     path = context.prompt_path(schema)
     stage = f"summarize-{representation}"
-    log_step_start(context, stage, source=arm.model, model=model, schema=path, force=force, arm=arm.name)
-    if not legacy_layout(context.config):
-        from extraction.summary_prompt import validate_summary_template
-        validate_summary_template(path.read_text(), arm.uses_title)
+    log_step_start(
+        context, stage, source=arm.model, model=model, schema=path, force=force, arm=arm.name
+    )
+    from extraction.summary_storage import validate_summary_template
+
+    validate_summary_template(path.read_text(), arm.uses_title)
     context.initialize()
     cohort = context.require_ready_cohort()
     return run_summary_stage(
@@ -239,7 +259,6 @@ def _summarize(context, *, representation, source=None, model, schema, force=Fal
         arm=arm,
         schema=path,
         catalog=cohort["catalog"],
-        metadata_titles=cohort["metadata_titles"] if arm.uses_title else [],
         provenance=prompt_provenance(context, path, arm, summary=True, model=model),
         generation=_summary_generation_settings(context) if model == "qwen" else {},
         model=model,
@@ -265,32 +284,14 @@ def summarize(context, *, model, schema, arm=None, force=False):
     if arm is None:
         raise ValueError("summarize requires --arm")
     selected = generation_registry(context.config).get(arm)
-    # Keep source-arm validation (including metadata-concat hints) in _summarize.
     representation = selected.representation if selected else None
     return _summarize(
         context, representation=representation, model=model, schema=schema, force=force, arm=arm
     )
 
 
-def summarize_graph(context, *, model, schema, arm=None, source=None, force=False):
-    return _summarize(
-        context, representation="graph", source=source, model=model, schema=schema, force=force, arm=arm
-    )
-
-
-def summarize_description(context, *, model, schema, arm=None, source=None, force=False):
-    return _summarize(
-        context, representation="description", source=source, model=model, schema=schema, force=force, arm=arm
-    )
-
-
-
 STEP_HANDLERS = {
-    "migrate-arm-layout": migrate_arm_layout,
-    "migrate-scene-schema": migrate_scene_schema,
     "extract-graph-scenes": extract_graph_scenes,
     "extract-description-scenes": extract_description_scenes,
     "summarize": summarize,
-    "summarize-graph": summarize_graph,
-    "summarize-description": summarize_description,
 }

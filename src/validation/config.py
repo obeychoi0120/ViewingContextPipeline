@@ -87,7 +87,6 @@ class ValidationConfig(StrictModel):
     output_dir: Path
 
 
-
 def build_validation_config(
     *, run_id, dataset, settings, model_path, output_dir
 ) -> ValidationConfig:

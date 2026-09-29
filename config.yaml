@@ -76,7 +76,7 @@ extraction:
       summary_max_new_tokens: 1024
   graph:
     qwen:
-      scene_max_new_tokens: 256
+      scene_max_new_tokens: 384
       summary_max_new_tokens: 512
     gemini:
       scene_max_new_tokens: 1024

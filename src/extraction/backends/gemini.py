@@ -72,9 +72,7 @@ class GeminiBackend:
                 thinking_level=self.thinking_level
             )
         if self.media_resolution:
-            config_kwargs["media_resolution"] = types.MediaResolution(
-                self.media_resolution
-            )
+            config_kwargs["media_resolution"] = types.MediaResolution(self.media_resolution)
         for attempt in range(RESOURCE_EXHAUSTED_MAX_ATTEMPTS):
             try:
                 response = self.client.models.generate_content(
@@ -84,7 +82,9 @@ class GeminiBackend:
                 )
                 break
             except Exception as exc:
-                if attempt + 1 == RESOURCE_EXHAUSTED_MAX_ATTEMPTS or not _is_resource_exhausted(exc):
+                if attempt + 1 == RESOURCE_EXHAUSTED_MAX_ATTEMPTS or not _is_resource_exhausted(
+                    exc
+                ):
                     raise
                 time.sleep(RESOURCE_EXHAUSTED_RETRY_DELAY_SECONDS)
         text = str(getattr(response, "text", "") or "")
@@ -92,13 +92,21 @@ class GeminiBackend:
         feedback = getattr(response, "prompt_feedback", None)
         usage = getattr(response, "usage_metadata", None)
         self.last_response_diagnostics = {
-            "candidates": [{"finish_reason": getattr(candidate, "finish_reason", None),
-                            "finish_message": getattr(candidate, "finish_message", None)}
-                           for candidate in candidates],
-            "prompt_feedback": (feedback.model_dump(mode="json", exclude_none=True)
-                                if feedback is not None else None),
-            "usage_metadata": (usage.model_dump(mode="json", exclude_none=True)
-                               if usage is not None else None),
+            "candidates": [
+                {
+                    "finish_reason": getattr(candidate, "finish_reason", None),
+                    "finish_message": getattr(candidate, "finish_message", None),
+                }
+                for candidate in candidates
+            ],
+            "prompt_feedback": (
+                feedback.model_dump(mode="json", exclude_none=True)
+                if feedback is not None
+                else None
+            ),
+            "usage_metadata": (
+                usage.model_dump(mode="json", exclude_none=True) if usage is not None else None
+            ),
         }
         if not text.strip():
             raise GeminiEmptyResponseError(self.last_response_diagnostics)
@@ -130,7 +138,5 @@ def _google_genai() -> tuple[Any, Any]:
         from google import genai
         from google.genai import types
     except ImportError as exc:
-        raise RuntimeError(
-            "Gemini extraction requires the 'gemini' optional dependencies"
-        ) from exc
+        raise RuntimeError("Gemini extraction requires the 'gemini' optional dependencies") from exc
     return genai, types

@@ -74,14 +74,14 @@ def ready_context(current_context, monkeypatch):
     from preparation.input_data import prepare_input_data
 
     prepare_cohort_step(current_context)
-    monkeypatch.setattr("extraction.data_preparation.media.probe_duration", lambda _: 10.0)
+    monkeypatch.setattr("preparation.video.media.probe_duration", lambda _: 10.0)
 
     def ffmpeg(args, **kwargs):
         assert args[0] == "ffmpeg"
         Image.new("RGB", (16, 8)).save(args[-1])
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("extraction.data_preparation.video_processor.subprocess.run", ffmpeg)
+    monkeypatch.setattr("preparation.video.video_processor.subprocess.run", ffmpeg)
     prepare_input_data(current_context)
     return current_context
 

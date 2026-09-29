@@ -6,4 +6,5 @@
 **/.ruff_cache/
 **/.mypy_cache/
 run*.sh
+!/run_pipeline_v7.sh
 update_repo.sh

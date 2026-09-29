@@ -1,4 +1,5 @@
 """Ephemeral worker-local acceleration; nothing here participates in cache identity."""
+
 from collections import OrderedDict
 
 import numpy as np
@@ -19,7 +20,7 @@ class RollingExecution:
             values = np.zeros((len(self.table.rows), max_length), dtype=np.int64)
             for event in range(len(values)):
                 history = self.table.history(event, max_length)
-                values[event, :len(history)] = history
+                values[event, : len(history)] = history
             self.sequences[max_length] = values
         return self.sequences[max_length]
 
@@ -72,12 +73,14 @@ def masked_ranks(scores, table, batch):
         columns.extend(seen)
     if rows:
         coordinates = torch.as_tensor(
-            np.asarray([rows, columns], dtype=np.int64), device=scores.device,
+            np.asarray([rows, columns], dtype=np.int64),
+            device=scores.device,
         )
         # Coordinates are unique, including under deterministic CUDA execution.
         scores[coordinates[0], coordinates[1]] = -torch.inf
     item_rows = torch.arange(scores.shape[1], device=scores.device)
     return (
-        1 + (scores > target_scores[:, None]).sum(dim=1)
+        1
+        + (scores > target_scores[:, None]).sum(dim=1)
         + ((scores == target_scores[:, None]) & (item_rows < targets[:, None])).sum(dim=1)
     )

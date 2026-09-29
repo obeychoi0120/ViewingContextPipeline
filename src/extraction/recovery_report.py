@@ -1,4 +1,5 @@
 """Read existing scene metadata without treating legacy aggregate failure files as scene payloads."""
+
 from collections import Counter
 from arm_registry import select_arms
 from extraction.scene_storage import read_scene_records
@@ -23,7 +24,12 @@ def recovery_report(context, *, branches=None, content_ids=None):
                 history = row.get("generation", {})
                 unknown += not bool(history)
                 attempt_count += history.get("attempt_count", int(bool(history.get("input_key"))))
-                modes[row.get("status", row.get("parse_mode", history.get("repair_mode", "unknown")))] += 1
-        report[name] = {"scene_modes": dict(modes), "scene_attempt_count": attempt_count,
-                        "unknown_history_count": unknown}
+                modes[
+                    row.get("status", row.get("parse_mode", history.get("repair_mode", "unknown")))
+                ] += 1
+        report[name] = {
+            "scene_modes": dict(modes),
+            "scene_attempt_count": attempt_count,
+            "unknown_history_count": unknown,
+        }
     return report

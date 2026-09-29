@@ -39,7 +39,9 @@ class QwenBackend:
             from vllm.engine.arg_utils import AsyncEngineArgs
             from vllm.v1.engine.async_llm import AsyncLLM
         except ImportError as exc:
-            raise RuntimeError("Qwen requires Linux/CUDA and the 'qwen' dependencies (vllm==0.28.0)") from exc
+            raise RuntimeError(
+                "Qwen requires Linux/CUDA and the 'qwen' dependencies (vllm==0.28.0)"
+            ) from exc
         if version("vllm").split("+")[0] != "0.28.0":
             raise RuntimeError("Qwen backend requires vllm==0.28.0")
         model_dir = Path(model_path)
@@ -51,7 +53,11 @@ class QwenBackend:
         resolved = qwen_settings(settings)
         processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
         generation_path = model_dir / "generation_config.json"
-        generation = json.loads(generation_path.read_text(encoding="utf-8")) if generation_path.exists() else {}
+        generation = (
+            json.loads(generation_path.read_text(encoding="utf-8"))
+            if generation_path.exists()
+            else {}
+        )
         eos = generation.get("eos_token_id", processor.tokenizer.eos_token_id)
         stop_ids = list(eos) if isinstance(eos, list) else ([eos] if eos is not None else [])
         arguments = {
@@ -94,8 +100,14 @@ class QwenBackend:
                 "gpu_memory_bytes": torch.cuda.get_device_properties(0).total_memory,
                 "settings": actual,
             }
-            return cls(engine, processor, model_path,
-                       ThreadPoolExecutor(max_workers=resolved["renderer_num_workers"]), stop_ids, info)
+            return cls(
+                engine,
+                processor,
+                model_path,
+                ThreadPoolExecutor(max_workers=resolved["renderer_num_workers"]),
+                stop_ids,
+                info,
+            )
         except BaseException:
             engine.shutdown()
             raise
@@ -106,7 +118,9 @@ class QwenBackend:
             content = [{"type": "image", "image": image} for image in images]
             content.append({"type": "text", "text": task.prompt})
             prompt = self.processor.apply_chat_template(
-                [{"role": "user", "content": content}], tokenize=False, add_generation_prompt=True,
+                [{"role": "user", "content": content}],
+                tokenize=False,
+                add_generation_prompt=True,
             )
             inputs = {"prompt": prompt}
             if images:
@@ -126,6 +140,7 @@ class QwenBackend:
         structured = None
         if task.structured_output is not None:
             from vllm.sampling_params import StructuredOutputsParams
+
             structured = StructuredOutputsParams(**task.structured_output)
         return SamplingParams(
             n=1,
@@ -151,7 +166,9 @@ class QwenBackend:
         images = []
         try:
             params = self.sampling_params(task)
-            preparation = asyncio.get_running_loop().run_in_executor(self.executor, self._prepare, task)
+            preparation = asyncio.get_running_loop().run_in_executor(
+                self.executor, self._prepare, task
+            )
             try:
                 inputs, images = await asyncio.shield(preparation)
             except asyncio.CancelledError:
@@ -160,19 +177,25 @@ class QwenBackend:
                     if not future.cancelled() and future.exception() is None:
                         for image in future.result()[1]:
                             image.close()
+
                 preparation.add_done_callback(release)
                 raise
             # Render once so expanded image tokens are counted before admission.
             # Never truncate the prompt or reduce max_tokens to fit.
-            rendered = (await self.engine.renderer.render_cmpl_async(
-                [inputs], tok_params=TokenizeParams(max_total_tokens=None, add_special_tokens=False),
-            ))[0]
+            rendered = (
+                await self.engine.renderer.render_cmpl_async(
+                    [inputs],
+                    tok_params=TokenizeParams(max_total_tokens=None, add_special_tokens=False),
+                )
+            )[0]
             prompt_length = len(rendered["prompt_token_ids"])
             required = prompt_length + task.max_new_tokens
             maximum = self.engine.model_config.max_model_len
             if required > maximum:
-                raise ValueError(f"context length required={required} (input={prompt_length}, "
-                                 f"output={task.max_new_tokens}) exceeds max_model_len={maximum}")
+                raise ValueError(
+                    f"context length required={required} (input={prompt_length}, "
+                    f"output={task.max_new_tokens}) exceeds max_model_len={maximum}"
+                )
             final = None
             async for output in self.engine.generate(rendered, params, task.task_id):
                 if output.finished:
@@ -180,9 +203,13 @@ class QwenBackend:
             if final is None or len(final.outputs) != 1:
                 raise RuntimeError("vLLM did not return one completed output")
             result = final.outputs[0]
-            return QwenOutput(result.text, prompt_length, len(result.token_ids),
-                              getattr(result, "finish_reason", None),
-                              getattr(result, "stop_reason", None))
+            return QwenOutput(
+                result.text,
+                prompt_length,
+                len(result.token_ids),
+                getattr(result, "finish_reason", None),
+                getattr(result, "stop_reason", None),
+            )
         except Exception as exc:
             raise RuntimeError(f"Qwen task {task.task_id}: {exc}") from exc
         finally:

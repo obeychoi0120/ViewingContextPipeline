@@ -2,7 +2,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import numpy as np
 import pytest
-from validation.rolling_data import DAY, EventTable, load_csv
+from validation.rolling_data import DAY, EventTable
+from preparation.cohort import load_csv
 from validation.rolling_diagnosis import cluster_bootstrap, weighted_day_mean
 
 def event_table(records):

@@ -58,7 +58,7 @@ def paired_bootstrap_ci(
     for start in range(0, samples, chunk):
         count = min(chunk, samples - start)
         indices = rng.integers(0, len(values), size=(count, len(values)))
-        means[start:start + count] = values[indices].mean(axis=1)
+        means[start : start + count] = values[indices].mean(axis=1)
     return {
         "mean": float(values.mean()),
         "ci_low": float(np.quantile(means, alpha / 2)),
@@ -85,13 +85,13 @@ def paired_relative_bootstrap_ci(
     if treatment.ndim != 1 or treatment.shape != control.shape or not len(treatment):
         raise ValueError("relative paired bootstrap requires equal non-empty vectors")
     if not np.isfinite(treatment).all() or not np.isfinite(control).all() or control.mean() <= 0:
-        raise ValueError("relative paired bootstrap requires finite values and positive control mean")
+        raise ValueError(
+            "relative paired bootstrap requires finite values and positive control mean"
+        )
     samples = _validate_samples(samples)
     alpha = _validate_alpha(alpha)
     if interval_type not in {"two_sided", "one_sided_lower"}:
-        raise ValueError(
-            "interval_type must be 'two_sided' or 'one_sided_lower'"
-        )
+        raise ValueError("interval_type must be 'two_sided' or 'one_sided_lower'")
     rng = np.random.default_rng(seed)
     estimates = np.empty(samples, dtype=np.float64)
     chunk = max(1, min(samples, 256))
@@ -107,11 +107,9 @@ def paired_relative_bootstrap_ci(
         control_means = control[indices].mean(axis=1)
         valid = control_means > 0
         zero_control_resamples += int(np.count_nonzero(~valid))
-        valid_estimates = (
-            (treatment_means[valid] - control_means[valid]) / control_means[valid]
-        )
+        valid_estimates = (treatment_means[valid] - control_means[valid]) / control_means[valid]
         take = min(remaining, len(valid_estimates))
-        estimates[accepted:accepted + take] = valid_estimates[:take]
+        estimates[accepted : accepted + take] = valid_estimates[:take]
         accepted += take
         draws += count
         if draws >= max_draws and accepted < samples:

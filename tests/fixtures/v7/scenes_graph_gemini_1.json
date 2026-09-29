@@ -1,0 +1,490 @@
+[
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 0,
+    "tokens": 107,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "road trip",
+        "van life",
+        "travel vlog"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing red vest"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "sitting in truck container"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "truck",
+          "attributes": [
+            "cargo box open"
+          ]
+        },
+        {
+          "id": "l1",
+          "name": "laptop",
+          "attributes": [
+            "on table inside truck"
+          ]
+        },
+        {
+          "id": "b1",
+          "name": "bridge",
+          "attributes": [
+            "pedestrian railings with flowers"
+          ]
+        },
+        {
+          "id": "r1",
+          "name": "river",
+          "attributes": [
+            "fast-flowing water"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "editing video on",
+          "target": "l1",
+          "tool": null,
+          "receiver": null,
+          "location": "t1"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 1,
+    "tokens": 115,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "outdoor market",
+        "street game",
+        "travel vlog"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "red vest",
+            "white bucket hat"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "red vest",
+            "black bucket hat"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "black shirt",
+            "seated"
+          ]
+        },
+        {
+          "id": "g1",
+          "name": "game board",
+          "attributes": [
+            "wooden",
+            "miniature ramp with slots"
+          ]
+        },
+        {
+          "id": "b1",
+          "name": "ball",
+          "attributes": [
+            "red"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "examining",
+          "target": "g1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "pointing to",
+          "target": "g1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 2,
+    "tokens": 101,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "food preparation",
+        "cooking ingredients"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing orange vest"
+          ]
+        },
+        {
+          "id": "f1",
+          "name": "cow hooves",
+          "attributes": [
+            "butchered"
+          ]
+        },
+        {
+          "id": "c1",
+          "name": "cat",
+          "attributes": []
+        },
+        {
+          "id": "s1",
+          "name": "sink",
+          "attributes": [
+            "with running faucet"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "cooking pot",
+          "attributes": [
+            "filled with water"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "unknown",
+          "action": "washing",
+          "target": "f1",
+          "tool": null,
+          "receiver": null,
+          "location": "s1"
+        },
+        {
+          "actor": "unknown",
+          "action": "putting ingredients into",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 3,
+    "tokens": 135,
+    "warning": [
+      "INVALID_ACTION_SYNTAX"
+    ],
+    "scene_graph": "[Context]\nmedium: live_action\nformat: demonstration\ntopics: outdoor cooking; beef hoof preparation\n\n[Entities]\np1: person; wearing orange jacket\nk1: cleaver\nf1: cow hoof\np2: stockpot; stainless steel\nw1: wok\nf2: chili bean paste; in jar\n\n[Actions]\np1 - chopping - f1; k1; none; unknown\nunknown - pouring liquid - unknown; w1; none; unknown\nunknown - adding - f2; none; w1; unknown\nunknown - pouring aromatics and sauce - unknown; w1; none; unknown"
+  },
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 4,
+    "tokens": 126,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "outdoor cooking",
+        "meal preparation"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing red vest"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "wearing dark shirt"
+          ]
+        },
+        {
+          "id": "f1",
+          "name": "broth",
+          "attributes": [
+            "with cooked meat"
+          ]
+        },
+        {
+          "id": "c1",
+          "name": "large pot",
+          "attributes": [
+            "metal"
+          ]
+        },
+        {
+          "id": "f2",
+          "name": "instant noodles",
+          "attributes": [
+            "in metal bowls"
+          ]
+        },
+        {
+          "id": "f3",
+          "name": "pork trotters",
+          "attributes": [
+            "cooked"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p2",
+          "action": "carrying",
+          "target": "c1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "unknown",
+          "action": "ladling",
+          "target": "f1",
+          "tool": "unknown",
+          "receiver": "f2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "holding",
+          "target": "f3",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 5,
+    "tokens": 154,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "outdoor dining",
+        "cooked meat",
+        "mukbang"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing red vest",
+            "short dark hair"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "wearing red vest",
+            "spiky dark hair"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "wearing dark long-sleeved shirt",
+            "short dark hair"
+          ]
+        },
+        {
+          "id": "f1",
+          "name": "cooked pork trotter",
+          "attributes": [
+            "large",
+            "brown"
+          ]
+        },
+        {
+          "id": "f2",
+          "name": "cooked pork trotter",
+          "attributes": [
+            "large",
+            "brown"
+          ]
+        },
+        {
+          "id": "f3",
+          "name": "cooked pork trotter",
+          "attributes": [
+            "large",
+            "brown"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "eating",
+          "target": "f1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "holding",
+          "target": "f2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "eating",
+          "target": "f3",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00027",
+    "scene_idx": 6,
+    "tokens": 144,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "outdoor meal",
+        "truck bed resting"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing red vest"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "wearing red vest",
+            "holding bottle"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "dark shirt"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "lying down",
+            "light long sleeve"
+          ]
+        },
+        {
+          "id": "f1",
+          "name": "food",
+          "attributes": [
+            "noodles and meat"
+          ]
+        },
+        {
+          "id": "f2",
+          "name": "food",
+          "attributes": [
+            "in metal pot"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "eating",
+          "target": "f1",
+          "tool": "unknown",
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "eating",
+          "target": "f1",
+          "tool": "unknown",
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "tending",
+          "target": "f2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "lying",
+          "target": null,
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  }
+]

@@ -9,13 +9,14 @@ import json
 from pathlib import Path
 
 from extraction import steps
-from extraction.recovery import file_fingerprint
+from artifact_io import file_fingerprint
 from extraction.scene_storage import read_scene_records
 from extraction.step_support import scene_generation_rows, visual_rows
-from extraction.summary_executor import summary_model_from_document
+from extraction.summary_storage import summary_model_from_document
 from extraction.structured_output import OutputValidationError, validate_graph_structure
 from model_provenance import local_model_identity
-from pipeline_runtime import RunContext, read_json, read_jsonl, write_json, write_jsonl
+from pipeline_runtime import RunContext
+from artifact_io import read_json, read_jsonl, write_json, write_jsonl
 
 
 @dataclass(frozen=True)
@@ -199,7 +200,7 @@ def main(argv=None):
         try:
             steps.extract_graph_scenes(pilot, model="qwen", arm="graph_qwen",
                                        schema="prompts/scene_graph_v5.md")
-            steps.summarize_graph(pilot, model=manifest["summary_model"], arm="graph_qwen",
+            steps.summarize(pilot, model=manifest["summary_model"], arm="graph_qwen",
                                   schema="prompts/summary_graph_v6.md")
         finally:
             steps.qwen_generator = original

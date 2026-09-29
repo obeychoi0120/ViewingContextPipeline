@@ -70,7 +70,9 @@ def _consume_combinations(context, device_name, jobs, results):
             run_combination(context, config, table, split, identity, branch, prepared, device)
             results.put(("complete", identity))
     except BaseException:
-        results.put(("error", f"device={device_name} combination={identity}\n{traceback.format_exc()}"))
+        results.put(
+            ("error", f"device={device_name} combination={identity}\n{traceback.format_exc()}")
+        )
 
 
 def run_parallel(context, jobs, devices, progress):
@@ -83,7 +85,7 @@ def run_parallel(context, jobs, devices, progress):
     try:
         for job in jobs:
             pending.put(job)
-        for device in devices[:len(jobs)]:
+        for device in devices[: len(jobs)]:
             pending.put(None)
             process = runtime.Process(
                 target=combination_worker, args=(context, device, pending, results)

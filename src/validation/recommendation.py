@@ -3,6 +3,7 @@ import numpy as np
 from validation.config import ValidationConfig
 from validation.model import SASRec, torch
 
+
 def popularity_probabilities(
     sequences: list[list[int]],
     item_count: int,

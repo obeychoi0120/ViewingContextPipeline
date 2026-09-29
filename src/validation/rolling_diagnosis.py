@@ -1,25 +1,22 @@
 """Streaming event validation and paired user-cluster, equal-day statistics."""
 
 from __future__ import annotations
-
 import numpy as np
-
-from pipeline_runtime import read_json, write_json
+from artifact_io import read_json, write_json
 from validation.diagnosis_scenes import _scene_coverage
 from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import (
-    DIAGNOSIS_ARCHITECTURE_VERSIONS, resolve_target_arms, target_scope,
+    DIAGNOSIS_ARCHITECTURE_VERSIONS,
+    resolve_target_arms,
+    target_scope,
 )
 from arm_registry import registry
 from validation.representation_checks import verify_representations
-from validation.rolling_data import EventTable, iter_jsonl
+from validation.rolling_data import EventTable
+from preparation.cohort import iter_jsonl
 from validation.selection import load_validation_cohort, recount_splits, training_signature
-from validation.rolling_recommendation import (
-    combination_complete,
-    combination_dir,
-    phase_ids,
-)
+from validation.rolling_recommendation import combination_complete, combination_dir, phase_ids
 
 MEMORY_LIMIT = 128 * 1024**2
 
@@ -37,13 +34,11 @@ def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIM
     sums = np.asarray(sums, dtype=np.float64)
     counts = np.asarray(counts, dtype=np.float64)
     users, days, arms = sums.shape
-    if counts.shape != (users, days) or not users or not np.isfinite(sums).all():
+    if counts.shape != (users, days) or not users or (not np.isfinite(sums).all()):
         raise ValueError("invalid user/date aggregates")
     if not np.isfinite(counts).all() or np.any(counts < 0):
         raise ValueError("invalid event counts")
-    # Reserve space for NumPy's sampler/matmul workspace and Python array metadata.
     fixed = sums.nbytes + counts.nbytes + samples * arms * 8 + users * 8 + 8 * 1024**2
-    # Include integer multinomial draws, float weights, matrix outputs and division temporaries.
     per_draw = users * 16 + days * (arms * 3 + 2) * 8
     batch = min(64, (memory_limit - fixed) // per_draw)
     if batch < 1:
@@ -75,6 +70,7 @@ def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIM
 def comparisons(observed, draws, settings, *, arms=None, config=None):
     from validation.diagnosis_statistics import comparison_families
     from validation.recommendation_contracts import DEFAULT_PROTOCOL
+
     configured = registry(config or DEFAULT_PROTOCOL)
     names = list(configured if arms is None else arms)
     indices = {name: index for index, name in enumerate(names)}
@@ -86,65 +82,52 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
         for left, right in pairs:
             if left not in indices or right not in indices:
                 continue
-            a, b = indices[left], indices[right]
+            a, b = (indices[left], indices[right])
             delta = draws[:, a] - draws[:, b]
             lo, hi = np.quantile(delta, [alpha / 2, 1 - alpha / 2])
             result[f"{left}-{right}"] = {
-                "family": family, "role": "confirmatory", "family_size": len(pairs),
+                "family": family,
+                "role": "confirmatory",
+                "family_size": len(pairs),
                 "difference": float(observed[a] - observed[b]),
-                "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 1 - alpha,
-                "superior": bool(lo > 0), "inferior": bool(hi < 0),
-                "relative_difference": (float((observed[a] - observed[b]) / observed[b])
-                                        if observed[b] > 0 else None),
+                "ci_low": float(lo),
+                "ci_high": float(hi),
+                "confidence_level": 1 - alpha,
+                "superior": bool(lo > 0),
+                "inferior": bool(hi < 0),
+                "relative_difference": float((observed[a] - observed[b]) / observed[b])
+                if observed[b] > 0
+                else None,
             }
-    from arm_registry import legacy_layout, concat_layout
-    if concat_layout(config or DEFAULT_PROTOCOL):
-        primary = result.get("graph_qwen_meta-meta")
-        if primary is not None:
-            primary["primary"] = True
-        left, right = "graph_gemini_meta", "graph_qwen_meta"
-        if {left, right} <= indices.keys():
-            a, b = indices[left], indices[right]
-            lo, hi = np.quantile(draws[:, a] - draws[:, b], [0.025, 0.975])
-            result[f"{left}-{right}"] = {
-                "family": "teacher_reference", "role": "exploratory",
-                "difference": float(observed[a] - observed[b]),
-                "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
-            }
-        return result
-    old = legacy_layout(config or DEFAULT_PROTOCOL)
-    by_kind = {(arm.representation, arm.model, arm.uses_title): name for name, arm in configured.items()}
-    for title in ((True,) if old else (False, True)):
-        terms = [by_kind[kind, model, title] for model in ("gemini", "qwen")
-                 for kind in ("graph", "description")]
-        if not set(terms) <= indices.keys():
-            continue
-        a, b, c, d = [indices[name] for name in terms]
-        delta = draws[:, a] - draws[:, b] - draws[:, c] + draws[:, d]
-        lo, hi = np.quantile(delta, [0.025, 0.975])
-        name = "interaction_graph_vs_description" + ("" if old else "_meta" if title else "_no_meta")
-        result[name] = {
-            "family": "interaction", "role": "exploratory", "arms": terms,
-            "difference": float(observed[a] - observed[b] - observed[c] + observed[d]),
-            "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
+    primary = result.get("graph_qwen_meta-meta")
+    if primary is not None:
+        primary["primary"] = True
+    left, right = ("graph_gemini_meta", "graph_qwen_meta")
+    if {left, right} <= indices.keys():
+        a, b = (indices[left], indices[right])
+        lo, hi = np.quantile(draws[:, a] - draws[:, b], [0.025, 0.975])
+        result[f"{left}-{right}"] = {
+            "family": "teacher_reference",
+            "role": "exploratory",
+            "difference": float(observed[a] - observed[b]),
+            "ci_low": float(lo),
+            "ci_high": float(hi),
+            "confidence_level": 0.95,
         }
     return result
 
 
 def diagnosis_training(directory, identity, expected_count, *, architecture_version=None):
-    """Validate historical results without making them eligible for training resume."""
+    """Validate completed results for the selected text or graph architecture."""
     training = read_json(directory / "training.json")
     recorded = training.get("architecture_version")
     if recorded not in DIAGNOSIS_ARCHITECTURE_VERSIONS:
         raise ValueError(f"unsupported diagnosis architecture {recorded!r}: {directory}")
     if architecture_version is not None and recorded != architecture_version:
         raise ValueError(
-            f"mixed recommendation architectures: expected {architecture_version}, "
-            f"found {recorded}: {directory}"
+            f"mixed recommendation architectures: expected {architecture_version}, found {recorded}: {directory}"
         )
-    if not combination_complete(
-        directory, identity, expected_count, architecture_version=recorded
-    ):
+    if not combination_complete(directory, identity, expected_count, architecture_version=recorded):
         raise ValueError(f"incomplete/corrupt combination: {directory}")
     return training
 
@@ -187,6 +170,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
                     "training_input_hash": training_input_hash,
                 }
                 from validation.representation_provenance import recommendation_identity
+
                 identity.update(recommendation_identity(context, selected[arm]))
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
                 training = diagnosis_training(
@@ -213,7 +197,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
                         raise ValueError("duplicate or unexpected test event")
                     seen.add(event)
                     source = table.rows[event]
-                    if any(row.get(k) != v for k, v in {**source, **identity}.items()):
+                    if any((row.get(k) != v for k, v in {**source, **identity}.items())):
                         raise ValueError("event identity mismatch")
                     rank = row["rank"]
                     if type(rank) is not int or not 1 <= rank <= len(table.items):
@@ -224,8 +208,10 @@ def collect_metrics(context, config, cohort, *, arms=None):
                         raise ValueError("refit target frequency mismatch")
                     calculated = metrics_from_rank(rank, config.evaluation.cutoffs)
                     if any(
-                        not np.isfinite(row[m]) or abs(row[m] - calculated[m]) > 1e-12
-                        for m in metrics
+                        (
+                            not np.isfinite(row[m]) or abs(row[m] - calculated[m]) > 1e-12
+                            for m in metrics
+                        )
                     ):
                         raise ValueError("event metric/rank mismatch")
                     for metric in metrics:
@@ -269,8 +255,6 @@ def collect_metrics(context, config, cohort, *, arms=None):
 def diagnose(context, *, target=None, compare_run_id=None):
     from validation.steps import validation_config
 
-    from validation.selection import diagnosis_context
-    context = diagnosis_context(context)
     arms = resolve_target_arms(target, config=context.config)
     context.initialize()
     config = validation_config(context)
@@ -284,11 +268,13 @@ def diagnose(context, *, target=None, compare_run_id=None):
     try:
         cohort = load_validation_cohort(context)
         document["cohort"] = cohort["plan"]
-        document["selection"] = {key: value for key, value in cohort["manifest"].items()
-                                 if key != "included_item_ids"}
+        document["selection"] = {
+            key: value for key, value in cohort["manifest"].items() if key != "included_item_ids"
+        }
         document["selection"]["manifest_path"] = "validation/cohort/manifest.json"
         from validation.metadata import verify_missing_metadata
-        if any(name in arms for name in ("meta", "metadata")):
+
+        if any((name in arms for name in ("meta", "metadata"))):
             document["metadata_missing"] = verify_missing_metadata(context, cohort)
         scene = _scene_coverage(
             context.run_root,
@@ -298,19 +284,22 @@ def diagnose(context, *, target=None, compare_run_id=None):
             config.evaluation.model_dump(),
             True,
             True,
-            branches=set(arms.values()), config=context.config,
+            branches=set(arms.values()),
+            config=context.config,
             excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
             source_assets_dir=context.source_assets_dir,
             informational=cohort["manifest"]["policy"] == "full-catalog-zero-vector/v2",
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
+
         document["generation_recovery"] = recovery_report(
             context, branches=arms, content_ids=[r["content_id"] for r in cohort["catalog"]]
         )
         from validation.diagnosis_representations import representation_report
-        document["representations"], document["gemini_summary_fallbacks"] = (
-            representation_report(context, arms)
+
+        document["representations"], document["gemini_summary_fallbacks"] = representation_report(
+            context, arms
         )
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
@@ -324,14 +313,23 @@ def diagnose(context, *, target=None, compare_run_id=None):
             document["statistics"] = {
                 "status": "computed",
                 "bootstrap": bootstrap,
-                "comparisons": comparisons(observed, draws, config.evaluation, arms=arms, config=context.config),
+                "comparisons": comparisons(
+                    observed, draws, config.evaluation, arms=arms, config=context.config
+                ),
                 "policy": multiple_comparison_policy(
-                    config.evaluation.model_dump(), True, "NDCG@10", arms=arms, config=context.config,
+                    config.evaluation.model_dump(),
+                    True,
+                    "NDCG@10",
+                    arms=arms,
+                    config=context.config,
                 ),
             }
             if compare_run_id is not None:
                 from validation.run_comparison import compare_graph_runs
-                document["run_comparison"] = compare_graph_runs(context, compare_run_id, target=arms)
+
+                document["run_comparison"] = compare_graph_runs(
+                    context, compare_run_id, target=arms
+                )
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_rolling_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}

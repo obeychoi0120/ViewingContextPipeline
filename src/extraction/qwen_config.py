@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+
 from typing import Any
 
 
@@ -39,5 +40,16 @@ def qwen_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
         raise ValueError("extraction.qwen.async_scheduling must be null, true or false")
     if not result["enable_chunked_prefill"] and length != "auto":
         if result["max_num_batched_tokens"] < length:
-            raise ValueError("without chunked prefill max_num_batched_tokens must cover max_model_len")
+            raise ValueError(
+                "without chunked prefill max_num_batched_tokens must cover max_model_len"
+            )
     return result
+
+
+def penalty_schedule(value):
+    values = value if isinstance(value, list) else [value]
+    if not values or any(
+        type(x) not in (int, float) or not math.isfinite(x) or not 1 <= x <= 2 for x in values
+    ):
+        raise ValueError("repetition penalty must be a number or non-empty list in [1, 2]")
+    return [float(x) for x in values]

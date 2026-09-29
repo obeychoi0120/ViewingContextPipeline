@@ -8,8 +8,7 @@ README = (ROOT / "README.md").read_text()
 COMMANDS = [
     line
     for line in README.splitlines()
-    if "migrate-arm-layout" not in line
-    and line.startswith(
+    if line.startswith(
         ("python -m preparation ", "python -m extraction ", "python -m validation ")
     )
 ]
@@ -22,6 +21,7 @@ def test_documented_commands_dispatch(current_context, monkeypatch, command):
     args = shlex.split(command.replace("$RUN_ID", current_context.run_id))[3:]
     monkeypatch.setattr(cli.RunContext, "load", lambda _: current_context)
     received = []
+    assert args[0] in cli.STEP_HANDLERS
     monkeypatch.setitem(
         cli.STEP_HANDLERS, args[0], lambda context, **options: received.append(options)
     )
