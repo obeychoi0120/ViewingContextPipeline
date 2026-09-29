@@ -24,11 +24,11 @@ python -m validation run-diagnosis --run-id 260928_v7 --representation-mode grap
 ## 모델 및 데이터 계약
 
 - BGE 입력: entity의 종류·attributes, action 문구, Context의 medium·format·topics, 필요한 Arm의 영문 제목. 고유 문자열만 인코딩하며 float32 특징은 학습하지 않습니다.
-- entity/action 노드 사이 actor·target·tool·receiver·location별 양방향 메시지를 2층·256차원에서 전달합니다. `none`/`unknown`은 역할별 서로 다른 상태 벡터이며 공유 개체 노드가 아닙니다.
+- entity/action 노드 사이 actor·target·tool·location별 양방향 메시지를 2층·256차원에서 전달합니다. `none`/`unknown`은 역할별 서로 다른 상태 벡터이며 공유 개체 노드가 아닙니다.
 - entity 평균, action 평균, Context를 결합해 장면 512차원으로 변환합니다. 영상 mean 또는 attention pooling은 순서 불변이며 시간 위치 정보와 장면 간 메시지는 사용하지 않습니다.
 - `_meta`는 `[제목 1024; Graph 512]` 순서입니다. 제목 없는 Graph Arm도 같은 1536→512 변환층을 사용하되 제목 부분은 0입니다.
 - 유효한 Graph가 없으면 Graph 부분은 0입니다. 제목도 없으면 최종 영상 벡터는 0입니다. 후보·interaction은 제거하지 않습니다. `meta` 기준선은 기존 모델 계산을 그대로 사용합니다.
-- raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver 누락은 `none`, location 누락은 `unknown`으로 해석합니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
+- raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver는 기존 데이터에 있어도 무시하고 location 누락은 `unknown`으로 해석합니다. 모델 텐서의 receiver 슬롯은 형태 호환성을 위해 남기되 항상 `none` 상태로 두고 해당 간선은 만들지 않습니다. 입력 버전을 갱신해 receiver를 사용한 기존 특징 캐시를 재사용하지 않습니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
 - 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 분할당 64개 영상·8,192개 노드를 기준으로 묶되 이를 넘는 단일 영상도 그대로 유지합니다. 학습 시 activation checkpointing으로 분할 내부 활성값을 backward에서 재계산합니다.
 - SASRec의 loss, 인기도 보정, 후보 마스킹, 이력 길이 10, 차원 512, 날짜별 selection/refit/test는 기존과 같습니다. 각 refit은 모든 학습 모듈을 초기화합니다. 학습 배치의 이력·정답 아이템 합집합만 계산하고 optimizer 갱신 후 캐시를 버립니다.
 

@@ -78,9 +78,11 @@ python -m preparation prepare-input-data --run-id "$RUN_ID"
 
 `--schema`에는 실제 존재하는 Markdown 프롬프트 파일 하나를 지정합니다. 상대 경로는 저장소 루트 기준입니다.
 
+v8 Graph의 Actions는 `actor - action - target; tool; location`입니다. receiver는 출력·검증·Summary 및 직접 Graph 입력에서 제외합니다. 기존 파일은 수정하지 않으며, 완전한 v7의 6개 필드 형식과 기존 JSON은 receiver를 무시하고 읽습니다. 5개 필드 행의 마지막 값은 항상 location으로 해석하므로, location을 생략한 과거 v7의 불완전한 행은 자동으로 구별하지 않습니다. 새 실험에서는 새 Run에 아래 v8 프롬프트 쌍을 지정합니다.
+
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v7.md --model qwen --arm graph_qwen
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v7.md --model gemini --arm graph_gemini
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model qwen --arm graph_qwen
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model gemini --arm graph_gemini
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen --arm desc_qwen
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
@@ -88,8 +90,8 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prom
 Text 평가에는 선택한 소스의 Summary를 생성합니다. 아래 예시는 네 소스 모두 Gemini로 요약합니다. Qwen 요약을 실행하려면 `--model qwen`을 지정합니다.
 
 ```bash
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v7.md --model gemini --arm graph_qwen
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v7.md --model gemini --arm graph_gemini
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model gemini --arm graph_qwen
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model gemini --arm graph_gemini
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
 ```

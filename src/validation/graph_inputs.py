@@ -12,14 +12,16 @@ import numpy as np
 
 from arm_registry import select_arms
 from artifact_io import fingerprint
-from extraction.structured_output import validate_graph_structure, OutputValidationError
+from extraction.structured_output import validate_graph_structure, OutputValidationError, without_receiver
 from model_provenance import local_model_identity
 from artifact_io import read_json, write_json
 from validation.graph_context import GRAPH_ARMS
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "role-graph-inputs/v1"
+VERSION = "role-graph-inputs/v2"
 ROLES = ("actor", "target", "tool", "receiver", "location")
+# Keep the receiver tensor slot for model/checkpoint shape compatibility; input
+# normalization disables its edges and always supplies the absent state.
 ARRAYS = (
     "features",
     "nodes",
@@ -130,7 +132,7 @@ def build_input(context, cohort, arm):
                     }
                 )
 
-            g = row.get("scene_graph")
+            g = without_receiver(row.get("scene_graph"))
             if not isinstance(g, dict):
                 reject("raw")
                 continue

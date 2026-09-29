@@ -3,13 +3,13 @@
 from __future__ import annotations
 import json
 from extraction.summary_storage import render_summary_prompt
-from extraction.structured_output import OutputValidationError, validate_graph_structure
+from extraction.structured_output import OutputValidationError, validate_graph_structure, without_receiver
 from extraction.summary_storage import (
     SUMMARY_SCHEMA_VERSION as SUMMARY_SCHEMA_VERSION,
     validate_summary as validate_summary,
 )
 
-GRAPH_SCHEMA_VERSION = "scene-graph/v5"
+GRAPH_SCHEMA_VERSION = "scene-graph/v6"
 
 
 class SemanticGraphError(ValueError):
@@ -32,7 +32,7 @@ def graph_summary_prompt(template, records, *, english_title=None):
         graph = record.get("graph", record.get("raw_response"))
         if graph is None:
             raise SemanticGraphError("missing graph observation")
-        observations.append({"scene": record["scene_idx"], "observation": graph})
+        observations.append({"scene": record["scene_idx"], "observation": without_receiver(graph)})
     return render_summary_prompt(
         template, json.dumps(observations, ensure_ascii=False), english_title=english_title
     )

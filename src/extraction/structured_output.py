@@ -72,10 +72,9 @@ GRAPH_JSON_SCHEMA = _object(
                     "action": STRING,
                     "target": REFERENCE,
                     "tool": REFERENCE,
-                    "receiver": REFERENCE,
                     "location": REFERENCE,
                 },
-                optional=("receiver", "location"),
+                optional=("location",),
             )
         ),
     }
@@ -86,6 +85,20 @@ class OutputValidationError(ValueError):
     def __init__(self, message, tags=(PARSE_ERROR,)):
         super().__init__(message)
         self.tags = list(dict.fromkeys(tags))
+
+
+def without_receiver(graph):
+    """Ignore deprecated v7 receiver data without mutating historical records."""
+    if not isinstance(graph, dict) or not isinstance(graph.get("actions"), list):
+        return graph
+    return {
+        **graph,
+        "actions": [
+            {key: value for key, value in action.items() if key != "receiver"}
+            if isinstance(action, dict) else action
+            for action in graph["actions"]
+        ],
+    }
 
 
 def validate_graph_structure(value, schema=None, path="graph"):
@@ -99,6 +112,8 @@ def validate_graph_structure(value, schema=None, path="graph"):
                 if isinstance(value, dict) and "context" in value
                 else RELATION_GRAPH_JSON_SCHEMA
             )
+    if schema is GRAPH_JSON_SCHEMA:
+        value = without_receiver(value)
     _validate_shape(value, schema, path)
     if schema is GRAPH_JSON_SCHEMA:
         _validate_actions(value, path)
@@ -158,7 +173,7 @@ def _validate_actions(graph, path):
             report(INVALID_ACTION_SYNTAX, "action requires a declared actor or target")
         if any(mark in action["action"] for mark in (" - ", "->", "→", "⇒", ";", "\n")):
             report(INVALID_ACTION_SYNTAX, "ambiguous action phrase")
-        for field in ("actor", "target", "tool", "receiver", "location"):
+        for field in ("actor", "target", "tool", "location"):
             value = action.get(field)
             if value not in (None, "unknown") and value not in ids:
                 report(INVALID_REFERENCE, f"undeclared {field} {value!r}")
