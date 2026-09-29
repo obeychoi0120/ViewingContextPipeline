@@ -1,5 +1,9 @@
 # ViewingContextPipeline
 
+![ViewingContextPipeline 실험 흐름](docs/design/Diagram.png)
+
+[다이어그램 PPTX 원본](docs/design/Diagram.pptx)
+
 MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시각 정보를 더했을 때 추천 성능이 어떻게 달라지는지 비교하는 실험 파이프라인입니다. Qwen·Gemini로 Graph와 Description을 생성하고, 동일한 사용자·후보 catalog·평가 구간에서 SASRec을 학습합니다.
 
 ## 실험 구성
@@ -122,7 +126,7 @@ Attention 평가에서는 추천·진단의 `mean`을 `attention`으로 바꿉�
 artifacts/
 ├── preparation/                    # 공유 cohort·영상 준비
 │   ├── cohort/
-│   ├── resized_keyframes/
+│   ├── resized_keyframes/<width>_<height>/  # 예: 640_352
 │   └── source_assets/
 ├── runs/<RUN_ID>/
 │   ├── extraction/

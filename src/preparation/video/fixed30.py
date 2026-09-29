@@ -32,10 +32,10 @@ def prepare_visual_item(
     content_id = _safe_content_id(content_id)
     item_assets = Path(assets_root) / content_id
     timestamp_path = item_assets / timestamp_filename(scene_duration, num_keyframes)
-    frames_dir = Path(output_root) / "resized_keyframes" / content_id
     width, height = image_size
     if width <= 0 or height <= 0:
         raise ValueError("image_size must contain positive width and height")
+    frames_dir = Path(output_root) / "resized_keyframes" / f"{width}_{height}" / content_id
     complete = visual_evidence_matches(
         timestamp_path,
         frames_dir,

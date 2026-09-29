@@ -64,7 +64,7 @@ def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(
     scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
     assert scenes[-1]["scene_end"] == 30.1
     assert extract.call_args.args[1] == [2.5, 7.5, 12.5, 17.5, 22.5, 27.5, 30]
-    assert extract.call_args.args[2] == output_root / "resized_keyframes/content-1"
+    assert extract.call_args.args[2] == output_root / "resized_keyframes/640_352/content-1"
 
 
 def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:
