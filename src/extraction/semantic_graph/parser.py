@@ -34,7 +34,8 @@ def _header(line, *, repair):
         r"(?:\[\s*(entities|relations|context|actions|end)\s*\]"
         r"|(entities|relations|context|actions|end)\s*[:：]"
         r"|#{1,6}\s+(entities|relations|context|actions|end)\s*[:：]?)",
-        line, re.IGNORECASE,
+        line,
+        re.IGNORECASE,
     )
     return next(value for value in match.groups() if value).capitalize() if match else None
 
@@ -72,19 +73,26 @@ def _relation(line, *, repair):
     if not repair and any(delimiter.group() != "->" for delimiter in delimiters):
         raise GraphTextError("nonstandard relation delimiter")
     left, right = delimiters
-    subject = line[:left.start()].strip()
-    predicate = line[left.end():right.start()].strip()
-    target = line[right.end():].strip()
-    if (not _ID.fullmatch(subject) or not _ID.fullmatch(target)
-            or not predicate or _RELATION_MARK.search(predicate)):
-        raise GraphTextError("incomplete or ambiguous relation; expected subject -> relation -> object")
+    subject = line[: left.start()].strip()
+    predicate = line[left.end() : right.start()].strip()
+    target = line[right.end() :].strip()
+    if (
+        not _ID.fullmatch(subject)
+        or not _ID.fullmatch(target)
+        or not predicate
+        or _RELATION_MARK.search(predicate)
+    ):
+        raise GraphTextError(
+            "incomplete or ambiguous relation; expected subject -> relation -> object"
+        )
     return {"subject_id": subject, "predicate": predicate, "object_id": target}
 
 
 def _parse_lines(text, *, repair):
     first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    if (_header(first, repair=repair) == "Context"
-            or any(_header(line.strip(), repair=repair) == "Actions" for line in text.splitlines())):
+    if _header(first, repair=repair) == "Context" or any(
+        _header(line.strip(), repair=repair) == "Actions" for line in text.splitlines()
+    ):
         return _parse_context_actions(text, repair=repair)
     sections = {}
     current = None
@@ -102,8 +110,9 @@ def _parse_lines(text, *, repair):
         header = _header(line, repair=repair)
         if header:
             legacy_context = header == "Context" and current == "Relations"
-            if not legacy_context and (seen >= len(_REQUIRED_SECTIONS)
-                                       or header != _REQUIRED_SECTIONS[seen]):
+            if not legacy_context and (
+                seen >= len(_REQUIRED_SECTIONS) or header != _REQUIRED_SECTIONS[seen]
+            ):
                 raise GraphTextError(f"line {number}: duplicate or out-of-order section {header}")
             current = header
             if header != "End":
@@ -111,8 +120,11 @@ def _parse_lines(text, *, repair):
             if not legacy_context:
                 seen += 1
             continue
-        if (_header(line, repair=True) or (re.fullmatch(r"\[.*\]", line) and line != "[]")
-                or line.startswith(("```", "#"))):
+        if (
+            _header(line, repair=True)
+            or (re.fullmatch(r"\[.*\]", line) and line != "[]")
+            or line.startswith(("```", "#"))
+        ):
             raise GraphTextError(f"line {number}: unexpected section or formatting")
         if current is None:
             raise GraphTextError(f"line {number}: expected [Entities]")
@@ -120,14 +132,15 @@ def _parse_lines(text, *, repair):
     # EOF after Relations (or legacy Context) is a valid terminator. Token-limit
     # truncation is detected from backend finish reasons by the scene executor.
     if seen < len(_REQUIRED_SECTIONS) - 1:
-        raise GraphTextError(f"missing [{_REQUIRED_SECTIONS[seen]}] section or terminator", MISSING_REQUIRED)
+        raise GraphTextError(
+            f"missing [{_REQUIRED_SECTIONS[seen]}] section or terminator", MISSING_REQUIRED
+        )
 
     graph = {}
     for section, rows in sections.items():
         if not rows:
             raise GraphTextError(f"empty [{section}]; write none explicitly")
-        empty = [line == "none" or repair and line.casefold() in {"none", "[]"}
-                 for _, line in rows]
+        empty = [line == "none" or repair and line.casefold() in {"none", "[]"} for _, line in rows]
         if any(empty):
             if len(rows) != 1:
                 raise GraphTextError(f"[{section}]: none mixed with other items")
@@ -179,18 +192,27 @@ def _action_fields(line, *, repair):
             raise GraphTextError("empty or ambiguous action")
     if any(not _ID.fullmatch(value) for value in (actor, target, tool, receiver, location)):
         raise GraphTextError("expected endpoint IDs, none, or unknown")
+
     def reference(value):
         token = value.casefold() if repair else value
         return None if token == "none" else "unknown" if token == "unknown" else value
-    return {"actor": reference(actor), "action": action,
-            "target": reference(target), "tool": reference(tool),
-            "receiver": reference(receiver), "location": reference(location)}
+
+    return {
+        "actor": reference(actor),
+        "action": action,
+        "target": reference(target),
+        "tool": reference(tool),
+        "receiver": reference(receiver),
+        "location": reference(location),
+    }
 
 
 def _parse_context_actions(text, *, repair):
     required = ("Context", "Entities", "Actions")
-    headers = {_header(_BULLET.sub("", line.strip(), count=1) if repair else line.strip(),
-                       repair=repair) for line in text.splitlines()}
+    headers = {
+        _header(_BULLET.sub("", line.strip(), count=1) if repair else line.strip(), repair=repair)
+        for line in text.splitlines()
+    }
     missing = [name for name in required if name not in headers]
     if missing:
         raise GraphTextError(f"missing [{missing[0]}]", MISSING_REQUIRED)
@@ -211,8 +233,12 @@ def _parse_context_actions(text, *, repair):
             current = header
             sections[header] = []
             seen += 1
-        elif (current is None or _header(line, repair=True)
-              or re.fullmatch(r"\[.*\]", line) and line != "[]"):
+        elif (
+            current is None
+            or _header(line, repair=True)
+            or re.fullmatch(r"\[.*\]", line)
+            and line != "[]"
+        ):
             raise GraphTextError(f"line {number}: unexpected section or formatting")
         else:
             sections[current].append(line)
@@ -229,8 +255,11 @@ def _parse_context_actions(text, *, repair):
         if not value:
             raise GraphTextError("missing context value", MISSING_REQUIRED)
         if key == "topics":
-            context[key] = ([] if value == "none" else
-                            [part.strip() for part in re.split(r"[;；]" if repair else ";", value)])
+            context[key] = (
+                []
+                if value == "none"
+                else [part.strip() for part in re.split(r"[;；]" if repair else ";", value)]
+            )
             if any(not part or part.casefold() == "none" for part in context[key]):
                 raise GraphTextError("empty topic or none mixed with topics")
         else:

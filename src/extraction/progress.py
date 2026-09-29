@@ -41,7 +41,8 @@ class RecentThroughput:
             "output_tokens_per_second": (
                 sum(tokens for _, tokens in self.events) / seconds if seconds > 0 else 0
             ),
-            "eta_ready": elapsed >= self.WARMUP_SECONDS and len(self.events) >= self.MIN_COMPLETIONS,
+            "eta_ready": elapsed >= self.WARMUP_SECONDS
+            and len(self.events) >= self.MIN_COMPLETIONS,
         }
 
 
@@ -50,10 +51,23 @@ class InferenceProgress:
 
     REFRESH_SECONDS = 5.0
 
-    def __init__(self, *, total, desc, unit, reused=0, empty=0, progress_factory=tqdm,
-                 clock=None, track_structured=False):
+    def __init__(
+        self,
+        *,
+        total,
+        desc,
+        unit,
+        reused=0,
+        empty=0,
+        progress_factory=tqdm,
+        clock=None,
+        track_structured=False,
+    ):
         self.bar = progress_factory(
-            total=total, desc=desc, unit=unit, mininterval=self.REFRESH_SECONDS,
+            total=total,
+            desc=desc,
+            unit=unit,
+            mininterval=self.REFRESH_SECONDS,
             dynamic_ncols=True,
             bar_format="{l_bar}{bar:20}| {n_fmt}/{total_fmt} {unit} [{elapsed}{postfix}]",
         )
@@ -80,7 +94,9 @@ class InferenceProgress:
         self._started = self._clock()
         self._render(refresh=True)
         self._ticker = threading.Thread(
-            target=self._refresh_loop, name="inference-progress", daemon=True,
+            target=self._refresh_loop,
+            name="inference-progress",
+            daemon=True,
         )
         self._ticker.start()
         return self
@@ -90,7 +106,9 @@ class InferenceProgress:
         if self._ticker is not None:
             self._ticker.join()
         if exc_type is not None:
-            self.stats["phase"] = "interrupted" if issubclass(exc_type, KeyboardInterrupt) else "error"
+            self.stats["phase"] = (
+                "interrupted" if issubclass(exc_type, KeyboardInterrupt) else "error"
+            )
         self._render(refresh=True)
         return self.bar.__exit__(exc_type, exc, tb)
 
@@ -101,7 +119,9 @@ class InferenceProgress:
             # Keep the cadence anchored to the step start; skip missed ticks if
             # writing to the terminal itself took longer than one interval.
             elapsed = max(0, self._clock() - self._started)
-            deadline = self._started + (int(elapsed / self.REFRESH_SECONDS) + 1) * self.REFRESH_SECONDS
+            deadline = (
+                self._started + (int(elapsed / self.REFRESH_SECONDS) + 1) * self.REFRESH_SECONDS
+            )
 
     def discover(self, count, *, reused=0):
         with self._lock:

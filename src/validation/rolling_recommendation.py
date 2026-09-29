@@ -11,20 +11,23 @@ import time
 import numpy as np
 from tqdm import tqdm
 
-from pipeline_runtime import read_json, write_json
+from artifact_io import read_json, write_json
 from validation.metrics import metrics_from_rank
 from validation.model import require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
 from validation.recommendation_contracts import ARCHITECTURE_VERSION, resolve_target_arms
-from validation.rolling_data import EventTable, iter_jsonl
+from validation.rolling_data import EventTable
+from preparation.cohort import iter_jsonl
 from validation.selection import load_validation_cohort, training_signature
 from validation.rolling_execution import (
-    EXECUTION_VERSION, execution_for, masked_ranks, negative_mask,
+    EXECUTION_VERSION,
+    execution_for,
+    masked_ranks,
+    negative_mask,
 )
 
 SCHEMA = "sasrec-rolling-combination/v3"
-LEGACY_SCHEMA = "sasrec-rolling-combination/v1"
 
 
 def phase_ids(table, split, phase):
@@ -69,7 +72,11 @@ def train_epoch(model, optimizer, table, ids, probabilities, rng, config, device
         updates += 1
     if not len(ids):
         raise RuntimeError("empty training partition")
-    return {"loss": float(total.cpu()) / len(ids), "positive_count": len(ids), "optimizer_updates": updates}
+    return {
+        "loss": float(total.cpu()) / len(ids),
+        "positive_count": len(ids),
+        "optimizer_updates": updates,
+    }
 
 
 def rank_batches(model, table, ids, config, device):
@@ -119,29 +126,28 @@ def result_files(identity):
 
 
 def combination_complete(directory, identity, expected_count, *, architecture_version=None):
-    # Resume always requires the current architecture unless a read-only caller
-    # explicitly selects a supported historical version.
-    read_only = architecture_version is not None
     if architecture_version is None:
         architecture_version = identity.get("graph_architecture", ARCHITECTURE_VERSION)
     try:
         complete = read_json(directory / "complete.json")
         schema = complete.get("schema_version")
-        if schema not in ({SCHEMA, LEGACY_SCHEMA, "sasrec-rolling-combination/v2"} if read_only else {SCHEMA}) or any(
+        if schema != SCHEMA or any(
             complete.get("identity", {}).get(key) != value for key, value in identity.items()
         ):
             return False
         if complete.get("event_count") != expected_count:
             return False
         names = set(result_files(identity))
-        if not all((directory / name).is_file() and (directory / name).stat().st_size for name in names):
+        if not all(
+            (directory / name).is_file() and (directory / name).stat().st_size for name in names
+        ):
             return False
-        if schema in {SCHEMA, "sasrec-rolling-combination/v2"}:
-            from validation.shared_cache import checksum
-            if set(complete.get("checksums", {})) != names or any(
-                checksum(directory / name) != complete["checksums"][name] for name in names
-            ):
-                return False
+        from validation.shared_cache import checksum
+
+        if set(complete.get("checksums", {})) != names or any(
+            checksum(directory / name) != complete["checksums"][name] for name in names
+        ):
+            return False
         training = read_json(directory / "training.json")
         if training.get("architecture_version") != architecture_version:
             return False
@@ -149,7 +155,9 @@ def combination_complete(directory, identity, expected_count, *, architecture_ve
             training.get(key) != value for key, value in identity.items()
         ):
             return False
-        if not training.get("selection") or len(training.get("refit", [])) != training.get("best_epoch"):
+        if not training.get("selection") or len(training.get("refit", [])) != training.get(
+            "best_epoch"
+        ):
             return False
         seen = set()
         for row in iter_jsonl(directory / "per_event_metrics.jsonl"):
@@ -179,13 +187,18 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     (directory / "complete.json").unlink(missing_ok=True)
     print(f"[Rolling] {date} seed={seed} {arm}: selection device={device}", flush=True)
     started = time.monotonic()
-    timings = dict.fromkeys(("preparation", "selection_training", "validation", "refit", "test"), 0.0)
+    timings = dict.fromkeys(
+        ("preparation", "selection_training", "validation", "refit", "test"), 0.0
+    )
     execution = execution_for(table)
     execution.padded(config.model.max_sequence_length)
     for phase in ("selection", "refit"):
-        execution.log_probabilities(probabilities[phase], table.targets[ids[phase]], device, torch.float32)
+        execution.log_probabilities(
+            probabilities[phase], table.targets[ids[phase]], device, torch.float32
+        )
     timings["preparation"] = time.monotonic() - started
     from validation.graph_context import is_graph
+
     features = None
     if not is_graph(context):
         with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
@@ -194,9 +207,12 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     def create_model():
         if is_graph(context):
             from validation.graph_model import new_graph_model
+
             return new_graph_model(context, config, branch, device)
-        return _new_model(config, item_count=len(table.items), branch=branch,
-                          features=features, device=device)
+        return _new_model(
+            config, item_count=len(table.items), branch=branch, features=features, device=device
+        )
+
     seed_everything(seed)
     rng = np.random.default_rng(seed)
     model = create_model()
@@ -233,7 +249,9 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     rng = np.random.default_rng(seed)
     model = create_model()
     optimizer = _optimizer(model, config)
-    print(f"[Rolling] {date} {arm} seed={seed} refit epochs={best_epoch} device={device}", flush=True)
+    print(
+        f"[Rolling] {date} {arm} seed={seed} refit epochs={best_epoch} device={device}", flush=True
+    )
     refit = []
     phase_started = time.monotonic()
     for epoch in range(1, best_epoch + 1):
@@ -261,9 +279,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
         for row in evaluate(model, table, ids["test"], config, device):
             row.update(identity)
             row["schema_version"] = "sasrec-per-event-metrics/v1"
-            row["refit_item_frequency"] = int(
-                frequencies[table.targets[row["event_id"]]]
-            )
+            row["refit_item_frequency"] = int(frequencies[table.targets[row["event_id"]]])
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             count += 1
         handle.flush()
@@ -306,6 +322,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
         },
     )
     from validation.shared_cache import checksum
+
     write_json(
         directory / "complete.json",
         {
@@ -318,6 +335,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     # Publish each completed unit, including in spawned workers, so interruption
     # of a later combination does not withhold already finished shared results.
     from validation import recommendation_cache
+
     if recommendation_cache.eligible(context, branch):
         recommendation_cache.publish(context, directory, identity, table, split, force=True)
 
@@ -352,12 +370,9 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
 
     arms = resolve_target_arms(target, config=context.config)
     from validation import recommendation_cache
-    from validation.selection import LEGACY_POLICY
 
     config = validation_config(context)
     cohort = load_validation_cohort(context)
-    if cohort["manifest"]["policy"] == LEGACY_POLICY:
-        raise ValueError("run embed-representations to create the full-catalog cohort first")
     table = EventTable(cohort["events"])
     verify_representations(context, cohort, arms=arms)
     training_input_hash = training_signature(context, cohort, config)
@@ -378,12 +393,13 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
                 }
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
                 combinations.append((directory, identity, branch, split))
-                if not force and combination_complete(
-                    directory, identity, expected_count
-                ):
+                if not force and combination_complete(directory, identity, expected_count):
                     skipped += 1
-                elif (not force and recommendation_cache.eligible(context, branch)
-                      and recommendation_cache.restore(context, directory, identity, table, split)):
+                elif (
+                    not force
+                    and recommendation_cache.eligible(context, branch)
+                    and recommendation_cache.restore(context, directory, identity, table, split)
+                ):
                     shared += 1
                     skipped += 1
                 else:
@@ -404,6 +420,7 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
         progress.set_postfix(reused=skipped)
         if jobs and len(devices) > 1:
             from validation.rolling_workers import run_parallel
+
             completed = run_parallel(context, jobs, devices, progress)
         elif jobs:
             previous_date, prepared = None, None
@@ -421,8 +438,14 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
     for directory, identity, branch, split in combinations:
         if recommendation_cache.eligible(context, branch):
             recommendation_cache.publish(context, directory, identity, table, split, force=force)
-    write_json(context.recommendations_dir / "reuse.json", {
-        "run_id": context.run_id, "local": skipped - shared, "shared": shared, "generated": completed,
-    })
+    write_json(
+        context.recommendations_dir / "reuse.json",
+        {
+            "run_id": context.run_id,
+            "local": skipped - shared,
+            "shared": shared,
+            "generated": completed,
+        },
+    )
     print(f"[Rolling] completed={completed} skipped={skipped}", flush=True)
     return {"stage": "run-recommendation", "completed": completed, "skipped": skipped}

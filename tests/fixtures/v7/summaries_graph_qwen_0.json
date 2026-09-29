@@ -1,0 +1,60 @@
+{
+  "schema_version": "video-summary/v5",
+  "content_id": "microlens_100k_00001",
+  "tokens": 215,
+  "arm": "graph_qwen",
+  "status": "complete",
+  "text": "This animated narrative features a fantasy drama rich in dialogue, character interactions, and emotional conflicts. Rendered in traditional eastern-inspired attire and flowing robes, various figures engage in intense conversations, power displays, and confrontations. Recurring character archetypes include individuals with striking features such as purple, green, or red eyes, as well as robed elders with long beards and figures dressed in ornate armor or garments with elaborate hair ornamentation. \n\nThroughout the narrative, characters frequently converse, exchange critical glances, and convey varied emotional states ranging from sorrow and crying to confident smiles, anger, and hidden thoughts. In several sequences, characters cover their faces or intently observe one another during serious discussions. Occasional supernatural tensions arise through displays of power and the presence of symbolic items, including scrolls, books, fans, and swords held against celestial or mountainous backdrops. Additional segments portray formal courtly or familial dynamics, with seated figures on thrones holding council and delivering proclamations to attentive listeners. Together, the scenes present an animated story centered on interpersonal intrigue, character dialogue, and dramatic supernatural confrontations.",
+  "scene_count": 19,
+  "word_count": 173,
+  "violations": [],
+  "correction_count": 0,
+  "provenance": {
+    "uses_title": false,
+    "scene_arm": "graph_qwen",
+    "representation": "graph",
+    "prompt_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/prompts/summary_graph_v7.md",
+    "prompt_hash": "d277dbd00344f9dd3c80ccae7e6cfebc4b283410a18b4fd2797a371c672ffb78",
+    "model": {
+      "project_id": "insight-dev-490002",
+      "location": "global",
+      "model_id": "gemini-3.8-flash",
+      "temperature": 0.0,
+      "thinking_level": "low",
+      "media_resolution": "MEDIA_RESOLUTION_LOW"
+    },
+    "settings": {
+      "max_new_tokens": 1024,
+      "backend": "gemini"
+    },
+    "summary_model": "gemini",
+    "schema_contract": "summary/v5",
+    "scene_provenance": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "scene_input_hash": "d3e8dcbe8d80a22cc5bfd00ab1be945d2c10acb83b10db16133eca86b65de680",
+    "scene_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/260928_v7/extraction/scenes/graph_qwen/microlens_100k_00001.jsonl",
+    "normal_scene_count": 19,
+    "raw_scene_count": 0,
+    "text_scene_count": 0,
+    "input_hash": "3131623560e528e998b843d99855a341aceb31269678d2531d5be1d0b796f0bb"
+  }
+}

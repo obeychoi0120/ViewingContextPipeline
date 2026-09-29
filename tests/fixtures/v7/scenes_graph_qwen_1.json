@@ -1,0 +1,420 @@
+[
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 0,
+    "tokens": 63,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "performance",
+      "topics": [
+        "clown act",
+        "sudden reversal",
+        "unexpected moment"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing clown mask and swimsuit"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "watching television"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "performing",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 1,
+    "tokens": 63,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "couple interaction",
+        "intimate moment"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "male",
+            "wearing red shirt"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "female",
+            "wearing white shirt"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "holding",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 2,
+    "tokens": 73,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "car maintenance",
+        "car repair",
+        "car care"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "applying sealant to car",
+            "white car"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "sealant",
+          "attributes": [
+            "white car"
+          ]
+        },
+        {
+          "id": "l1",
+          "name": "car body",
+          "attributes": []
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "applying",
+          "target": "t1",
+          "tool": null,
+          "receiver": "l1",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 3,
+    "tokens": 114,
+    "warning": [
+      "INVALID_ACTION_SYNTAX"
+    ],
+    "scene_graph": "[Context]\nmedium: live_action\nformat: narrative\ntopics: personal story; beach visit; mother's love\n[Entities]\np1: person; male; shirtless, wet hair\np2: person; female; sitting on a bench, holding phone\nf1: car; black SUV\nt1: wave; ocean water\nl1: beach; rocky shore\n[Actions]\np1 - speaking - none; p1 - looking at camera - none; p2 - sitting - t1; f1 - parked - l1"
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 4,
+    "tokens": 82,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "woman driving luxury car",
+        "woman with red car seat"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "woman",
+          "attributes": [
+            "wearing black shirt and blue jeans"
+          ]
+        },
+        {
+          "id": "f1",
+          "name": "luxury car",
+          "attributes": [
+            "red interior"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "car seat",
+          "attributes": [
+            "red color"
+          ]
+        },
+        {
+          "id": "l1",
+          "name": "road",
+          "attributes": []
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "sitting",
+          "target": "f1",
+          "tool": null,
+          "receiver": "p1",
+          "location": "l1"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 5,
+    "tokens": 130,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "street cleaning",
+        "car arrival",
+        "person walking"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing green jacket",
+            "holding broom"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "wearing blue vest",
+            "holding broom"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "wearing yellow dress",
+            "running"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "black car",
+          "attributes": [
+            "license plate visible"
+          ]
+        },
+        {
+          "id": "l1",
+          "name": "sidewalk",
+          "attributes": [
+            "near building"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "cleaning",
+          "target": "t1",
+          "tool": null,
+          "receiver": "p2",
+          "location": "l1"
+        },
+        {
+          "actor": "p2",
+          "action": "running",
+          "target": "p3",
+          "tool": null,
+          "receiver": "p3",
+          "location": "l1"
+        },
+        {
+          "actor": "p3",
+          "action": "running",
+          "target": null,
+          "tool": null,
+          "receiver": null,
+          "location": "l1"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 6,
+    "tokens": 62,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "transformation",
+        "identity",
+        "performance"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing makeup",
+            "facial features"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "wearing costume",
+            "yellow top"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "applying",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 7,
+    "tokens": 59,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "card transaction",
+        "customer interaction"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "holding card"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "card",
+          "attributes": []
+        },
+        {
+          "id": "l1",
+          "name": "counter",
+          "attributes": []
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "inserting",
+          "target": "t1",
+          "tool": null,
+          "receiver": "l1",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 8,
+    "tokens": 308,
+    "warning": [
+      "INVALID_REFERENCE"
+    ],
+    "scene_graph": "[Context]\nmedium: live_action\nformat: narrative\ntopics: motorcycle ride; road traffic; rural setting\n[Entities]\np1: person; riding motorcycle; wearing patterned shirt\np2: person; riding motorcycle; wearing yellow shirt\np3: person; riding motorcycle; wearing white shirt\np4: person; riding bicycle; wearing blue shorts\np5: person; riding bicycle; wearing red pants\nt1: motorcycle; black color; with front light\nt2: motorcycle; blue color; with front light\nt3: motorcycle; black color; with front light\nt4: motorcycle; blue color; with front light\nt5: motorcycle; black color; with front light\nt6: motorcycle; blue color; with front light\nl1: road; paved surface; with cracks\nl2: road; paved surface; with cracks\nl3: road; paved surface; with cracks\nl4: road; paved surface; with cracks\nl5: road; paved surface; with cracks\nl6: road; paved surface; with cracks\n[Actions]\np1 - riding - t1; none; p2; l1\np2 - riding - t2; none; p3; l1\np3 - riding - t3; none; p4; l1\np4 - riding - t4; none; p5; l1\np5 - riding - t5; none; p6; l1"
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 9,
+    "tokens": 120,
+    "warning": [
+      "INVALID_ACTION_SYNTAX"
+    ],
+    "scene_graph": "[Context]\nmedium: live_action\nformat: narrative\ntopics: baby interaction; emotional expression\n[Entities]\np1: person; wearing face mask\np2: person; holding baby\np3: baby; wearing blue outfit\np4: person; in pink shirt\n[Actions]\np1 - looking at - p2; p2 - holding - p3; p4 - holding - p3; p1 - smiling - p3; p2 - touching - p3; p3 - looking up - p4; p4 - looking at - p3"
+  },
+  {
+    "content_id": "microlens_100k_00003",
+    "scene_idx": 10,
+    "tokens": 64,
+    "warning": [],
+    "scene_graph": {
+      "medium": "live_action",
+      "format": "narrative",
+      "topics": [
+        "emotional expression",
+        "interpersonal interaction"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "female",
+            "long dark hair"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "male",
+            "short black hair"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking down",
+          "target": "p1",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        }
+      ]
+    }
+  }
+]

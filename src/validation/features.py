@@ -39,7 +39,9 @@ class BGETextEncoder:
     def _encode_batch(self, texts: list[str]) -> np.ndarray:
         lengths = self.tokenizer(texts, truncation=False, padding=False)["input_ids"]
         self.last_truncation["text_count"] += len(texts)
-        self.last_truncation["truncated_count"] += sum(len(ids) > self.settings.max_length for ids in lengths)
+        self.last_truncation["truncated_count"] += sum(
+            len(ids) > self.settings.max_length for ids in lengths
+        )
         encoded = self.tokenizer(
             texts,
             padding=True,
@@ -56,11 +58,10 @@ class BGETextEncoder:
         self.last_truncation = {"text_count": 0, "truncated_count": 0}
         batches: list[np.ndarray] = []
         with self._torch.no_grad():
-            for start in tqdm(range(0, len(texts), self.settings.batch_size),
-                              desc="BGE embeddings", unit="batch"):
-                batches.append(
-                    self._encode_batch(texts[start : start + self.settings.batch_size])
-                )
+            for start in tqdm(
+                range(0, len(texts), self.settings.batch_size), desc="BGE embeddings", unit="batch"
+            ):
+                batches.append(self._encode_batch(texts[start : start + self.settings.batch_size]))
         matrix = (
             np.concatenate(batches, axis=0)
             if batches

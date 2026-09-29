@@ -1,0 +1,59 @@
+{
+  "schema_version": "video-summary/v5",
+  "content_id": "microlens_100k_00001",
+  "tokens": 278,
+  "arm": "desc_gemini",
+  "status": "complete",
+  "text": "This animated Chinese motion comic recap depicts a dramatic narrative set in a fantasy xianxia cultivation world, tracking intense interpersonal conflicts and martial sect intrigue. The visual story centers on high-stakes interactions between a distressed young woman with luminous violet eyes and a cunning, dark-haired male cultivator distinguished by a forehead mark and calculating smiles. Their encounters range from tense nighttime conversations over drinks in a courtyard and ceremonial swearing gestures to supernatural clashes featuring radiant energy shockwaves and a massive glowing hand descending from the sky. \n\nAs the narrative progresses, the focus expands to dynamic character interactions across martial arenas, mountain vistas, and ornate sect halls. Elaborately robed female protagonists display suspicion, grief, and exasperation, at times reacting alongside attendants or brandishing talismans before astonished crowds. Meanwhile, various male cultivators engage in heated exchanges, encompassing a sorrowful youth in teal attire, meditating martial artists surrounded by mystical auras, and an agitated bearded disciple addressing an authoritative elder seated upon an elevated throne. These dramatic, dialogue-heavy confrontations are punctuated by visuals of fallen or injured warriors, malevolent figures enveloped in shadowy and reddish energy, and occasional cutaways to exaggerated, comical chibi-style reaction artwork. Using stylized 2D manhua illustrations, atmospheric light effects, camera pans, and narrative subtitles, the video chronicles continuous power struggles, interpersonal drama, and martial tension among the cultivation sect members.",
+  "scene_count": 19,
+  "word_count": 222,
+  "violations": [],
+  "correction_count": 0,
+  "provenance": {
+    "uses_title": false,
+    "scene_arm": "desc_gemini",
+    "representation": "description",
+    "prompt_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/prompts/summary_description_v5.md",
+    "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+    "model": {
+      "project_id": "insight-dev-490002",
+      "location": "global",
+      "model_id": "gemini-3.8-flash",
+      "temperature": 0.0,
+      "thinking_level": "low",
+      "media_resolution": "MEDIA_RESOLUTION_LOW"
+    },
+    "settings": {
+      "max_new_tokens": 1024,
+      "backend": "gemini"
+    },
+    "summary_model": "gemini",
+    "schema_contract": "summary/v5",
+    "scene_provenance": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "scene_input_hash": "a0fea1a56abfd8372397eb8de31627219940ce937d2c5e767bc5ebebd998187c",
+    "scene_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/v6_260926/extraction/scenes/desc_gemini/microlens_100k_00001.jsonl",
+    "normal_scene_count": 19,
+    "raw_scene_count": 0,
+    "input_hash": "ff330e9524196c70901be1d944623eb96fe5e005e7664303a3681fbca4a30edb"
+  }
+}

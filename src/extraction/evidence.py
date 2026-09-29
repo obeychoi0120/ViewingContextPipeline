@@ -32,7 +32,8 @@ def build_scene_evidence(
     scenes: list[dict[str, Any]],
     frames_dir: str | Path,
     timestamp_json_path: str | Path,
-    *, prepared: bool = False,
+    *,
+    prepared: bool = False,
 ) -> list[dict[str, Any]]:
     timeline = scenes if prepared else load_scene_timestamps(timestamp_json_path)
     frame_index = None if prepared else _frame_image_index(frames_dir)
@@ -41,29 +42,34 @@ def build_scene_evidence(
         keyframes = normalize_keyframe_timestamps(
             get_keyframe_timestamps(scene, timeline, fallback_idx)
         )
-        rows.append({
-            "fallback_idx": fallback_idx,
-            "scene_idx": int(scene.get("scene_idx", fallback_idx)),
-            "scene_start_seconds": _scene_boundary(
-                scene, timeline, fallback_idx, "scene_start", keyframes[0] if keyframes else 0
-            ),
-            "scene_end_seconds": _scene_boundary(
-                scene,
-                timeline,
-                fallback_idx,
-                "scene_end",
-                keyframes[-1] if keyframes else 0,
-            ),
-            "keyframes": keyframes,
-            "image_paths": [str(Path(frames_dir) / f"{timestamp_stem(t)}.png") for t in keyframes]
-            if prepared else select_scene_image_paths(
-                frames_dir,
-                scene,
-                timeline,
-                fallback_idx,
-                frame_index=frame_index,
-            ),
-        })
+        rows.append(
+            {
+                "fallback_idx": fallback_idx,
+                "scene_idx": int(scene.get("scene_idx", fallback_idx)),
+                "scene_start_seconds": _scene_boundary(
+                    scene, timeline, fallback_idx, "scene_start", keyframes[0] if keyframes else 0
+                ),
+                "scene_end_seconds": _scene_boundary(
+                    scene,
+                    timeline,
+                    fallback_idx,
+                    "scene_end",
+                    keyframes[-1] if keyframes else 0,
+                ),
+                "keyframes": keyframes,
+                "image_paths": [
+                    str(Path(frames_dir) / f"{timestamp_stem(t)}.png") for t in keyframes
+                ]
+                if prepared
+                else select_scene_image_paths(
+                    frames_dir,
+                    scene,
+                    timeline,
+                    fallback_idx,
+                    frame_index=frame_index,
+                ),
+            }
+        )
     return rows
 
 

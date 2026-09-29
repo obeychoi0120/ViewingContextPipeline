@@ -20,24 +20,36 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
-        "--target", nargs="+", required=True,
+        "--target",
+        nargs="+",
+        required=True,
         help="Explicit arms to include (required for embedding/recommendation/diagnosis; no default).",
     )
     parser.add_argument(
-        "--workers-per-gpu", type=_positive_int,
+        "--workers-per-gpu",
+        type=_positive_int,
         help="Independent combination processes per GPU (run-recommendation only; default: one).",
     )
-    parser.add_argument("--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only).")
+    parser.add_argument(
+        "--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only)."
+    )
     parser.add_argument("--representation-mode", choices=("text", "graph"), required=True)
     parser.add_argument("--scene-aggregation", choices=("mean", "attention"))
     args = parser.parse_args(argv)
     try:
         from validation.graph_context import validate_mode
+
         validate_mode(args.representation_mode, args.scene_aggregation, args.step, args.target)
         if args.compare_run_id is not None and args.step != "run-diagnosis":
             raise ValueError("--compare-run-id is only supported by run-diagnosis")
-        if args.target is not None and args.step not in {"embed-representations", "run-recommendation", "run-diagnosis"}:
-            raise ValueError("--target is only supported by embed-representations/run-recommendation/run-diagnosis")
+        if args.target is not None and args.step not in {
+            "embed-representations",
+            "run-recommendation",
+            "run-diagnosis",
+        }:
+            raise ValueError(
+                "--target is only supported by embed-representations/run-recommendation/run-diagnosis"
+            )
         if args.workers_per_gpu is not None and args.step != "run-recommendation":
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")
         context = RunContext.load(args.run_id)
@@ -46,11 +58,9 @@ def main(argv: list[str] | None = None) -> int:
             kwargs["scene_aggregation"] = args.scene_aggregation
         if args.compare_run_id is not None:
             kwargs["compare_run_id"] = args.compare_run_id
-        if args.step == "run-diagnosis":
-            from validation.selection import diagnosis_context
-            context = diagnosis_context(context)
         if args.target is not None:
             from arm_registry import select_arms
+
             select_arms(context.config, args.target)
             kwargs["target"] = args.target
         if args.workers_per_gpu is not None:

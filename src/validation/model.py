@@ -93,7 +93,9 @@ if nn is not None:
                 norm_first=True,
             )
             self.encoder = nn.TransformerEncoder(
-                layer, num_layers=num_blocks, enable_nested_tensor=False,
+                layer,
+                num_layers=num_blocks,
+                enable_nested_tensor=False,
             )
             self.dropout = nn.Dropout(dropout)
             self.norm = nn.LayerNorm(embedding_dim)

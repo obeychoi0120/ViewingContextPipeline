@@ -48,6 +48,6 @@ Run 루트는 `artifacts/runs/<RUN_ID>/`입니다.
 
 `--compare-run-id`는 선택한 모드와 aggregation의 상대 Run 결과만 읽습니다. 다른 모드 또는 pooling의 결과를 대신 읽지 않습니다. 방식 간 자동 paired 비교와 장면 간 GNN은 [TODO](TODO.md)에 기록했습니다.
 
-검증 명령: `PYTHONPATH=.:src python -m pytest tests/v4/test_direct_graph.py -q`. 실제 BGE 모델 호출을 대체한 작은 CPU 검증입니다. 전체 실험 성능 및 RTX 6000 Ada 자원 측정은 별도 수행해야 합니다.
+검증 명령: `PYTHONPATH=.:src python -m pytest tests/validation/test_direct_graph.py -q`. 실제 BGE 모델 호출을 대체한 작은 CPU 검증입니다. 전체 실험 성능 및 RTX 6000 Ada 자원 측정은 별도 수행해야 합니다.
 
 경로 변경 이전의 Run 내부 산출물은 자동 이동하지 않습니다. 새 경로에서 같은 명령을 실행하면 입력 검증 후 공유 캐시의 유효한 결과를 복구하며, 캐시가 없으면 재계산합니다.

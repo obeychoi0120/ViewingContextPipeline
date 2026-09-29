@@ -146,7 +146,7 @@ def test_nonfinite_loss_prevents_optimizer_update(device, monkeypatch):
 
 def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch, device):
     arm, seed = "graph_qwen_meta", 42
-    from pipeline_runtime import read_json
+    from artifact_io import read_json
     from validation.recommendation_cache import valid_bundle, cache_for
     from validation.recommendation_contracts import (
         ARCHITECTURE_VERSION, TRAINING_IMPLEMENTATION_VERSION,

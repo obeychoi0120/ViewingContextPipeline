@@ -13,7 +13,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
-        "--plan-only", action="store_true",
+        "--plan-only",
+        action="store_true",
         help="Freeze users and list required items without media/title validation (prepare-cohort only).",
     )
     args = parser.parse_args(argv)

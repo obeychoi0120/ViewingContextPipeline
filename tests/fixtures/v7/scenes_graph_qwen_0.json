@@ -1,0 +1,1445 @@
+[
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 0,
+    "tokens": 134,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "close-up",
+        "visual storytelling"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "intense eyes",
+            "dark hair"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "purple eyes",
+            "long hair"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "white dress",
+            "flowing hair"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "red hair",
+            "side profile"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "covering face",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "looking at viewer",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "standing in landscape",
+          "target": "p3",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "looking down",
+          "target": "p4",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 1,
+    "tokens": 66,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character interaction",
+        "emotional expression"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "male",
+            "white hair, black clothing"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "female",
+            "long brown hair, purple eyes"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 2,
+    "tokens": 78,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "supernatural power",
+        "emotional conflict"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "woman",
+          "attributes": [
+            "long hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "man",
+          "attributes": [
+            "long hair",
+            "white robe"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "observing",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 3,
+    "tokens": 168,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "emotional expression"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "character",
+          "attributes": [
+            "with red eyes and purple hair"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "character",
+          "attributes": [
+            "with black hair"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "character",
+          "attributes": [
+            "with brown hair"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "character",
+          "attributes": [
+            "with pink hair"
+          ]
+        },
+        {
+          "id": "p5",
+          "name": "character",
+          "attributes": [
+            "with blue hair"
+          ]
+        },
+        {
+          "id": "p6",
+          "name": "character",
+          "attributes": [
+            "with white hair"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "crying",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "speaking",
+          "target": "p3",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "holding",
+          "target": "p4",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p5",
+          "action": "looking at",
+          "target": "p5",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p6",
+          "action": "looking at",
+          "target": "p6",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 4,
+    "tokens": 63,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "power display",
+        "character interaction"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "character",
+          "attributes": [
+            "long dark hair",
+            "red eyes"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "character",
+          "attributes": [
+            "long brown hair",
+            "purple eyes"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "uses",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 5,
+    "tokens": 68,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "dialogue",
+        "close-up"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "female",
+            "brown hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "male",
+            "long dark hair",
+            "white robe"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 6,
+    "tokens": 62,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character interaction",
+        "emotional expression"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "long dark hair",
+            "pink eyes"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "brown hair",
+            "purple eyes"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "smiling",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 7,
+    "tokens": 329,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "dialogue",
+        "scene transition"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "female",
+            "purple eyes",
+            "long hair"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "male",
+            "black hair",
+            "white face",
+            "red mark on forehead"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "text",
+          "attributes": [
+            "\"如果她劝一下的话\" (If she encourages one)"
+          ]
+        },
+        {
+          "id": "t2",
+          "name": "text",
+          "attributes": [
+            "\"最后免不了会被顾长歌弄死\" (Finally, she'll be killed by Guan Changge)"
+          ]
+        },
+        {
+          "id": "t3",
+          "name": "text",
+          "attributes": [
+            "\"和系统提示中的秦无涯的道侣\" (and the Daoist companion in the system's prompt)"
+          ]
+        },
+        {
+          "id": "t4",
+          "name": "text",
+          "attributes": [
+            "\"虽然现在不确定唐碗是不是秦无涯道侣的转世\" (although it's uncertain whether Tang Bao is the reincarnation of Qin Wuyi's companion)"
+          ]
+        },
+        {
+          "id": "t5",
+          "name": "text",
+          "attributes": [
+            "\"不过唐天脑海里多了一部功法\" (but Tang Tian's mind has gained a new technique)"
+          ]
+        },
+        {
+          "id": "t6",
+          "name": "text",
+          "attributes": [
+            "\"顾长歌装作无上存在同样套路了唐天\" (Guan Changge pretends to exist in the same way as Tang Tian)"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "speaking",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "speaking",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "speaking",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 8,
+    "tokens": 63,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character interaction",
+        "emotional expression"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "woman",
+          "attributes": [
+            "brown hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "man",
+          "attributes": [
+            "long black hair",
+            "white robe"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 9,
+    "tokens": 171,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character portrayal",
+        "emotional expression",
+        "dramatic scene"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "long red hair",
+            "side profile"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "black hair",
+            "lying down"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "blue clothing",
+            "standing"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "blue hair",
+            "seated"
+          ]
+        },
+        {
+          "id": "p5",
+          "name": "person",
+          "attributes": [
+            "dark hair",
+            "close-up"
+          ]
+        },
+        {
+          "id": "p6",
+          "name": "person",
+          "attributes": [
+            "light hair",
+            "close-up"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "standing",
+          "target": "p3",
+          "tool": null,
+          "receiver": "p3",
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "sitting",
+          "target": "p4",
+          "tool": null,
+          "receiver": "p4",
+          "location": "unknown"
+        },
+        {
+          "actor": "p5",
+          "action": "looking at",
+          "target": "p5",
+          "tool": null,
+          "receiver": "p5",
+          "location": "unknown"
+        },
+        {
+          "actor": "p6",
+          "action": "looking at",
+          "target": "p6",
+          "tool": null,
+          "receiver": "p6",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 10,
+    "tokens": 133,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character interaction",
+        "dialogue",
+        "emotional expression"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "male",
+            "angry expression"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "female",
+            "confident expression"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "female",
+            "holding scroll"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "female",
+            "holding scroll"
+          ]
+        },
+        {
+          "id": "p5",
+          "name": "person",
+          "attributes": [
+            "female",
+            "holding scroll"
+          ]
+        },
+        {
+          "id": "p6",
+          "name": "person",
+          "attributes": [
+            "female",
+            "holding scroll"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "holding",
+          "target": "p4",
+          "tool": null,
+          "receiver": "p4",
+          "location": "unknown"
+        },
+        {
+          "actor": "p5",
+          "action": "holding",
+          "target": "p6",
+          "tool": null,
+          "receiver": "p6",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 11,
+    "tokens": 81,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "close-up",
+        "dialogue"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "wearing purple robe",
+            "holding fan"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "wearing blue robe",
+            "with butterfly hairpin"
+          ]
+        },
+        {
+          "id": "t1",
+          "name": "bone book",
+          "attributes": []
+        },
+        {
+          "id": "l1",
+          "name": "mountain landscape",
+          "attributes": []
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "t1",
+          "tool": null,
+          "receiver": "p1",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 12,
+    "tokens": 223,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "dialogue",
+        "scene transition"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "woman",
+          "attributes": [
+            "wearing traditional clothing",
+            "long dark hair",
+            "blue eyes"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "woman",
+          "attributes": [
+            "wearing traditional clothing",
+            "short brown hair",
+            "light eyes"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "woman",
+          "attributes": [
+            "wearing traditional clothing",
+            "long dark hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "wearing traditional clothing",
+            "long dark hair",
+            "white face"
+          ]
+        },
+        {
+          "id": "p5",
+          "name": "person",
+          "attributes": [
+            "wearing traditional clothing",
+            "long dark hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "p6",
+          "name": "person",
+          "attributes": [
+            "wearing traditional clothing",
+            "long dark hair",
+            "white face"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "covering face",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "looking at p1",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "looking at p1",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "looking at p1",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p5",
+          "action": "looking at p1",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "p6",
+          "action": "looking at p1",
+          "target": "p1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 13,
+    "tokens": 178,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character interaction",
+        "celestial background"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "long dark hair",
+            "white robe"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "purple robes",
+            "holding a book"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "pink hair",
+            "green dress"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "large purple cloak",
+            "holding a sword"
+          ]
+        },
+        {
+          "id": "p5",
+          "name": "person",
+          "attributes": [
+            "small purple hair",
+            "holding a book"
+          ]
+        },
+        {
+          "id": "p6",
+          "name": "person",
+          "attributes": [
+            "large purple cloak",
+            "holding a sword"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "looking at",
+          "target": "p3",
+          "tool": null,
+          "receiver": "p3",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "looking at",
+          "target": "p4",
+          "tool": null,
+          "receiver": "p4",
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "looking at",
+          "target": "p5",
+          "tool": null,
+          "receiver": "p5",
+          "location": "unknown"
+        },
+        {
+          "actor": "p5",
+          "action": "looking at",
+          "target": "p6",
+          "tool": null,
+          "receiver": "p6",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 14,
+    "tokens": 189,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character development",
+        "dialogue",
+        "scene transition"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "long dark hair",
+            "white and gold armor"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "short dark hair",
+            "green eyes",
+            "light clothing"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "long black hair",
+            "beard",
+            "seated on throne"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "long dark hair",
+            "green eyes",
+            "light clothing"
+          ]
+        },
+        {
+          "id": "p5",
+          "name": "person",
+          "attributes": [
+            "long black hair",
+            "beard",
+            "standing"
+          ]
+        },
+        {
+          "id": "p6",
+          "name": "person",
+          "attributes": [
+            "long black hair",
+            "beard",
+            "seated on throne"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "speaking",
+          "target": "p5",
+          "tool": null,
+          "receiver": "p5",
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p5",
+          "action": "speaking",
+          "target": "p3",
+          "tool": null,
+          "receiver": "p3",
+          "location": "unknown"
+        },
+        {
+          "actor": "p6",
+          "action": "speaking",
+          "target": "p1",
+          "tool": null,
+          "receiver": "p1",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 15,
+    "tokens": 105,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character development",
+        "power dynamics"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "long black hair",
+            "beard",
+            "wearing dark robe"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "white hair",
+            "long beard",
+            "wearing dark robe"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "short black hair",
+            "green eyes",
+            "wearing light green robe"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "looking at p1",
+          "target": "p1",
+          "tool": null,
+          "receiver": "p1",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 16,
+    "tokens": 70,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "dialogue",
+        "internal thought"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "character",
+          "attributes": [
+            "wearing traditional attire",
+            "with elaborate hair ornamentation"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "character",
+          "attributes": [
+            "with green eyes",
+            "wearing a simple robe"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 17,
+    "tokens": 130,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character emotion",
+        "dialogue",
+        "scene transition"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "green eyes",
+            "long black hair",
+            "traditional clothing"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "older male",
+            "long black hair",
+            "traditional clothing"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "female",
+            "long black hair",
+            "traditional clothing"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "female",
+            "long black hair",
+            "traditional clothing"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "speaking",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "speaking",
+          "target": "p3",
+          "tool": null,
+          "receiver": "p3",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "speaking",
+          "target": "p1",
+          "tool": null,
+          "receiver": "p1",
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 18,
+    "tokens": 149,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "character development",
+        "emotional expression",
+        "dialogue"
+      ],
+      "entities": [
+        {
+          "id": "p1",
+          "name": "person",
+          "attributes": [
+            "green eyes",
+            "long black hair",
+            "traditional clothing"
+          ]
+        },
+        {
+          "id": "p2",
+          "name": "person",
+          "attributes": [
+            "purple eyes",
+            "long black hair",
+            "traditional clothing"
+          ]
+        },
+        {
+          "id": "p3",
+          "name": "person",
+          "attributes": [
+            "white beard",
+            "long black hair",
+            "traditional clothing"
+          ]
+        },
+        {
+          "id": "p4",
+          "name": "person",
+          "attributes": [
+            "red face",
+            "long black hair",
+            "traditional clothing"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "p1",
+          "action": "looking at",
+          "target": "p2",
+          "tool": null,
+          "receiver": "p2",
+          "location": "unknown"
+        },
+        {
+          "actor": "p2",
+          "action": "reacting to",
+          "target": "p1",
+          "tool": null,
+          "receiver": "p1",
+          "location": "unknown"
+        },
+        {
+          "actor": "p3",
+          "action": "speaking",
+          "target": "p4",
+          "tool": null,
+          "receiver": "p4",
+          "location": "unknown"
+        },
+        {
+          "actor": "p4",
+          "action": "observing",
+          "target": "p3",
+          "tool": null,
+          "receiver": "p3",
+          "location": "unknown"
+        }
+      ]
+    }
+  }
+]

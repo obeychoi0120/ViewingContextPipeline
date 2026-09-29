@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 import json
-from extraction.summary_prompt import render_summary_prompt
+from extraction.summary_storage import render_summary_prompt
 from extraction.structured_output import OutputValidationError, validate_graph_structure
-from extraction.summary_validation import (
+from extraction.summary_storage import (
     SUMMARY_SCHEMA_VERSION as SUMMARY_SCHEMA_VERSION,
     validate_summary as validate_summary,
 )

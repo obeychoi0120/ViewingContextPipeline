@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-from .io import read_jsonl
+from artifact_io import read_jsonl
 
 
 MAX_ERROR_EXAMPLES = 10

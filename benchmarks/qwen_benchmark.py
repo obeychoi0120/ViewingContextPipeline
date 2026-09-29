@@ -15,7 +15,7 @@ from extraction.descriptions import description_summary_prompt, validate_summary
 from extraction.evidence import load_images
 from extraction.qwen_config import qwen_settings
 from extraction.qwen_runtime import result_hash
-from extraction.recovery import penalty_schedule
+from extraction.qwen_config import penalty_schedule
 from extraction.scene_storage import read_scene_records
 from extraction.structured_output import GRAPH_JSON_SCHEMA, validate_graph_structure
 from extraction.semantic_graph import graph_summary_prompt, parse_or_repair_graph, validate_summary
@@ -23,7 +23,8 @@ from extraction.step_support import (
     minimal_description_records, minimal_graph_records, scene_generation_rows, visual_rows,
 )
 from extraction.steps import _summary_generation_settings
-from pipeline_runtime import RunContext, read_json, write_json
+from pipeline_runtime import RunContext
+from artifact_io import read_json, write_json
 
 
 def file_hash(path):

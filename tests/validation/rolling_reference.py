@@ -10,12 +10,12 @@ import time
 
 import numpy as np
 
-from pipeline_runtime import read_json, write_json
+from artifact_io import read_json, write_json
 from validation.metrics import metrics_from_rank
 from validation.model import pad_sequences, save_checkpoint, seed_everything, torch
 from validation.recommendation import _new_model, _optimizer
 from validation.recommendation_contracts import ARCHITECTURE_VERSION
-from validation.rolling_data import iter_jsonl
+from preparation.cohort import iter_jsonl
 from validation.scoring import mask_history, rank_of_target
 
 SCHEMA = "sasrec-rolling-combination/v3"

@@ -1,6 +1,6 @@
 """Require both actual inputs and encoded values to match recorded provenance."""
 
-from validation.selection import load_validation_cohort, validation_arms, LEGACY_POLICY
+from validation.selection import load_validation_cohort, validation_arms
 from validation.metadata import verify_missing_metadata
 from validation.representation_inputs import documents_for_arm, representation_signature
 from validation.representation_provenance import matrix_hash, pending_write, read_state
@@ -8,8 +8,10 @@ from validation.representation_provenance import matrix_hash, pending_write, rea
 
 def verify_representations(context, cohort=None, *, arms=None):
     from validation.graph_context import is_graph
+
     if is_graph(context):
         from validation.graph_inputs import verify
+
         return verify(context, cohort or load_validation_cohort(context), arms)
     from validation.steps import _representations_match_catalog
 
@@ -30,7 +32,6 @@ def verify_representations(context, cohort=None, *, arms=None):
 
 def verify_recorded_representations(context, cohort, *, arms=None):
     selected = validation_arms(context, list(arms) if arms is not None else None)
-    legacy = cohort["manifest"]["policy"] == LEGACY_POLICY
     for name, arm in selected.items():
         state = read_state(context, name)
         if not state or pending_write(context, name).exists():
@@ -40,18 +41,22 @@ def verify_recorded_representations(context, cohort, *, arms=None):
         path = context.representations_dir / f"{name}_embeddings.npz"
         if state.get("embedding_hash") != matrix_hash(path):
             raise RuntimeError(f"embedding values changed without provenance: {name}")
-        docs = documents_for_arm(context, cohort, arm,
-                                 summary_source=state.get("summary_source", "qwen"), strict=True, legacy=legacy)
+        docs = documents_for_arm(context, cohort, arm)
         if state.get("input_hash") != representation_signature(
-            context, cohort["catalog"], arm, docs,
-            selection_hash=cohort["manifest"]["selection_hash"], legacy=legacy
+            context,
+            cohort["catalog"],
+            arm,
+            docs,
+            selection_hash=cohort["manifest"]["selection_hash"],
         ):
             raise RuntimeError(f"stale representation inputs: {name}; rerun embedding")
 
-        if not legacy:
-            import numpy as np
-            with np.load(path) as arrays:
-                values = arrays["values"]
-                for i, doc in enumerate(docs):
-                    if not doc["text"].strip() and np.any(values[i] != 0):
-                        raise RuntimeError(f"empty expression must have a zero vector: {name}/{doc['content_id']}")
+        import numpy as np
+
+        with np.load(path) as arrays:
+            values = arrays["values"]
+            for i, doc in enumerate(docs):
+                if not doc["text"].strip() and np.any(values[i] != 0):
+                    raise RuntimeError(
+                        f"empty expression must have a zero vector: {name}/{doc['content_id']}"
+                    )

@@ -1,0 +1,374 @@
+{
+  "scenes/desc_gemini": {
+    "files": 19738,
+    "formats": {
+      "description": 115924
+    },
+    "fixtures": [
+      {
+        "file": "scenes_desc_gemini_0.json",
+        "format": "description",
+        "source": "artifacts/runs/260928_v7/extraction/scenes/desc_gemini/microlens_100k_00001.jsonl",
+        "fingerprint": "68a2c97385829357d27501394fe17572b9cda2368a1e5e625c10ac183a1a7616"
+      }
+    ]
+  },
+  "scenes/desc_qwen": {
+    "files": 19738,
+    "formats": {
+      "description": 115947
+    },
+    "fixtures": [
+      {
+        "file": "scenes_desc_qwen_0.json",
+        "format": "description",
+        "source": "artifacts/runs/260928_v7/extraction/scenes/desc_qwen/microlens_100k_00001.jsonl",
+        "fingerprint": "f53c9b40c825070d180ede8a23f048b57d16cc8437ab0f0bc99d5bca197c5d9a"
+      }
+    ]
+  },
+  "scenes/graph_gemini": {
+    "files": 19738,
+    "formats": {
+      "graph:actions,entities,format,medium,topics": 114872,
+      "graph:text": 1061
+    },
+    "fixtures": [
+      {
+        "file": "scenes_graph_gemini_0.json",
+        "format": "graph:actions,entities,format,medium,topics",
+        "source": "artifacts/runs/260928_v7/extraction/scenes/graph_gemini/microlens_100k_00001.jsonl",
+        "fingerprint": "6f580a0e3325c8c7fefc3890f2d2e146a001b5e75a4b72b4b47a87c40555a46c"
+      },
+      {
+        "file": "scenes_graph_gemini_1.json",
+        "format": "graph:text",
+        "source": "artifacts/runs/260928_v7/extraction/scenes/graph_gemini/microlens_100k_00027.jsonl",
+        "fingerprint": "cc903d63a18401bb6a6661096d62bd25e2da681ebbcbd4a3fc67609f50c97c91"
+      }
+    ]
+  },
+  "scenes/graph_qwen": {
+    "files": 19738,
+    "formats": {
+      "graph:actions,entities,format,medium,topics": 108271,
+      "graph:text": 7621
+    },
+    "fixtures": [
+      {
+        "file": "scenes_graph_qwen_0.json",
+        "format": "graph:actions,entities,format,medium,topics",
+        "source": "artifacts/runs/260928_v7/extraction/scenes/graph_qwen/microlens_100k_00001.jsonl",
+        "fingerprint": "f203c18fc61416588c02f0831a0ca46b1050af738b6a0d7956aac33897086213"
+      },
+      {
+        "file": "scenes_graph_qwen_1.json",
+        "format": "graph:text",
+        "source": "artifacts/runs/260928_v7/extraction/scenes/graph_qwen/microlens_100k_00003.jsonl",
+        "fingerprint": "0bbf11f9bd221a612dbfebe9e21d4f294832efdef829cf88d9b0b10602087427"
+      }
+    ]
+  },
+  "summaries/desc_gemini": {
+    "files": 19738,
+    "formats": {
+      "video-summary/v5:complete": 19732,
+      "video-summary/v5:failed": 6
+    },
+    "fixtures": [
+      {
+        "file": "summaries_desc_gemini_0.json",
+        "format": "video-summary/v5:complete",
+        "source": "artifacts/runs/260928_v7/extraction/summaries/desc_gemini/microlens_100k_00001.json",
+        "fingerprint": "4d0e37c047062f30c304fd12184b91c4285c9119d7ccdbfd9adc182d5858e068",
+        "generation_identity": {
+          "representation": "description",
+          "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+          "model": {
+            "project_id": "insight-dev-490002",
+            "location": "global",
+            "model_id": "gemini-3.8-flash",
+            "temperature": 0.0,
+            "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_LOW"
+          },
+          "settings": {
+            "max_new_tokens": 1024,
+            "backend": "gemini"
+          },
+          "summary_model": "gemini",
+          "schema_contract": "summary/v5",
+          "uses_title": false,
+          "scene_arm": "desc_gemini",
+          "scene_provenance": [
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {}
+          ],
+          "scene_input_hash": "a0fea1a56abfd8372397eb8de31627219940ce937d2c5e767bc5ebebd998187c"
+        },
+        "document_hash": "b2bf45de931b585c20c5d8ba08795cc4faba6f107bdab0104f9b312e981f7e5e"
+      },
+      {
+        "file": "summaries_desc_gemini_1.json",
+        "format": "video-summary/v5:failed",
+        "source": "artifacts/runs/260928_v7/extraction/summaries/desc_gemini/microlens_100k_08877.json",
+        "fingerprint": "c4facf4af4b407d37d17b84c5861e4cbd334790dd2b43c3c8b48603cdd5f97c3",
+        "generation_identity": {
+          "representation": "description",
+          "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+          "model": {
+            "project_id": "insight-dev-490002",
+            "location": "global",
+            "model_id": "gemini-3.8-flash",
+            "temperature": 0.0,
+            "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_LOW"
+          },
+          "settings": {
+            "max_new_tokens": 1024,
+            "backend": "gemini"
+          },
+          "summary_model": "gemini",
+          "schema_contract": "summary/v5",
+          "uses_title": false,
+          "scene_arm": "desc_gemini",
+          "scene_provenance": [
+            {},
+            {},
+            {},
+            {},
+            {}
+          ],
+          "scene_input_hash": "befadcd496697bd12d1451c16426e49bad34ba824237edcb64fd755dec45fdca"
+        },
+        "document_hash": "30c4718ab4b803dc9b6747b5acb2da7dae95457d762c77b1fe63e0777fdbc481"
+      }
+    ]
+  },
+  "summaries/desc_qwen": {
+    "files": 19738,
+    "formats": {
+      "video-summary/v5:complete": 19724,
+      "video-summary/v5:failed": 14
+    },
+    "fixtures": [
+      {
+        "file": "summaries_desc_qwen_0.json",
+        "format": "video-summary/v5:complete",
+        "source": "artifacts/runs/260928_v7/extraction/summaries/desc_qwen/microlens_100k_00001.json",
+        "fingerprint": "690d86ba8104b5c0588b504ce1bdc07c5ca9c9491b2b29a173d14840c7066679",
+        "generation_identity": {
+          "representation": "description",
+          "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+          "model": {
+            "project_id": "insight-dev-490002",
+            "location": "global",
+            "model_id": "gemini-3.8-flash",
+            "temperature": 0.0,
+            "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_LOW"
+          },
+          "settings": {
+            "max_new_tokens": 1024,
+            "backend": "gemini"
+          },
+          "summary_model": "gemini",
+          "schema_contract": "summary/v5",
+          "uses_title": false,
+          "scene_arm": "desc_qwen",
+          "scene_provenance": [
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {}
+          ],
+          "scene_input_hash": "55f7a3e7479155e633938c6d88aa3c3b28447b5c3dcb04aa6839293e45eeabbb"
+        },
+        "document_hash": "4bb1613b16c905be39d83307a06633bd98203c5453cedb04235ad8105921ec6d"
+      },
+      {
+        "file": "summaries_desc_qwen_1.json",
+        "format": "video-summary/v5:failed",
+        "source": "artifacts/runs/260928_v7/extraction/summaries/desc_qwen/microlens_100k_01189.json",
+        "fingerprint": "802e46ba29848e670afdcaf38ff5fea2dd77660fe4a22f607e64e87c98387930",
+        "generation_identity": {
+          "representation": "description",
+          "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+          "model": {
+            "project_id": "insight-dev-490002",
+            "location": "global",
+            "model_id": "gemini-3.8-flash",
+            "temperature": 0.0,
+            "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_LOW"
+          },
+          "settings": {
+            "max_new_tokens": 1024,
+            "backend": "gemini"
+          },
+          "summary_model": "gemini",
+          "schema_contract": "summary/v5",
+          "uses_title": false,
+          "scene_arm": "desc_qwen",
+          "scene_provenance": [
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {}
+          ],
+          "scene_input_hash": "a7250f9fcbfed01bc807b24c5fadab4ab34057396d886be09e708cd48263c23d"
+        },
+        "document_hash": "36f4b35f3161815fe227ffe7155613f0b1cd334b89b2308762f749d43a92995e"
+      }
+    ]
+  },
+  "summaries/graph_gemini": {
+    "files": 19738,
+    "formats": {
+      "video-summary/v5:complete": 19738
+    },
+    "fixtures": [
+      {
+        "file": "summaries_graph_gemini_0.json",
+        "format": "video-summary/v5:complete",
+        "source": "artifacts/runs/260928_v7/extraction/summaries/graph_gemini/microlens_100k_00001.json",
+        "fingerprint": "f652202107721c856e8af99ab3d86cb8b5a5be11d4d1a2dd6806157bb67ca6c3",
+        "generation_identity": {
+          "representation": "graph",
+          "prompt_hash": "d277dbd00344f9dd3c80ccae7e6cfebc4b283410a18b4fd2797a371c672ffb78",
+          "model": {
+            "project_id": "insight-dev-490002",
+            "location": "global",
+            "model_id": "gemini-3.8-flash",
+            "temperature": 0.0,
+            "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_LOW"
+          },
+          "settings": {
+            "max_new_tokens": 1024,
+            "backend": "gemini"
+          },
+          "summary_model": "gemini",
+          "schema_contract": "summary/v5",
+          "uses_title": false,
+          "scene_arm": "graph_gemini",
+          "scene_provenance": [
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {}
+          ],
+          "scene_input_hash": "49529d85001593948139f39eb67a04b485e2cf982dd4d5b0e39267204b3fe375"
+        },
+        "document_hash": "8266f58f882eb31dc7555b5ca373f014c7f363f1e4259c1568c6ebc7a962db28"
+      }
+    ]
+  },
+  "summaries/graph_qwen": {
+    "files": 19738,
+    "formats": {
+      "video-summary/v5:complete": 19738
+    },
+    "fixtures": [
+      {
+        "file": "summaries_graph_qwen_0.json",
+        "format": "video-summary/v5:complete",
+        "source": "artifacts/runs/260928_v7/extraction/summaries/graph_qwen/microlens_100k_00001.json",
+        "fingerprint": "1ab5c10a2041425204873a1635079230e2670445389f61b8eb28f5cb54d70288",
+        "generation_identity": {
+          "representation": "graph",
+          "prompt_hash": "d277dbd00344f9dd3c80ccae7e6cfebc4b283410a18b4fd2797a371c672ffb78",
+          "model": {
+            "project_id": "insight-dev-490002",
+            "location": "global",
+            "model_id": "gemini-3.8-flash",
+            "temperature": 0.0,
+            "thinking_level": "low",
+            "media_resolution": "MEDIA_RESOLUTION_LOW"
+          },
+          "settings": {
+            "max_new_tokens": 1024,
+            "backend": "gemini"
+          },
+          "summary_model": "gemini",
+          "schema_contract": "summary/v5",
+          "uses_title": false,
+          "scene_arm": "graph_qwen",
+          "scene_provenance": [
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {},
+            {}
+          ],
+          "scene_input_hash": "d3e8dcbe8d80a22cc5bfd00ab1be945d2c10acb83b10db16133eca86b65de680"
+        },
+        "document_hash": "307c3876ecaecda03dae850c690cac25147a4cb519f5a365ea646770ad459ef1"
+      }
+    ]
+  }
+}

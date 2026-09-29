@@ -30,7 +30,10 @@ def timestamp_stem(value: Any) -> str:
 
 
 def build_fixed_windows(
-    video_duration: object, *, scene_duration: int, num_keyframes: int,
+    video_duration: object,
+    *,
+    scene_duration: int,
+    num_keyframes: int,
 ) -> list[dict[str, Any]]:
     validate_sampling(scene_duration, num_keyframes)
     duration = Fraction(str(video_duration))
@@ -46,17 +49,21 @@ def build_fixed_windows(
             if scene_start + index * interval < scene_end
         ]
         # Keep full sampling bins; only clip the final bin to the actual video end.
-        keyframes = list(dict.fromkeys(
-            truncate_timestamp((start + min(start + interval, scene_end)) / 2)
-            for start in boundaries
-        ))
-        windows.append({
-            "scene_start": scene_start,
-            "scene_end": float(scene_end),
-            "duration": float(scene_end - scene_start),
-            "shot_change_timestamps": [float(start) for start in boundaries],
-            "keyframe_timestamps": keyframes,
-        })
+        keyframes = list(
+            dict.fromkeys(
+                truncate_timestamp((start + min(start + interval, scene_end)) / 2)
+                for start in boundaries
+            )
+        )
+        windows.append(
+            {
+                "scene_start": scene_start,
+                "scene_end": float(scene_end),
+                "duration": float(scene_end - scene_start),
+                "shot_change_timestamps": [float(start) for start in boundaries],
+                "keyframe_timestamps": keyframes,
+            }
+        )
     return windows
 
 

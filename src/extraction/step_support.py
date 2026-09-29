@@ -13,7 +13,8 @@ from extraction.monitoring import video_names
 from extraction.progress import InferenceProgress
 from extraction.raw_output import is_raw_graph, valid_raw_graph
 from extraction.scene_storage import write_scene_records
-from pipeline_runtime import RunContext, read_jsonl
+from pipeline_runtime import RunContext
+from artifact_io import read_jsonl
 
 
 def write_progress(progress: tqdm | InferenceProgress, message: str) -> None:
@@ -21,11 +22,6 @@ def write_progress(progress: tqdm | InferenceProgress, message: str) -> None:
         progress.write_log(message)
     else:
         tqdm.write(message, file=progress.fp)
-
-
-def complete_content_progress(progress: tqdm) -> None:
-    progress.update(1)
-    write_progress(progress, "")
 
 
 def write_scene_results(scene_path: Path, records: list[dict[str, Any]]) -> None:
@@ -95,12 +91,6 @@ def result(
     }
 
 
-def require_file(path: Path, label: str) -> Path:
-    if not path.is_file():
-        raise ExtractionStepError(f"missing {label}: {path}")
-    return path
-
-
 def minimal_graph_records(
     records: list[dict[str, Any]],
     path: Path,
@@ -112,16 +102,26 @@ def minimal_graph_records(
         "parse_mode",
         "semantic_warnings",
     }
-    invalid = [index for index, row in enumerate(records)
-               if (not valid_raw_graph(row) if is_raw_graph(row) else set(row) - {"provenance", "generation", "tokens"} != required)]
+    invalid = [
+        index
+        for index, row in enumerate(records)
+        if (
+            not valid_raw_graph(row)
+            if is_raw_graph(row)
+            else set(row) - {"provenance", "generation", "tokens"} != required
+        )
+    ]
     if invalid:
         raise ExtractionStepError(
             f"incompatible graph scene output at rows {invalid[:10]}: {path}; "
             "use --force or a new run_id"
         )
     from extraction.structured_output import validate_graph_structure, OutputValidationError
+
     for row in records:
-        if not is_raw_graph(row) and not (row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)):
+        if not is_raw_graph(row) and not (
+            row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)
+        ):
             try:
                 validate_graph_structure(row["graph"])
             except OutputValidationError as exc:
@@ -140,18 +140,26 @@ def minimal_description_records(
         "keyframes",
         "description",
     }
-    invalid = [index for index, row in enumerate(records) if set(row) - {"provenance", "generation", "status", "tokens"} != required
-               or row.get("status", "raw_fallback") != "raw_fallback"]
+    invalid = [
+        index
+        for index, row in enumerate(records)
+        if set(row) - {"provenance", "generation", "status", "tokens"} != required
+        or row.get("status", "raw_fallback") != "raw_fallback"
+    ]
     if invalid:
         raise ExtractionStepError(
             f"incompatible description scene output at rows {invalid[:10]}: {path}; "
             "use --force or a new run_id"
         )
     from extraction.descriptions import SCENE_SCHEMA_VERSION
-    if any(row.get("schema_version") != SCENE_SCHEMA_VERSION
-           or row.get("content_id") != path.stem
-           or not isinstance(row.get("description"), str) or not row["description"].strip()
-           for row in records):
+
+    if any(
+        row.get("schema_version") != SCENE_SCHEMA_VERSION
+        or row.get("content_id") != path.stem
+        or not isinstance(row.get("description"), str)
+        or not row["description"].strip()
+        for row in records
+    ):
         raise ExtractionStepError(f"invalid description scene: {path}")
     return records
 
@@ -180,6 +188,7 @@ def minimal_graph_failures(
 def visual_rows(context: RunContext) -> list[dict[str, Any]]:
     cohort = context.require_ready_cohort()
     from visual_sampling import timestamp_filename
+
     sampling = context.config["extraction"]["visual_evidence"]
     rows: list[dict[str, Any]] = []
     for item in cohort["catalog"]:

@@ -1,30 +1,13 @@
 """Explicit missing-title provenance; no invented text or removed catalog rows."""
 
 from __future__ import annotations
-
+from preparation.titles import missing_metadata_report
 import numpy as np
-
-
-
-def missing_metadata_report(titles):
-    missing = [
-        {"item_id": row["item_id"], "content_id": row["content_id"], "embedding_row": index}
-        for index, row in enumerate(titles)
-        if not row["title"].strip()
-    ]
-    return {
-        "schema_version": "metadata-missing/v1",
-        "policy": "zero_vector",
-        "catalog_size": len(titles),
-        "missing_count": len(missing),
-        "items": missing,
-    }
 
 
 def verify_missing_metadata(context, cohort):
     expected = missing_metadata_report(cohort["metadata_titles"])
-    from arm_registry import legacy_layout
-    name = "metadata" if legacy_layout(context.config) else "meta"
+    name = "meta"
     with np.load(context.representations_dir / f"{name}_embeddings.npz") as data:
         values = data["values"]
         if values.shape != (

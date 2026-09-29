@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from extraction.data_preparation.fixed30 import visual_evidence_matches
-from extraction.data_preparation.media import cached_duration
-from extraction.data_preparation.microlens import prepare_catalog
-from extraction.evidence_reuse import source_matches_inventory
-from extraction.errors import ExtractionStepError
-from extraction.step_support import result
+from preparation.video.fixed30 import visual_evidence_matches
+from preparation.video.media import cached_duration
+from preparation.video.microlens import prepare_catalog
+from preparation.video.source import source_matches_inventory
+
+
 from pipeline_logging import log_step_start
 from visual_sampling import build_fixed_windows, timestamp_filename
 
@@ -21,11 +21,9 @@ def prepare_input_data(context, *, force=False):
     pending = []
     for item, inventory in zip(cohort["catalog"], cohort["inventory"], strict=True):
         if not source_matches_inventory(inventory):
-            raise ExtractionStepError(f"source changed since prepare-cohort: {item['content_id']}")
+            raise RuntimeError(f"source changed since prepare-cohort: {item['content_id']}")
         cid = str(item["content_id"])
-        timestamp = (
-            assets_root / cid / timestamp_filename(**sampling)
-        )
+        timestamp = assets_root / cid / timestamp_filename(**sampling)
         frames = context.keyframes_dir / cid
         duration = cached_duration(assets_root, inventory)
         if force or not visual_evidence_matches(
@@ -44,20 +42,18 @@ def prepare_input_data(context, *, force=False):
             force=force,
         )
         if prepared["failed"]:
-            raise ExtractionStepError(f"visual evidence preparation incomplete: {prepared}")
+            raise RuntimeError(f"visual evidence preparation incomplete: {prepared}")
     else:
         (context.cohort_dir / "preparation_failures.jsonl").unlink(missing_ok=True)
     scene_count = frame_count = 0
     for item, inventory in zip(cohort["catalog"], cohort["inventory"], strict=True):
         cid = str(item["content_id"])
         duration = cached_duration(assets_root, inventory)
-        timestamp = (
-            assets_root / cid / timestamp_filename(**sampling)
-        )
+        timestamp = assets_root / cid / timestamp_filename(**sampling)
         if not visual_evidence_matches(
             timestamp, context.keyframes_dir / cid, image_size, duration, **sampling
         ):
-            raise ExtractionStepError(f"invalid visual evidence for {cid}")
+            raise RuntimeError(f"invalid visual evidence for {cid}")
         windows = build_fixed_windows(duration, **sampling)
         scene_count += len(windows)
         frame_count += sum(len(w["keyframe_timestamps"]) for w in windows)
@@ -67,4 +63,8 @@ def prepare_input_data(context, *, force=False):
         f"new_frames={prepared['extracted_frames']} shared_frames={context.keyframes_dir}",
         flush=True,
     )
-    return result("prepare-input-data", content_count=len(cohort["catalog"]))
+    return {
+        "stage": "prepare-input-data",
+        "content_count": len(cohort["catalog"]),
+        "failure_count": 0,
+    }

@@ -1,0 +1,60 @@
+{
+  "schema_version": "video-summary/v5",
+  "content_id": "microlens_100k_00001",
+  "tokens": 261,
+  "arm": "graph_gemini",
+  "status": "complete",
+  "text": "This animated motion comic presents a narrative steeped in xianxia cultivation, historical fantasy, and donghua drama. Rendered in an anime-inspired style, the video centers on a diverse cast of characters clad in traditional robes, ornate garments, and decorative hair ornaments. Key figures include a recurring woman with purple eyes and long hair, as well as various men with long dark hair, forehead marks, and distinct expressions ranging from intense smirks to severe glances. \n\nThe scenes primarily depict dramatic character exchanges, interpersonal tensions, and traditional settings. Throughout the narrative, figures engage in deliberate gestures and interactions: a man in traditional robes holds a small white cup, another raises three fingers, and a character places hands near a metallic teapot. Other visual moments highlight emotional distress and supernatural elements, such as a female character raising a hand to her head, a woman touching her face while nearby legs appear wrapped in bloodied bandages, and a female figure holding up a yellow paper talisman. Tension escalates in throne room confrontations, where a bearded man passionately shouts toward an elderly, white-haired figure seated upon a throne. Featuring shifting character dynamics, injured warriors, and occasional chibi-styled character variations, this presentation is well suited for fans of Chinese fantasy animation, comic recaps, and dramatic martial arts sagas.",
+  "scene_count": 19,
+  "word_count": 211,
+  "violations": [],
+  "correction_count": 0,
+  "provenance": {
+    "uses_title": false,
+    "scene_arm": "graph_gemini",
+    "representation": "graph",
+    "prompt_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/prompts/summary_graph_v7.md",
+    "prompt_hash": "d277dbd00344f9dd3c80ccae7e6cfebc4b283410a18b4fd2797a371c672ffb78",
+    "model": {
+      "project_id": "insight-dev-490002",
+      "location": "global",
+      "model_id": "gemini-3.8-flash",
+      "temperature": 0.0,
+      "thinking_level": "low",
+      "media_resolution": "MEDIA_RESOLUTION_LOW"
+    },
+    "settings": {
+      "max_new_tokens": 1024,
+      "backend": "gemini"
+    },
+    "summary_model": "gemini",
+    "schema_contract": "summary/v5",
+    "scene_provenance": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "scene_input_hash": "49529d85001593948139f39eb67a04b485e2cf982dd4d5b0e39267204b3fe375",
+    "scene_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/260928_v7/extraction/scenes/graph_gemini/microlens_100k_00001.jsonl",
+    "normal_scene_count": 19,
+    "raw_scene_count": 0,
+    "text_scene_count": 0,
+    "input_hash": "d9c00d51eefae962fbffbf1080a7569a552f2ffd84006b26e008ec5c5a6e2360"
+  }
+}

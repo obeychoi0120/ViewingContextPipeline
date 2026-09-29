@@ -1,0 +1,841 @@
+[
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 0,
+    "tokens": 58,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy donghua"
+      ],
+      "entities": [
+        {
+          "id": "m1",
+          "name": "male character",
+          "attributes": [
+            "dark long hair",
+            "smirking expression"
+          ]
+        },
+        {
+          "id": "f1",
+          "name": "female character",
+          "attributes": [
+            "purple eyes",
+            "wearing light robe"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 1,
+    "tokens": 72,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy drama"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "man",
+          "attributes": [
+            "long dark hair",
+            "traditional robes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "woman",
+          "attributes": [
+            "long hair",
+            "traditional dress"
+          ]
+        },
+        {
+          "id": "o1",
+          "name": "small cup",
+          "attributes": [
+            "white"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "c1",
+          "action": "holding",
+          "target": "o1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 2,
+    "tokens": 51,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy drama"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "woman",
+          "attributes": [
+            "dark hair",
+            "white outfit"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "man",
+          "attributes": [
+            "dark hair",
+            "white robe"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 3,
+    "tokens": 54,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "anime style"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "animated character",
+          "attributes": [
+            "long dark hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "animated character",
+          "attributes": [
+            "dark hair",
+            "severe expression"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 4,
+    "tokens": 56,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy drama"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "male character",
+          "attributes": [
+            "long dark hair",
+            "red forehead mark"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "female character",
+          "attributes": [
+            "long brown hair",
+            "purple eyes"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 5,
+    "tokens": 68,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "xianxia cultivation"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "woman",
+          "attributes": [
+            "long brown hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "man",
+          "attributes": [
+            "long dark hair",
+            "raising three fingers"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "c2",
+          "action": "raising hand",
+          "target": null,
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 6,
+    "tokens": 85,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "anime dialogue"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "male character",
+          "attributes": [
+            "long dark hair",
+            "purple glowing eyes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "female character",
+          "attributes": [
+            "long brown hair",
+            "purple eyes"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "c1",
+          "action": "smirking",
+          "target": null,
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        },
+        {
+          "actor": "c2",
+          "action": "raising hand to head",
+          "target": null,
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 7,
+    "tokens": 72,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "xianxia cultivation"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "anime character",
+          "attributes": [
+            "brown hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "anime character",
+          "attributes": [
+            "long dark hair",
+            "eyes closed"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "anime character",
+          "attributes": [
+            "long brown hair tied up",
+            "wearing yellow robe"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 8,
+    "tokens": 85,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy drama"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "woman",
+          "attributes": [
+            "long brown hair",
+            "purple eyes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "man",
+          "attributes": [
+            "blue and white robe",
+            "long brown hair"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "man",
+          "attributes": [
+            "dark hair",
+            "smiling"
+          ]
+        },
+        {
+          "id": "k1",
+          "name": "teapot",
+          "attributes": [
+            "metallic"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "unknown",
+          "action": "placing hands on",
+          "target": "k1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 9,
+    "tokens": 98,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy donghua"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "anime character",
+          "attributes": [
+            "long reddish hair",
+            "smiling"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "anime character",
+          "attributes": [
+            "long dark hair",
+            "lying injured on rocks"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "anime character",
+          "attributes": [
+            "long dark hair",
+            "blue patterned robe"
+          ]
+        },
+        {
+          "id": "c4",
+          "name": "anime character",
+          "attributes": [
+            "blue hair tied up",
+            "wearing blue robe"
+          ]
+        },
+        {
+          "id": "c5",
+          "name": "anime character",
+          "attributes": [
+            "dark hair",
+            "shouting expression"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 10,
+    "tokens": 96,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "comic recaps",
+        "manhua animation"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "anime character",
+          "attributes": [
+            "male with long dark hair",
+            "intense expression"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "anime character",
+          "attributes": [
+            "female in red dress",
+            "holding talisman"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "talisman",
+          "attributes": [
+            "yellow paper with writing"
+          ]
+        },
+        {
+          "id": "c4",
+          "name": "anime character",
+          "attributes": [
+            "female with purple attire",
+            "outdoors"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "c2",
+          "action": "holding up",
+          "target": "c3",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 11,
+    "tokens": 71,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "historical fantasy"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "woman",
+          "attributes": [
+            "dark hair with hairpin",
+            "wearing traditional robes"
+          ]
+        },
+        {
+          "id": "p1",
+          "name": "legs",
+          "attributes": [
+            "wrapped in bloodied bandages",
+            "wearing white trousers"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "c1",
+          "action": "touching face",
+          "target": "c1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 12,
+    "tokens": 77,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "historical fantasy"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "woman",
+          "attributes": [
+            "dark hair",
+            "traditional robe"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "young woman",
+          "attributes": [
+            "hair buns",
+            "traditional dress"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "man",
+          "attributes": [
+            "long dark hair",
+            "smiling mouth"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "c1",
+          "action": "touching face",
+          "target": "c1",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 13,
+    "tokens": 64,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "anime character",
+          "attributes": [
+            "long dark hair",
+            "white and dark clothing"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "anime character",
+          "attributes": [
+            "purple robe"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "anime character",
+          "attributes": [
+            "pink hair",
+            "light dress"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 14,
+    "tokens": 78,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy cultivation"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "animated character",
+          "attributes": [
+            "long dark hair",
+            "ornate robes"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "animated character",
+          "attributes": [
+            "green eyes",
+            "traditional attire"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "animated character",
+          "attributes": [
+            "bearded",
+            "speaking angrily"
+          ]
+        },
+        {
+          "id": "c4",
+          "name": "animated character",
+          "attributes": [
+            "white hair",
+            "sitting on throne"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 15,
+    "tokens": 84,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "xianxia"
+      ],
+      "entities": [
+        {
+          "id": "m1",
+          "name": "man",
+          "attributes": [
+            "dark hair and beard",
+            "shouting"
+          ]
+        },
+        {
+          "id": "m2",
+          "name": "man",
+          "attributes": [
+            "white hair and long beard",
+            "seated on throne"
+          ]
+        },
+        {
+          "id": "m3",
+          "name": "person",
+          "attributes": [
+            "dark hair and green eyes",
+            "green robe"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "actor": "m1",
+          "action": "shouting at",
+          "target": "m2",
+          "tool": null,
+          "receiver": null,
+          "location": "unknown"
+        }
+      ]
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 16,
+    "tokens": 57,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "historical fantasy"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "woman",
+          "attributes": [
+            "dark hair with ornaments",
+            "purple and blue attire"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "young man",
+          "attributes": [
+            "long dark hair",
+            "green robe"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 17,
+    "tokens": 77,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "xianxia"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "animated character",
+          "attributes": [
+            "dark hair, green eyes",
+            "teal traditional robe"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "animated character",
+          "attributes": [
+            "dark hair, mustache",
+            "holding chin thoughtfully"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "animated character",
+          "attributes": [
+            "closed eyes, forehead mark",
+            "wearing blue earrings"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  },
+  {
+    "content_id": "microlens_100k_00001",
+    "scene_idx": 18,
+    "tokens": 89,
+    "warning": [],
+    "scene_graph": {
+      "medium": "animation",
+      "format": "narrative",
+      "topics": [
+        "motion comic",
+        "fantasy donghua"
+      ],
+      "entities": [
+        {
+          "id": "c1",
+          "name": "anime character",
+          "attributes": [
+            "green eyes and dark hair",
+            "smiling"
+          ]
+        },
+        {
+          "id": "c2",
+          "name": "anime character",
+          "attributes": [
+            "chibi style with purple eyes",
+            "wearing hairpins"
+          ]
+        },
+        {
+          "id": "c3",
+          "name": "anime character",
+          "attributes": [
+            "red forehead mark",
+            "dark hair"
+          ]
+        },
+        {
+          "id": "c4",
+          "name": "anime character",
+          "attributes": [
+            "elderly man with white beard",
+            "wearing traditional robe"
+          ]
+        }
+      ],
+      "actions": []
+    }
+  }
+]

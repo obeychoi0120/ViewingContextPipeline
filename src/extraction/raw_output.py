@@ -1,11 +1,16 @@
 """Explicit raw artifact variants; ordinary malformed artifacts remain errors."""
+
 RAW_GRAPH_SCHEMA = "graph-scene-raw/v1"
 
 
 def raw_graph_record(row, text):
-    return {"schema_version": RAW_GRAPH_SCHEMA, "status": "raw_fallback",
-            "scene_idx": row["scene_idx"], "keyframes": row["keyframes"],
-            "raw_response": text}
+    return {
+        "schema_version": RAW_GRAPH_SCHEMA,
+        "status": "raw_fallback",
+        "scene_idx": row["scene_idx"],
+        "keyframes": row["keyframes"],
+        "raw_response": text,
+    }
 
 
 def is_raw_graph(row):
@@ -13,9 +18,20 @@ def is_raw_graph(row):
 
 
 def valid_raw_graph(row):
-    return (is_raw_graph(row) and set(row) - {"provenance", "generation", "semantic_warnings", "tokens"} == {
-        "schema_version", "status", "scene_idx", "keyframes", "raw_response",
-    } and row.get("status") == "raw_fallback"
-        and type(row.get("scene_idx")) is int and row["scene_idx"] >= 0
+    return (
+        is_raw_graph(row)
+        and set(row) - {"provenance", "generation", "semantic_warnings", "tokens"}
+        == {
+            "schema_version",
+            "status",
+            "scene_idx",
+            "keyframes",
+            "raw_response",
+        }
+        and row.get("status") == "raw_fallback"
+        and type(row.get("scene_idx")) is int
+        and row["scene_idx"] >= 0
         and isinstance(row.get("keyframes"), list)
-        and isinstance(row.get("raw_response"), str) and bool(row["raw_response"].strip()))
+        and isinstance(row.get("raw_response"), str)
+        and bool(row["raw_response"].strip())
+    )

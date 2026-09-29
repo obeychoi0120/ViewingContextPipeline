@@ -1,0 +1,59 @@
+{
+  "schema_version": "video-summary/v5",
+  "content_id": "microlens_100k_00001",
+  "tokens": 276,
+  "arm": "desc_qwen",
+  "status": "complete",
+  "text": "This animated narrative sequence centers on high-stakes conflicts, emotional revelations, and shifting power dynamics across mystical and traditional settings. A primary narrative thread follows the calm, powerful male figure Gu Changge as he unleashes devastating magical forces and interacts with female characters. Among them is a woman with striking purple eyes and brown hair, identified as Tang Wan, who endures severe distress, fear, and internal turmoil as she navigates her complicated bond with Gu Changge, questioning her loyalty, confronting declarations of independence, and contemplating his mysterious motives. Other women, including Gu Xian'er, grapple with profound grief, loss, and contemplation regarding personal sacrifices and hidden inheritances.\n\nParallel plotlines highlight escalating conflicts involving magical inheritances, prophecies, and familial devotion. A determined young man with green eyes urgently pleads for aid, seeking an elixir to save his sister and demanding the return of a child. His desperate quest brings him into an ornate throne room to confront an imposing, white-haired elder who recognizes the young man's formidable power. Concurrently, other key figures, including a female warrior bearing a scroll and a ruler marked with a red symbol on his forehead, assess the shifting loyalties and strategic confrontations unfolding across the realm. Driven by themes of duty, personal sacrifice, and royal lineages, the characters repeatedly navigate tense verbal confrontations and mystical clashes that place their fates in jeopardy.",
+  "scene_count": 19,
+  "word_count": 224,
+  "violations": [],
+  "correction_count": 0,
+  "provenance": {
+    "uses_title": false,
+    "scene_arm": "desc_qwen",
+    "representation": "description",
+    "prompt_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/prompts/summary_description_v5.md",
+    "prompt_hash": "8eb1217bb720bcb3a46c1fe0d4c4c446f4d0f61760520fd98bba9b9549516d23",
+    "model": {
+      "project_id": "insight-dev-490002",
+      "location": "global",
+      "model_id": "gemini-3.8-flash",
+      "temperature": 0.0,
+      "thinking_level": "low",
+      "media_resolution": "MEDIA_RESOLUTION_LOW"
+    },
+    "settings": {
+      "max_new_tokens": 1024,
+      "backend": "gemini"
+    },
+    "summary_model": "gemini",
+    "schema_contract": "summary/v5",
+    "scene_provenance": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {}
+    ],
+    "scene_input_hash": "55f7a3e7479155e633938c6d88aa3c3b28447b5c3dcb04aa6839293e45eeabbb",
+    "scene_path": "/home/junsu2.choi/workspace/ViewingContextPipeline/artifacts/runs/v6_260926/extraction/scenes/desc_qwen/microlens_100k_00001.jsonl",
+    "normal_scene_count": 19,
+    "raw_scene_count": 0,
+    "input_hash": "27af1a50fe65d64b5469522e07b18341cad42d3dd3b519cde4ed196985f298c0"
+  }
+}

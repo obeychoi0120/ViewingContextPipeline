@@ -1,10 +1,8 @@
 """Compare graph results from two runs with matched users, events, dates and seeds."""
 
 from __future__ import annotations
-
 import numpy as np
-
-from extraction.recovery import fingerprint
+from artifact_io import fingerprint
 from pipeline_runtime import RunContext
 from validation.selection import load_validation_cohort
 from validation.representation_provenance import read_state
@@ -18,15 +16,16 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         raise ValueError("comparison requires two different run IDs")
     reference = RunContext.load(reference_run_id, root=context.root)
     from validation.graph_context import is_graph, graph_context
+
     if is_graph(context):
         reference = graph_context(reference, context.scene_aggregation)
-    from validation.selection import diagnosis_context
-    if hasattr(context, "run_root"):
-        context = diagnosis_context(context)
-        reference = diagnosis_context(reference)
     from arm_registry import registry
-    names = [name for name, arm in registry(context.config).items()
-             if arm.representation == "graph" and (target is None or name in target)]
+
+    names = [
+        name
+        for name, arm in registry(context.config).items()
+        if arm.representation == "graph" and (target is None or name in target)
+    ]
     if not names:
         raise ValueError("run comparison requires at least one Graph target")
     arms = {name: name for name in names}
@@ -52,9 +51,9 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     observed, draws, bootstrap = cluster_bootstrap(
         left - right, counts, samples=configs[0].evaluation.bootstrap_samples
     )
-    # Two prespecified model comparisons, even when only one model is selected.
-    alpha = configs[0].evaluation.familywise_alpha / len([a for a in registry(context.config).values()
-                                                         if a.representation == "graph"])
+    alpha = configs[0].evaluation.familywise_alpha / len(
+        [a for a in registry(context.config).values() if a.representation == "graph"]
+    )
     intervals = np.quantile(draws, [alpha / 2, 1 - alpha / 2], axis=0)
     results = {
         name: {
@@ -65,21 +64,8 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         }
         for i, name in enumerate(names)
     }
-    from arm_registry import legacy_layout, concat_layout
-    old = legacy_layout(context.config)
     interactions = {}
-    for title in (() if concat_layout(context.config) else (True,) if old else (False, True)):
-        pair = {arm.model: name for name, arm in registry(context.config).items()
-                if arm.representation == "graph" and arm.uses_title == title and name in names}
-        if set(pair) != {"qwen", "gemini"}:
-            continue
-        g, q = names.index(pair["gemini"]), names.index(pair["qwen"])
-        lo, hi = np.quantile(draws[:, g] - draws[:, q], [0.025, 0.975])
-        interactions["meta" if title else "no_meta"] = {
-            "role": "exploratory", "difference": float(observed[g] - observed[q]),
-            "ci_low": float(lo), "ci_high": float(hi), "confidence_level": 0.95,
-        }
-    interaction = interactions.get("meta") if old else None
+    interaction = None
     return {
         "run_id": context.run_id,
         "reference_run_id": reference.run_id,
@@ -87,15 +73,20 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         "metric": "NDCG@10",
         "bootstrap": bootstrap,
         "correction": "bonferroni",
-        "family_size": len([a for a in registry(context.config).values() if a.representation == "graph"]),
+        "family_size": len(
+            [a for a in registry(context.config).values() if a.representation == "graph"]
+        ),
         "comparisons": results,
         "model_interaction": interaction,
-        **({"model_interactions": interactions} if not old else {}),
-        "interpretation": ("Includes extraction and direct-graph training differences; identical pooling mode required."
-                           if is_graph(context) else
-                           "Includes differences in extraction, summary prompts, models and fallback; inspect provenance."),
-        **({"representation_mode": "graph", "scene_aggregation": context.scene_aggregation}
-           if is_graph(context) else {}),
+        **{"model_interactions": interactions},
+        "interpretation": "Includes extraction and direct-graph training differences; identical pooling mode required."
+        if is_graph(context)
+        else "Includes differences in extraction, summary prompts, models and fallback; inspect provenance.",
+        **(
+            {"representation_mode": "graph", "scene_aggregation": context.scene_aggregation}
+            if is_graph(context)
+            else {}
+        ),
         "sources": {
             ctx.run_id: {name: read_state(ctx, name).get("sources", []) for name in names}
             for ctx in (context, reference)

@@ -5,7 +5,7 @@ from preparation.input_data import prepare_input_data
 
 
 def prepare_cohort_step(context, *, force=False, plan_only=False):
-    from validation.rolling_data import prepare_full_cohort
+    from preparation.cohort import prepare_full_cohort
 
     log_step_start(context, "prepare-cohort", force=force, plan_only=plan_only)
     context.initialize()

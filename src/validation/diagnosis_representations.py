@@ -2,32 +2,32 @@
 
 import json
 from collections import Counter
-
 from arm_registry import registry
 from validation.diagnosis_support import MAX_ERROR_EXAMPLES
 from validation.representation_provenance import read_state, state_path
 
 
 def _distribution(rows, field):
-    counts = Counter(json.dumps(row.get(field), sort_keys=True, ensure_ascii=False)
-                     for row in rows)
+    counts = Counter(
+        (json.dumps(row.get(field), sort_keys=True, ensure_ascii=False) for row in rows)
+    )
     values = counts.most_common(MAX_ERROR_EXAMPLES)
     return {
         "distinct_count": len(counts),
         "values": [{"value": json.loads(value), "count": count} for value, count in values],
-        "omitted_count": sum(counts.values()) - sum(count for _, count in values),
+        "omitted_count": sum(counts.values()) - sum((count for _, count in values)),
     }
 
 
 def representation_report(context, arms):
-    representations, fallbacks = {}, {}
+    representations, fallbacks = ({}, {})
     registered = registry(context.config)
     for name in arms:
         state = read_state(context, name)
         rows = state.get("sources", [])
         details_path = state_path(context, name).relative_to(context.run_root).as_posix()
         fallback_count = issue_count = 0
-        fallback_examples, issue_examples = [], []
+        fallback_examples, issue_examples = ([], [])
         for index, row in enumerate(rows):
             example = {"source_index": index, "content_id": row.get("content_id")}
             if row.get("actual_arm") and row["actual_arm"] != name:
@@ -43,27 +43,37 @@ def representation_report(context, arms):
                     issue_examples.append({**example, "fields": reasons})
         summary = {
             "count": len(rows),
-            "status_counts": dict(Counter(r.get("status", "complete") for r in rows)),
+            "status_counts": dict(Counter((r.get("status", "complete") for r in rows))),
             "zero_vector_count": state.get("zero_vector_count", 0),
-            "generation_record_count": sum(row.get("generation") is not None for row in rows),
+            "generation_record_count": sum((row.get("generation") is not None for row in rows)),
             "issue_count": issue_count,
             "issue_examples": issue_examples,
             "issue_examples_omitted_count": issue_count - len(issue_examples),
         }
-        from arm_registry import concat_layout
-        if concat_layout(context.config):
-            counts = Counter(row.get("components", "neither") for row in rows)
-            summary["component_counts"] = {key: counts[key] for key in ("both", "title_only", "summary_only", "neither")}
-            summary["title_fallback_count"] = counts["title_only"] if registered[name].model else 0
-            if registered[name].model:
-                summary["visual_summary_count"] = sum(bool(row.get("summary_used")) for row in rows)
-                summary["visual_summary_coverage"] = summary["visual_summary_count"] / len(rows) if rows else 0.0
-                summary["summary_status_counts"] = dict(Counter(row.get("summary_status") for row in rows))
+        counts = Counter((row.get("components", "neither") for row in rows))
+        summary["component_counts"] = {
+            key: counts[key] for key in ("both", "title_only", "summary_only", "neither")
+        }
+        summary["title_fallback_count"] = counts["title_only"] if registered[name].model else 0
+        if registered[name].model:
+            summary["visual_summary_count"] = sum((bool(row.get("summary_used")) for row in rows))
+            summary["visual_summary_coverage"] = (
+                summary["visual_summary_count"] / len(rows) if rows else 0.0
+            )
+            summary["summary_status_counts"] = dict(
+                Counter((row.get("summary_status") for row in rows))
+            )
         if registered[name].model is not None:
             summary["distributions"] = {
                 field: _distribution(rows, field)
-                for field in ("actual_arm", "source_arm", "status", "summary_schema",
-                              "summary_policy", "source_provenance")
+                for field in (
+                    "actual_arm",
+                    "source_arm",
+                    "status",
+                    "summary_schema",
+                    "summary_policy",
+                    "source_provenance",
+                )
             }
             lengths = [row["word_count"] for row in rows if row.get("word_count") is not None]
             summary["word_count"] = {
@@ -73,9 +83,18 @@ def representation_report(context, arms):
                 "mean": sum(lengths) / len(lengths) if lengths else None,
             }
         representations[name] = {
-            **{key: state[key] for key in (
-                "input_hash", "embedding_hash", "recommendation_hash", "truncation", "cache", "shareable"
-            ) if key in state},
+            **{
+                key: state[key]
+                for key in (
+                    "input_hash",
+                    "embedding_hash",
+                    "recommendation_hash",
+                    "truncation",
+                    "cache",
+                    "shareable",
+                )
+                if key in state
+            },
             "details_path": details_path,
             "sources_summary": summary,
         }
@@ -86,4 +105,4 @@ def representation_report(context, arms):
                 "omitted_count": fallback_count - len(fallback_examples),
                 "details_path": details_path,
             }
-    return representations, fallbacks
+    return (representations, fallbacks)
