@@ -1,6 +1,6 @@
-"""V3 architecture with the old loop-based packing/pooling for numerical checks.
+"""V4 architecture with the old loop-based packing/pooling for numerical checks.
 
-The historical v2 reference remains untouched. This reference substitutes v3's
+The historical v2 reference remains untouched. This reference substitutes v4's
 one-layer, concatenation-only readout/fusion, not v2 predictions or weights.
 """
 
@@ -43,9 +43,9 @@ class GraphSASRec(CurrentGraphSASRec):
         video = self.graph_encoder(batch)
         title_ids = self.store["titles"][indices]
         titles = torch.as_tensor(np.array(self.store["features"][title_ids]), device=device)
-        titles = self.title_norm(self.title_projection(titles))
+        titles = self.title_projection(titles)
         titles = titles.masked_fill(torch.as_tensor(title_ids == 0, device=device)[:, None], 0)
-        values = self.item_mlp(torch.cat([titles, video], dim=-1))
+        values = self.item_norm(torch.cat([titles, video], dim=-1))
         available = (
             self.store["video_offsets"][indices + 1] > self.store["video_offsets"][indices]
         ) | (title_ids != 0)

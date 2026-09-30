@@ -24,6 +24,8 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시�
 
 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `desc_qwen`, `desc_gemini`입니다. 접미사는 **Scene 추출 모델**이며, Summary 모델은 `--model`로 따로 선택합니다. 생성에는 결합 Arm을 지정하지 않습니다. 평가에는 `--target`과 `--representation-mode`를 항상 명시합니다.
 
+현재 모델(v4)은 `meta`: 제목 BGE 1024→Linear 512→LayerNorm 512, Text: 제목 128 + Summary 384→LayerNorm 512, Graph: 제목 128 + Graph 영상 384→LayerNorm 512입니다. 아이템 MLP는 없으며 SASRec·User MLP는 유지합니다. [모델 v4와 재실행 안내](docs/graph_training.md#모델-v4-baselinetextgraph-최종-구조)를 참고하세요.
+
 주 비교는 `graph_qwen_meta − meta`입니다. Text 전체 평가는 기본 설정에서 7일 × 3 seed × 6 Arm입니다. 사용자 단위 paired bootstrap을 사용하며, seed 평균 후 날짜별 평균을 동일 가중치로 합칩니다. 현재 비교군은 제목 기준선 대비 5개, Graph/Description 비교 2개, 제목 추가 효과 1개이고 각 군에 Bonferroni 보정을 적용합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다.
 
 ## 설치와 설정
@@ -98,7 +100,7 @@ python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_descr
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
 ```
 
-제목은 LLM 입력에 넣지 않고 text 임베딩 직전에 결합합니다. Summary 프롬프트에는 `{scenes}`가 필요하며 `{english_title}`은 허용하지 않습니다. 같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 `--force`를 사용합니다.
+제목은 LLM 입력에 넣지 않습니다. Text embedding에서는 제목·Summary를 각각 BGE로 인코딩하고, 추천 모델에서 projection한 벡터를 결합합니다. Summary 프롬프트에는 `{scenes}`가 필요하며 `{english_title}`은 허용하지 않습니다. 같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 `--force`를 사용합니다.
 
 [run_pipeline_v7.sh](run_pipeline_v7.sh)는 단계별 명령을 보관한 수동 실행 스크립트입니다. 기본 활성 명령은 **두 Graph 소스의 Gemini 요약**이며, 전체 파이프라인을 자동 실행하지 않습니다. 필요한 단계의 주석을 조정하거나 위 명령을 직접 실행합니다.
 

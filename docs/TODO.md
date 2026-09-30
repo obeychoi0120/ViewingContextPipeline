@@ -18,3 +18,5 @@
 
 - Graph 모델 v3: 1층·장면 384·제목 128 결합과 추천 단계별 프로파일링 구현. 실제 추천 성능/RTX 처리량 비교는 대기. [현재 모델·프로파일링 사용법](graph_training.md#graph-모델-v3-1층-encoder와-128384-결합-2026-09-30).
 - `260928_v7` Graph v3·프로파일링 검증: [변경 위치·재학습 범위·검사 결과](../artifacts/runs/260928_v7/reports/graph_v3_profiling_implementation.md).
+
+- 모델 v4: Meta 제목 512 기준선, Text 제목·Summary 독립 BGE, 공통 최종 LayerNorm, 아이템 MLP 제거. 전체 추천 성능 실험은 대기. [구현·검증 보고서](../artifacts/runs/260928_v7/reports/model_v4_implementation.md).

@@ -257,7 +257,7 @@ def run_combination(
         with sampled(profiler, "feature_load", kind="stage"):
             with span("feature_load", cuda=False):
                 with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
-                    features = data["values"]
+                    features = {key: data[key] for key in data.files}
 
     def create_model():
         if is_graph(context):

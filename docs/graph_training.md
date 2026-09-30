@@ -19,15 +19,15 @@ python -m validation run-diagnosis --run-id 260928_v7 --representation-mode grap
 
 위 추천 명령은 각각 **7일 × 3 seed × 4 Arm = 84개 조합**의 전체 실험입니다. 완료된 조합은 체크섬과 입력 해시를 검증해 재사용하고, 중단된 조합은 초기화부터 다시 실행합니다. `--force`는 완료 조합도 재계산합니다. 실패한 epoch 중간 상태에서 이어 학습하는 방식은 아닙니다.
 
-기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 기존 제목 전용 SASRec이며 Graph encoder를 사용하지 않습니다.
+기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 text와 같은 제목 1024→512 projection + LayerNorm 기준선이며 Graph encoder를 사용하지 않습니다.
 
 ## 모델 및 데이터 계약
 
 - BGE 입력: entity의 종류·attributes, action 문구, Context의 medium·format·topics, 필요한 Arm의 영문 제목. 고유 문자열만 인코딩하며 float32 특징은 학습하지 않습니다.
 - entity/action 노드 사이 actor·target·tool·location별 양방향 메시지를 1층·128차원에서 전달합니다. `none`/`unknown`은 역할별 서로 다른 상태 벡터이며 공유 개체 노드가 아닙니다.
-- entity 평균 128, action 평균 128, projection한 Context 128을 결합하고 LayerNorm을 적용해 장면 384차원을 만듭니다. 영상 mean 또는 attention pooling은 순서 불변이며 시간 위치 정보와 장면 간 메시지는 사용하지 않습니다.
-- `_meta`는 제목 BGE 1024를 Linear 1024→128과 LayerNorm으로 변환한 뒤 `[제목 128; Graph 384]` 순서로 결합합니다. 이 512차원에 기존 residual MLP를 적용하여 SASRec에 전달합니다. 장면 384→512 및 결합 1536→512 Linear는 없습니다. 제목 없는 Graph Arm은 제목 부분 128차원을 0으로 유지하며, 학습된 bias·LayerNorm offset이 있어도 동일합니다.
-- 유효한 Graph가 없으면 Graph 부분은 0입니다. 제목도 없으면 최종 영상 벡터는 0입니다. 후보·interaction은 제거하지 않습니다. `meta` 기준선은 기존 모델 계산을 그대로 사용합니다.
+- entity 평균 128, action 평균 128, projection한 Context 128을 단순 결합해 장면 384차원을 만듭니다. 영상 mean 또는 attention pooling은 순서 불변이며 시간 위치 정보와 장면 간 메시지는 사용하지 않습니다.
+- `_meta`는 제목 BGE 1024를 Linear 1024→128로 변환하고 `[제목 128; Graph 384]`를 결합한 뒤 LayerNorm(512)를 적용합니다. 제목 및 장면 concat 직후 별도 LayerNorm과 아이템 MLP는 없습니다. Role Graph Encoder와 SASRec 내부 정규화는 유지합니다.
+- 누락된 제목·영상 부분은 최종 LayerNorm 전 영벡터입니다. 부분 결측 영역이 정규화 이후에도 0일 필요는 없습니다. 전체 결측과 padding은 LayerNorm 이후 다시 0으로 마스킹하며 후보·interaction은 제거하지 않습니다. `meta`는 제목 1024→512→LayerNorm을 사용합니다.
 - raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver는 기존 데이터에 있어도 무시하고 location 누락은 `unknown`으로 해석합니다. 모델 텐서의 receiver 슬롯은 형태 호환성을 위해 남기되 항상 `none` 상태로 두고 해당 간선은 만들지 않습니다. 입력 버전을 갱신해 receiver를 사용한 기존 특징 캐시를 재사용하지 않습니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
 - 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 기본 분할 크기는 256개 영상·32,768개 노드이며 이를 넘는 단일 영상도 그대로 유지합니다. Checkpoint는 아래 실행 설정에 따라 사용하며, 배치 조립과 전송은 backward에서 반복하지 않습니다.
 - SASRec의 loss, 인기도 보정, 후보 마스킹, 이력 길이 10, 차원 512, 날짜별 selection/refit/test는 기존과 같습니다. 각 refit은 모든 학습 모듈을 초기화합니다. 학습 배치의 이력·정답 아이템 합집합만 계산하고 optimizer 갱신 후 캐시를 버립니다.
@@ -44,7 +44,7 @@ Run 루트는 `artifacts/runs/<RUN_ID>/`입니다.
 
 `catalog_vectors.npy`의 행 순서는 Graph 입력 manifest의 catalog와 같습니다. padding 행은 저장하지 않습니다. checkpoint를 읽을 때는 동일 해시의 Graph 입력으로 `new_graph_model`을 생성하고 state_dict를 읽습니다. BGE 특징은 checkpoint에 중복 저장하지 않습니다.
 
-캐시는 실제 Scene Graph 파일 바이트·catalog 순서·제목·BGE 설정/로컬 모델 식별 정보·변환 버전으로 구분합니다. 추천 결과에는 특징 해시, Graph 구조 설정, aggregation과 기존 학습 해시·구간·seed가 들어갑니다. 변환/모델 의미를 변경하면 해당 버전도 갱신해야 합니다. text 캐시 키와 파일 형식은 유지하며 저장 위치는 `validation/representations/text/`, `validation/recommendations/text/`, `validation/diagnosis/text_diagnosis.json`입니다.
+캐시는 실제 Scene Graph 파일 바이트·catalog 순서·제목·BGE 설정/로컬 모델 식별 정보·변환 버전으로 구분합니다. 추천 결과에는 특징 해시, Graph 구조 설정, aggregation과 기존 학습 해시·구간·seed가 들어갑니다. 변환/모델 의미를 변경하면 해당 버전도 갱신해야 합니다. Text v4는 분리 특징 배열과 새 캐시 키를 사용하며 저장 위치는 `validation/representations/text/`, `validation/recommendations/text/`, `validation/diagnosis/text_diagnosis.json`입니다.
 
 `--compare-run-id`는 선택한 모드와 aggregation의 상대 Run 결과만 읽습니다. 다른 모드 또는 pooling의 결과를 대신 읽지 않습니다. 방식 간 자동 paired 비교와 장면 간 GNN은 [TODO](TODO.md)에 기록했습니다.
 
@@ -113,9 +113,9 @@ v2 당시의 측정 코드·결과는 [실행 최적화 보고서](../artifacts/
 v3에서는 가중치 구조가 달라졌으므로 당시 v2 비교 스크립트를 현재 모델에 그대로 적용할 수 없습니다.
 현재 실행의 병목은 아래 `--profile-every` 옵션으로 측정하십시오.
 
-## Graph 모델 v3: 1층 encoder와 128+384 결합 (2026-09-30)
+## 이전 Graph 모델 v3: 1층 encoder와 128+384 결합 (2026-09-30)
 
-사용자가 확정한 구조를 실제 모델에 반영했습니다. 모델 계약은 **`sasrec-role-graph/v3`**입니다.
+아래는 이전 v3의 변경 이력입니다. 현재 계약은 v4이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
 
 | 부분 | 이전 v2 | 현재 v3 |
 |---|---|---|
@@ -174,7 +174,7 @@ python -m validation run-recommendation \
 | `graph_items/graph_encoder/node_projection` | 노드 projection 및 종류 embedding |
 | `…/message_passing` | 역할별 Graph 메시지 전달 |
 | `…/scene_readout`, `…/video_pooling` | 장면 벡터 생성 및 영상 mean/attention |
-| `graph_items/item_fusion` | 제목·영상 결합 및 아이템 MLP |
+| `graph_items/item_fusion` | 제목 projection·영상 결합 및 최종 LayerNorm |
 | `sasrec_forward`, `candidate_vectors`, `logits_loss` | 사용자 표현·학습 후보 벡터·추천 loss |
 | `backward`, `clip_grad`, `optimizer` | 역전파·gradient clipping·가중치 갱신 |
 | `catalog_encode` | 평가용 전체 catalog 벡터 생성 |
@@ -214,3 +214,37 @@ artifacts/runs/<RUN_ID>/validation/recommendations/
   새 로그도 생성되지 않습니다. 완료된 조합까지 다시 측정할 때만 명시적으로 `--force`를 사용합니다.
   `profile.jsonl`은 로컬 진단 부속 파일이며 공유 추천 캐시에 게시하거나 복원하지 않습니다.
 - 이미 실행 중인 프로세스에는 적용되지 않습니다. 다음 실행부터 사용할 수 있습니다.
+
+
+## 모델 v4: Baseline·Text·Graph 최종 구조
+
+최종 다이어그램과 일치하는 모델 계약은 Text `sasrec-content-v4`, Graph `sasrec-role-graph/v4`입니다.
+
+| 경로 | 아이템 벡터 |
+|---|---|
+| meta (두 모드 공통) | 제목 BGE 1024 → Linear 512 → LayerNorm 512 |
+| text | 제목 BGE 1024→128; Summary BGE 1024→384 → concat 512 → LayerNorm 512 |
+| graph | 제목 128; Graph 영상 384 → concat 512 → LayerNorm 512 |
+
+Graph Encoder는 1층·hidden 128입니다. 장면은 Entity 평균·Action 평균·Context 각각 128을 concat한 384차원이며, mean/attention이 영상 384차원을 만듭니다. 최종 아이템 MLP와 제목·장면 별도 LayerNorm은 제거했습니다. Graph layer 내부 정규화, SASRec, User MLP, loss와 평가 프로토콜은 유지합니다. LayerNorm은 affine=True, eps=1e-5입니다.
+
+Text 특징 NPZ는 `title_values`, `video_values` (각 float32 N×1024), `title_available`, `video_available` (각 bool N)를 저장합니다. 제목·Summary는 독립 BGE 입력이며 선택한 Arm 간 새로 인코딩하는 동일 문자열을 공유합니다. `.inputs/<arm>.json`에는 구성 요소별 원문·사용 여부와 truncation을 기록합니다. Text 표현 계약은 `shared-scenes-representation/v4`입니다. 이전 단일 `values` 배열은 사용하지 않습니다.
+
+누락된 부분은 concat 전에 0으로 마스킹합니다. LayerNorm 이후 부분 결측 슬롯에 값이 생길 수 있습니다. 전체 결측·padding은 마지막에 다시 0으로 마스킹합니다. 이력과 추천 후보에 같은 최종 벡터를 사용합니다.
+
+### 재실행
+
+이전 결과가 필요하면 아래 실행 **전에** 별도로 보관하세요. 동일 결과 경로의 기존 조합은 새 학습 결과로 갱신됩니다. 이전 모델의 완료 조합·checkpoint는 새 모델에 재사용되지 않으며 selection부터 재학습합니다. 새 버전으로 완료한 조합은 재개 시 재사용합니다. epoch 중간 재개는 지원하지 않습니다.
+
+```bash
+# Text: 분리 BGE 입력 재준비 후 모든 선택 Arm 재학습
+python -m validation embed-representations --run-id 260928_v7 --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-recommendation --run-id 260928_v7 --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-diagnosis --run-id 260928_v7 --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+
+# Graph: 유효한 기존 입력 캐시 재사용. attention 실험은 mean을 attention으로 변경.
+python -m validation run-recommendation --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+```
+
+Graph 입력 계약은 그대로입니다. 입력 파일·제목·BGE가 바뀌지 않았다면 재임베딩하지 않습니다. 이전 Gemini 프로파일에서 catalog 전체 Graph가 비어 있었으므로, 전체 실험 전에 해당 입력의 `statistics.json`에서 유효 장면 및 제외 사유를 확인해야 합니다. v4 모델 변경이 그 입력 문제를 해결하지는 않습니다.

@@ -40,7 +40,7 @@ def _new_model(
     *,
     item_count: int,
     branch: str,
-    features: np.ndarray,
+    features: dict[str, np.ndarray],
     device: "torch.device",
 ) -> SASRec:
     return SASRec(

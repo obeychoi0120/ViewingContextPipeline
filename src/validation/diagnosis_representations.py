@@ -86,6 +86,8 @@ def representation_report(context, arms):
             **{
                 key: state[key]
                 for key in (
+                    "representation_version",
+                    "composition_policy",
                     "input_hash",
                     "embedding_hash",
                     "recommendation_hash",

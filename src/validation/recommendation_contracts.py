@@ -1,11 +1,17 @@
 from __future__ import annotations
 from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms
 
-ARCHITECTURE_VERSION = "sasrec-content-v3"
+ARCHITECTURE_VERSION = "sasrec-content-v4"
 # Current text and direct-graph architectures.
-DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset(
-    {"sasrec-content-v3", "sasrec-role-graph/v1", "sasrec-role-graph/v2", "sasrec-role-graph/v3"}
-)
+DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v4", "sasrec-role-graph/v4"})
+ITEM_MODEL = {
+    "baseline_dim": 512,
+    "title_dim": 128,
+    "video_dim": 384,
+    "normalization": "final_layernorm",
+    "eps": 1e-5,
+    "item_mlp": False,
+}
 DEFAULT_PROTOCOL = {"experiment_config_version": EXPERIMENT_CONFIG_VERSION}
 RECOMMENDATION_ARMS = {name: name for name in registry(DEFAULT_PROTOCOL)}
 TARGET_SOURCES = dict(RECOMMENDATION_ARMS)

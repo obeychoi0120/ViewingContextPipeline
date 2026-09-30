@@ -61,27 +61,55 @@ if nn is not None:
             dropout: float,
             *,
             arm: ArmKind,
-            item_features: "torch.Tensor | np.ndarray",
+            item_features: "dict[str, np.ndarray] | torch.Tensor | np.ndarray",
         ) -> None:
             super().__init__()
             self.max_length = max_length
             self.arm = arm
-            features = torch.as_tensor(item_features, dtype=torch.float32)
-            if features.ndim != 2 or features.shape[0] != item_count:
-                raise ValueError("item_features must have one row per catalog item")
-            if not torch.isfinite(features).all():
-                raise ValueError("item_features must contain only finite values")
-            padding = torch.zeros((1, features.shape[1]), dtype=features.dtype)
-            self.register_buffer(
-                "frozen_item_features",
-                torch.cat([padding, features], dim=0),
-                persistent=False,
-            )
-            self.item_projection = nn.Linear(features.shape[1], embedding_dim)
-            self.item_mlp = ResidualMLP(
-                embedding_dim,
-                activation="relu",
-            )
+            if embedding_dim % 4:
+                raise ValueError("recommendation dimension must be divisible by four")
+            if isinstance(item_features, dict):
+                titles = torch.as_tensor(item_features["title_values"], dtype=torch.float32)
+                videos = torch.as_tensor(item_features["video_values"], dtype=torch.float32)
+                title_available = torch.as_tensor(
+                    item_features["title_available"], dtype=torch.bool
+                )
+                video_available = torch.as_tensor(
+                    item_features["video_available"], dtype=torch.bool
+                )
+            else:
+                # Standalone callers may supply a single component. Production uses explicit masks.
+                features = torch.as_tensor(item_features, dtype=torch.float32)
+                titles = features if arm == "metadata" else torch.zeros_like(features)
+                videos = torch.zeros_like(features) if arm == "metadata" else features
+                title_available = titles.ne(0).any(dim=1)
+                video_available = videos.ne(0).any(dim=1)
+            if (
+                titles.ndim != 2
+                or titles.shape != videos.shape
+                or titles.shape[0] != item_count
+                or title_available.shape != (item_count,)
+                or video_available.shape != (item_count,)
+                or not torch.isfinite(titles).all()
+                or not torch.isfinite(videos).all()
+            ):
+                raise ValueError(
+                    "invalid component feature arrays: require matching shapes and finite values"
+                )
+            for name, values in (
+                ("title_features", titles),
+                ("video_features", videos),
+                ("title_available", title_available),
+                ("video_available", video_available),
+            ):
+                padding = values.new_zeros((1, *values.shape[1:]))
+                self.register_buffer(name, torch.cat([padding, values.detach()]), persistent=False)
+            if arm == "metadata":
+                self.item_projection = nn.Linear(titles.shape[1], embedding_dim)
+            else:
+                self.title_projection = nn.Linear(titles.shape[1], embedding_dim // 4)
+                self.video_projection = nn.Linear(videos.shape[1], embedding_dim * 3 // 4)
+            self.item_norm = nn.LayerNorm(embedding_dim, eps=1e-5)
             self.position_embedding = nn.Embedding(max_length, embedding_dim)
             layer = nn.TransformerEncoderLayer(
                 d_model=embedding_dim,
@@ -119,12 +147,22 @@ if nn is not None:
 
         @property
         def item_count(self) -> int:
-            return int(self.frozen_item_features.shape[0] - 1)
+            return int(self.title_features.shape[0] - 1)
 
         def item_vectors(self, item_ids: "torch.Tensor") -> "torch.Tensor":
-            values = self.item_projection(self.frozen_item_features[item_ids])
-            values = self.item_mlp(values)
-            return values.masked_fill(item_ids.eq(0).unsqueeze(-1), 0.0)
+            title_present = self.title_available[item_ids]
+            video_present = self.video_available[item_ids]
+            if self.arm == "metadata":
+                values = self.item_projection(self.title_features[item_ids])
+                available = title_present
+            else:
+                title = self.title_projection(self.title_features[item_ids])
+                video = self.video_projection(self.video_features[item_ids])
+                title = title.masked_fill(~title_present.unsqueeze(-1), 0.0)
+                video = video.masked_fill(~video_present.unsqueeze(-1), 0.0)
+                values = torch.cat([title, video], dim=-1)
+                available = title_present | video_present
+            return self.item_norm(values).masked_fill(~available.unsqueeze(-1), 0.0)
 
         def catalog_vectors(self) -> "torch.Tensor":
             ids = torch.arange(

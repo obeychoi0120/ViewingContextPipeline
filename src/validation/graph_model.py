@@ -60,7 +60,7 @@ class RoleGraphEncoder(nn.Module):
         self.projection = nn.Linear(feature_dim, hidden)
         self.node_type = nn.Embedding(2, hidden)
         self.layers = nn.ModuleList([RoleLayer(hidden) for _ in range(GRAPH_MODEL["layers"])])
-        self.readout = nn.LayerNorm(output_dim)
+        self.readout = nn.Identity()
         self.attention = (
             nn.Sequential(nn.Linear(output_dim, 128), nn.Tanh(), nn.Linear(128, 1))
             if aggregation == "attention"
@@ -151,9 +151,8 @@ class GraphSASRec(SASRec):
             store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation
         )
         # Production: [title 128; video 384] already matches SASRec's 512.
-        del self.item_projection
+        del self.video_projection
         self.title_projection = nn.Linear(store["features"].shape[1], self.title_dim)
-        self.title_norm = nn.LayerNorm(self.title_dim)
         self._vectors = self._indices = None
         self.embedding_dim = embedding_dim
         self.execution = execution or GraphExecutionConfig()
@@ -174,10 +173,10 @@ class GraphSASRec(SASRec):
         with span("graph_encoder", cuda=True):
             video = self.graph_encoder(batch)
         with span("item_fusion", cuda=True):
-            title = self.title_norm(self.title_projection(batch["titles"]))
+            title = self.title_projection(batch["titles"])
             # Biases and LayerNorm must not invent a title for a missing input.
             title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
-            values = self.item_mlp(torch.cat([title, video], dim=-1))
+            values = self.item_norm(torch.cat([title, video], dim=-1))
             return values.masked_fill(~batch["available"].bool()[:, None], 0.0)
 
     def _use_checkpoint(self, items):
@@ -310,7 +309,16 @@ def new_graph_model(context, config, branch, device):
     )
     if branch == "meta":
         features = np.array(store["features"][store["titles"]], copy=True)
-        return SASRec(**kwargs, arm="metadata", item_features=features).to(device)
+        return SASRec(
+            **kwargs,
+            arm="metadata",
+            item_features={
+                "title_values": features,
+                "video_values": np.zeros_like(features),
+                "title_available": np.asarray(store["titles"]) != 0,
+                "video_available": np.zeros(len(store), dtype=bool),
+            },
+        ).to(device)
     return GraphSASRec(
         **kwargs,
         store=store,

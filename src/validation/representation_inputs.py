@@ -141,7 +141,8 @@ def _source_documents_for_arm(context, cohort, arm, *, failure_rows=None):
 
 
 def documents_for_arm(context, cohort, arm, *, failure_rows=None):
-    from arm_registry import generation_registry, CONCAT_POLICY
+    from arm_registry import generation_registry
+    from validation.text_features import COMPOSITION_POLICY
 
     titles = None
     if arm.uses_title:
@@ -169,10 +170,12 @@ def documents_for_arm(context, cohort, arm, *, failure_rows=None):
             {
                 **doc,
                 "text": text,
+                "title_text": title,
+                "video_text": summary,
                 "actual_arm": arm.name,
                 "source_arm": arm.scene_arm,
                 "summary_source": arm.scene_arm,
-                "composition_policy": CONCAT_POLICY,
+                "composition_policy": COMPOSITION_POLICY,
                 "components": components,
                 "title_used": bool(title),
                 "title_source_path": titles[index]["source_path"] if titles is not None else None,

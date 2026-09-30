@@ -61,12 +61,12 @@ def test_all_item_towers_use_frozen_features_and_trainable_projection(arm) -> No
     loss.backward()
 
     assert torch.isfinite(loss)
-    assert model.frozen_item_features.requires_grad is False
-    assert model.item_projection.weight.grad is not None
+    assert model.title_features.requires_grad is False
+    assert (model.item_projection if arm == "metadata" else model.video_projection).weight.grad is not None
     assert model.user_mlp.fc1.weight.grad is not None
-    assert model.item_mlp.activation == "relu"
+    assert not hasattr(model, "item_mlp")
     assert model.user_mlp.activation == "gelu"
-    assert model.item_mlp.fc1.out_features == 8
+    assert model.item_norm.normalized_shape == (8,)
     assert model.user_mlp.fc1.out_features == 8
 
 

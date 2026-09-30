@@ -7,7 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import graph_v3_reference as reference  # noqa: E402
+import graph_v4_reference as reference  # noqa: E402
 from graph_fixture import synthetic_store  # noqa: E402
 from validation.graph_batching import PackedGraphStore  # noqa: E402
 from validation.graph_model import GraphSASRec, RoleGraphEncoder, graph_batch  # noqa: E402

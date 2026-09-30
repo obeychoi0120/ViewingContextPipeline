@@ -142,7 +142,7 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
                                              torch.tensor([0, 1]))
     loss.backward()
     for module in [encoder.projection, encoder.layers[0].relations[0], model.encoder,
-                   model.title_projection, model.title_norm, model.item_mlp,
+                   model.title_projection, model.item_norm,
                    *([encoder.attention] if pool == 'attention' else [])]:
         assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in module.parameters())
     assert not batch['features'].requires_grad
@@ -241,16 +241,16 @@ def test_title_order_and_missing_inputs(graph_data):
         # Missing titles must stay zero even after trainable offsets change.
         with torch.no_grad():
             model.title_projection.bias.fill_(0.25)
-            model.title_norm.bias.fill_(0.75)
+            model.item_norm.bias.fill_(0.75)
         captured = []
-        hook = model.item_mlp.register_forward_pre_hook(lambda module, args: captured.append(args[0].detach()))
+        hook = model.item_norm.register_forward_pre_hook(lambda module, args: captured.append(args[0].detach()))
         with torch.no_grad():
             values = model.catalog_vectors()
         hook.remove()
         title_ids = model.store['titles']
         with torch.no_grad():
             titles = torch.as_tensor(np.array(model.store['features'][title_ids]))
-            expected = model.title_norm(model.title_projection(titles))
+            expected = model.title_projection(titles)
             expected[title_ids == 0] = 0
         torch.testing.assert_close(captured[0][:, :128], expected)
         assert torch.count_nonzero(captured[0][3, 128:]) == 0
@@ -261,7 +261,7 @@ def test_title_order_and_missing_inputs(graph_data):
         assert model.title_projection.out_features == 128
         assert len(model.graph_encoder.layers) == 1
         assert model.graph_encoder.output_dim == 384
-        assert isinstance(model.graph_encoder.readout, torch.nn.LayerNorm)
+        assert isinstance(model.graph_encoder.readout, torch.nn.Identity)
         assert not hasattr(model, 'item_projection')
 
 
@@ -403,7 +403,7 @@ def test_deprecated_receiver_is_ignored_in_graph_inputs(graph_data):
             np.testing.assert_array_equal(actual[name], expected[name])
 
 
-def test_v3_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
+def test_v4_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
     pytest.importorskip('torch')
     import graph_reference as v2
     from validation.graph_context import GRAPH_ARCHITECTURE, GRAPH_MODEL
@@ -418,7 +418,7 @@ def test_v3_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
     assert prepare(context, target=['graph_qwen_meta'])['reused_arms'] == ['graph_qwen_meta']
     assert source_identity(context, cohort, arm) == source_before
     current = recommendation_identity(context, arm.name)
-    assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v3'
+    assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v4'
     assert (GRAPH_MODEL['layers'], GRAPH_MODEL['scene_dim'], GRAPH_MODEL['title_dim']) == (1, 384, 128)
     previous = {**current, 'graph_architecture': 'sasrec-role-graph/v2',
                 'graph_model': {'layers': 2, 'hidden_dim': 128, 'scene_dim': 512, 'attention_dim': 128}}
@@ -434,7 +434,7 @@ def test_v3_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
     assert 'graph_encoder.layers.1.states' not in model.state_dict()
 
 
-def test_title_only_meta_model_unchanged(graph_data):
+def test_title_only_meta_uses_common_v4_baseline(graph_data):
     torch = pytest.importorskip('torch')
     from validation.model import SASRec, seed_everything
     from validation.graph_model import new_graph_model

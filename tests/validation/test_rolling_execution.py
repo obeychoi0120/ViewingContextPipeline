@@ -163,7 +163,9 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
     features_dir.mkdir()
     features = np.random.default_rng(len(arm)).normal(size=(len(table.items), 16)).astype(np.float32)
     features[::7] = 0
-    np.savez(features_dir / f"{arm}_embeddings.npz", values=features)
+    np.savez(features_dir / f"{arm}_embeddings.npz", title_values=features, video_values=np.zeros_like(features),
+                 title_available=np.any(features != 0, axis=1),
+                 video_available=np.zeros(len(features), dtype=bool))
 
     def tiny(config, *, item_count, branch, features, device):
         return SASRec(item_count, 10, 16, 1, 2, 0.1,
@@ -202,7 +204,7 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
     assert all(valid_bundle(p, identity, table, split) for p in bundles)
     assert original == {p.name: p.read_bytes() for p in bundles[0].iterdir()}
     assert cache_for(contexts[0], identity).key == cache_for(contexts[1], identity).key
-    assert ARCHITECTURE_VERSION == "sasrec-content-v3"
+    assert ARCHITECTURE_VERSION == "sasrec-content-v4"
     assert TRAINING_IMPLEMENTATION_VERSION == "shared-scenes-training-evaluation/v4"
 
     # Actually resume a pre-optimization bundle without preparing tensors or devices.
