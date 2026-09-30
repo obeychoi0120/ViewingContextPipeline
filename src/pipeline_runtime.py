@@ -89,7 +89,8 @@ class RunContext:
 
     @property
     def keyframes_dir(self) -> Path:
-        return self.evidence_dir / "resized_keyframes"
+        width, height = self.config["extraction"]["visual_evidence"]["image_resolution"]
+        return self.evidence_dir / "resized_keyframes" / f"{width}_{height}"
 
     @property
     def source_assets_dir(self) -> Path:

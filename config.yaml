@@ -101,10 +101,11 @@ validation:
     num_blocks: 2
     num_heads: 2
     dropout: 0.1
-    batch_size: 256
+    batch_size: 512
     max_epochs: 50
-    patience: 5
-    learning_rate: 0.0001
+    patience: 3
+    min_delta: 0.0001
+    learning_rate: 0.0003
     popularity_power: 1.0
     seeds:
     - 42

@@ -4,6 +4,7 @@ import numpy as np
 
 from validation.model import SASRec, torch, nn
 from validation.graph_inputs import GraphStore
+from validation.graph_context import GRAPH_MODEL
 
 
 def segment_mean(values, indices, count):
@@ -43,7 +44,7 @@ class RoleLayer(nn.Module):
 
 
 class RoleGraphEncoder(nn.Module):
-    def __init__(self, feature_dim=1024, output_dim=512, hidden=256, aggregation="mean"):
+    def __init__(self, feature_dim=1024, output_dim=512, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
         super().__init__()
         if aggregation not in ("mean", "attention"):
             raise ValueError("unknown scene aggregation")

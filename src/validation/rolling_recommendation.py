@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from artifact_io import read_json, write_json
 from validation.metrics import metrics_from_rank
+from validation.early_stopping import EarlyStopping
 from validation.model import require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
@@ -218,7 +219,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     model = create_model()
     optimizer = _optimizer(model, config)
     selection = []
-    best_epoch, best_score = 0, -math.inf
+    stopping = EarlyStopping(config.model.patience, getattr(config.model, "min_delta", 0.0))
     for epoch in range(1, config.model.max_epochs + 1):
         phase_started = time.monotonic()
         record = train_epoch(
@@ -240,10 +241,9 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
             f"[Rolling] {date} {arm} seed={seed} epoch={epoch} valid={score:.6f}",
             flush=True,
         )
-        if score > best_score:
-            best_epoch, best_score = epoch, score
-        if epoch - best_epoch >= config.model.patience:
+        if stopping.update(epoch, score):
             break
+    best_epoch = stopping.best_epoch
     del model, optimizer
     seed_everything(seed)
     rng = np.random.default_rng(seed)
@@ -293,6 +293,12 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
         "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
         "best_epoch": best_epoch,
         "catalog_size": len(table.items),
+        "training_settings": {
+            "learning_rate": config.model.learning_rate,
+            "batch_size": config.model.batch_size,
+            "patience": config.model.patience,
+            "min_delta": getattr(config.model, "min_delta", 0.0),
+        },
     }
     if is_graph(context):
         model.eval()

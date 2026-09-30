@@ -41,7 +41,7 @@ def test_direction_and_internal_hyphens(separator, mode):
     assert result.graph["topics"] == ["seafood preparation", "cooking"]
     assert result.graph["actions"] == [{"actor": "person-1", "action": "cross-cutting",
                                        "target": "food-1", "tool": "knife-1",
-                                       "receiver": None, "location": "unknown"}]
+                                       "location": "unknown"}]
     assert "context" not in result.graph  # Context fields are top-level in storage.
 
 

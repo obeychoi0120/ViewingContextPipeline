@@ -11,7 +11,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v8"
+GRAPH_PARSER_VERSION = "graph-text/v9"
 _REQUIRED_SECTIONS = ("Entities", "Relations", "End")
 # Recognize both relational legacy graphs and Context + Actions graphs.
 _SECTIONS = (*_REQUIRED_SECTIONS, "Context", "Actions")
@@ -173,13 +173,14 @@ def _action(line, *, repair):
 def _action_fields(line, *, repair):
     parts = re.split(r"[;；]" if repair else ";", line)
     if not 2 <= len(parts) <= 4:
-        raise GraphTextError("expected actor - action - target; tool; receiver; location")
+        raise GraphTextError("expected actor - action - target; tool; location")
     body, tool = (part.strip() for part in parts[:2])
     optional = [part.strip() for part in parts[2:]]
-    if not repair and (len(optional) != 2 or not all(optional)):
-        raise GraphTextError("receiver/location defaults required")
-    receiver = optional[0] if optional and optional[0] else "none"
-    location = optional[1] if len(optional) > 1 and optional[1] else "unknown"
+    if not repair and (len(optional) != 1 or not optional[0]):
+        raise GraphTextError("location slot required")
+    # v8 has one trailing location slot. Complete v7 lines have two trailing
+    # slots: ignore receiver and retain location. Do not infer roles from kinds.
+    location = optional[-1] if optional and optional[-1] else "unknown"
     if repair:
         relation = _relation(body, repair=True)
         actor, action, target = (relation[key] for key in ("subject_id", "predicate", "object_id"))
@@ -190,7 +191,7 @@ def _action_fields(line, *, repair):
         actor, action, target = (part.strip() for part in fields)
         if not action or _RELATION_MARK.search(action):
             raise GraphTextError("empty or ambiguous action")
-    if any(not _ID.fullmatch(value) for value in (actor, target, tool, receiver, location)):
+    if any(not _ID.fullmatch(value) for value in (actor, target, tool, location)):
         raise GraphTextError("expected endpoint IDs, none, or unknown")
 
     def reference(value):
@@ -202,7 +203,6 @@ def _action_fields(line, *, repair):
         "action": action,
         "target": reference(target),
         "tool": reference(tool),
-        "receiver": reference(receiver),
         "location": reference(location),
     }
 
@@ -282,13 +282,16 @@ def _parse_context_actions(text, *, repair):
 
 
 def _restore_action_defaults(graph):
-    """Normalize optional action slots only; leave malformed values for validation."""
+    """Drop deprecated receiver and default location; validate other values later."""
     actions = graph.get("actions")
     changed = False
     if isinstance(actions, list):
         for action in actions:
             if isinstance(action, dict):
-                for key, default in (("receiver", None), ("location", "unknown")):
+                if "receiver" in action:
+                    action.pop("receiver")
+                    changed = True
+                for key, default in (("location", "unknown"),):
                     if key not in action:
                         action[key] = default
                         changed = True

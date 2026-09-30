@@ -309,7 +309,7 @@ def test_optional_explicit_role_states_and_scene_order(graph_data):
     g['actions'][0].update(receiver='unknown', location=None)
     write_scenes(context, cid, [g])
     _, arrays, _ = build_input(context, cohort, arm)
-    assert arrays['missing'][0, -2:].tolist() == [1, 0]
+    assert arrays['missing'][0, -2:].tolist() == [0, 0]  # receiver is disabled
     invalid = scene()
     del invalid['actions'][0]['tool']
     write_scenes(context, cid, [invalid])
@@ -370,3 +370,19 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     for split, identity, branch in jobs:
         directory = combination_dir(context, split['evaluation_date'], identity['seed'], branch)
         assert combination_complete(directory, identity, len(phase_ids(EventTable(cohort['events']), split, 'test')))
+
+
+def test_deprecated_receiver_is_ignored_in_graph_inputs(graph_data):
+    context, cohort = graph_data
+    cid = cohort['catalog'][0]['content_id']
+    arm = registry(context.config)['graph_qwen']
+    write_scenes(context, cid, [scene()])
+    texts, expected, stats = build_input(context, cohort, arm)
+    for receiver in ['missing', 'c', ['p', 'c']]:
+        graph = scene()
+        graph['actions'][0]['receiver'] = receiver
+        write_scenes(context, cid, [graph])
+        actual_texts, actual, actual_stats = build_input(context, cohort, arm)
+        assert actual_texts == texts and actual_stats == stats
+        for name in expected:
+            np.testing.assert_array_equal(actual[name], expected[name])

@@ -1,5 +1,9 @@
 # ViewingContextPipeline
 
+![ViewingContextPipeline 실험 흐름](docs/design/Diagram.png)
+
+[다이어그램 PPTX 원본](docs/design/Diagram.pptx)
+
 MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시각 정보를 더했을 때 추천 성능이 어떻게 달라지는지 비교하는 실험 파이프라인입니다. Qwen·Gemini로 Graph와 Description을 생성하고, 동일한 사용자·후보 catalog·평가 구간에서 SASRec을 학습합니다.
 
 ## 실험 구성
@@ -74,9 +78,11 @@ python -m preparation prepare-input-data --run-id "$RUN_ID"
 
 `--schema`에는 실제 존재하는 Markdown 프롬프트 파일 하나를 지정합니다. 상대 경로는 저장소 루트 기준입니다.
 
+v8 Graph의 Actions는 `actor - action - target; tool; location`입니다. receiver는 출력·검증·Summary 및 직접 Graph 입력에서 제외합니다. 기존 파일은 수정하지 않으며, 완전한 v7의 6개 필드 형식과 기존 JSON은 receiver를 무시하고 읽습니다. 5개 필드 행의 마지막 값은 항상 location으로 해석하므로, location을 생략한 과거 v7의 불완전한 행은 자동으로 구별하지 않습니다. 새 실험에서는 새 Run에 아래 v8 프롬프트 쌍을 지정합니다.
+
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v7.md --model qwen --arm graph_qwen
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v7.md --model gemini --arm graph_gemini
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model qwen --arm graph_qwen
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model gemini --arm graph_gemini
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen --arm desc_qwen
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
@@ -84,8 +90,8 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prom
 Text 평가에는 선택한 소스의 Summary를 생성합니다. 아래 예시는 네 소스 모두 Gemini로 요약합니다. Qwen 요약을 실행하려면 `--model qwen`을 지정합니다.
 
 ```bash
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v7.md --model gemini --arm graph_qwen
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v7.md --model gemini --arm graph_gemini
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model gemini --arm graph_qwen
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model gemini --arm graph_gemini
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
 ```
@@ -122,7 +128,7 @@ Attention 평가에서는 추천·진단의 `mean`을 `attention`으로 바꿉�
 artifacts/
 ├── preparation/                    # 공유 cohort·영상 준비
 │   ├── cohort/
-│   ├── resized_keyframes/
+│   ├── resized_keyframes/<width>_<height>/  # 예: 640_352
 │   └── source_assets/
 ├── runs/<RUN_ID>/
 │   ├── extraction/

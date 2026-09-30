@@ -12,6 +12,13 @@ Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen,gemini}`�
 
 ## Scene·Summary 저장
 
+키프레임은 `extraction.visual_evidence.image_resolution: [width, height]`에 따라
+`preparation/resized_keyframes/<width>_<height>/<content_id>/`에 저장하고 읽습니다.
+예를 들어 `[640, 352]`이면 `resized_keyframes/640_352/`를 사용합니다.
+해상도를 바꾸면 별도 디렉터리에 준비하며, 같은 해상도로 돌아오면 기존 프레임을 재사용합니다.
+기존 `resized_keyframes/<content_id>/` 파일은 자동 이동하거나 읽지 않습니다.
+새 경로의 프레임은 `prepare-input-data`를 실행해 준비합니다.
+
 - Scene: `runs/<RUN_ID>/extraction/scenes/<source>/<content_id>.jsonl`.
 - Description 행: `content_id`, `scene_idx`, `tokens`, `description`.
 - Graph 행: `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph`. `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다.

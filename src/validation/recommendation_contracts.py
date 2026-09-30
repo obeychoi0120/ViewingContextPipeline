@@ -3,7 +3,7 @@ from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms
 
 ARCHITECTURE_VERSION = "sasrec-content-v3"
 # Current text and direct-graph architectures.
-DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v3", "sasrec-role-graph/v1"})
+DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v3", "sasrec-role-graph/v1", "sasrec-role-graph/v2"})
 DEFAULT_PROTOCOL = {"experiment_config_version": EXPERIMENT_CONFIG_VERSION}
 RECOMMENDATION_ARMS = {name: name for name in registry(DEFAULT_PROTOCOL)}
 TARGET_SOURCES = dict(RECOMMENDATION_ARMS)
@@ -27,4 +27,4 @@ def target_scope(arms, *, config=None):
 
 
 # Bump for changes to selection/refit, loss, masking, ranking, or metric semantics.
-TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-training-evaluation/v3"
+TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-training-evaluation/v4"

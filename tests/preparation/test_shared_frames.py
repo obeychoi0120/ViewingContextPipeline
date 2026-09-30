@@ -1,4 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +11,44 @@ from preparation.video.video_processor import extract_resized_keyframes
 from preparation.input_data import prepare_input_data
 from pipeline_runtime import RunContext
 from preparation.steps import prepare_cohort_step
+
+
+def test_resolution_directories_are_isolated_and_reusable(ready_context, monkeypatch):
+    from extraction.step_support import visual_rows
+
+    first = ready_context
+    assert first.keyframes_dir == first.preparation_dir / "resized_keyframes/16_8"
+    original = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in first.keyframes_dir.rglob("*.png")}
+    config = deepcopy(first.config)
+    config["extraction"]["visual_evidence"]["image_resolution"] = [32, 16]
+    second = replace(first, config=config)
+    assert second.keyframes_dir == first.preparation_dir / "resized_keyframes/32_16"
+
+    calls = []
+
+    def ffmpeg(args, **kwargs):
+        calls.append(args)
+        Image.new("RGB", (32, 16)).save(args[-1])
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("preparation.video.video_processor.subprocess.run", ffmpeg)
+    prepare_input_data(second)
+    assert len(calls) == len(original)
+    for row in visual_rows(second):
+        directory = Path(row["frames_dir"])
+        assert directory == second.keyframes_dir / row["content_id"]
+        for path in directory.glob("*.png"):
+            with Image.open(path) as frame:
+                assert frame.size == (32, 16)
+    assert original == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in original}
+
+    monkeypatch.setattr(
+        "preparation.video.video_processor.subprocess.run",
+        lambda *a, **kw: pytest.fail("both prepared resolutions must be reused"),
+    )
+    prepare_input_data(first)
+    prepare_input_data(second)
+    assert all(Path(row["frames_dir"]).parent == first.keyframes_dir for row in visual_rows(first))
 
 
 def test_second_run_reuses_shared_timestamps_and_frames(ready_context, monkeypatch):
