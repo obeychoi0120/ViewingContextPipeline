@@ -203,7 +203,7 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
     assert original == {p.name: p.read_bytes() for p in bundles[0].iterdir()}
     assert cache_for(contexts[0], identity).key == cache_for(contexts[1], identity).key
     assert ARCHITECTURE_VERSION == "sasrec-content-v3"
-    assert TRAINING_IMPLEMENTATION_VERSION == "shared-scenes-training-evaluation/v3"
+    assert TRAINING_IMPLEMENTATION_VERSION == "shared-scenes-training-evaluation/v4"
 
     # Actually resume a pre-optimization bundle without preparing tensors or devices.
     def forbid(*args, **kwargs):

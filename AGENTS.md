@@ -4,7 +4,7 @@
 
 # Run별 분석 산출물
 
-- 각 Run의 분석 코드와 보고서 Markdown 파일은 저장소 루트 기준 `artifacts/<RUN_ID>/reports/`에 저장합니다.
+- 각 Run의 분석 코드와 보고서 Markdown 파일은 저장소 루트 기준 `artifacts/runs/<RUN_ID>/reports/`에 저장합니다.
 - 해당 분석에 필요한 통계, 표, 이미지 등 부속 산출물도 같은 디렉터리 아래에 저장합니다.
 - 새 Run별 분석 산출물을 `docs/`에 저장하지 않습니다.
 - 기존 파일은 별도 이동 요청이 없는 한 그대로 둡니다.

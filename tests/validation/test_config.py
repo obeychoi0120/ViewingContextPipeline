@@ -18,7 +18,7 @@ from conftest import config_data
         lambda value: value["dataset"].pop("titles_csv"),
         lambda value: value["dataset"].update(legacy_titles="titles.csv"),
         lambda value: value["model"].update(embedding_dim=8),
-        lambda value: value["model"].update(batch_size=2),
+        lambda value: value["model"].update(batch_size=0),
         lambda value: value["model"].pop("popularity_power"),
         lambda value: value["model"].update(legacy_id_embedding=True),
     ],

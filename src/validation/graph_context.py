@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from pipeline_runtime import RunContext
 
 GRAPH_ARMS = frozenset({"meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"})
-GRAPH_ARCHITECTURE = "sasrec-role-graph/v1"
-GRAPH_MODEL = {"layers": 2, "hidden_dim": 256, "scene_dim": 512, "attention_dim": 128}
+GRAPH_ARCHITECTURE = "sasrec-role-graph/v2"
+GRAPH_MODEL = {"layers": 2, "hidden_dim": 128, "scene_dim": 512, "attention_dim": 128}
 
 
 @dataclass(frozen=True)

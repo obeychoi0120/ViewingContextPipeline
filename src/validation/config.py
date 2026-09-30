@@ -33,9 +33,10 @@ class ModelConfig(StrictModel):
     num_blocks: Literal[2]
     num_heads: Literal[2]
     dropout: float = Field(ge=0, lt=1)
-    batch_size: Literal[256]
+    batch_size: int = Field(gt=0)
     max_epochs: int = Field(gt=0)
     patience: int = Field(gt=0)
+    min_delta: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     learning_rate: float = Field(gt=0)
     popularity_power: Literal[1.0]
     seeds: list[int]
