@@ -1,4 +1,4 @@
-"""Parity against the frozen graph implementation, including real backward passes."""
+"""V3 packing/pooling parity with a loop reference, including real backward passes."""
 
 import os
 
@@ -7,7 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import graph_reference as reference  # noqa: E402
+import graph_v3_reference as reference  # noqa: E402
 from graph_fixture import synthetic_store  # noqa: E402
 from validation.graph_batching import PackedGraphStore  # noqa: E402
 from validation.graph_model import GraphSASRec, RoleGraphEncoder, graph_batch  # noqa: E402
@@ -38,8 +38,8 @@ def test_ragged_gathers_preserve_order_duplicates_and_empty_videos(device):
 @pytest.mark.parametrize("pool", ["mean", "attention"])
 def test_encoder_outputs_and_all_parameter_gradients(pool, device):
     store = synthetic_store(20, feature_dim=32)
-    old = reference.RoleGraphEncoder(feature_dim=32, output_dim=64, aggregation=pool).to(device)
-    new = RoleGraphEncoder(feature_dim=32, output_dim=64, aggregation=pool).to(device)
+    old = reference.RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
+    new = RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
     new.load_state_dict(old.state_dict())
     items = [0, 5, 2, 11, 7, 9, 1]
     inputs = [
@@ -171,8 +171,8 @@ def test_execution_tuning_does_not_invalidate_training_identity(current_context)
 @pytest.mark.parametrize("pool", ["mean", "attention"])
 def test_fully_missing_batches_do_not_create_graph_gradients(pool, device):
     store = synthetic_store(24, feature_dim=32)
-    old = reference.RoleGraphEncoder(feature_dim=32, output_dim=64, aggregation=pool).to(device)
-    new = RoleGraphEncoder(feature_dim=32, output_dim=64, aggregation=pool).to(device)
+    old = reference.RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
+    new = RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
     new.load_state_dict(old.state_dict())
     for model, batch in [
         (old, reference.graph_batch(store, [0, 11, 22], device)),
@@ -196,8 +196,8 @@ def test_checkpoint_auto_uses_total_batch_memory(monkeypatch):
         training=True,
         execution=GraphExecutionConfig(),
         packed=packed,
-        item_projection=SimpleNamespace(weight=SimpleNamespace(device=torch.device("cuda:0"))),
-        graph_encoder=SimpleNamespace(projection=SimpleNamespace(out_features=128)),
+        title_projection=SimpleNamespace(weight=SimpleNamespace(device=torch.device("cuda:0"))),
+        graph_encoder=SimpleNamespace(projection=SimpleNamespace(out_features=128), layers=[None]),
         store={"features": np.empty((0, 1024))},
         embedding_dim=512,
     )

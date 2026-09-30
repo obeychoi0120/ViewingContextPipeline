@@ -7,6 +7,7 @@ from validation.graph_inputs import GraphStore
 from validation.graph_context import GRAPH_MODEL
 from validation.graph_batching import PackedGraphStore, GRAPH_EXECUTION_VERSION
 from validation.config import GraphExecutionConfig
+from validation.profiling import span, timed, workload, is_profiling, checkpoint_contexts
 
 
 def segment_mean(values, indices, count):
@@ -50,18 +51,16 @@ class RoleLayer(nn.Module):
 
 
 class RoleGraphEncoder(nn.Module):
-    def __init__(
-        self, feature_dim=1024, output_dim=512, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"
-    ):
+    def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
         super().__init__()
         if aggregation not in ("mean", "attention"):
             raise ValueError("unknown scene aggregation")
         self.aggregation = aggregation
-        self.output_dim = output_dim
+        self.output_dim = output_dim = hidden * 3
         self.projection = nn.Linear(feature_dim, hidden)
         self.node_type = nn.Embedding(2, hidden)
-        self.layers = nn.ModuleList([RoleLayer(hidden) for _ in range(2)])
-        self.readout = nn.Sequential(nn.Linear(hidden * 3, output_dim), nn.LayerNorm(output_dim))
+        self.layers = nn.ModuleList([RoleLayer(hidden) for _ in range(GRAPH_MODEL["layers"])])
+        self.readout = nn.LayerNorm(output_dim)
         self.attention = (
             nn.Sequential(nn.Linear(output_dim, 128), nn.Tanh(), nn.Linear(128, 1))
             if aggregation == "attention"
@@ -73,36 +72,45 @@ class RoleGraphEncoder(nn.Module):
             # Match the old constant-zero branch: unused parameters must keep
             # grad=None, so AdamW does not decay them on fully missing batches.
             return batch["features"].new_zeros((len(batch["offsets"]) - 1, self.output_dim))
-        h = self.projection(batch["features"]) + self.node_type(batch["types"])
+        with span("node_projection", cuda=True):
+            h = self.projection(batch["features"]) + self.node_type(batch["types"])
         prepared = "roles" in batch
-        for layer in self.layers:
-            if prepared:
-                h = layer(
-                    h, roles=batch["roles"], states=batch["states"], counts=batch["message_counts"]
-                )
-            else:
-                h = layer(h, batch["edges"], batch["missing"])
-        count = len(batch["contexts"])
-        groups = (
-            [batch["entity_ids"], batch["action_ids"]]
-            if prepared
-            else [torch.where(batch["types"] == t)[0] for t in (0, 1)]
-        )
-        pooled = [segment_mean(h[index], batch["node_scenes"][index], count) for index in groups]
-        context = self.projection(batch["contexts"])
-        scenes = self.readout(torch.cat([*pooled, context], dim=-1))
-        video_ids, video_count = batch["scene_videos"], len(batch["offsets"]) - 1
-        if self.attention is None:
-            return segment_mean(scenes, video_ids, video_count)
-        scores = self.attention(scenes).squeeze(-1)
-        maxima = scores.new_full((video_count,), -torch.inf)
-        maxima.scatter_reduce_(0, video_ids, scores.detach(), reduce="amax", include_self=True)
-        weights = torch.exp(scores - maxima[video_ids])
-        totals = weights.new_zeros(video_count).index_add_(0, video_ids, weights)
-        weights = weights / totals[video_ids].clamp_min(torch.finfo(weights.dtype).tiny)
-        return scenes.new_zeros((video_count, self.output_dim)).index_add_(
-            0, video_ids, scenes * weights[:, None]
-        )
+        with span("message_passing", cuda=True):
+            for layer in self.layers:
+                if prepared:
+                    h = layer(
+                        h,
+                        roles=batch["roles"],
+                        states=batch["states"],
+                        counts=batch["message_counts"],
+                    )
+                else:
+                    h = layer(h, batch["edges"], batch["missing"])
+        with span("scene_readout", cuda=True):
+            count = len(batch["contexts"])
+            groups = (
+                [batch["entity_ids"], batch["action_ids"]]
+                if prepared
+                else [torch.where(batch["types"] == t)[0] for t in (0, 1)]
+            )
+            pooled = [
+                segment_mean(h[index], batch["node_scenes"][index], count) for index in groups
+            ]
+            context = self.projection(batch["contexts"])
+            scenes = self.readout(torch.cat([*pooled, context], dim=-1))
+        with span("video_pooling", cuda=True):
+            video_ids, video_count = batch["scene_videos"], len(batch["offsets"]) - 1
+            if self.attention is None:
+                return segment_mean(scenes, video_ids, video_count)
+            scores = self.attention(scenes).squeeze(-1)
+            maxima = scores.new_full((video_count,), -torch.inf)
+            maxima.scatter_reduce_(0, video_ids, scores.detach(), reduce="amax", include_self=True)
+            weights = torch.exp(scores - maxima[video_ids])
+            totals = weights.new_zeros(video_count).index_add_(0, video_ids, weights)
+            weights = weights / totals[video_ids].clamp_min(torch.finfo(weights.dtype).tiny)
+            return scenes.new_zeros((video_count, self.output_dim)).index_add_(
+                0, video_ids, scenes * weights[:, None]
+            )
 
 
 def graph_batch(store, item_ids, device):
@@ -135,11 +143,17 @@ class GraphSASRec(SASRec):
             arm=arm,
             item_features=np.zeros((item_count, 1), dtype=np.float32),
         )
+        if embedding_dim % 4:
+            raise ValueError("Graph recommendation dimension must be divisible by 4")
         self.store = store
+        self.title_dim = embedding_dim // 4
         self.graph_encoder = RoleGraphEncoder(
-            store["features"].shape[1], embedding_dim, aggregation=aggregation
+            store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation
         )
-        self.item_projection = nn.Linear(store["features"].shape[1] + embedding_dim, embedding_dim)
+        # Production: [title 128; video 384] already matches SASRec's 512.
+        del self.item_projection
+        self.title_projection = nn.Linear(store["features"].shape[1], self.title_dim)
+        self.title_norm = nn.LayerNorm(self.title_dim)
         self._vectors = self._indices = None
         self.embedding_dim = embedding_dim
         self.execution = execution or GraphExecutionConfig()
@@ -157,16 +171,21 @@ class GraphSASRec(SASRec):
 
     def _calculate_chunk(self, batch):
         # Only differentiable operations are recomputed by checkpoint backward.
-        video = self.graph_encoder(batch)
-        values = self.item_mlp(self.item_projection(torch.cat([batch["titles"], video], dim=-1)))
-        return values.masked_fill(~batch["available"].bool()[:, None], 0.0)
+        with span("graph_encoder", cuda=True):
+            video = self.graph_encoder(batch)
+        with span("item_fusion", cuda=True):
+            title = self.title_norm(self.title_projection(batch["titles"]))
+            # Biases and LayerNorm must not invent a title for a missing input.
+            title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
+            values = self.item_mlp(torch.cat([title, video], dim=-1))
+            return values.masked_fill(~batch["available"].bool()[:, None], 0.0)
 
     def _use_checkpoint(self, items):
         if not self.training or not torch.is_grad_enabled():
             return False
         if self.execution.checkpoint != "auto":
             return self.execution.checkpoint == "always"
-        device = self.item_projection.weight.device
+        device = self.title_projection.weight.device
         if device.type != "cuda":
             return False
         indices = np.asarray(items, dtype=np.int64) - 1
@@ -175,10 +194,11 @@ class GraphSASRec(SASRec):
         scenes = int(self.packed.scene_counts[indices].sum())
         hidden = self.graph_encoder.projection.out_features
         feature = self.store["features"].shape[1]
+        layers = len(self.graph_encoder.layers)
         # Conservative whole-batch activation estimate, not merely one chunk.
         estimate = 4 * (
-            nodes * (feature + hidden * 48)
-            + edges * hidden * 8
+            nodes * (feature + hidden * 24 * layers)
+            + edges * hidden * 4 * layers
             + scenes * (feature + self.embedding_dim * 4)
         )
         free, _ = torch.cuda.mem_get_info(device)
@@ -202,42 +222,56 @@ class GraphSASRec(SASRec):
         if chunk:
             chunks.append(chunk)
         use_checkpoint = self._use_checkpoint(ids)
+        if is_profiling():
+            selected = np.asarray(ids, dtype=np.int64) - 1
+            workload(
+                unique_videos=len(ids),
+                scenes=self.packed.scene_counts[selected].sum(),
+                nodes=self.packed.node_counts[selected].sum(),
+                edges=self.packed.edge_counts[selected].sum(),
+                chunks=len(chunks),
+                checkpoint_batches=int(use_checkpoint),
+            )
         if self.training:
             self.execution_counts["checkpoint_batches" if use_checkpoint else "direct_batches"] += 1
-        device = self.item_projection.weight.device
+        device = self.title_projection.weight.device
         for items in chunks:
             batch = self.packed.batch(np.asarray(items) - 1, device)
             self.execution_counts["chunks"] += 1
             if use_checkpoint:
-                values = checkpoint(self._calculate_chunk, batch, use_reentrant=False)
+                options = {"context_fn": checkpoint_contexts} if is_profiling() else {}
+                values = checkpoint(self._calculate_chunk, batch, use_reentrant=False, **options)
             else:
                 values = self._calculate_chunk(batch)
             vectors.append(values)
         return (
             torch.cat(vectors)
             if vectors
-            else self.item_projection.weight.new_empty((0, self.embedding_dim))
+            else self.title_projection.weight.new_empty((0, self.embedding_dim))
         )
 
+    @timed("graph_items")
     def prepare_items(self, ids):
-        if isinstance(ids, torch.Tensor):
-            ids = ids.detach().cpu().numpy()
-        unique = np.unique(np.asarray(ids, dtype=np.int64))
-        unique = unique[unique != 0]
-        if len(unique) and (unique[0] < 1 or unique[-1] > self.item_count):
-            raise ValueError("graph item ID outside catalog")
+        with span("unique_ids", cuda=False):
+            if isinstance(ids, torch.Tensor):
+                ids = ids.detach().cpu().numpy()
+            unique = np.unique(np.asarray(ids, dtype=np.int64))
+            unique = unique[unique != 0]
+            if len(unique) and (unique[0] < 1 or unique[-1] > self.item_count):
+                raise ValueError("graph item ID outside catalog")
         self._vectors = torch.cat(
             [
-                self.item_projection.weight.new_zeros((1, self.embedding_dim)),
+                self.title_projection.weight.new_zeros((1, self.embedding_dim)),
                 self._calculate(unique),
             ]
         )
         # Build the lookup in CPU memory once; transfer it in a single operation.
-        indices = np.full(self.item_count + 1, -1, dtype=np.int64)
-        indices[0] = 0
-        indices[unique] = np.arange(1, len(unique) + 1)
-        self._indices = torch.as_tensor(indices, device=self._vectors.device)
-        self._catalog_cached = len(unique) == self.item_count
+        with span("item_lookup", cuda=True):
+            indices = np.full(self.item_count + 1, -1, dtype=np.int64)
+            indices[0] = 0
+            indices[unique] = np.arange(1, len(unique) + 1)
+            self._indices = torch.as_tensor(indices, device=self._vectors.device)
+            self._catalog_cached = len(unique) == self.item_count
 
     def item_vectors(self, item_ids):
         if self._vectors is None:

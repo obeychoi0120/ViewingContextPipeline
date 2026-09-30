@@ -79,7 +79,8 @@ def two_jobs(context):
 
 
 @pytest.mark.torch
-def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
+@pytest.mark.parametrize("profile_every", [None, 2])
+def test_spawned_training_matches_serial_parameters_and_metrics(full_context, profile_every):
     import torch
 
     context = full_context
@@ -88,7 +89,7 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
     stream = io.StringIO()
     children_before = {child.pid for child in mp.active_children()}
     with tqdm(total=2, desc="Rolling recommendation", file=stream) as progress:
-        assert run_parallel(context, jobs, ["cpu", "cpu"], progress) == 2
+        assert run_parallel(context, jobs, ["cpu", "cpu"], progress, profile_every=profile_every) == 2
     assert {child.pid for child in mp.active_children()} == children_before
 
     table = EventTable(load_validation_cohort(context)["events"])
@@ -132,6 +133,15 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
             b.pop("elapsed_seconds")
             a["execution"].pop("seconds")
             b["execution"].pop("seconds")
+            if profile_every is not None:
+                assert a["execution"].pop("profiling")["every"] == profile_every
+                profile_path = parallel_dir / "profile.jsonl"
+                import json
+                rows = [json.loads(line) for line in profile_path.read_text().splitlines()]
+                assert {row.get("phase") for row in rows} >= {"selection", "refit", "validation", "test", "export"}
+                assert "[Profile]" in stream.getvalue()
+            else:
+                assert not (parallel_dir / "profile.jsonl").exists()
             assert a == b
             a, b = (
                 torch.load(path / "sasrec.pt", weights_only=True)["state_dict"]

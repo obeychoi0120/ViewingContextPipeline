@@ -56,6 +56,8 @@ Gemini 생성만 실행하는 환경은 `.[gemini,dev]`, 임베딩·추천 환�
 
 이하 명령은 저장소 루트에서 실행합니다. Qwen·추천의 GPU 선택은 `CUDA_VISIBLE_DEVICES`로 지정합니다. 추천의 `--workers-per-gpu`는 GPU당 독립 학습 작업 수이며 기본값은 1입니다.
 
+추천 학습의 세부 병목은 `run-recommendation`에 `--profile-every 100`을 추가해 측정할 수 있습니다. 배치별 Graph 준비·전송·인코딩·역전파와 평가 시간을 콘솔 및 조합별 `profile.jsonl`에 기록합니다. [측정 항목과 해석](docs/graph_training.md#추천-학습-병목-프로파일링)을 참고하십시오.
+
 ```bash
 export RUN_ID=260928_v7
 export CUDA_VISIBLE_DEVICES=0,1,2,3

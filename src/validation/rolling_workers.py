@@ -31,18 +31,18 @@ class WorkerOutput(io.TextIOBase):
             self.buffered = ""
 
 
-def combination_worker(context, device_name, jobs, results):
+def combination_worker(context, device_name, jobs, results, profile_every=None):
     # The parent owns Ctrl-C and terminates/joins all its children on interruption.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     output = WorkerOutput(results)
     with redirect_stdout(output), redirect_stderr(output):
         try:
-            _consume_combinations(context, device_name, jobs, results)
+            _consume_combinations(context, device_name, jobs, results, profile_every)
         finally:
             output.flush()
 
 
-def _consume_combinations(context, device_name, jobs, results):
+def _consume_combinations(context, device_name, jobs, results, profile_every=None):
     identity = None
     try:
         from validation.model import torch
@@ -67,7 +67,17 @@ def _consume_combinations(context, device_name, jobs, results):
             if split["evaluation_date"] != previous_date:
                 prepared = prepare_split(table, split)
                 previous_date = split["evaluation_date"]
-            run_combination(context, config, table, split, identity, branch, prepared, device)
+            run_combination(
+                context,
+                config,
+                table,
+                split,
+                identity,
+                branch,
+                prepared,
+                device,
+                **({"profile_every": profile_every} if profile_every is not None else {}),
+            )
             results.put(("complete", identity))
     except BaseException:
         results.put(
@@ -75,7 +85,7 @@ def _consume_combinations(context, device_name, jobs, results):
         )
 
 
-def run_parallel(context, jobs, devices, progress):
+def run_parallel(context, jobs, devices, progress, *, profile_every=None):
     # CUDA must be initialized in spawned children, never inherited through fork.
     runtime = mp.get_context("spawn")
     pending, results = runtime.Queue(), runtime.Queue()
@@ -88,7 +98,9 @@ def run_parallel(context, jobs, devices, progress):
         for device in devices[: len(jobs)]:
             pending.put(None)
             process = runtime.Process(
-                target=combination_worker, args=(context, device, pending, results)
+                target=combination_worker,
+                args=(context, device, pending, results),
+                kwargs={"profile_every": profile_every} if profile_every is not None else {},
             )
             process.start()
             processes.append(process)

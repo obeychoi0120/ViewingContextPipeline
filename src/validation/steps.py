@@ -239,6 +239,7 @@ def run_recommendation(
     target=None,
     representation_mode="text",
     scene_aggregation=None,
+    profile_every=None,
 ):
     from validation.graph_context import graph_context, validate_mode
 
@@ -250,10 +251,21 @@ def run_recommendation(
     from validation.rolling_recommendation import run_rolling
 
     log_step_start(
-        context, "run-recommendation", force=force, target=target, workers_per_gpu=workers_per_gpu
+        context,
+        "run-recommendation",
+        force=force,
+        target=target,
+        workers_per_gpu=workers_per_gpu,
+        profile_every=profile_every,
     )
     context.initialize()
-    return run_rolling(context, force=force, workers_per_gpu=workers_per_gpu, target=target)
+    return run_rolling(
+        context,
+        force=force,
+        workers_per_gpu=workers_per_gpu,
+        target=target,
+        **({"profile_every": profile_every} if profile_every is not None else {}),
+    )
 
 
 def run_diagnosis(
