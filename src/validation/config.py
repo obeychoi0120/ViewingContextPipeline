@@ -77,6 +77,14 @@ class FullCohortConfig(StrictModel):
     exclude_final_day: Literal[True]
 
 
+class GraphExecutionConfig(StrictModel):
+    # Execution choices only: no change to model weights, loss or cache identity.
+    chunk_items: int = Field(default=256, gt=0)
+    chunk_nodes: int = Field(default=32768, gt=0)
+    checkpoint: Literal["auto", "always", "never"] = "auto"
+    feature_cache_mb: int = Field(default=2048, ge=0)
+
+
 class ValidationConfig(StrictModel):
     schema_version: Literal["validation-config/v5"]
     run_id: str
@@ -85,6 +93,7 @@ class ValidationConfig(StrictModel):
     encoder: EncoderConfig
     model: ModelConfig
     evaluation: EvaluationConfig
+    graph_execution: GraphExecutionConfig = Field(default_factory=GraphExecutionConfig)
     output_dir: Path
 
 
@@ -101,6 +110,7 @@ def build_validation_config(
             "encoder": {**settings["encoder"], "model_path": model_path},
             "model": settings.get("model"),
             "evaluation": settings.get("evaluation"),
+            "graph_execution": settings.get("graph_execution", {}),
             "output_dir": output_dir,
         }
     )

@@ -42,7 +42,9 @@ def transition_loss(model, table, ids, probabilities, device):
     targets = torch.as_tensor(target_ids, dtype=torch.long, device=device)
     inputs = execution.inputs(ids, model.max_length, device)
     if hasattr(model, "prepare_items"):
-        model.prepare_items(torch.cat([inputs.reshape(-1), targets]))
+        model.prepare_items(
+            np.concatenate([execution.padded(model.max_length)[ids].reshape(-1), target_ids])
+        )
     users = model.user_vectors(inputs)
     logits = users @ model.item_vectors(targets).T
     logs = execution.log_probabilities(probabilities, target_ids, device, logits.dtype)
@@ -244,6 +246,9 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
         if stopping.update(epoch, score):
             break
     best_epoch = stopping.best_epoch
+    graph_selection_execution = (
+        model.execution_report() if hasattr(model, "execution_report") else None
+    )
     del model, optimizer
     seed_everything(seed)
     rng = np.random.default_rng(seed)
@@ -301,7 +306,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
         },
     }
     if is_graph(context):
-        model.eval()
+        # evaluate() already left a frozen catalog cache on graph models.
         with torch.no_grad():
             np.save(directory / "catalog_vectors.npy", model.catalog_vectors().cpu().numpy())
     save_checkpoint(directory / "sasrec.pt", model, metadata)
@@ -317,7 +322,18 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
                 np.mean(frequencies[table.targets[ids["test"]]] == 0)
             ),
             "elapsed_seconds": time.monotonic() - started,
-            "execution": {"version": EXECUTION_VERSION, "seconds": timings},
+            "execution": {
+                "version": EXECUTION_VERSION,
+                "seconds": timings,
+                **(
+                    {
+                        "graph_selection": graph_selection_execution,
+                        "graph_refit": model.execution_report(),
+                    }
+                    if graph_selection_execution
+                    else {}
+                ),
+            },
             "device": str(device),
             "environment": {
                 "python": sys.version,

@@ -29,7 +29,7 @@ python -m validation run-diagnosis --run-id 260928_v7 --representation-mode grap
 - `_meta`는 `[제목 1024; Graph 512]` 순서입니다. 제목 없는 Graph Arm도 같은 1536→512 변환층을 사용하되 제목 부분은 0입니다.
 - 유효한 Graph가 없으면 Graph 부분은 0입니다. 제목도 없으면 최종 영상 벡터는 0입니다. 후보·interaction은 제거하지 않습니다. `meta` 기준선은 기존 모델 계산을 그대로 사용합니다.
 - raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver는 기존 데이터에 있어도 무시하고 location 누락은 `unknown`으로 해석합니다. 모델 텐서의 receiver 슬롯은 형태 호환성을 위해 남기되 항상 `none` 상태로 두고 해당 간선은 만들지 않습니다. 입력 버전을 갱신해 receiver를 사용한 기존 특징 캐시를 재사용하지 않습니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
-- 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 분할당 64개 영상·8,192개 노드를 기준으로 묶되 이를 넘는 단일 영상도 그대로 유지합니다. 학습 시 activation checkpointing으로 분할 내부 활성값을 backward에서 재계산합니다.
+- 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 기본 분할 크기는 256개 영상·32,768개 노드이며 이를 넘는 단일 영상도 그대로 유지합니다. Checkpoint는 아래 실행 설정에 따라 사용하며, 배치 조립과 전송은 backward에서 반복하지 않습니다.
 - SASRec의 loss, 인기도 보정, 후보 마스킹, 이력 길이 10, 차원 512, 날짜별 selection/refit/test는 기존과 같습니다. 각 refit은 모든 학습 모듈을 초기화합니다. 학습 배치의 이력·정답 아이템 합집합만 계산하고 optimizer 갱신 후 캐시를 버립니다.
 
 ## 산출물과 재현
@@ -70,3 +70,47 @@ Graph 모델 계약은 `sasrec-role-graph/v2`, 학습 구현 계약은
 재사용하지 않습니다. 고정 BGE·Graph 입력은 재사용할 수 있습니다.
 실행 중인 프로세스에는 변경이 자동 적용되지 않으며 다음 실행부터 적용됩니다.
 속도 및 추천 성능 개선은 아직 전체 실험으로 검증하지 않았습니다.
+
+## Graph 실행 최적화 (2026-09-30)
+
+`validation.graph_execution`은 학습 알고리즘과 별개인 실행 설정입니다. 생략해도 다음 기본값을 사용합니다.
+
+```yaml
+validation:
+  graph_execution:
+    chunk_items: 256
+    chunk_nodes: 32768
+    checkpoint: auto
+    feature_cache_mb: 2048
+```
+
+- 연결을 역할별로 작업 시작 때 정리합니다. 영상·장면·노드별 Python 조립 루프 대신 연속 구간을 일괄 gather하고, 작은 인덱스 배열을 합쳐 GPU로 전송합니다.
+- 역할별 edge·예약값 인덱스, 메시지 개수와 노드 그룹을 배치 준비 때 계산하므로 각 GNN 층에서 GPU boolean filtering을 반복하지 않습니다.
+- mean은 영상 ID별 합/개수로, attention은 영상 ID별 안정화 softmax/가중합으로 일괄 계산합니다. 장면 삭제, 시간 순서 정보 또는 새 연결은 추가하지 않습니다.
+- `checkpoint: auto`는 전체 학습 배치의 노드·edge·장면 수로 활성값 메모리를 추정합니다. CUDA에서 추정치가 `min(8 GiB, 현재 여유 메모리의 35%)`를 넘으면 checkpoint를 적용하고, 그렇지 않으면 재계산을 생략합니다. CPU의 auto는 재계산하지 않습니다. 메모리 사용량을 엄격히 제한해야 하면 `always`, 재계산을 끄려면 `never`를 사용합니다. auto는 추정 규칙이며 최대 메모리를 보장하는 제한값은 아닙니다.
+- Checkpoint의 대상은 이미 준비한 입력에 대한 신경망 연산뿐입니다. 배치 조립·고정 특징 조회·GPU 전송은 다시 실행하지 않습니다.
+- 고정 BGE 특징 사전 전체가 `min(feature_cache_mb, 현재 여유 GPU 메모리의 20%)`에 들어가면 GPU에 유지합니다. 들어가지 않거나 할당에 실패하면 필요한 특징을 CPU에서 일괄 조회·전송합니다. `feature_cache_mb: 0`으로 GPU 특징 캐시를 끌 수 있습니다. 전체 topology의 GPU 상주나 비동기 prefetch는 이번 구현에 포함하지 않습니다.
+- 학습 이력·정답 ID 합집합은 원래 CPU 데이터에서 만들고, 학습된 아이템 벡터는 기존처럼 optimizer 갱신 후 폐기합니다. 평가 catalog는 같은 모델 상태에서 재사용하며 저장 직전에 재계산하지 않습니다.
+
+실행 버전은 `packed-role-graph/v1`이며 `training.json`의 `execution.graph_selection`과
+`execution.graph_refit`에 설정·checkpoint 적용 배치 수·chunk 수·GPU 특징 캐시 크기를 기록합니다.
+`chunks`는 해당 모델의 학습 및 평가 호출을 합친 수이며, checkpoint/direct 배치 수는 학습 호출만 셉니다.
+
+파라미터 구조, loss, seed, 학습률·early stopping·refit과 입력 해시는 유지했습니다.
+실행 설정은 학습 캐시 키를 바꾸지 않으므로 **동일한 학습 설정의 완료 조합과 기존 checkpoint는 재사용**합니다.
+부동소수점 연산 묶음/합산 순서가 바뀌므로 비트 단위 일치 대신 출력·gradient·점수 오차와 테스트 순위를 검증합니다.
+전체 실제 데이터의 추천 성능 및 RTX 6000 Ada 처리량은 아직 검증하지 않았습니다.
+
+CPU 회귀 검사:
+
+```bash
+CUDA_VISIBLE_DEVICES='' PYTHONPATH=.:src python -m pytest tests/validation/test_graph_execution.py tests/validation/test_direct_graph.py -q
+```
+
+실제 준비된 Graph 입력에서 짧은 성능 측정(전체 실험과 별도 실행):
+
+```bash
+python artifacts/runs/260928_v7/reports/graph_execution_benchmark.py --device cuda:0 --graph-input artifacts/runs/260928_v7/validation/representations/graph/graph_qwen_embeddings --batch-size 512 --iterations 5 --output artifacts/runs/260928_v7/reports/graph_execution_rtx6000.json
+```
+
+측정 코드·결과와 범위는 [실행 최적화 보고서](../artifacts/runs/260928_v7/reports/graph_execution_optimization.md)에 정리합니다.

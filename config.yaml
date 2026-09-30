@@ -95,6 +95,11 @@ validation:
     embedding_dim: 1024
     max_length: 512
     batch_size: 32
+  graph_execution:
+    chunk_items: 256
+    chunk_nodes: 32768
+    checkpoint: auto
+    feature_cache_mb: 2048
   model:
     max_sequence_length: 10
     embedding_dim: 512
