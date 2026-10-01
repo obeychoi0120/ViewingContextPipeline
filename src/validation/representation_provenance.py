@@ -120,11 +120,22 @@ def recommendation_identity(context, branch):
     from validation.graph_context import is_graph, GRAPH_MODEL, GRAPH_ARCHITECTURE
 
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION
+    from model_provenance import canonical, local_model_identity
+
+    encoder = {
+        "embedding_dim": context.config["validation"]["encoder"]["embedding_dim"],
+        "model_name": context.path("models", "bge").name,
+        "model": canonical(local_model_identity(context.path("models", "bge"))),
+    }
 
     item_model = {**ITEM_MODEL, "kind": "baseline" if branch == "meta" else "split"}
+    item_model["video_transform"] = (
+        "none" if branch == "meta" else "graph_encoder" if is_graph(context) else "identity"
+    )
 
     if is_graph(context):
         return {
+            "encoder": encoder,
             "item_model": item_model,
             "embedding_hash": value,
             "representation_mode": "graph",
@@ -133,6 +144,7 @@ def recommendation_identity(context, branch):
             "graph_architecture": GRAPH_ARCHITECTURE,
         }
     return {
+        "encoder": encoder,
         "embedding_hash": value,
         "item_model": item_model,
         "representation_mode": "text",

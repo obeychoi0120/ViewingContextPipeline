@@ -107,8 +107,10 @@ if nn is not None:
             if arm == "metadata":
                 self.item_projection = nn.Linear(titles.shape[1], embedding_dim)
             else:
+                if videos.shape[1] != embedding_dim * 3 // 4:
+                    raise ValueError("video feature dimension must match the direct video output dimension")
                 self.title_projection = nn.Linear(titles.shape[1], embedding_dim // 4)
-                self.video_projection = nn.Linear(videos.shape[1], embedding_dim * 3 // 4)
+                self.video_projection = nn.Identity()
             self.item_norm = nn.LayerNorm(embedding_dim, eps=1e-5)
             self.position_embedding = nn.Embedding(max_length, embedding_dim)
             layer = nn.TransformerEncoderLayer(
@@ -161,7 +163,7 @@ if nn is not None:
             else:
                 with span("title_projection"):
                     title = self.title_projection(self.title_features[item_ids])
-                with span("video_projection"):
+                with span("video_lookup"):
                     video = self.video_projection(self.video_features[item_ids])
                 title = title.masked_fill(~title_present.unsqueeze(-1), 0.0)
                 video = video.masked_fill(~video_present.unsqueeze(-1), 0.0)
@@ -224,14 +226,14 @@ def require_torch() -> None:
         )
 
 
-def seed_everything(seed: int) -> None:
+def seed_everything(seed: int, *, deterministic: bool = False) -> None:
     require_torch()
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    torch.use_deterministic_algorithms(True)
+    torch.use_deterministic_algorithms(deterministic)
 
 
 def pad_sequences(

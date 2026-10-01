@@ -236,7 +236,10 @@ def run_combination(
     (directory / "complete.json").unlink(missing_ok=True)
     print(f"[Rolling] {date} seed={seed} {arm}: selection device={device}", flush=True)
     profiler = (
-        RunProfiler(directory, identity, device, profile_every, operators=profile_operators)
+        RunProfiler(
+            directory, {**identity, "deterministic": config.model.deterministic}, device,
+            profile_every, operators=profile_operators,
+        )
         if profile_every is not None
         else None
     )
@@ -271,7 +274,7 @@ def run_combination(
             config, item_count=len(table.items), branch=branch, features=features, device=device
         )
 
-    seed_everything(seed)
+    seed_everything(seed, deterministic=config.model.deterministic)
     rng = np.random.default_rng(seed)
     with sampled(profiler, "selection_init", kind="stage"):
         with span("model_and_optimizer"):
@@ -320,7 +323,7 @@ def run_combination(
         model.execution_report() if hasattr(model, "execution_report") else None
     )
     del model, optimizer
-    seed_everything(seed)
+    seed_everything(seed, deterministic=config.model.deterministic)
     rng = np.random.default_rng(seed)
     with sampled(profiler, "refit_init", kind="stage"):
         with span("model_and_optimizer"):
@@ -387,6 +390,7 @@ def run_combination(
         "best_epoch": best_epoch,
         "catalog_size": len(table.items),
         "training_settings": {
+            "deterministic": config.model.deterministic,
             "learning_rate": config.model.learning_rate,
             "batch_size": config.model.batch_size,
             "patience": config.model.patience,
@@ -525,6 +529,7 @@ def run_rolling(
                     "seed": seed,
                     "arm": arm,
                     "training_input_hash": training_input_hash,
+                    "deterministic": config.model.deterministic,
                     **recommendation_identity(context, branch),
                 }
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)

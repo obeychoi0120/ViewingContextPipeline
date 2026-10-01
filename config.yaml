@@ -20,7 +20,7 @@ data:
   titles_supplement_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-50k_titles.csv
 models:
   qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
-  bge: /home_nvme/shared/models/bge-large-en-v1.5
+  bge: /home_nvme/shared/models/bge-small-en-v1.5
   gemini:
     project_id: insight-dev-490002
     location: global
@@ -92,7 +92,7 @@ validation:
     evaluation_days: 7
     exclude_final_day: true
   encoder:
-    embedding_dim: 1024
+    embedding_dim: 384
     max_length: 512
     batch_size: 32
   graph_execution:
@@ -101,6 +101,7 @@ validation:
     checkpoint: auto
     feature_cache_mb: 2048
   model:
+    deterministic: false
     max_sequence_length: 10
     embedding_dim: 512
     num_blocks: 2

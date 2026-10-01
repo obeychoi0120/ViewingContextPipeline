@@ -19,15 +19,15 @@ python -m validation run-diagnosis --run-id 260928_v7 --representation-mode grap
 
 위 추천 명령은 각각 **7일 × 3 seed × 4 Arm = 84개 조합**의 전체 실험입니다. 완료된 조합은 체크섬과 입력 해시를 검증해 재사용하고, 중단된 조합은 초기화부터 다시 실행합니다. `--force`는 완료 조합도 재계산합니다. 실패한 epoch 중간 상태에서 이어 학습하는 방식은 아닙니다.
 
-기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 text와 같은 제목 1024→512 projection + LayerNorm 기준선이며 Graph encoder를 사용하지 않습니다.
+기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 text와 같은 제목 384→512 projection + LayerNorm 기준선이며 Graph encoder를 사용하지 않습니다. 현재 small 전환의 재임베딩 절차는 아래 모델 v5 절을 참고하세요.
 
 ## 모델 및 데이터 계약
 
 - BGE 입력: entity의 종류·attributes, action 문구, Context의 medium·format·topics, 필요한 Arm의 영문 제목. 고유 문자열만 인코딩하며 float32 특징은 학습하지 않습니다.
 - entity/action 노드 사이 actor·target·tool·location별 양방향 메시지를 1층·128차원에서 전달합니다. `none`/`unknown`은 역할별 서로 다른 상태 벡터이며 공유 개체 노드가 아닙니다.
 - entity 평균 128, action 평균 128, projection한 Context 128을 단순 결합해 장면 384차원을 만듭니다. 영상 mean 또는 attention pooling은 순서 불변이며 시간 위치 정보와 장면 간 메시지는 사용하지 않습니다.
-- `_meta`는 제목 BGE 1024를 Linear 1024→128로 변환하고 `[제목 128; Graph 384]`를 결합한 뒤 LayerNorm(512)를 적용합니다. 제목 및 장면 concat 직후 별도 LayerNorm과 아이템 MLP는 없습니다. Role Graph Encoder와 SASRec 내부 정규화는 유지합니다.
-- 누락된 제목·영상 부분은 최종 LayerNorm 전 영벡터입니다. 부분 결측 영역이 정규화 이후에도 0일 필요는 없습니다. 전체 결측과 padding은 LayerNorm 이후 다시 0으로 마스킹하며 후보·interaction은 제거하지 않습니다. `meta`는 제목 1024→512→LayerNorm을 사용합니다.
+- `_meta`는 제목 BGE 384를 Linear 384→128로 변환하고 `[제목 128; Graph 384]`를 결합한 뒤 LayerNorm(512)를 적용합니다. 제목 및 장면 concat 직후 별도 LayerNorm과 아이템 MLP는 없습니다. Role Graph Encoder와 SASRec 내부 정규화는 유지합니다.
+- 누락된 제목·영상 부분은 최종 LayerNorm 전 영벡터입니다. 부분 결측 영역이 정규화 이후에도 0일 필요는 없습니다. 전체 결측과 padding은 LayerNorm 이후 다시 0으로 마스킹하며 후보·interaction은 제거하지 않습니다. `meta`는 제목 384→512→LayerNorm을 사용합니다.
 - raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver는 기존 데이터에 있어도 무시하고 location 누락은 `unknown`으로 해석합니다. 모델 텐서의 receiver 슬롯은 형태 호환성을 위해 남기되 항상 `none` 상태로 두고 해당 간선은 만들지 않습니다. 입력 버전을 갱신해 receiver를 사용한 기존 특징 캐시를 재사용하지 않습니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
 - 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 기본 분할 크기는 256개 영상·32,768개 노드이며 이를 넘는 단일 영상도 그대로 유지합니다. Checkpoint는 아래 실행 설정에 따라 사용하며, 배치 조립과 전송은 backward에서 반복하지 않습니다.
 - SASRec의 loss, 인기도 보정, 후보 마스킹, 이력 길이 10, 차원 512, 날짜별 selection/refit/test는 기존과 같습니다. 각 refit은 모든 학습 모듈을 초기화합니다. 학습 배치의 이력·정답 아이템 합집합만 계산하고 optimizer 갱신 후 캐시를 버립니다.
@@ -115,7 +115,7 @@ v3에서는 가중치 구조가 달라졌으므로 당시 v2 비교 스크립트
 
 ## 이전 Graph 모델 v3: 1층 encoder와 128+384 결합 (2026-09-30)
 
-아래는 이전 v3의 변경 이력입니다. 현재 계약은 v4이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
+아래는 이전 v3의 변경 이력입니다. 현재 계약은 v5이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
 
 | 부분 | 이전 v2 | 현재 v3 |
 |---|---|---|
@@ -271,7 +271,111 @@ device 시간이 수집되지 않았다면 CPU 비율로 GPU projection 비중�
 측정 구간은 한 배치이므로 전체 epoch의 projection 비중으로 확정하지 않습니다.
 
 
-## 모델 v4: Baseline·Text·Graph 최종 구조
+## 모델 v5: BGE small 전환과 state lookup 최적화
+
+새 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
+설정 계약은 `validation-config/v6`, Text 모델은 `sasrec-content-v5`, Graph 모델은
+`sasrec-role-graph/v5`, 학습 구현은 `shared-scenes-training-evaluation/v5`입니다.
+Text의 분리 입력 포맷(v4)과 Graph 입력 포맷(v2)은 유지하지만 BGE 모델 식별과 차원이
+특징 해시에 포함되므로 기존 large 특징을 재사용하지 않습니다. 1024/768차원 Encoder 설정,
+실제 모델의 다른 hidden size, 저장 특징 배열의 차원 불일치는 거부합니다.
+
+| 경로 | 학습 구조 |
+|---|---|
+| Baseline | 제목 BGE 384 → Linear 512 → LayerNorm 512 |
+| Text | 제목 384 → Linear 128; Summary 384 → Identity → concat 512 → LayerNorm 512 |
+| Graph | 노드·Context 384 → 공유 Linear 128; 역할별 연산 → Entity·Action·Context concat 384 → mean/attention 384 |
+| Graph 제목 결합 | 제목 384 → Linear 128 + Graph 영상 384 → concat 512 → LayerNorm 512 |
+| 공통 추천기 | SASRec 512, 2 blocks, 2 heads; User MLP 512 유지 |
+
+Text Summary는 frozen BGE 값을 그대로 사용하며 `video_projection`의 학습 가중치는 없습니다.
+Graph의 Context는 노드와 **동일한 Linear 모듈**을 사용하며, 제목 projection은 별도입니다.
+결측 구성 요소는 concat 전에 마스킹하고, 전체 결측과 padding은 최종 LayerNorm 뒤에
+다시 0으로 만듭니다. 제목 없는 Arm은 기존처럼 제목 슬롯 128이 0입니다.
+
+`validation.model.deterministic: false`가 기본값이며 모든 Text·Graph Arm에 적용됩니다.
+Python·NumPy·PyTorch seed는 계속 고정합니다. Selection과 refit 각각 초기화할 때,
+병렬 worker 안에서도 같은 설정으로 `torch.use_deterministic_algorithms`를 호출합니다.
+`true`로 바꾸면 강제 모드를 사용할 수 있으며, CUDA에서는 PyTorch/cuBLAS 실행 조건에 따라
+시작 전에 `export CUBLAS_WORKSPACE_CONFIG=:4096:8`이 필요합니다.
+설정값은 training/checkpoint metadata와 profiler 시작 레코드에 남습니다.
+모델 구조·입력 차원·BGE 모델 식별·결정성 값 및 학습 구현 버전은 결과 캐시 식별에 반영됩니다.
+결정성 설정을 바꾸면 같은 특징으로도 추천 결과를 재학습합니다.
+
+역할별 `states`는 이름·shape `(5, 2, 128)`·초기화를 유지하며 lookup만 `F.embedding`으로
+교체했습니다. `sparse=False`, `scale_grad_by_freq=False`, `max_norm=None`, `padding_idx=None`으로
+일반 optimizer와 누적 gradient의 수학적 의미를 유지합니다. 역할 순서와 메시지 누적도 같습니다.
+Profiler의 `graph_encoder/message_passing/state_lookup` 구간과 operator JSON의
+`EmbeddingBackward`/`aten::embedding_dense_backward` 비용으로 확인합니다.
+Chunk 확대, compile, 추가 캐싱은 적용하지 않았습니다.
+
+### 서버 B에서 특징 재생성과 재학습
+
+기존 extraction·Summary·보고서와 large 그림은 보존합니다. 기존 결과도 보존하려면 새 Run에
+기존 extraction만 복사하고 small 특징과 추천 결과를 생성할 수 있습니다. 아래는 그 예입니다.
+새 Run 디렉터리가 아직 없는 상태에서 실행하며, 데이터 경로와 shared preparation cohort는
+원본 Run과 동일해야 합니다. 모델은 서버에 미리 준비하고 네트워크 다운로드는 사용하지 않습니다.
+
+```bash
+conda activate vc_cloud
+export RUN_ID=261001_v8_small
+mkdir -p "artifacts/runs/$RUN_ID"
+cp -a artifacts/runs/260930_v8/extraction "artifacts/runs/$RUN_ID/extraction"
+
+# Text: 모든 frozen 특징을 small로 생성하고 selection부터 학습합니다.
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+
+# Graph도 small 특징을 먼저 재생성합니다. Attention은 pooling 옵션만 바꿉니다.
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+```
+
+기존 Run에 직접 실행하면 small 특징과 새 추천 결과가 해당 경로를 갱신합니다.
+`--force` 없이도 large 캐시는 배제합니다. 기존 large checkpoint는 small 모델에 로드할 수 없습니다.
+각 Graph 입력의 `statistics.json`에서 유효 장면 수를 확인하세요. 빈 Graph의 영벡터 처리도
+유지되므로 학습 완료만으로 Graph 정보가 사용되었다고 판단할 수 없습니다.
+
+### 두 최적화의 독립 측정
+
+[측정 코드](../artifacts/runs/260930_v8/reports/benchmark_small_graph_optimizations.py)는
+동일 small 구조에서 결정성 on/off × indexing/embedding의 4개 조합을 비교합니다.
+입력 배치·초기 state_dict·seed·warm-up 횟수가 같고, 반복마다 조합 순서를 섞습니다.
+원래 indexing은 측정 코드에만 존재하며 제품 경로에 선택 설정을 추가하지 않습니다.
+학습 처리 시간은 **profiler를 끄고** CUDA 동기화 후 측정하며, operator capture는
+별도 warm-up 이후 배치에서 수행합니다. 결과에는 입력·가중치 hash, 장치·PyTorch 버전,
+평균 배치 시간의 반복별 값과 중앙값, events/s, operator trace를 저장합니다.
+실제 small Graph 특징을 생성한 뒤 같은 서버에서 실행하세요.
+측정 코드는 Git 제외 경로인 `artifacts/` 아래에 있으므로 서버 B에도 해당 파일을 복사합니다.
+
+```bash
+python artifacts/runs/260930_v8/reports/benchmark_small_graph_optimizations.py \
+  --run-id "$RUN_ID" --arm graph_qwen_meta --aggregation mean --device cuda:0 \
+  --warmup 5 --steps 30 --repeats 3 --operators
+```
+
+산출물은 해당 Run의 `reports/small_optimization_benchmark_<timestamp>/`에 저장합니다.
+특정 selection 구간은 `--date YYYY-MM-DD`로 지정합니다. 전체 실험 평가나 품질 비교는 하지 않습니다.
+`--device cpu --synthetic-items 32 --batch-size 8 --warmup 1 --steps 2 --repeats 1`은
+실제 BGE 호출 없이 측정 코드의 동작을 확인하는 smoke 검사이며 성능 근거로 쓰지 않습니다.
+CPU와 현재 VM의 단위 검증은 실제 서버 B의 속도 개선이나 NDCG/HR 품질 변화 측정을 대신하지 않습니다.
+
+현재 VM에서는 CPU·CUDA operator 검사를 같은 프로세스에서 실행했을 때 일부 GPU 비용이
+0으로 기록되는 현상이 관찰됐습니다. 별도 CUDA 프로세스에서는 kernel 비용을 확인했습니다.
+측정 JSON의 `operator_device_timing_available`이 false이면 해당 operator 비용을 해석하지 않고,
+profiler를 끈 wall time만 사용합니다.
+
+Small 구조 그림: [편집 가능한 PPTX](design/recsys_diagram_small.pptx),
+[PPTX에서 렌더링한 PNG](design/recsys_diagram_small.png).
+[생성 코드](design/generate_recsys_diagram_small.py)는 기존 large PPTX를 읽어 도형·연결선을
+수정하고 LibreOffice로 PDF를 렌더링한 뒤 PNG를 생성합니다. 실행에는 `python-pptx`,
+`PyMuPDF`, LibreOffice Impress가 필요합니다. 기존 `recsys_diagram.pptx/png`는 변경하지 않습니다.
+
+## 이전 모델 v4: Baseline·Text·Graph 최종 구조
+
+아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 v5의 small 전환 절차를 따릅니다.
 
 최종 다이어그램과 일치하는 모델 계약은 Text `sasrec-content-v4`, Graph `sasrec-role-graph/v4`입니다.
 

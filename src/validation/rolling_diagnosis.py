@@ -168,6 +168,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
                     "seed": seed,
                     "arm": arm,
                     "training_input_hash": training_input_hash,
+                    "deterministic": config.model.deterministic,
                 }
                 from validation.representation_provenance import recommendation_identity
 

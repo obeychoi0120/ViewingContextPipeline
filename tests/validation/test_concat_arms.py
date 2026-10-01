@@ -233,6 +233,8 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
     embed_representations(ready_context, target=list(registry(ready_context.config)))
 
     def tiny(config, *, item_count, branch, features, device):
+        features = {**features, "title_values": features["title_values"][:, :6],
+                    "video_values": features["video_values"][:, :6]}
         return SASRec(item_count, 10, 8, 1, 2, 0, arm=branch, item_features=features).to(device)
 
     monkeypatch.setattr("validation.rolling_recommendation._new_model", tiny)
@@ -445,7 +447,7 @@ def test_embedding_never_sends_combined_title_summary(ready_context, fake_models
         def encode(self, texts):
             calls.extend(texts)
             self.last_truncated_flags = [False] * len(texts)
-            return np.ones((len(texts), 1024), dtype=np.float32)
+            return np.ones((len(texts), 384), dtype=np.float32)
 
     monkeypatch.setattr('validation.features.BGETextEncoder', Encoder)
     arms = registry(ready_context.config)

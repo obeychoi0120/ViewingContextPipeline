@@ -54,7 +54,7 @@ def prepare_embeddings(context):
     )
     write_json(context.representations_dir / "graph_gemini_fallbacks.json", {"fallbacks": []})
     for branch in registry(context.config):
-        values = np.random.default_rng(4).normal(size=(4, 1024)).astype(np.float32)
+        values = np.random.default_rng(4).normal(size=(4, 384)).astype(np.float32)
         np.savez(context.representations_dir / f"{branch}_embeddings.npz", title_values=values, video_values=np.zeros_like(values),
                  title_available=np.any(values != 0, axis=1),
                  video_available=np.zeros(len(values), dtype=bool))
@@ -73,6 +73,7 @@ def two_jobs(context):
                 "seed": seed,
                 "arm": "meta",
                 "training_input_hash": training_hash,
+                "deterministic": validation_config(context).model.deterministic,
             },
             "meta",
         )
@@ -81,13 +82,16 @@ def two_jobs(context):
 
 
 @pytest.mark.torch
-@pytest.mark.parametrize("profile_every, profile_operators", [(None, False), (2, False), (2, True)])
+@pytest.mark.parametrize("profile_every, profile_operators, deterministic", [
+    (None, False, False), (2, False, False), (2, True, False), (2, True, True),
+])
 def test_spawned_training_matches_serial_parameters_and_metrics(
-    full_context, profile_every, profile_operators
+    full_context, profile_every, profile_operators, deterministic
 ):
     import torch
 
     context = full_context
+    context.config["validation"]["model"]["deterministic"] = deterministic
     if profile_operators:
         # The tiny fixture otherwise finishes each epoch before batch 3.
         context.config["validation"]["model"]["batch_size"] = 4
@@ -139,6 +143,7 @@ def test_spawned_training_matches_serial_parameters_and_metrics(
             complete_b.pop("checksums")
             assert complete_a == complete_b
             a, b = (read_json(path / "training.json") for path in (parallel_dir, serial_dir))
+            assert a["training_settings"]["deterministic"] is deterministic
             a.pop("elapsed_seconds")
             b.pop("elapsed_seconds")
             a["execution"].pop("seconds")
@@ -153,6 +158,7 @@ def test_spawned_training_matches_serial_parameters_and_metrics(
                 assert {row.get("phase") for row in rows} >= {"selection", "refit", "validation", "test", "export"}
                 assert "[Profile]" in stream.getvalue()
                 assert rows[0]["operator_profiling"] == profile_operators
+                assert rows[0]["deterministic"] is deterministic
                 if profile_operators:
                     assert any(row.get("operator_summary") for row in rows)
             else:

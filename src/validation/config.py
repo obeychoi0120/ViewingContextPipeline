@@ -22,12 +22,13 @@ class RollingDatasetConfig(DatasetConfig):
 
 class EncoderConfig(StrictModel):
     model_path: Path
-    embedding_dim: Literal[1024]
+    embedding_dim: Literal[384]
     max_length: Literal[512]
     batch_size: int = Field(default=32, gt=0)
 
 
 class ModelConfig(StrictModel):
+    deterministic: bool = Field(default=False, strict=True)
     max_sequence_length: Literal[10]
     embedding_dim: Literal[512]
     num_blocks: Literal[2]
@@ -86,7 +87,7 @@ class GraphExecutionConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v5"]
+    schema_version: Literal["validation-config/v6"]
     run_id: str
     dataset: RollingDatasetConfig
     cohort: FullCohortConfig
@@ -103,7 +104,7 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v5",
+            "schema_version": "validation-config/v6",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),

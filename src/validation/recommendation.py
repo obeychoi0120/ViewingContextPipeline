@@ -43,6 +43,9 @@ def _new_model(
     features: dict[str, np.ndarray],
     device: "torch.device",
 ) -> SASRec:
+    for component in ("title_values", "video_values"):
+        if features[component].shape != (item_count, config.encoder.embedding_dim):
+            raise ValueError("text feature dimension mismatch; rerun embed-representations")
     return SASRec(
         item_count,
         config.model.max_sequence_length,

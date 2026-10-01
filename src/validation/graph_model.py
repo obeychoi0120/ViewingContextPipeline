@@ -39,7 +39,12 @@ class RoleLayer(nn.Module):
             if counts is None:
                 sizes.index_add_(0, pairs[:, 1], h.new_ones(len(pairs)))
         for role, pairs in enumerate(states):
-            messages.index_add_(0, pairs[:, 0], self.states[role, pairs[:, 1]])
+            with span("state_lookup", cuda=True):
+                values = torch.nn.functional.embedding(
+                    pairs[:, 1], self.states[role], padding_idx=None, max_norm=None,
+                    scale_grad_by_freq=False, sparse=False,
+                )
+            messages.index_add_(0, pairs[:, 0], values)
             if counts is None:
                 sizes.index_add_(0, pairs[:, 0], h.new_ones(len(pairs)))
         return self.norm(
@@ -51,7 +56,7 @@ class RoleLayer(nn.Module):
 
 
 class RoleGraphEncoder(nn.Module):
-    def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
+    def __init__(self, feature_dim=384, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
         super().__init__()
         if aggregation not in ("mean", "attention"):
             raise ValueError("unknown scene aggregation")
@@ -143,9 +148,13 @@ class GraphSASRec(SASRec):
             num_blocks,
             num_heads,
             dropout,
-            arm=arm,
+            arm="metadata",
             item_features=np.zeros((item_count, 1), dtype=np.float32),
         )
+        # The graph tower supplies its own title/video vectors; initialize only
+        # the common recommender with the minimal placeholder feature above.
+        del self.item_projection
+        self.arm = arm
         if embedding_dim % 4:
             raise ValueError("Graph recommendation dimension must be divisible by 4")
         self.store = store
@@ -154,7 +163,6 @@ class GraphSASRec(SASRec):
             store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation
         )
         # Production: [title 128; video 384] already matches SASRec's 512.
-        del self.video_projection
         self.title_projection = nn.Linear(store["features"].shape[1], self.title_dim)
         self._vectors = self._indices = None
         self.embedding_dim = embedding_dim
@@ -303,6 +311,8 @@ class GraphSASRec(SASRec):
 
 def new_graph_model(context, config, branch, device):
     store = GraphStore(context.representations_dir / f"{branch}_embeddings")
+    if store["features"].shape[1] != config.encoder.embedding_dim:
+        raise ValueError("graph feature dimension mismatch; rerun embed-representations")
     kwargs = dict(
         item_count=len(store),
         max_length=config.model.max_sequence_length,

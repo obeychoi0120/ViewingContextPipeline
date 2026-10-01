@@ -152,7 +152,7 @@ class GraphSASRec(SASRec):
             num_blocks,
             num_heads,
             dropout,
-            arm=arm,
+            arm="metadata",
             item_features=np.zeros((item_count, 1), dtype=np.float32),
         )
         self.store = store

@@ -51,8 +51,8 @@ def test_component_order_masks_and_gradients(arm):
     torch.set_num_threads(1)
     rng = np.random.default_rng(4)
     features = dict(
-        title_values=rng.normal(size=(4, 16)).astype("float32"),
-        video_values=rng.normal(size=(4, 16)).astype("float32"),
+        title_values=rng.normal(size=(4, 6)).astype("float32"),
+        video_values=rng.normal(size=(4, 6)).astype("float32"),
         title_available=np.array([True, True, False, False]),
         video_available=np.array([True, False, True, False]),
     )
@@ -62,7 +62,6 @@ def test_component_order_masks_and_gradients(arm):
         model.item_norm.bias.fill_(0.4)
         if arm != "metadata":
             model.title_projection.bias.fill_(1)
-            model.video_projection.bias.fill_(1)
     captured = []
     hook = model.item_norm.register_forward_pre_hook(
         lambda _, args: captured.append(args[0].detach())
@@ -84,7 +83,9 @@ def test_component_order_masks_and_gradients(arm):
         assert model.item_projection.weight.grad is not None
     else:
         assert model.title_projection.weight.grad is not None
-        assert model.video_projection.weight.grad is not None
+        assert isinstance(model.video_projection, torch.nn.Identity)
+        assert not any(k.startswith("video_projection.") for k in model.state_dict())
+        torch.testing.assert_close(captured[0][1, 2:], model.video_features[1])
     optimizer.step()
     assert not model.item_vectors(torch.tensor([0, 4])).any()
     if arm == "metadata":

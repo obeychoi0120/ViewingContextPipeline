@@ -191,6 +191,7 @@ def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     split = cohort['plan']['splits'][0]
     identity = {'run_id': context.run_id, 'evaluation_date': split['evaluation_date'],
                 'seed': config.model.seeds[0], 'arm': 'graph_qwen_meta',
+                'deterministic': config.model.deterministic,
                 'training_input_hash': training_signature(context, cohort, config),
                 **recommendation_identity(context, 'graph_qwen_meta')}
     prepared = prepare_split(table, split)
@@ -257,7 +258,7 @@ def test_title_order_and_missing_inputs(graph_data):
         assert torch.count_nonzero(values[1]) == 0
         assert bool(torch.count_nonzero(values[3])) == (arm == 'graph_qwen_meta')
         assert captured[0].shape == (4, 512)
-        assert model.title_projection.in_features == 1024
+        assert model.title_projection.in_features == 384
         assert model.title_projection.out_features == 128
         assert len(model.graph_encoder.layers) == 1
         assert model.graph_encoder.output_dim == 384
@@ -293,7 +294,7 @@ def test_four_gpu_feature_partition_and_order(monkeypatch, tmp_path):
             self.last_truncation = {}
         def encode(self, texts):
             calls.append((self.device, texts))
-            return np.asarray([[int(t)] * 1024 for t in texts], dtype=np.float32)
+            return np.asarray([[int(t)] * 384 for t in texts], dtype=np.float32)
     class Pool:
         def __init__(self, **kwargs):
             assert kwargs['max_workers'] == 4
@@ -377,6 +378,7 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     for seed in config.model.seeds[:2]:
         identity = {'run_id': context.run_id, 'evaluation_date': split['evaluation_date'],
                     'seed': seed, 'arm': 'graph_qwen',
+                    'deterministic': config.model.deterministic,
                     'training_input_hash': training_signature(context, cohort, config),
                     **recommendation_identity(context, 'graph_qwen')}
         jobs.append((split, identity, 'graph_qwen'))
@@ -418,7 +420,7 @@ def test_v4_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
     assert prepare(context, target=['graph_qwen_meta'])['reused_arms'] == ['graph_qwen_meta']
     assert source_identity(context, cohort, arm) == source_before
     current = recommendation_identity(context, arm.name)
-    assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v4'
+    assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v5'
     assert (GRAPH_MODEL['layers'], GRAPH_MODEL['scene_dim'], GRAPH_MODEL['title_dim']) == (1, 384, 128)
     previous = {**current, 'graph_architecture': 'sasrec-role-graph/v2',
                 'graph_model': {'layers': 2, 'hidden_dim': 128, 'scene_dim': 512, 'attention_dim': 128}}

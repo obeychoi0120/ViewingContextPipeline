@@ -170,7 +170,8 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     probabilities = counts / counts.sum()
     results, states, ranked = [], [], []
     for enabled in (False, True, "operators"):
-        seed_everything(42)
+        # Isolate profiling from the optional nondeterministic training policy.
+        seed_everything(42, deterministic=True)
         kwargs = dict(
             item_count=len(table.items),
             max_length=10,
@@ -181,7 +182,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
             arm="graph",
         )
         model = (
-            SASRec(**kwargs, item_features=np.ones((len(table.items), 32), dtype=np.float32))
+            SASRec(**kwargs, item_features=np.ones((len(table.items), 12), dtype=np.float32))
             if mode == "text"
             else GraphSASRec(
                 **kwargs,
@@ -269,7 +270,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     assert backward["matched_nodes"] > 0
     assert 0 < backward["projection_cpu_pct_of_backward_nodes"] <= 100
     paths = backward["projection_nodes"]
-    expected = {"title_projection", "video_projection"} if mode == "text" else {
+    expected = {"title_projection"} if mode == "text" else {
         "node_linear", "context_projection", "title_projection"
     }
     assert expected <= {path.rsplit("/", 1)[-1] for path in paths}

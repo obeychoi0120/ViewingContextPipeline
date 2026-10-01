@@ -21,6 +21,11 @@ def _load_bge_runtime(settings: EncoderConfig, device=None):
 
     tokenizer = AutoTokenizer.from_pretrained(str(settings.model_path), local_files_only=True)
     model = AutoModel.from_pretrained(str(settings.model_path), local_files_only=True)
+    if model.config.hidden_size != settings.embedding_dim:
+        raise FeatureError(
+            f"encoder hidden_size {model.config.hidden_size} does not match "
+            f"the required BGE small dimension {settings.embedding_dim}"
+        )
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device).eval()
     return torch, tokenizer, model, device

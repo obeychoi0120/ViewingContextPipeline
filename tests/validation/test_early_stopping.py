@@ -61,4 +61,5 @@ def test_training_changes_invalidate_identity_without_changing_input(current_con
     cohort = {'events': [], 'manifest': {'selection_hash': 'fixed'}}
     original = training_signature(current_context, cohort, config)
     current_context.config['validation']['model']['min_delta'] *= 2
+    config = validation_config(current_context)
     assert training_signature(current_context, cohort, config) != original
