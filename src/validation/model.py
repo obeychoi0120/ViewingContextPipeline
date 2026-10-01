@@ -150,14 +150,19 @@ if nn is not None:
             return int(self.title_features.shape[0] - 1)
 
         def item_vectors(self, item_ids: "torch.Tensor") -> "torch.Tensor":
+            from validation.profiling import span
+
             title_present = self.title_available[item_ids]
             video_present = self.video_available[item_ids]
             if self.arm == "metadata":
-                values = self.item_projection(self.title_features[item_ids])
+                with span("item_projection"):
+                    values = self.item_projection(self.title_features[item_ids])
                 available = title_present
             else:
-                title = self.title_projection(self.title_features[item_ids])
-                video = self.video_projection(self.video_features[item_ids])
+                with span("title_projection"):
+                    title = self.title_projection(self.title_features[item_ids])
+                with span("video_projection"):
+                    video = self.video_projection(self.video_features[item_ids])
                 title = title.masked_fill(~title_present.unsqueeze(-1), 0.0)
                 video = video.masked_fill(~video_present.unsqueeze(-1), 0.0)
                 values = torch.cat([title, video], dim=-1)

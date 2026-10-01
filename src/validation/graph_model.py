@@ -73,7 +73,9 @@ class RoleGraphEncoder(nn.Module):
             # grad=None, so AdamW does not decay them on fully missing batches.
             return batch["features"].new_zeros((len(batch["offsets"]) - 1, self.output_dim))
         with span("node_projection", cuda=True):
-            h = self.projection(batch["features"]) + self.node_type(batch["types"])
+            with span("node_linear", cuda=True):
+                h = self.projection(batch["features"])
+            h = h + self.node_type(batch["types"])
         prepared = "roles" in batch
         with span("message_passing", cuda=True):
             for layer in self.layers:
@@ -96,7 +98,8 @@ class RoleGraphEncoder(nn.Module):
             pooled = [
                 segment_mean(h[index], batch["node_scenes"][index], count) for index in groups
             ]
-            context = self.projection(batch["contexts"])
+            with span("context_projection", cuda=True):
+                context = self.projection(batch["contexts"])
             scenes = self.readout(torch.cat([*pooled, context], dim=-1))
         with span("video_pooling", cuda=True):
             video_ids, video_count = batch["scene_videos"], len(batch["offsets"]) - 1
@@ -173,7 +176,8 @@ class GraphSASRec(SASRec):
         with span("graph_encoder", cuda=True):
             video = self.graph_encoder(batch)
         with span("item_fusion", cuda=True):
-            title = self.title_projection(batch["titles"])
+            with span("title_projection", cuda=True):
+                title = self.title_projection(batch["titles"])
             # Biases and LayerNorm must not invent a title for a missing input.
             title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
             values = self.item_norm(torch.cat([title, video], dim=-1))

@@ -172,9 +172,12 @@ python -m validation run-recommendation \
 | `…/feature_cpu_gather`, `…/feature_transfer` | GPU 캐시 미사용 시 특징 조회·전송 |
 | `…/feature_gpu_gather` | GPU 캐시에서 고정 특징 조회 |
 | `graph_items/graph_encoder/node_projection` | 노드 projection 및 종류 embedding |
+| `…/node_projection/node_linear` | 종류 embedding과 분리한 노드 Linear projection |
 | `…/message_passing` | 역할별 Graph 메시지 전달 |
 | `…/scene_readout`, `…/video_pooling` | 장면 벡터 생성 및 영상 mean/attention |
+| `…/scene_readout/context_projection` | 장면 context의 Linear projection |
 | `graph_items/item_fusion` | 제목 projection·영상 결합 및 최종 LayerNorm |
+| `graph_items/item_fusion/title_projection` | 제목 Linear projection |
 | `sasrec_forward`, `candidate_vectors`, `logits_loss` | 사용자 표현·학습 후보 벡터·추천 loss |
 | `backward`, `clip_grad`, `optimizer` | 역전파·gradient clipping·가중치 갱신 |
 | `catalog_encode` | 평가용 전체 catalog 벡터 생성 |
@@ -221,6 +224,51 @@ artifacts/runs/<RUN_ID>/validation/recommendations/
   새 로그도 생성되지 않습니다. 완료된 조합까지 다시 측정할 때만 명시적으로 `--force`를 사용합니다.
   `profile.jsonl`은 로컬 진단 부속 파일이며 공유 추천 캐시에 게시하거나 복원하지 않습니다.
 - 이미 실행 중인 프로세스에는 적용되지 않습니다. 다음 실행부터 사용할 수 있습니다.
+
+### Projection 역전파 operator 측정
+
+`--profile-every`에 **`--profile-operators`**를 함께 지정하면 각 조합/session에서
+첫 번째 측정 가능한 selection/refit 학습 batch 3 이상을 한 번만 PyTorch profiler로
+기록합니다. 일반적인 배치 수에서는 selection epoch 1 batch 3입니다. epoch당 배치 수가
+3 미만이면 operator trace는 생성되지 않습니다. 일반 표본 로그는 기존 간격대로 유지합니다.
+
+```bash
+python -m validation run-recommendation \
+  --run-id 260930_v8 --representation-mode graph --scene-aggregation mean \
+  --target graph_gemini_meta --workers-per-gpu 1 \
+  --profile-every 100 --profile-operators
+```
+
+각 조합 결과 디렉터리의 `profile_traces/<session_id>/`에 다음 파일을 저장합니다.
+
+- `selection_epoch_1_batch_3.trace.json`: CPU operator·입력 shape·CUDA 실행 trace.
+  Chrome/Perfetto 형식이며 `profile::` 구간과 forward/backward 연결을 확인할 수 있습니다.
+- `selection_epoch_1_batch_3.operators.json`: shape별 operator 통계와
+  `projection_backward` 요약. CPU 실행이면 device 시간은 0이고 device 비율은 null입니다.
+- `profile.jsonl`의 해당 배치에는 `operator_profiled`, `operator_trace`,
+  `operator_summary`를 기록합니다. start에는 `operator_profiling` 설정을 추가합니다.
+  기존 v2 형식의 필드는 유지합니다. 이 파일들은 공유 추천 캐시에 포함하지 않습니다.
+
+`projection_backward.projection_nodes`는 노드·context·제목 projection의 forward
+sequence number와 forward thread를 autograd backward node에 연결해 집계합니다.
+같은 Linear를 노드와 context가 공유해도 호출 구간별로 나눕니다. Text 경로는
+title/video projection, metadata 경로는 item projection을 기록합니다.
+Checkpoint 재계산이 있으면 해당 forward projection은 `backward/...` 경로로 표시됩니다.
+요약의 `node_types`와 trace를 함께 확인하십시오. 파라미터 gradient 누적과 checkpoint
+재계산 forward 시간은 projection backward node 비용에 포함하지 않습니다.
+
+CPU·device 시간의 단위는 µs입니다. 요약의 projection 비율은 **모든 autograd backward
+node의 inclusive CPU/device 시간 합 대비 비율**입니다. Engine wrapper는 제외해
+wrapper와 node를 이중 합산하지 않습니다. 이 비율은 기존 `backward` wall time의 비율이
+아니며 CPU 시간과 device 시간을 더하거나 inclusive operator 행들을 모두 더하지 않습니다.
+특히 checkpoint 중첩 node나 CUDA 실행 겹침이 있으면 node 시간 합은 elapsed time과 다릅니다.
+CPU 비율에는 host 실행 비용이 포함되므로 GPU 계산 비용에는 device 비율과 trace를 사용합니다.
+
+이 옵션은 무거운 진단용입니다. Operator 측정 배치의 wall time에는 profiler 시작·종료
+비용이 포함되므로 정상 상태 배치 통계에서 제외하십시오. 기록·파일 저장 비용은 epoch 시간에도
+영향을 줍니다. 실제 CUDA operator 수집은 서버의 PyTorch/CUPTI 지원과 권한에 의존하며,
+device 시간이 수집되지 않았다면 CPU 비율로 GPU projection 비중을 대신 판단하지 않습니다.
+측정 구간은 한 배치이므로 전체 epoch의 projection 비중으로 확정하지 않습니다.
 
 
 ## 모델 v4: Baseline·Text·Graph 최종 구조

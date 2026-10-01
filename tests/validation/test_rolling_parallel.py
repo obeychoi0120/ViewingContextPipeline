@@ -81,17 +81,25 @@ def two_jobs(context):
 
 
 @pytest.mark.torch
-@pytest.mark.parametrize("profile_every", [None, 2])
-def test_spawned_training_matches_serial_parameters_and_metrics(full_context, profile_every):
+@pytest.mark.parametrize("profile_every, profile_operators", [(None, False), (2, False), (2, True)])
+def test_spawned_training_matches_serial_parameters_and_metrics(
+    full_context, profile_every, profile_operators
+):
     import torch
 
     context = full_context
+    if profile_operators:
+        # The tiny fixture otherwise finishes each epoch before batch 3.
+        context.config["validation"]["model"]["batch_size"] = 4
     prepare_embeddings(context)
     jobs = two_jobs(context)
     stream = io.StringIO()
     children_before = {child.pid for child in mp.active_children()}
     with tqdm(total=2, desc="Rolling recommendation", file=stream) as progress:
-        assert run_parallel(context, jobs, ["cpu", "cpu"], progress, profile_every=profile_every) == 2
+        assert run_parallel(
+            context, jobs, ["cpu", "cpu"], progress,
+            profile_every=profile_every, profile_operators=profile_operators,
+        ) == 2
     assert {child.pid for child in mp.active_children()} == children_before
 
     table = EventTable(load_validation_cohort(context)["events"])
@@ -136,12 +144,17 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context, pr
             a["execution"].pop("seconds")
             b["execution"].pop("seconds")
             if profile_every is not None:
-                assert a["execution"].pop("profiling")["every"] == profile_every
+                profiling = a["execution"].pop("profiling")
+                assert profiling["every"] == profile_every
+                assert profiling["operators"] == profile_operators
                 profile_path = parallel_dir / "profile.jsonl"
                 import json
                 rows = [json.loads(line) for line in profile_path.read_text().splitlines()]
                 assert {row.get("phase") for row in rows} >= {"selection", "refit", "validation", "test", "export"}
                 assert "[Profile]" in stream.getvalue()
+                assert rows[0]["operator_profiling"] == profile_operators
+                if profile_operators:
+                    assert any(row.get("operator_summary") for row in rows)
             else:
                 assert not (parallel_dir / "profile.jsonl").exists()
             assert a == b

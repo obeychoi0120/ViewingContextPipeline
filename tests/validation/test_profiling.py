@@ -26,10 +26,11 @@ def device(request):
     return torch.device(request.param)
 
 
-def profiler(path, device="cpu", every=4):
+def profiler(path, device="cpu", every=4, *, operators=False):
     path.mkdir(exist_ok=True)
     return RunProfiler(
-        path, {"evaluation_date": "test", "seed": 42, "arm": "graph_qwen"}, device, every
+        path, {"evaluation_date": "test", "seed": 42, "arm": "graph_qwen"}, device, every,
+        operators=operators,
     )
 
 
@@ -43,6 +44,7 @@ def test_disabled_is_inert_and_sampling_resets_after_error(tmp_path, monkeypatch
 
     monkeypatch.setattr(torch.cuda, "synchronize", forbidden)
     monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", forbidden)
+    monkeypatch.setattr(torch.profiler, "profile", forbidden)
     with sampled(None, "selection", 1, 1), span("anything"):
         assert not is_profiling()
     assert not list(tmp_path.iterdir())
@@ -109,6 +111,42 @@ def test_compact_records_preserve_session_context_and_measurements(tmp_path):
     assert other.session != p.session
 
 
+def test_operator_backward_attribution_separates_shared_projection_and_other_linear(tmp_path):
+    p = profiler(tmp_path, operators=True)
+    shared = torch.nn.Linear(4, 2)
+    other = torch.nn.Linear(2, 1)
+    with p.sample("selection", 1, 3, examples=3):
+        with span("node_linear"):
+            nodes = shared(torch.ones(3, 4))
+        with span("context_projection"):
+            contexts = shared(torch.ones(3, 4))
+        with span("backward"):
+            other(nodes + contexts).sum().backward()
+    row = records(tmp_path)[-1]
+    summary = json.loads((tmp_path / row["operator_summary"]).read_text())
+    groups = summary["projection_backward"]["projection_nodes"]
+    assert set(groups) == {"node_linear", "context_projection"}
+    for group in groups.values():
+        assert group["node_types"] == {"AddmmBackward0": 1, "TBackward0": 1}
+        assert group["nodes"] == 2
+    with p.sample("selection", 2, 3), span("node_linear"):
+        shared(torch.ones(3, 4))
+    with p.sample("validation", 2, 3):
+        pass
+    assert sum(bool(r.get("operator_profiled")) for r in records(tmp_path)) == 1
+
+
+def test_operator_profile_error_preserves_original_and_resets_context(tmp_path):
+    p = profiler(tmp_path, operators=True)
+    with pytest.raises(ValueError, match="original failure"):
+        with p.sample("selection", 1, 3), span("node_linear"):
+            raise ValueError("original failure")
+    assert not is_profiling()
+    row = records(tmp_path)[-1]
+    assert row["status"] == "error" and row["operator_profiled"]
+    assert "operator_trace" not in row
+
+
 @pytest.mark.parametrize("mode", ["text", "mean", "attention"])
 @pytest.mark.parametrize("checkpoint", ["never", "always"])
 def test_profile_preserves_training_weights_ranks_and_records_work(
@@ -131,7 +169,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     counts = np.bincount(table.targets[ids], minlength=len(table.items) + 1)
     probabilities = counts / counts.sum()
     results, states, ranked = [], [], []
-    for enabled in (False, True):
+    for enabled in (False, True, "operators"):
         seed_everything(42)
         kwargs = dict(
             item_count=len(table.items),
@@ -152,7 +190,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
                 execution=GraphExecutionConfig(chunk_items=3, checkpoint=checkpoint),
             )
         ).to(device)
-        p = profiler(tmp_path, device) if enabled else None
+        p = profiler(tmp_path, device, operators=enabled == "operators") if enabled else None
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
         result = train_epoch(
             model,
@@ -181,7 +219,9 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     assert ranked[0] == ranked[1]
     for key in states[0]:
         torch.testing.assert_close(states[0][key], states[1][key], rtol=0, atol=0)
-    rows = records(tmp_path)
+        torch.testing.assert_close(states[0][key], states[2][key], rtol=0, atol=0)
+    assert results[0] == results[2] and ranked[0] == ranked[2]
+    rows = [r for r in records(tmp_path) if r["session_id"] == p.session]
     training = [r for r in rows if r.get("phase") == "selection"]
     assert [r["batch"] for r in training] == [1, 2, 3, 4]
     for row in training:
@@ -206,6 +246,9 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
             "graph_items/graph_batch/cpu_pack",
             "graph_items/graph_encoder/message_passing",
             "graph_items/graph_encoder/video_pooling",
+            "graph_items/graph_encoder/node_projection/node_linear",
+            "graph_items/graph_encoder/scene_readout/context_projection",
+            "graph_items/item_fusion/title_projection",
         ):
             assert name in row["seconds"]
         if checkpoint == "always":
@@ -217,4 +260,21 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     assert len(catalog) == 1 and "catalog_encode" in catalog[0]["seconds"]
     if device.type == "cuda":
         assert training[0]["cuda_memory_mib"]["peak_allocated"] > 0
+    traced = [r for r in rows if r.get("operator_profiled")]
+    assert len(traced) == 1 and traced[0]["batch"] == 3
+    summary = json.loads((tmp_path / traced[0]["operator_summary"]).read_text())
+    trace = json.loads((tmp_path / traced[0]["operator_trace"]).read_text())
+    assert trace["traceEvents"]
+    backward = summary["projection_backward"]
+    assert backward["matched_nodes"] > 0
+    assert 0 < backward["projection_cpu_pct_of_backward_nodes"] <= 100
+    paths = backward["projection_nodes"]
+    expected = {"title_projection", "video_projection"} if mode == "text" else {
+        "node_linear", "context_projection", "title_projection"
+    }
+    assert expected <= {path.rsplit("/", 1)[-1] for path in paths}
+    assert all(g["cpu_total_us"] > 0 for g in paths.values())
+    if device.type == "cuda":
+        assert backward["all_backward_device_total_us"] > 0
+        assert backward["projection_device_pct_of_backward_nodes"] > 0
     assert not is_profiling()

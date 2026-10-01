@@ -224,8 +224,11 @@ def combination_complete(directory, identity, expected_count, *, architecture_ve
 
 
 def run_combination(
-    context, config, table, split, identity, branch, prepared, device, *, profile_every=None
+    context, config, table, split, identity, branch, prepared, device, *,
+    profile_every=None, profile_operators=False,
 ):
+    if profile_operators and profile_every is None:
+        raise ValueError("profile_operators requires profile_every")
     ids, probabilities, frequencies = prepared
     date, seed, arm = (identity[key] for key in ("evaluation_date", "seed", "arm"))
     directory = combination_dir(context, date, seed, arm)
@@ -233,7 +236,7 @@ def run_combination(
     (directory / "complete.json").unlink(missing_ok=True)
     print(f"[Rolling] {date} seed={seed} {arm}: selection device={device}", flush=True)
     profiler = (
-        RunProfiler(directory, identity, device, profile_every)
+        RunProfiler(directory, identity, device, profile_every, operators=profile_operators)
         if profile_every is not None
         else None
     )
@@ -420,6 +423,7 @@ def run_combination(
                             "file": "profile.jsonl",
                             "session_id": profiler.session,
                             "every": profiler.every,
+                            "operators": profiler.operators,
                         }
                     }
                     if profiler
@@ -486,13 +490,20 @@ def worker_devices(workers_per_gpu):
     return [f"cuda:{i}" for _ in range(workers_per_gpu) for i in range(available)]
 
 
-def run_rolling(context, *, force=False, workers_per_gpu=1, target=None, profile_every=None):
+def run_rolling(
+    context, *, force=False, workers_per_gpu=1, target=None, profile_every=None,
+    profile_operators=False,
+):
     from validation.steps import validation_config
     from validation.representation_provenance import recommendation_identity
 
     if profile_every is not None and (type(profile_every) is not int or profile_every < 1):
         raise ValueError("profile_every must be a positive integer")
+    if profile_operators and profile_every is None:
+        raise ValueError("profile_operators requires profile_every")
     profile_options = {"profile_every": profile_every} if profile_every is not None else {}
+    if profile_operators:
+        profile_options["profile_operators"] = True
     arms = resolve_target_arms(target, config=context.config)
     from validation import recommendation_cache
 

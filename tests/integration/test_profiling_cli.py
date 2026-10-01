@@ -48,7 +48,8 @@ def test_profile_interval_must_be_positive(value, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["text", "graph"])
-def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, mode):
+@pytest.mark.parametrize("operators", [False, True])
+def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, mode, operators):
     calls = []
     monkeypatch.setattr(cli.RunContext, "load", lambda *_: ready_context)
     monkeypatch.setattr(
@@ -56,6 +57,8 @@ def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, 
         lambda context, **kwargs: calls.append((context, kwargs)),
     )
     extra = ["--scene-aggregation", "mean"] if mode == "graph" else []
+    if operators:
+        extra.append("--profile-operators")
     assert (
         cli.main(
             [
@@ -74,5 +77,16 @@ def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, 
         == 0
     )
     assert calls[0][1]["profile_every"] == 17
+    assert calls[0][1].get("profile_operators", False) == operators
     if mode == "graph":
         assert calls[0][0].scene_aggregation == "mean"
+
+
+@pytest.mark.parametrize("step", ["run-recommendation", "embed-representations", "run-diagnosis"])
+def test_operator_profile_requires_recommendation_and_interval(step, monkeypatch, capsys):
+    monkeypatch.setattr(cli.RunContext, "load", lambda *_: pytest.fail("must reject before load"))
+    assert cli.main([
+        step, "--run-id", "unused", "--target", "meta", "--representation-mode", "text",
+        "--profile-operators",
+    ]) == 1
+    assert "--profile-operators requires" in capsys.readouterr().err

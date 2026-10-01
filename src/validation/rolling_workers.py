@@ -31,18 +31,22 @@ class WorkerOutput(io.TextIOBase):
             self.buffered = ""
 
 
-def combination_worker(context, device_name, jobs, results, profile_every=None):
+def combination_worker(
+    context, device_name, jobs, results, profile_every=None, profile_operators=False
+):
     # The parent owns Ctrl-C and terminates/joins all its children on interruption.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     output = WorkerOutput(results)
     with redirect_stdout(output), redirect_stderr(output):
         try:
-            _consume_combinations(context, device_name, jobs, results, profile_every)
+            _consume_combinations(context, device_name, jobs, results, profile_every, profile_operators)
         finally:
             output.flush()
 
 
-def _consume_combinations(context, device_name, jobs, results, profile_every=None):
+def _consume_combinations(
+    context, device_name, jobs, results, profile_every=None, profile_operators=False
+):
     identity = None
     try:
         from validation.model import torch
@@ -77,6 +81,7 @@ def _consume_combinations(context, device_name, jobs, results, profile_every=Non
                 prepared,
                 device,
                 **({"profile_every": profile_every} if profile_every is not None else {}),
+                **({"profile_operators": True} if profile_operators else {}),
             )
             results.put(("complete", identity))
     except BaseException:
@@ -85,7 +90,9 @@ def _consume_combinations(context, device_name, jobs, results, profile_every=Non
         )
 
 
-def run_parallel(context, jobs, devices, progress, *, profile_every=None):
+def run_parallel(
+    context, jobs, devices, progress, *, profile_every=None, profile_operators=False
+):
     # CUDA must be initialized in spawned children, never inherited through fork.
     runtime = mp.get_context("spawn")
     pending, results = runtime.Queue(), runtime.Queue()
@@ -100,7 +107,10 @@ def run_parallel(context, jobs, devices, progress, *, profile_every=None):
             process = runtime.Process(
                 target=combination_worker,
                 args=(context, device, pending, results),
-                kwargs={"profile_every": profile_every} if profile_every is not None else {},
+                kwargs={
+                    **({"profile_every": profile_every} if profile_every is not None else {}),
+                    **({"profile_operators": True} if profile_operators else {}),
+                },
             )
             process.start()
             processes.append(process)
