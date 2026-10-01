@@ -12,6 +12,7 @@ import numpy as np
 from tqdm import tqdm
 
 from artifact_io import read_json, write_json
+from validation.profiling import RunProfiler, sampled, span
 from validation.metrics import metrics_from_rank
 from validation.early_stopping import EarlyStopping
 from validation.model import require_torch, save_checkpoint, seed_everything, torch
@@ -37,40 +38,68 @@ def phase_ids(table, split, phase):
 
 
 def transition_loss(model, table, ids, probabilities, device):
-    execution = execution_for(table)
-    target_ids = table.targets[ids]
-    targets = torch.as_tensor(target_ids, dtype=torch.long, device=device)
-    inputs = execution.inputs(ids, model.max_length, device)
+    with span("input_prepare"):
+        execution = execution_for(table)
+        target_ids = table.targets[ids]
+        targets = torch.as_tensor(target_ids, dtype=torch.long, device=device)
+        inputs = execution.inputs(ids, model.max_length, device)
+        if hasattr(model, "prepare_items"):
+            graph_ids = np.concatenate(
+                [execution.padded(model.max_length)[ids].reshape(-1), target_ids]
+            )
     if hasattr(model, "prepare_items"):
-        model.prepare_items(torch.cat([inputs.reshape(-1), targets]))
-    users = model.user_vectors(inputs)
-    logits = users @ model.item_vectors(targets).T
-    logs = execution.log_probabilities(probabilities, target_ids, device, logits.dtype)
-    logits = logits - logs[targets][None, :]
-    masks = negative_mask(inputs, targets)
-    logits = logits.masked_fill(masks, -1e4)
-    loss = torch.nn.functional.cross_entropy(logits, torch.arange(len(ids), device=device))
-    if not torch.isfinite(loss):
-        raise RuntimeError("nonfinite transition loss")
+        model.prepare_items(graph_ids)
+    with span("sasrec_forward"):
+        users = model.user_vectors(inputs)
+    with span("candidate_vectors"):
+        candidates = model.item_vectors(targets)
+    with span("logits_loss"):
+        logits = users @ candidates.T
+        logs = execution.log_probabilities(probabilities, target_ids, device, logits.dtype)
+        logits = logits - logs[targets][None, :]
+        masks = negative_mask(inputs, targets)
+        logits = logits.masked_fill(masks, -1e4)
+        loss = torch.nn.functional.cross_entropy(logits, torch.arange(len(ids), device=device))
+        if not torch.isfinite(loss):
+            raise RuntimeError("nonfinite transition loss")
     return loss
 
 
-def train_epoch(model, optimizer, table, ids, probabilities, rng, config, device):
+def train_epoch(
+    model,
+    optimizer,
+    table,
+    ids,
+    probabilities,
+    rng,
+    config,
+    device,
+    *,
+    profiler=None,
+    phase="train",
+    epoch=0,
+):
     model.train()
     total = torch.zeros((), dtype=torch.float64, device=device)
     updates = 0
     order = rng.permutation(ids)
     for start in range(0, len(order), config.model.batch_size):
         batch = order[start : start + config.model.batch_size]
-        optimizer.zero_grad(set_to_none=True)
-        loss = transition_loss(model, table, batch, probabilities, device)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        optimizer.step()
-        if hasattr(model, "clear_item_cache"):
-            model.clear_item_cache()
-        total += loss.detach().to(torch.float64) * len(batch)
-        updates += 1
+        with sampled(profiler, phase, epoch, updates + 1, len(batch)):
+            with span("zero_grad"):
+                optimizer.zero_grad(set_to_none=True)
+            loss = transition_loss(model, table, batch, probabilities, device)
+            with span("backward"):
+                loss.backward()
+            with span("clip_grad"):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            with span("optimizer"):
+                optimizer.step()
+            with span("cleanup"):
+                if hasattr(model, "clear_item_cache"):
+                    model.clear_item_cache()
+                total += loss.detach().to(torch.float64) * len(batch)
+            updates += 1
     if not len(ids):
         raise RuntimeError("empty training partition")
     return {
@@ -80,32 +109,46 @@ def train_epoch(model, optimizer, table, ids, probabilities, rng, config, device
     }
 
 
-def rank_batches(model, table, ids, config, device):
+def rank_batches(model, table, ids, config, device, *, profiler=None, phase="evaluation", epoch=0):
     """Share ranking between validation-only and full per-event evaluation."""
     model.eval()
     execution = execution_for(table)
     with torch.no_grad():
-        catalog = model.catalog_vectors()
-        for start in range(0, len(ids), config.model.batch_size):
+        with sampled(profiler, phase, epoch, kind="catalog"):
+            with span("catalog_encode"):
+                catalog = model.catalog_vectors()
+        for step, start in enumerate(range(0, len(ids), config.model.batch_size), 1):
             batch = ids[start : start + config.model.batch_size]
-            inputs = execution.inputs(batch, model.max_length, device)
-            scores = model.user_vectors(inputs) @ catalog.T
-            ranks = masked_ranks(scores, table, batch).cpu().tolist()
+            with sampled(profiler, phase, epoch, step, len(batch)):
+                with span("input_prepare"):
+                    inputs = execution.inputs(batch, model.max_length, device)
+                with span("sasrec_forward"):
+                    users = model.user_vectors(inputs)
+                with span("catalog_score"):
+                    scores = users @ catalog.T
+                with span("mask_rank"):
+                    ranks = masked_ranks(scores, table, batch)
+                with span("rank_to_cpu"):
+                    ranks = ranks.cpu().tolist()
             yield batch, ranks
 
 
-def validation_ndcg10(model, table, ids, config, device):
+def validation_ndcg10(model, table, ids, config, device, *, profiler=None, epoch=0):
     # Python float/math.log2 and source order match the previous metric reduction.
     return sum(
         1.0 / math.log2(rank + 1) if rank <= 10 else 0.0
-        for _, ranks in rank_batches(model, table, ids, config, device)
+        for _, ranks in rank_batches(
+            model, table, ids, config, device, profiler=profiler, phase="validation", epoch=epoch
+        )
         for rank in ranks
     ) / len(ids)
 
 
-def evaluate(model, table, ids, config, device):
+def evaluate(model, table, ids, config, device, *, profiler=None):
     """Frozen parameters, cached catalog vectors, strictly earlier full seen mask."""
-    for batch, ranks in rank_batches(model, table, ids, config, device):
+    for batch, ranks in rank_batches(
+        model, table, ids, config, device, profiler=profiler, phase="test"
+    ):
         for event, rank in zip(batch, ranks, strict=True):
             yield {
                 **table.rows[int(event)],
@@ -180,30 +223,47 @@ def combination_complete(directory, identity, expected_count, *, architecture_ve
         return False
 
 
-def run_combination(context, config, table, split, identity, branch, prepared, device):
+def run_combination(
+    context, config, table, split, identity, branch, prepared, device, *,
+    profile_every=None, profile_operators=False,
+):
+    if profile_operators and profile_every is None:
+        raise ValueError("profile_operators requires profile_every")
     ids, probabilities, frequencies = prepared
     date, seed, arm = (identity[key] for key in ("evaluation_date", "seed", "arm"))
     directory = combination_dir(context, date, seed, arm)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "complete.json").unlink(missing_ok=True)
     print(f"[Rolling] {date} seed={seed} {arm}: selection device={device}", flush=True)
+    profiler = (
+        RunProfiler(
+            directory, {**identity, "deterministic": config.model.deterministic}, device,
+            profile_every, operators=profile_operators,
+        )
+        if profile_every is not None
+        else None
+    )
     started = time.monotonic()
     timings = dict.fromkeys(
         ("preparation", "selection_training", "validation", "refit", "test"), 0.0
     )
-    execution = execution_for(table)
-    execution.padded(config.model.max_sequence_length)
-    for phase in ("selection", "refit"):
-        execution.log_probabilities(
-            probabilities[phase], table.targets[ids[phase]], device, torch.float32
-        )
+    with sampled(profiler, "preparation", kind="stage"):
+        with span("history_and_probabilities"):
+            execution = execution_for(table)
+            execution.padded(config.model.max_sequence_length)
+            for phase in ("selection", "refit"):
+                execution.log_probabilities(
+                    probabilities[phase], table.targets[ids[phase]], device, torch.float32
+                )
     timings["preparation"] = time.monotonic() - started
     from validation.graph_context import is_graph
 
     features = None
     if not is_graph(context):
-        with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
-            features = data["values"]
+        with sampled(profiler, "feature_load", kind="stage"):
+            with span("feature_load", cuda=False):
+                with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
+                    features = {key: data[key] for key in data.files}
 
     def create_model():
         if is_graph(context):
@@ -214,10 +274,12 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
             config, item_count=len(table.items), branch=branch, features=features, device=device
         )
 
-    seed_everything(seed)
+    seed_everything(seed, deterministic=config.model.deterministic)
     rng = np.random.default_rng(seed)
-    model = create_model()
-    optimizer = _optimizer(model, config)
+    with sampled(profiler, "selection_init", kind="stage"):
+        with span("model_and_optimizer"):
+            model = create_model()
+            optimizer = _optimizer(model, config)
     selection = []
     stopping = EarlyStopping(config.model.patience, getattr(config.model, "min_delta", 0.0))
     for epoch in range(1, config.model.max_epochs + 1):
@@ -231,30 +293,49 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
             rng,
             config,
             device,
+            profiler=profiler,
+            phase="selection",
+            epoch=epoch,
         )
-        timings["selection_training"] += time.monotonic() - phase_started
+        train_seconds = time.monotonic() - phase_started
+        timings["selection_training"] += train_seconds
+        if profiler:
+            profiler.phase("selection", epoch, train_seconds, len(ids["selection"]))
         phase_started = time.monotonic()
-        score = validation_ndcg10(model, table, ids["validation"], config, device)
-        timings["validation"] += time.monotonic() - phase_started
+        score = validation_ndcg10(
+            model, table, ids["validation"], config, device, profiler=profiler, epoch=epoch
+        )
+        valid_seconds = time.monotonic() - phase_started
+        timings["validation"] += valid_seconds
+        if profiler:
+            profiler.phase("validation", epoch, valid_seconds, len(ids["validation"]))
         selection.append({"epoch": epoch, **record, "validation_ndcg10": score})
         print(
-            f"[Rolling] {date} {arm} seed={seed} epoch={epoch} valid={score:.6f}",
+            f"[Rolling] {date} {arm} seed={seed} epoch={epoch} valid={score:.6f} "
+            f"train={train_seconds:.2f}s valid_time={valid_seconds:.2f}s "
+            f"train_events/s={len(ids['selection']) / max(train_seconds, 1e-9):.1f}",
             flush=True,
         )
         if stopping.update(epoch, score):
             break
     best_epoch = stopping.best_epoch
+    graph_selection_execution = (
+        model.execution_report() if hasattr(model, "execution_report") else None
+    )
     del model, optimizer
-    seed_everything(seed)
+    seed_everything(seed, deterministic=config.model.deterministic)
     rng = np.random.default_rng(seed)
-    model = create_model()
-    optimizer = _optimizer(model, config)
+    with sampled(profiler, "refit_init", kind="stage"):
+        with span("model_and_optimizer"):
+            model = create_model()
+            optimizer = _optimizer(model, config)
     print(
         f"[Rolling] {date} {arm} seed={seed} refit epochs={best_epoch} device={device}", flush=True
     )
     refit = []
     phase_started = time.monotonic()
     for epoch in range(1, best_epoch + 1):
+        epoch_started = time.monotonic()
         refit.append(
             {
                 "epoch": epoch,
@@ -267,8 +348,20 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
                     rng,
                     config,
                     device,
+                    profiler=profiler,
+                    phase="refit",
+                    epoch=epoch,
                 ),
             }
+        )
+        epoch_seconds = time.monotonic() - epoch_started
+        if profiler:
+            profiler.phase("refit", epoch, epoch_seconds, len(ids["refit"]))
+        print(
+            f"[Rolling] {date} {arm} seed={seed} refit epoch={epoch}/{best_epoch} "
+            f"train={epoch_seconds:.2f}s "
+            f"train_events/s={len(ids['refit']) / max(epoch_seconds, 1e-9):.1f}",
+            flush=True,
         )
     timings["refit"] = time.monotonic() - phase_started
     phase_started = time.monotonic()
@@ -276,7 +369,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     temporary = directory / "per_event_metrics.jsonl.tmp"
     count = 0
     with temporary.open("w", encoding="utf-8", newline="\n") as handle:
-        for row in evaluate(model, table, ids["test"], config, device):
+        for row in evaluate(model, table, ids["test"], config, device, profiler=profiler):
             row.update(identity)
             row["schema_version"] = "sasrec-per-event-metrics/v1"
             row["refit_item_frequency"] = int(frequencies[table.targets[row["event_id"]]])
@@ -288,23 +381,31 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
         raise RuntimeError("incomplete evaluation")
     temporary.replace(directory / "per_event_metrics.jsonl")
     timings["test"] = time.monotonic() - phase_started
+    if profiler:
+        profiler.phase("test", 0, timings["test"], len(ids["test"]))
+    print(f"[Rolling] {date} {arm} seed={seed} test={timings['test']:.2f}s", flush=True)
     metadata = {
         **identity,
         "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
         "best_epoch": best_epoch,
         "catalog_size": len(table.items),
         "training_settings": {
+            "deterministic": config.model.deterministic,
             "learning_rate": config.model.learning_rate,
             "batch_size": config.model.batch_size,
             "patience": config.model.patience,
             "min_delta": getattr(config.model, "min_delta", 0.0),
         },
     }
-    if is_graph(context):
-        model.eval()
-        with torch.no_grad():
-            np.save(directory / "catalog_vectors.npy", model.catalog_vectors().cpu().numpy())
-    save_checkpoint(directory / "sasrec.pt", model, metadata)
+    with sampled(profiler, "export", kind="stage"):
+        with span("catalog_and_checkpoint_save"):
+            if is_graph(context):
+                # evaluate() already left a frozen catalog cache on graph models.
+                with torch.no_grad():
+                    np.save(
+                        directory / "catalog_vectors.npy", model.catalog_vectors().cpu().numpy()
+                    )
+            save_checkpoint(directory / "sasrec.pt", model, metadata)
     write_json(
         directory / "training.json",
         {
@@ -317,7 +418,30 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
                 np.mean(frequencies[table.targets[ids["test"]]] == 0)
             ),
             "elapsed_seconds": time.monotonic() - started,
-            "execution": {"version": EXECUTION_VERSION, "seconds": timings},
+            "execution": {
+                "version": EXECUTION_VERSION,
+                "seconds": timings,
+                **(
+                    {
+                        "profiling": {
+                            "file": "profile.jsonl",
+                            "session_id": profiler.session,
+                            "every": profiler.every,
+                            "operators": profiler.operators,
+                        }
+                    }
+                    if profiler
+                    else {}
+                ),
+                **(
+                    {
+                        "graph_selection": graph_selection_execution,
+                        "graph_refit": model.execution_report(),
+                    }
+                    if graph_selection_execution
+                    else {}
+                ),
+            },
             "device": str(device),
             "environment": {
                 "python": sys.version,
@@ -370,10 +494,20 @@ def worker_devices(workers_per_gpu):
     return [f"cuda:{i}" for _ in range(workers_per_gpu) for i in range(available)]
 
 
-def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
+def run_rolling(
+    context, *, force=False, workers_per_gpu=1, target=None, profile_every=None,
+    profile_operators=False,
+):
     from validation.steps import validation_config
     from validation.representation_provenance import recommendation_identity
 
+    if profile_every is not None and (type(profile_every) is not int or profile_every < 1):
+        raise ValueError("profile_every must be a positive integer")
+    if profile_operators and profile_every is None:
+        raise ValueError("profile_operators requires profile_every")
+    profile_options = {"profile_every": profile_every} if profile_every is not None else {}
+    if profile_operators:
+        profile_options["profile_operators"] = True
     arms = resolve_target_arms(target, config=context.config)
     from validation import recommendation_cache
 
@@ -395,6 +529,7 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
                     "seed": seed,
                     "arm": arm,
                     "training_input_hash": training_input_hash,
+                    "deterministic": config.model.deterministic,
                     **recommendation_identity(context, branch),
                 }
                 directory = combination_dir(context, split["evaluation_date"], seed, arm)
@@ -427,7 +562,7 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
         if jobs and len(devices) > 1:
             from validation.rolling_workers import run_parallel
 
-            completed = run_parallel(context, jobs, devices, progress)
+            completed = run_parallel(context, jobs, devices, progress, **profile_options)
         elif jobs:
             previous_date, prepared = None, None
             device = torch.device(devices[0])
@@ -438,7 +573,17 @@ def run_rolling(context, *, force=False, workers_per_gpu=1, target=None):
                 progress.set_postfix(
                     date=previous_date, seed=identity["seed"], arm=identity["arm"], reused=skipped
                 )
-                run_combination(context, config, table, split, identity, branch, prepared, device)
+                run_combination(
+                    context,
+                    config,
+                    table,
+                    split,
+                    identity,
+                    branch,
+                    prepared,
+                    device,
+                    **profile_options,
+                )
                 completed += 1
                 progress.update(1)
     for directory, identity, branch, split in combinations:

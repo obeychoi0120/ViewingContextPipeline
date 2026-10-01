@@ -110,7 +110,7 @@ def test_composition_cases_and_zero_vectors(ready_context, fake_models, generate
     # Compact scenes are identified by the Summary's actual Scene input hash.
     assert read_state(ready_context, arm.name)["shareable"]
     with np.load(ready_context.representations_dir / f"{arm.name}_embeddings.npz") as data:
-        assert data["values"][2].any() and not data["values"][3].any()
+        assert data["title_values"][2].any() and not data["title_values"][3].any()
     from validation.diagnosis_representations import representation_report
 
     report, _ = representation_report(ready_context, [arm.name])
@@ -233,6 +233,8 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
     embed_representations(ready_context, target=list(registry(ready_context.config)))
 
     def tiny(config, *, item_count, branch, features, device):
+        features = {**features, "title_values": features["title_values"][:, :6],
+                    "video_values": features["video_values"][:, :6]}
         return SASRec(item_count, 10, 8, 1, 2, 0, arm=branch, item_features=features).to(device)
 
     monkeypatch.setattr("validation.rolling_recommendation._new_model", tiny)
@@ -432,3 +434,28 @@ def test_unstructured_graph_reaches_summary_and_embedding(ready_context, fake_mo
     assert all(json.dumps(text) in task.prompt for task in fake_models[-1])
     embed_representations(context, target=["graph_qwen"])
     assert read_state(context, "graph_qwen")["zero_vector_count"] == 0
+
+
+def test_embedding_never_sends_combined_title_summary(ready_context, fake_models, generate_all, monkeypatch):
+    generate_all(ready_context)
+    calls = []
+
+    class Encoder:
+        def __init__(self, config):
+            pass
+
+        def encode(self, texts):
+            calls.extend(texts)
+            self.last_truncated_flags = [False] * len(texts)
+            return np.ones((len(texts), 384), dtype=np.float32)
+
+    monkeypatch.setattr('validation.features.BGETextEncoder', Encoder)
+    arms = registry(ready_context.config)
+    cohort = ready_context.require_ready_cohort()
+    docs = [doc for arm in arms.values() for doc in documents_for_arm(ready_context, cohort, arm)]
+    expected = {d[f'{part}_text'].strip() for d in docs for part in ('title', 'video')
+                if d[f'{part}_text'].strip()}
+    embed_representations(ready_context, target=list(arms))
+    assert set(calls) == expected
+    assert len(calls) == len(expected)
+    assert read_state(ready_context, 'graph_qwen_meta')['truncation']['title']['text_count'] > 0

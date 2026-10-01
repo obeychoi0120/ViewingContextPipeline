@@ -1,8 +1,10 @@
 # ViewingContextPipeline
 
-![ViewingContextPipeline 실험 흐름](docs/design/Diagram.png)
+![ViewingContextPipeline 실험 흐름](docs/design/main_diagram.png)
 
-[다이어그램 PPTX 원본](docs/design/Diagram.pptx)
+![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram_small.png)
+
+[다이어그램 PPTX 원본](docs/design/main_diagram.pptx) · [다이어그램 생성 코드](docs/design/generate_main_diagram.py)
 
 MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시각 정보를 더했을 때 추천 성능이 어떻게 달라지는지 비교하는 실험 파이프라인입니다. Qwen·Gemini로 Graph와 Description을 생성하고, 동일한 사용자·후보 catalog·평가 구간에서 SASRec을 학습합니다.
 
@@ -23,6 +25,8 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시�
 | `desc_gemini_meta` | 제목 + Gemini Description의 Summary | 미지원 |
 
 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `desc_qwen`, `desc_gemini`입니다. 접미사는 **Scene 추출 모델**이며, Summary 모델은 `--model`로 따로 선택합니다. 생성에는 결합 Arm을 지정하지 않습니다. 평가에는 `--target`과 `--representation-mode`를 항상 명시합니다.
+
+현재 모델(v5)은 **BGE small-en-v1.5 / 384차원만 지원**합니다. `meta`는 제목 384→Linear 512, Text는 제목 384→128 + Summary 384 직접 사용, Graph는 노드·Context 384→공유 Linear 128로 영상 384를 만든 뒤 제목 128과 결합합니다. 최종 LayerNorm 512와 SASRec·User MLP는 유지합니다. 결정성 강제는 기본 해제하며 seed는 고정합니다. [small 전환 및 서버 실행 안내](docs/graph_training.md#모델-v5-bge-small-전환과-state-lookup-최적화)를 참고하세요. [편집 가능한 PPTX](docs/design/recsys_diagram_small.pptx) · [PNG](docs/design/recsys_diagram_small.png)
 
 주 비교는 `graph_qwen_meta − meta`입니다. Text 전체 평가는 기본 설정에서 7일 × 3 seed × 6 Arm입니다. 사용자 단위 paired bootstrap을 사용하며, seed 평균 후 날짜별 평균을 동일 가중치로 합칩니다. 현재 비교군은 제목 기준선 대비 5개, Graph/Description 비교 2개, 제목 추가 효과 1개이고 각 군에 Bonferroni 보정을 적용합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다.
 
@@ -55,6 +59,8 @@ Gemini 생성만 실행하는 환경은 `.[gemini,dev]`, 임베딩·추천 환�
 설정 형식의 `experiment_config_version: v4`와 실험 이름의 `v7`은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
 
 이하 명령은 저장소 루트에서 실행합니다. Qwen·추천의 GPU 선택은 `CUDA_VISIBLE_DEVICES`로 지정합니다. 추천의 `--workers-per-gpu`는 GPU당 독립 학습 작업 수이며 기본값은 1입니다.
+
+추천 학습의 세부 병목은 `run-recommendation`에 `--profile-every 100`을 추가해 측정할 수 있습니다. 배치별 Graph 준비·전송·인코딩·역전파와 평가 시간을 콘솔 및 조합별 `profile.jsonl`에 기록합니다. [측정 항목과 해석](docs/graph_training.md#추천-학습-병목-프로파일링)을 참고하십시오.
 
 ```bash
 export RUN_ID=260928_v7
@@ -96,7 +102,7 @@ python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_descr
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
 ```
 
-제목은 LLM 입력에 넣지 않고 text 임베딩 직전에 결합합니다. Summary 프롬프트에는 `{scenes}`가 필요하며 `{english_title}`은 허용하지 않습니다. 같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 `--force`를 사용합니다.
+제목은 LLM 입력에 넣지 않습니다. Text embedding에서는 제목·Summary를 각각 BGE로 인코딩하고, 추천 모델에서 projection한 벡터를 결합합니다. Summary 프롬프트에는 `{scenes}`가 필요하며 `{english_title}`은 허용하지 않습니다. 같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 `--force`를 사용합니다.
 
 [run_pipeline_v7.sh](run_pipeline_v7.sh)는 단계별 명령을 보관한 수동 실행 스크립트입니다. 기본 활성 명령은 **두 Graph 소스의 Gemini 요약**이며, 전체 파이프라인을 자동 실행하지 않습니다. 필요한 단계의 주석을 조정하거나 위 명령을 직접 실행합니다.
 

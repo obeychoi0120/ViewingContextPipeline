@@ -32,9 +32,9 @@ def test_full_catalog_applies_to_all_targets_and_preserves_shared_data(summaries
     assert table.items == ["1", "2", "3", "4"]
     assert len(table.rows) == 72
     with np.load(context.representations_dir / "graph_qwen_embeddings.npz") as data:
-        assert data["values"].shape == (4, 1024) and not data["values"].any()
+        assert data["video_values"].shape == (4, 384) and not data["video_values"].any()
     with np.load(context.representations_dir / "meta_embeddings.npz") as data:
-        assert not data["values"][1].any()
+        assert not data["title_values"][1].any()
     assert original == {p: p.read_bytes() for p in original}
 
 

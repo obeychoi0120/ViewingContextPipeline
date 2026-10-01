@@ -160,7 +160,7 @@ def run_combination(context, config, table, split, identity, branch, prepared, d
     print(f"[Rolling] {date} seed={seed} {arm}: selection device={device}", flush=True)
     started = time.monotonic()
     with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
-        features = data["values"]
+        features = {key: data[key] for key in data.files}
     seed_everything(seed)
     rng = np.random.default_rng(seed)
     model = _new_model(

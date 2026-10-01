@@ -54,8 +54,10 @@ def prepare_embeddings(context):
     )
     write_json(context.representations_dir / "graph_gemini_fallbacks.json", {"fallbacks": []})
     for branch in registry(context.config):
-        values = np.random.default_rng(4).normal(size=(4, 1024)).astype(np.float32)
-        np.savez(context.representations_dir / f"{branch}_embeddings.npz", values=values)
+        values = np.random.default_rng(4).normal(size=(4, 384)).astype(np.float32)
+        np.savez(context.representations_dir / f"{branch}_embeddings.npz", title_values=values, video_values=np.zeros_like(values),
+                 title_available=np.any(values != 0, axis=1),
+                 video_available=np.zeros(len(values), dtype=bool))
 
 
 def two_jobs(context):
@@ -71,6 +73,7 @@ def two_jobs(context):
                 "seed": seed,
                 "arm": "meta",
                 "training_input_hash": training_hash,
+                "deterministic": validation_config(context).model.deterministic,
             },
             "meta",
         )
@@ -79,16 +82,28 @@ def two_jobs(context):
 
 
 @pytest.mark.torch
-def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
+@pytest.mark.parametrize("profile_every, profile_operators, deterministic", [
+    (None, False, False), (2, False, False), (2, True, False), (2, True, True),
+])
+def test_spawned_training_matches_serial_parameters_and_metrics(
+    full_context, profile_every, profile_operators, deterministic
+):
     import torch
 
     context = full_context
+    context.config["validation"]["model"]["deterministic"] = deterministic
+    if profile_operators:
+        # The tiny fixture otherwise finishes each epoch before batch 3.
+        context.config["validation"]["model"]["batch_size"] = 4
     prepare_embeddings(context)
     jobs = two_jobs(context)
     stream = io.StringIO()
     children_before = {child.pid for child in mp.active_children()}
     with tqdm(total=2, desc="Rolling recommendation", file=stream) as progress:
-        assert run_parallel(context, jobs, ["cpu", "cpu"], progress) == 2
+        assert run_parallel(
+            context, jobs, ["cpu", "cpu"], progress,
+            profile_every=profile_every, profile_operators=profile_operators,
+        ) == 2
     assert {child.pid for child in mp.active_children()} == children_before
 
     table = EventTable(load_validation_cohort(context)["events"])
@@ -128,10 +143,26 @@ def test_spawned_training_matches_serial_parameters_and_metrics(full_context):
             complete_b.pop("checksums")
             assert complete_a == complete_b
             a, b = (read_json(path / "training.json") for path in (parallel_dir, serial_dir))
+            assert a["training_settings"]["deterministic"] is deterministic
             a.pop("elapsed_seconds")
             b.pop("elapsed_seconds")
             a["execution"].pop("seconds")
             b["execution"].pop("seconds")
+            if profile_every is not None:
+                profiling = a["execution"].pop("profiling")
+                assert profiling["every"] == profile_every
+                assert profiling["operators"] == profile_operators
+                profile_path = parallel_dir / "profile.jsonl"
+                import json
+                rows = [json.loads(line) for line in profile_path.read_text().splitlines()]
+                assert {row.get("phase") for row in rows} >= {"selection", "refit", "validation", "test", "export"}
+                assert "[Profile]" in stream.getvalue()
+                assert rows[0]["operator_profiling"] == profile_operators
+                assert rows[0]["deterministic"] is deterministic
+                if profile_operators:
+                    assert any(row.get("operator_summary") for row in rows)
+            else:
+                assert not (parallel_dir / "profile.jsonl").exists()
             assert a == b
             a, b = (
                 torch.load(path / "sasrec.pt", weights_only=True)["state_dict"]

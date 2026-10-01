@@ -9,7 +9,7 @@ def verify_missing_metadata(context, cohort):
     expected = missing_metadata_report(cohort["metadata_titles"])
     name = "meta"
     with np.load(context.representations_dir / f"{name}_embeddings.npz") as data:
-        values = data["values"]
+        values = data["title_values"]
         if values.shape != (
             len(cohort["catalog"]),
             context.config["validation"]["encoder"]["embedding_dim"],

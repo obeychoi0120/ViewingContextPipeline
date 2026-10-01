@@ -87,10 +87,15 @@ def finish_write(
     cache=None,
     shareable=False,
 ):
+    from validation.cache_identity import REPRESENTATION_VERSION
+    from validation.text_features import COMPOSITION_POLICY
+
     current = matrix_hash(context.representations_dir / f"{branch}_embeddings.npz")
     atomic_write_json(
         state_path(context, branch),
         {
+            "representation_version": REPRESENTATION_VERSION,
+            "composition_policy": COMPOSITION_POLICY,
             "input_hash": signature,
             "embedding_hash": current,
             "selection_hash": selection_hash,
@@ -114,12 +119,34 @@ def recommendation_identity(context, branch):
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
     from validation.graph_context import is_graph, GRAPH_MODEL, GRAPH_ARCHITECTURE
 
+    from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION
+    from model_provenance import canonical, local_model_identity
+
+    encoder = {
+        "embedding_dim": context.config["validation"]["encoder"]["embedding_dim"],
+        "model_name": context.path("models", "bge").name,
+        "model": canonical(local_model_identity(context.path("models", "bge"))),
+    }
+
+    item_model = {**ITEM_MODEL, "kind": "baseline" if branch == "meta" else "split"}
+    item_model["video_transform"] = (
+        "none" if branch == "meta" else "graph_encoder" if is_graph(context) else "identity"
+    )
+
     if is_graph(context):
         return {
+            "encoder": encoder,
+            "item_model": item_model,
             "embedding_hash": value,
             "representation_mode": "graph",
             "scene_aggregation": context.scene_aggregation,
             "graph_model": GRAPH_MODEL,
             "graph_architecture": GRAPH_ARCHITECTURE,
         }
-    return {"embedding_hash": value}
+    return {
+        "encoder": encoder,
+        "embedding_hash": value,
+        "item_model": item_model,
+        "representation_mode": "text",
+        "text_architecture": ARCHITECTURE_VERSION,
+    }

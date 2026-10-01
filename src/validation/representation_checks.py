@@ -24,7 +24,7 @@ def verify_representations(context, cohort=None, *, arms=None):
         cohort["catalog"],
         context.config["validation"]["encoder"]["embedding_dim"],
     ):
-        raise RuntimeError("invalid catalog embedding mapping or values")
+        raise RuntimeError("invalid/legacy Text embeddings; rerun embed-representations")
     if any(name in selected for name in ("meta", "metadata")):
         verify_missing_metadata(context, cohort)
     verify_recorded_representations(context, cohort, arms=selected)
@@ -54,9 +54,8 @@ def verify_recorded_representations(context, cohort, *, arms=None):
         import numpy as np
 
         with np.load(path) as arrays:
-            values = arrays["values"]
-            for i, doc in enumerate(docs):
-                if not doc["text"].strip() and np.any(values[i] != 0):
-                    raise RuntimeError(
-                        f"empty expression must have a zero vector: {name}/{doc['content_id']}"
-                    )
+            from validation.text_features import validate_arrays
+
+            validate_arrays(
+                arrays, len(docs), context.config["validation"]["encoder"]["embedding_dim"], docs
+            )

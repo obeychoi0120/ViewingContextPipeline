@@ -353,8 +353,8 @@ def _validate_models(value: dict[str, Any]) -> None:
 def _validate_validation(value: dict[str, Any]) -> None:
     validation = _require_mapping(value, "validation")
     expected_validation_keys = {"cohort", "encoder", "model", "evaluation"}
-    if set(validation) != expected_validation_keys:
-        raise ConfigError(f"validation must contain exactly {sorted(expected_validation_keys)}")
+    if set(validation) - {"graph_execution"} != expected_validation_keys:
+        raise ConfigError(f"validation requires {sorted(expected_validation_keys)} and optional graph_execution")
     try:
         from pydantic import ValidationError
         from validation.config import build_validation_config

@@ -21,6 +21,11 @@ def _load_bge_runtime(settings: EncoderConfig, device=None):
 
     tokenizer = AutoTokenizer.from_pretrained(str(settings.model_path), local_files_only=True)
     model = AutoModel.from_pretrained(str(settings.model_path), local_files_only=True)
+    if model.config.hidden_size != settings.embedding_dim:
+        raise FeatureError(
+            f"encoder hidden_size {model.config.hidden_size} does not match "
+            f"the required BGE small dimension {settings.embedding_dim}"
+        )
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device).eval()
     return torch, tokenizer, model, device
@@ -38,6 +43,7 @@ class BGETextEncoder:
 
     def _encode_batch(self, texts: list[str]) -> np.ndarray:
         lengths = self.tokenizer(texts, truncation=False, padding=False)["input_ids"]
+        self.last_truncated_flags.extend(len(ids) > self.settings.max_length for ids in lengths)
         self.last_truncation["text_count"] += len(texts)
         self.last_truncation["truncated_count"] += sum(
             len(ids) > self.settings.max_length for ids in lengths
@@ -56,6 +62,7 @@ class BGETextEncoder:
 
     def encode(self, texts: list[str]) -> np.ndarray:
         self.last_truncation = {"text_count": 0, "truncated_count": 0}
+        self.last_truncated_flags = []
         batches: list[np.ndarray] = []
         with self._torch.no_grad():
             for start in tqdm(

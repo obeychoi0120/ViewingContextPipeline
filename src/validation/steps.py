@@ -7,6 +7,7 @@ from validation.selection import prepare_validation_cohort, validation_arms
 from pipeline_logging import log_step_start
 from artifact_io import read_json, write_json
 from validation.config import build_validation_config
+from validation.text_features import validate_arrays, encode_components
 from validation.representation_inputs import documents_for_arm, representation_signature
 from validation.representation_provenance import (
     begin_write,
@@ -41,15 +42,13 @@ def _representations_match_catalog(item_index_path, outputs, catalog, embedding_
             return False
         for path in outputs:
             with np.load(path) as arrays:
-                matrix = arrays["values"]
-                if matrix.shape != (len(catalog), embedding_dim) or not np.isfinite(matrix).all():
-                    return False
+                validate_arrays(arrays, len(catalog), embedding_dim)
     except (OSError, ValueError, KeyError):
         return False
     return True
 
 
-def _write_embedding(path: Path, matrix: np.ndarray) -> None:
+def _write_embedding(path: Path, matrix: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -57,7 +56,7 @@ def _write_embedding(path: Path, matrix: np.ndarray) -> None:
             "wb", dir=path.parent, prefix=f".{path.name}.", suffix=".npz", delete=False
         ) as handle:
             temporary = Path(handle.name)
-            np.savez_compressed(handle, values=matrix)
+            np.savez_compressed(handle, **matrix)
             handle.flush()
             os.fsync(handle.fileno())
         temporary.replace(path)
@@ -93,6 +92,7 @@ def embed_representations(context, *, force=False, target=None, representation_m
     pending = []
     reused = {"local": [], "shared": []}
     encoder = None
+    component_cache = {}
     inputs = {}
     for name, arm in arms.items():
         docs = documents_for_arm(context, cohort, arm)
@@ -142,22 +142,11 @@ def embed_representations(context, *, force=False, target=None, representation_m
                     if restored:
                         try:
                             with np.load(temporary / "values.npz") as arrays:
-                                matrix = arrays["values"]
-                                valid = (
-                                    matrix.shape == (len(catalog), config.encoder.embedding_dim)
-                                    and np.isfinite(matrix).all()
-                                    and all(
-                                        (
-                                            np.all(matrix[i] == 0)
-                                            for i, d in enumerate(docs)
-                                            if not d["text"].strip()
-                                        )
-                                    )
+                                matrix = {key: arrays[key] for key in arrays.files}
+                                validate_arrays(
+                                    matrix, len(catalog), config.encoder.embedding_dim, docs
                                 )
-                            if valid:
-                                _write_embedding(_embedding_path(context, name), matrix)
-                            else:
-                                restored = None
+                            _write_embedding(_embedding_path(context, name), matrix)
                         except (OSError, ValueError, KeyError):
                             restored = None
             if restored:
@@ -169,12 +158,8 @@ def embed_representations(context, *, force=False, target=None, representation_m
                 origin = {"run_id": context.run_id, "kind": "generated", "key": signature}
                 if encoder is None and any((d["text"].strip() for d in docs)):
                     encoder = BGETextEncoder(config.encoder)
-                _encode_arm(context, config, name, docs, encoder)
-                truncation = (
-                    getattr(encoder, "last_truncation", None)
-                    if any((d["text"].strip() for d in docs))
-                    else {"text_count": 0, "truncated_count": 0}
-                )
+                truncation = _encode_arm(context, config, name, docs, encoder, component_cache)
+
         finish_write(
             context,
             name,
@@ -210,18 +195,13 @@ def embed_representations(context, *, force=False, target=None, representation_m
     }
 
 
-def _encode_arm(context, config, name, docs, encoder):
-    catalog = docs
-    indices = [i for i, row in enumerate(docs) if row["text"].strip()]
-    matrix = np.zeros((len(catalog), config.encoder.embedding_dim), dtype=np.float32)
-    if indices:
-        encoded = np.asarray(encoder.encode([docs[i]["text"] for i in indices]), dtype=np.float32)
-        if (
-            encoded.shape != (len(indices), config.encoder.embedding_dim)
-            or not np.isfinite(encoded).all()
-        ):
-            raise ValidationStepError(f"invalid embedding values: {name}")
-        matrix[indices] = encoded
+def _encode_arm(context, config, name, docs, encoder, component_cache=None):
+    matrix, truncation = encode_components(
+        docs,
+        config.encoder.embedding_dim,
+        encoder,
+        component_cache if component_cache is not None else {},
+    )
     path = _embedding_path(context, name)
     try:
         previous = matrix_hash(path) if path.is_file() else None
@@ -229,6 +209,7 @@ def _encode_arm(context, config, name, docs, encoder):
         previous = None
     begin_write(context, name, previous)
     _write_embedding(path, matrix)
+    return truncation
 
 
 def run_recommendation(
@@ -239,6 +220,8 @@ def run_recommendation(
     target=None,
     representation_mode="text",
     scene_aggregation=None,
+    profile_every=None,
+    profile_operators=False,
 ):
     from validation.graph_context import graph_context, validate_mode
 
@@ -250,10 +233,23 @@ def run_recommendation(
     from validation.rolling_recommendation import run_rolling
 
     log_step_start(
-        context, "run-recommendation", force=force, target=target, workers_per_gpu=workers_per_gpu
+        context,
+        "run-recommendation",
+        force=force,
+        target=target,
+        workers_per_gpu=workers_per_gpu,
+        profile_every=profile_every,
+        profile_operators=profile_operators,
     )
     context.initialize()
-    return run_rolling(context, force=force, workers_per_gpu=workers_per_gpu, target=target)
+    return run_rolling(
+        context,
+        force=force,
+        workers_per_gpu=workers_per_gpu,
+        target=target,
+        **({"profile_every": profile_every} if profile_every is not None else {}),
+        **({"profile_operators": True} if profile_operators else {}),
+    )
 
 
 def run_diagnosis(

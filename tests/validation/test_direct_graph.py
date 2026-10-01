@@ -142,6 +142,7 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
                                              torch.tensor([0, 1]))
     loss.backward()
     for module in [encoder.projection, encoder.layers[0].relations[0], model.encoder,
+                   model.title_projection, model.item_norm,
                    *([encoder.attention] if pool == 'attention' else [])]:
         assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in module.parameters())
     assert not batch['features'].requires_grad
@@ -190,6 +191,7 @@ def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     split = cohort['plan']['splits'][0]
     identity = {'run_id': context.run_id, 'evaluation_date': split['evaluation_date'],
                 'seed': config.model.seeds[0], 'arm': 'graph_qwen_meta',
+                'deterministic': config.model.deterministic,
                 'training_input_hash': training_signature(context, cohort, config),
                 **recommendation_identity(context, 'graph_qwen_meta')}
     prepared = prepare_split(table, split)
@@ -237,17 +239,31 @@ def test_title_order_and_missing_inputs(graph_data):
     prepare(context, target=['graph_qwen', 'graph_qwen_meta'])
     for arm in ('graph_qwen', 'graph_qwen_meta'):
         model = new_graph_model(context, validation_config(context), arm, 'cpu').eval()
+        # Missing titles must stay zero even after trainable offsets change.
+        with torch.no_grad():
+            model.title_projection.bias.fill_(0.25)
+            model.item_norm.bias.fill_(0.75)
         captured = []
-        hook = model.item_projection.register_forward_pre_hook(lambda module, args: captured.append(args[0].detach()))
+        hook = model.item_norm.register_forward_pre_hook(lambda module, args: captured.append(args[0].detach()))
         with torch.no_grad():
             values = model.catalog_vectors()
         hook.remove()
         title_ids = model.store['titles']
-        np.testing.assert_array_equal(captured[0][:, :1024].numpy(), model.store['features'][title_ids])
-        assert torch.count_nonzero(captured[0][3, 1024:]) == 0
+        with torch.no_grad():
+            titles = torch.as_tensor(np.array(model.store['features'][title_ids]))
+            expected = model.title_projection(titles)
+            expected[title_ids == 0] = 0
+        torch.testing.assert_close(captured[0][:, :128], expected)
+        assert torch.count_nonzero(captured[0][3, 128:]) == 0
         assert torch.count_nonzero(values[1]) == 0
         assert bool(torch.count_nonzero(values[3])) == (arm == 'graph_qwen_meta')
-        assert model.item_projection.in_features == 1536
+        assert captured[0].shape == (4, 512)
+        assert model.title_projection.in_features == 384
+        assert model.title_projection.out_features == 128
+        assert len(model.graph_encoder.layers) == 1
+        assert model.graph_encoder.output_dim == 384
+        assert isinstance(model.graph_encoder.readout, torch.nn.Identity)
+        assert not hasattr(model, 'item_projection')
 
 
 def test_empty_and_single_scene_pooling(graph_data):
@@ -278,7 +294,7 @@ def test_four_gpu_feature_partition_and_order(monkeypatch, tmp_path):
             self.last_truncation = {}
         def encode(self, texts):
             calls.append((self.device, texts))
-            return np.asarray([[int(t)] * 1024 for t in texts], dtype=np.float32)
+            return np.asarray([[int(t)] * 384 for t in texts], dtype=np.float32)
     class Pool:
         def __init__(self, **kwargs):
             assert kwargs['max_workers'] == 4
@@ -362,6 +378,7 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     for seed in config.model.seeds[:2]:
         identity = {'run_id': context.run_id, 'evaluation_date': split['evaluation_date'],
                     'seed': seed, 'arm': 'graph_qwen',
+                    'deterministic': config.model.deterministic,
                     'training_input_hash': training_signature(context, cohort, config),
                     **recommendation_identity(context, 'graph_qwen')}
         jobs.append((split, identity, 'graph_qwen'))
@@ -386,3 +403,54 @@ def test_deprecated_receiver_is_ignored_in_graph_inputs(graph_data):
         assert actual_texts == texts and actual_stats == stats
         for name in expected:
             np.testing.assert_array_equal(actual[name], expected[name])
+
+
+def test_v4_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
+    pytest.importorskip('torch')
+    import graph_reference as v2
+    from validation.graph_context import GRAPH_ARCHITECTURE, GRAPH_MODEL
+    from validation.graph_model import new_graph_model
+    from validation.representation_provenance import recommendation_identity
+    from validation.recommendation_cache import cache_for
+    from validation.steps import validation_config
+    context, cohort = graph_data
+    config = validation_config(context)
+    arm = registry(context.config)['graph_qwen_meta']
+    source_before = source_identity(context, cohort, arm)
+    assert prepare(context, target=['graph_qwen_meta'])['reused_arms'] == ['graph_qwen_meta']
+    assert source_identity(context, cohort, arm) == source_before
+    current = recommendation_identity(context, arm.name)
+    assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v5'
+    assert (GRAPH_MODEL['layers'], GRAPH_MODEL['scene_dim'], GRAPH_MODEL['title_dim']) == (1, 384, 128)
+    previous = {**current, 'graph_architecture': 'sasrec-role-graph/v2',
+                'graph_model': {'layers': 2, 'hidden_dim': 128, 'scene_dim': 512, 'attention_dim': 128}}
+    assert cache_for(context, current).key != cache_for(context, previous).key
+    model = new_graph_model(context, config, arm.name, 'cpu')
+    old = v2.GraphSASRec(store=model.store, aggregation='attention', item_count=len(model.store),
+                        max_length=10, embedding_dim=512, num_blocks=2, num_heads=2, dropout=0.1,
+                        arm='graph')
+    with pytest.raises(RuntimeError, match='state_dict'):
+        model.load_state_dict(old.state_dict())
+    assert 'title_projection.weight' in model.state_dict()
+    assert 'item_projection.weight' not in model.state_dict()
+    assert 'graph_encoder.layers.1.states' not in model.state_dict()
+
+
+def test_title_only_meta_uses_common_v4_baseline(graph_data):
+    torch = pytest.importorskip('torch')
+    from validation.model import SASRec, seed_everything
+    from validation.graph_model import new_graph_model
+    from validation.steps import validation_config
+    context, _ = graph_data
+    config = validation_config(context)
+    store = GraphStore(context.representations_dir / 'meta_embeddings')
+    seed_everything(42)
+    actual = new_graph_model(context, config, 'meta', 'cpu')
+    seed_everything(42)
+    expected = SASRec(len(store), 10, 512, 2, 2, config.model.dropout, arm='metadata',
+                      item_features=np.array(store['features'][store['titles']]))
+    assert not hasattr(actual, 'graph_encoder')
+    for key, value in expected.state_dict().items():
+        torch.testing.assert_close(value, actual.state_dict()[key], rtol=0, atol=0)
+    with torch.no_grad():
+        torch.testing.assert_close(actual.catalog_vectors(), expected.catalog_vectors(), rtol=0, atol=0)

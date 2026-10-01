@@ -30,7 +30,7 @@ def _model(*, dimension: int = 8, item_count: int = 12) -> SASRec:
 
 @pytest.mark.parametrize("arm", ["metadata", "graph", "desc"])
 def test_all_item_towers_use_frozen_features_and_trainable_projection(arm) -> None:
-    features = np.ones((12, 1024), dtype=np.float32)
+    features = np.ones((12, 6), dtype=np.float32)
     model = SASRec(
         item_count=12,
         max_length=10,
@@ -61,12 +61,12 @@ def test_all_item_towers_use_frozen_features_and_trainable_projection(arm) -> No
     loss.backward()
 
     assert torch.isfinite(loss)
-    assert model.frozen_item_features.requires_grad is False
-    assert model.item_projection.weight.grad is not None
+    assert model.title_features.requires_grad is False
+    assert (model.item_projection if arm == "metadata" else model.title_projection).weight.grad is not None
     assert model.user_mlp.fc1.weight.grad is not None
-    assert model.item_mlp.activation == "relu"
+    assert not hasattr(model, "item_mlp")
     assert model.user_mlp.activation == "gelu"
-    assert model.item_mlp.fc1.out_features == 8
+    assert model.item_norm.normalized_shape == (8,)
     assert model.user_mlp.fc1.out_features == 8
 
 

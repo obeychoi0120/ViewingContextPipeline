@@ -22,12 +22,13 @@ class RollingDatasetConfig(DatasetConfig):
 
 class EncoderConfig(StrictModel):
     model_path: Path
-    embedding_dim: Literal[1024]
+    embedding_dim: Literal[384]
     max_length: Literal[512]
     batch_size: int = Field(default=32, gt=0)
 
 
 class ModelConfig(StrictModel):
+    deterministic: bool = Field(default=False, strict=True)
     max_sequence_length: Literal[10]
     embedding_dim: Literal[512]
     num_blocks: Literal[2]
@@ -77,14 +78,23 @@ class FullCohortConfig(StrictModel):
     exclude_final_day: Literal[True]
 
 
+class GraphExecutionConfig(StrictModel):
+    # Execution choices only: no change to model weights, loss or cache identity.
+    chunk_items: int = Field(default=256, gt=0)
+    chunk_nodes: int = Field(default=32768, gt=0)
+    checkpoint: Literal["auto", "always", "never"] = "auto"
+    feature_cache_mb: int = Field(default=2048, ge=0)
+
+
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v5"]
+    schema_version: Literal["validation-config/v6"]
     run_id: str
     dataset: RollingDatasetConfig
     cohort: FullCohortConfig
     encoder: EncoderConfig
     model: ModelConfig
     evaluation: EvaluationConfig
+    graph_execution: GraphExecutionConfig = Field(default_factory=GraphExecutionConfig)
     output_dir: Path
 
 
@@ -94,13 +104,14 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v5",
+            "schema_version": "validation-config/v6",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),
             "encoder": {**settings["encoder"], "model_path": model_path},
             "model": settings.get("model"),
             "evaluation": settings.get("evaluation"),
+            "graph_execution": settings.get("graph_execution", {}),
             "output_dir": output_dir,
         }
     )

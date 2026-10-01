@@ -132,7 +132,7 @@ def training_signature(context, cohort, config):
             "events": cohort["events"],
             "selection_hash": cohort["manifest"]["selection_hash"],
             "model": {
-                k: v for k, v in context.config["validation"]["model"].items() if k != "seeds"
+                k: v for k, v in config.model.model_dump().items() if k != "seeds"
             },
             "cutoffs": config.evaluation.cutoffs,
         }

@@ -3,7 +3,7 @@
 from model_provenance import canonical, without_provenance_arm
 from artifact_io import fingerprint
 
-REPRESENTATION_VERSION = "shared-scenes-representation/v3"
+REPRESENTATION_VERSION = "shared-scenes-representation/v4"
 
 
 def generation_identity(provenance):
@@ -33,9 +33,9 @@ def verified_generation(prov):
 
 
 def shareable_document(doc):
-    from arm_registry import CONCAT_POLICY
+    from validation.text_features import COMPOSITION_POLICY
 
-    if doc.get("composition_policy") == CONCAT_POLICY and not doc.get("summary_used"):
+    if doc.get("composition_policy") == COMPOSITION_POLICY and not doc.get("summary_used"):
         # Missing/failed visual inputs have a deterministic metadata-only or zero representation.
         return doc.get("summary_status") in {"missing", "failed", "not_applicable"}
     prov = doc.get("source_provenance", {})
@@ -60,7 +60,8 @@ def semantic_documents(docs):
     return [
         {
             "content_id": d["content_id"],
-            "text": d["text"],
+            "title_text": d.get("title_text", ""),
+            "video_text": d.get("video_text", d["text"]),
             "generation": generation_identity(d.get("source_provenance", {})),
             **(
                 {

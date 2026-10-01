@@ -33,7 +33,7 @@ def fixture_table(users=8, count=32):
 
 def fixture_model(table, device, seed=42):
     seed_everything(seed)
-    features = np.random.default_rng(17).normal(size=(len(table.items), 16)).astype(np.float32)
+    features = np.random.default_rng(17).normal(size=(len(table.items), 12)).astype(np.float32)
     features[::7] = 0
     return SASRec(len(table.items), 10, 16, 1, 2, 0.1,
                   arm="graph", item_features=features).to(device)
@@ -144,7 +144,8 @@ def test_nonfinite_loss_prevents_optimizer_update(device, monkeypatch):
             SimpleNamespace(model=SimpleNamespace(batch_size=32)), device)
 
 
-def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch, device):
+@pytest.mark.parametrize("deterministic", [False, True])
+def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch, device, deterministic):
     arm, seed = "graph_qwen_meta", 42
     from artifact_io import read_json
     from validation.recommendation_cache import valid_bundle, cache_for
@@ -156,14 +157,16 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
     split = table.splits()[0]
     config = SimpleNamespace(
         model=SimpleNamespace(max_sequence_length=10, max_epochs=4, patience=2, seeds=[seed],
-                              batch_size=37, learning_rate=1e-4),
+                              batch_size=37, learning_rate=1e-4, deterministic=deterministic),
         evaluation=SimpleNamespace(cutoffs=[4, 8, 10, 20, 30]),
     )
     features_dir = tmp_path / "representations"
     features_dir.mkdir()
-    features = np.random.default_rng(len(arm)).normal(size=(len(table.items), 16)).astype(np.float32)
+    features = np.random.default_rng(len(arm)).normal(size=(len(table.items), 12)).astype(np.float32)
     features[::7] = 0
-    np.savez(features_dir / f"{arm}_embeddings.npz", values=features)
+    np.savez(features_dir / f"{arm}_embeddings.npz", title_values=features, video_values=np.zeros_like(features),
+                 title_available=np.any(features != 0, axis=1),
+                 video_available=np.zeros(len(features), dtype=bool))
 
     def tiny(config, *, item_count, branch, features, device):
         return SASRec(item_count, 10, 16, 1, 2, 0.1,
@@ -171,9 +174,16 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
 
     monkeypatch.setattr(reference, "_new_model", tiny)
     monkeypatch.setattr(optimized, "_new_model", tiny)
+    seed_calls = []
+
+    def seeded(seed, *, deterministic):
+        seed_calls.append(deterministic)
+        seed_everything(seed, deterministic=deterministic)
+
+    monkeypatch.setattr(optimized, "seed_everything", seeded)
     monkeypatch.setattr("validation.recommendation_cache.eligible", lambda *a: False)
     identity = dict(run_id="comparison", evaluation_date=split["evaluation_date"],
-                    seed=seed, arm=arm, training_input_hash="same-input")
+                    seed=seed, arm=arm, training_input_hash="same-input", deterministic=deterministic)
     bundles, contexts = [], []
     for name, implementation in (("reference", reference), ("optimized", optimized)):
         ctx = SimpleNamespace(representations_dir=features_dir,
@@ -187,6 +197,7 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
                                        implementation.prepare_split(current, split), device)
         bundles.append(optimized.combination_dir(ctx, split["evaluation_date"], seed, arm))
     before, after = (read_json(p / "training.json") for p in bundles)
+    assert after["training_settings"]["deterministic"] is deterministic
     assert "execution" not in before and "execution" in after
     assert before["best_epoch"] == after["best_epoch"]
     for phase in ("selection", "refit"):
@@ -202,8 +213,9 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
     assert all(valid_bundle(p, identity, table, split) for p in bundles)
     assert original == {p.name: p.read_bytes() for p in bundles[0].iterdir()}
     assert cache_for(contexts[0], identity).key == cache_for(contexts[1], identity).key
-    assert ARCHITECTURE_VERSION == "sasrec-content-v3"
-    assert TRAINING_IMPLEMENTATION_VERSION == "shared-scenes-training-evaluation/v4"
+    assert ARCHITECTURE_VERSION == "sasrec-content-v5"
+    assert TRAINING_IMPLEMENTATION_VERSION == "shared-scenes-training-evaluation/v5"
+    assert seed_calls == [deterministic, deterministic]
 
     # Actually resume a pre-optimization bundle without preparing tensors or devices.
     def forbid(*args, **kwargs):
