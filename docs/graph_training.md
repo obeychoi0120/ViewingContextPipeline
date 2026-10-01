@@ -369,9 +369,11 @@ profiler를 끈 wall time만 사용합니다.
 
 Small 구조 그림: [편집 가능한 PPTX](design/recsys_diagram_small.pptx),
 [PPTX에서 렌더링한 PNG](design/recsys_diagram_small.png).
-[생성 코드](design/generate_recsys_diagram_small.py)는 기존 large PPTX를 읽어 도형·연결선을
-수정하고 LibreOffice로 PDF를 렌더링한 뒤 PNG를 생성합니다. 실행에는 `python-pptx`,
-`PyMuPDF`, LibreOffice Impress가 필요합니다. 기존 `recsys_diagram.pptx/png`는 변경하지 않습니다.
+[생성 코드](design/generate_recsys_diagram_small.py)는 large와 small 모두에서 Entity·Action·Context가
+하나의 Shared Linear Projection 상자를 통과하도록 표시합니다. 노드 종류 embedding과 Role Graph
+Encoder는 Entity·Action 분기에만 적용하고, Context 분기는 장면 concat에 직접 연결합니다.
+두 PPTX를 편집 가능한 도형·연결선으로 저장하고 LibreOffice PDF를 거쳐 PNG로 렌더링합니다.
+실행에는 `python-pptx`, `PyMuPDF`, LibreOffice Impress가 필요합니다.
 
 ## 이전 모델 v4: Baseline·Text·Graph 최종 구조
 
