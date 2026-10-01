@@ -197,8 +197,8 @@ artifacts/runs/<RUN_ID>/validation/recommendations/
 - `kind=batch`: 선택된 배치, `kind=catalog`: 전체 catalog 생성, `kind=stage`: 준비·초기화·저장,
   `kind=phase`: epoch 또는 test 전체 시간입니다. `kind=start`는 측정 설정입니다.
 - `seconds`는 자식 단계를 포함하는 시간입니다. 예를 들어 `graph_items`와 그 하위 시간을
-  더하면 중복 계산됩니다. `exclusive_seconds`는 측정된 자식 시간을 뺀 값이며,
-  `calls`는 해당 표본에서 단계가 실행된 횟수입니다. 여러 chunk의 같은 경로는 합산됩니다.
+  더하면 중복 계산됩니다. 부모의 독점 시간은 부모 시간에서 직접 자식 경로들의 시간을
+  빼서 계산합니다. `calls`는 해당 표본에서 단계가 실행된 횟수입니다. 여러 chunk의 같은 경로는 합산됩니다.
 - Checkpoint 재계산은 `backward/graph_encoder/...`로 표시되며 `backward` 시간에 포함됩니다.
   원래 forward와 합쳐 중복 집계하지 않습니다. 전체 backward의 커널별 세분화는 제공하지 않습니다.
 - CUDA 측정은 경계에서 synchronize하는 **완료 기준 wall time**입니다. CPU 처리·전송·GPU 실행·
@@ -208,6 +208,13 @@ artifacts/runs/<RUN_ID>/validation/recommendations/
   샘플 시간 합을 전체 epoch 시간으로 해석하거나, 서로 크기가 다른 Graph 배치를 단순 비교하지 않습니다.
 - 옵션이 없거나 샘플링하지 않는 배치에는 프로파일러의 CUDA 동기화·메모리 조회·파일 쓰기가 없습니다.
   기존 학습 코드가 원래 수행하던 동기화는 유지합니다.
+- 프로파일 형식 v2는 Run·Arm·모델 설정·입력 해시·device·pid·schema_version을 세션의
+  `kind=start` 줄에만 기록합니다. 측정 줄의 `session_id`로 해당 시작 줄과 연결합니다.
+  측정 줄에는 timestamp, 단계·epoch·배치, 상태, 예제 수, wall time, 작업별 시간·호출 수,
+  workload·CUDA 메모리를 남깁니다. null 배치와 빈 딕셔너리는 생략합니다.
+  `examples_per_second`는 examples/wall_seconds로 계산하며, `exclusive_seconds`도
+  계산 가능한 중복 데이터여서 저장하지 않습니다. 기존 v1 로그는 수정하지 않으며,
+  같은 파일에 새 v2 세션이 추가될 수 있습니다.
 - 파일은 표본마다 append 후 닫으며, 중단 후 재실행은 새로운 `session_id`로 구분합니다.
   `training.json`의 `execution.profiling`에 이번 session과 측정 간격을 기록합니다.
 - 프로파일링 옵션 자체는 학습 캐시 키·모델·BGE 설정을 바꾸지 않습니다. 위 v3 구조 변경은 별도입니다. 완료 조합은 그대로 건너뛰므로

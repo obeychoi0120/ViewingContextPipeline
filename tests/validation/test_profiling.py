@@ -62,12 +62,51 @@ def test_disabled_is_inert_and_sampling_resets_after_error(tmp_path, monkeypatch
     assert [r["batch"] for r in rows if r.get("status") == "ok"] == [1, 2, 3, 4, 8]
     row = rows[1]
     assert row["seconds"]["parent"] >= row["seconds"]["parent/child"]
-    assert row["exclusive_seconds"]["parent"] == pytest.approx(
-        row["seconds"]["parent"] - row["seconds"]["parent/child"]
-    )
+    assert "exclusive_seconds" not in row
     assert rows[-1]["status"] == "error"
     p2 = profiler(tmp_path)
     assert p2.session != p.session and len(records(tmp_path)) == len(rows) + 1
+
+
+def test_compact_records_preserve_session_context_and_measurements(tmp_path):
+    identity = {
+        "run_id": "run",
+        "evaluation_date": "2022-09-05",
+        "seed": 42,
+        "arm": "graph_qwen",
+        "embedding_hash": "features",
+        "training_input_hash": "training",
+        "representation_mode": "graph",
+        "scene_aggregation": "mean",
+        "graph_model": {"layers": 1},
+        "item_model": {"normalization": "final_layernorm"},
+    }
+    p = RunProfiler(tmp_path, identity, "cpu", 100)
+    with p.sample("selection", 1, 1, examples=512):
+        with span("parent"):
+            with span("child"):
+                pass
+    with p.sample("preparation", kind="stage"):
+        pass
+    p.phase("selection", 1, 10.0, 1024)
+    start, batch, stage, phase = records(tmp_path)
+    assert start["schema_version"] == "recommendation-profile/v2"
+    assert all(start[key] == value for key, value in identity.items())
+    assert start["device"] == "cpu" and "pid" in start
+    for row in (batch, stage, phase):
+        assert row["session_id"] == start["session_id"]
+        assert row["timestamp"]
+        assert not set(identity).intersection(row)
+        assert not {"schema_version", "pid", "device", "exclusive_seconds",
+                    "examples_per_second"}.intersection(row)
+    assert batch["examples"] == 512 and batch["status"] == "ok"
+    assert batch["calls"] == {"parent/child": 1, "parent": 1}
+    assert batch["seconds"]["parent"] >= batch["seconds"]["parent/child"]
+    assert not {"batch", "seconds", "calls", "workload"}.intersection(stage)
+    assert phase["wall_seconds"] == 10.0 and phase["examples"] == 1024
+    other = RunProfiler(tmp_path, {**identity, "embedding_hash": "new"}, "cpu", 100)
+    assert records(tmp_path)[-1]["embedding_hash"] == "new"
+    assert other.session != p.session
 
 
 @pytest.mark.parametrize("mode", ["text", "mean", "attention"])

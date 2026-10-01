@@ -1,6 +1,6 @@
 """Opt-in sampled wall timings, with CUDA completion at measured boundaries.
 
-Nested timings are inclusive; exclusive_seconds removes measured child spans.
+Nested timings are inclusive; exclusive times can be derived from child spans.
 No CUDA synchronization, device queries or file writes happen while disabled.
 """
 
@@ -16,7 +16,7 @@ import uuid
 
 from validation.model import torch
 
-PROFILE_VERSION = "recommendation-profile/v1"
+PROFILE_VERSION = "recommendation-profile/v2"
 _active = ContextVar("recommendation_profile_sample", default=None)
 
 
@@ -67,7 +67,6 @@ class Sample:
     def __init__(self, device):
         self.device = torch.device(device)
         self.seconds = defaultdict(float)
-        self.exclusive_seconds = defaultdict(float)
         self.calls = defaultdict(int)
         self.workload = defaultdict(int)
         self.stack = []
@@ -80,10 +79,9 @@ class Sample:
     def span(self, name, *, cuda=True):
         if cuda:
             self.sync()
-        path = "/".join([frame[0] for frame in self.stack] + [name])
-        frame = [name, 0.0]
+        path = "/".join([*self.stack, name])
         started = time.perf_counter()
-        self.stack.append(frame)
+        self.stack.append(name)
         try:
             yield
         finally:
@@ -94,10 +92,7 @@ class Sample:
                 elapsed = time.perf_counter() - started
                 self.stack.pop()
                 self.seconds[path] += elapsed
-                self.exclusive_seconds[path] += max(0.0, elapsed - frame[1])
                 self.calls[path] += 1
-                if self.stack:
-                    self.stack[-1][1] += elapsed
 
 
 class RunProfiler:
@@ -118,14 +113,20 @@ class RunProfiler:
 
     def emit(self, record):
         row = {
-            "schema_version": PROFILE_VERSION,
             "session_id": self.session,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            **self.identity,
-            "device": str(self.device),
-            "pid": os.getpid(),
             **record,
         }
+        if record["kind"] == "start":
+            row = {
+                "schema_version": PROFILE_VERSION,
+                **self.identity,
+                "device": str(self.device),
+                "pid": os.getpid(),
+                **row,
+            }
+        # Keep the measurement rows small; start holds session-wide context.
+        row = {key: value for key, value in row.items() if value is not None and value != {}}
         # Append+close each record: interruption preserves earlier samples;
         # separate sessions distinguish retries. Not part of result cache identity.
         with self.path.open("a", encoding="utf-8") as handle:
@@ -164,9 +165,7 @@ class RunProfiler:
                 "status": status,
                 "examples": examples,
                 "wall_seconds": elapsed,
-                "examples_per_second": examples / elapsed if elapsed else 0.0,
                 "seconds": dict(sample.seconds),
-                "exclusive_seconds": dict(sample.exclusive_seconds),
                 "calls": dict(sample.calls),
                 "workload": dict(sample.workload),
             }
@@ -206,7 +205,6 @@ class RunProfiler:
                 "epoch": epoch,
                 "wall_seconds": seconds,
                 "examples": examples,
-                "examples_per_second": examples / seconds if seconds else 0.0,
             }
         )
 
