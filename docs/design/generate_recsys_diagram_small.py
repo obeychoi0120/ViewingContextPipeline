@@ -13,6 +13,10 @@ import tempfile
 
 import pymupdf
 from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
 
@@ -41,7 +45,7 @@ def single_line(shape, text, size):
 def shared_projection(presentation):
     slide = presentation.slides[0]
     shapes = list(slide.shapes)
-    if any(s.has_text_frame and s.text.startswith("Shared Linear Projection:") for s in shapes):
+    if any(s.has_text_frame and s.text.startswith("Shared Linear Projection") for s in shapes):
         return
     node = next(s for s in shapes if s.has_text_frame and s.text.startswith("Shared projection:"))
     context = next(s for s in shapes if s.has_text_frame and s.text.startswith("Projection\n")
@@ -99,6 +103,76 @@ def small_model(presentation):
     )
 
 
+def shared_projection_format(presentation):
+    """Match the title projection's two-line name/dimension format."""
+    slide = presentation.slides[0]
+    shared = next(s for s in slide.shapes
+                  if s.has_text_frame and s.text.startswith("Shared Linear Projection"))
+    title = next(s for s in slide.shapes if s.has_text_frame
+                 and s.left == Inches(9.7) and s.top == Inches(3.87))
+    for paragraph in list(shared.text_frame.paragraphs):
+        shared.text_frame._txBody.remove(paragraph._p)
+    for paragraph in title.text_frame.paragraphs:
+        shared.text_frame._txBody.append(deepcopy(paragraph._p))
+    shared.text_frame.paragraphs[0].runs[0].text = "Shared Linear Projection"
+
+
+def node_type_addition(presentation):
+    """Show type-vector addition on each node branch rather than a transform layer."""
+    slide = presentation.slides[0]
+    if any(s.name == "Entity node-type addition" for s in slide.shapes):
+        return
+    old = next(s for s in slide.shapes
+               if s.has_text_frame and s.text == "Entity / action node-type embedding")
+    remove(old)
+    ink = RGBColor.from_string("008B91")
+    caption = slide.shapes.add_textbox(Inches(13.9), Inches(4.79), Inches(2.5), Inches(0.30))
+    caption.name = "Node-type addition caption"
+    frame = caption.text_frame
+    frame.auto_size = MSO_AUTO_SIZE.NONE
+    frame.word_wrap = False
+    frame.margin_left = frame.margin_right = frame.margin_top = frame.margin_bottom = 0
+    frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    paragraph = frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.CENTER
+    run = paragraph.add_run()
+    run.text = "Add node-type embedding"
+    run.font.name, run.font.size, run.font.color.rgb = "Liberation Sans", Pt(15), ink
+    for role, x in (("Entity", 13.75), ("Action", 16.55)):
+        symbol = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL, Inches(x - 0.14), Inches(4.8), Inches(0.28), Inches(0.28)
+        )
+        symbol.name = f"{role} node-type addition"
+        symbol.fill.solid()
+        symbol.fill.fore_color.rgb = RGBColor.from_string("FFFFFF")
+        symbol.line.color.rgb, symbol.line.width = ink, Pt(1.2)
+        symbol._element.spPr.append(OxmlElement("a:effectLst"))
+        symbol.text_frame.margin_left = symbol.text_frame.margin_right = 0
+        symbol.text_frame.margin_top = symbol.text_frame.margin_bottom = 0
+        symbol.text_frame.auto_size = MSO_AUTO_SIZE.NONE
+        symbol.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        paragraph = symbol.text_frame.paragraphs[0]
+        paragraph.alignment = PP_ALIGN.CENTER
+        run = paragraph.add_run()
+        run.text = "+"
+        run.font.name, run.font.size, run.font.color.rgb = "Liberation Sans", Pt(16), ink
+        incoming = next(s for s in slide.shapes if not s.has_text_frame
+                        and s.left == Inches(x) and s.top == Inches(4.6))
+        incoming.height = Inches(0.2)
+    for name, start, end in (
+        ("Entity addition output", (13.75, 5.08), (13.75, 5.17)),
+        ("Action addition output", (16.55, 5.08), (16.55, 5.17)),
+        ("Added node features merge", (13.75, 5.17), (16.55, 5.17)),
+    ):
+        line = slide.shapes.add_connector(
+            MSO_CONNECTOR.STRAIGHT, Inches(start[0]), Inches(start[1]),
+            Inches(end[0]), Inches(end[1]),
+        )
+        line.name = name
+        line.line.color.rgb, line.line.width = ink, Pt(1.2)
+        line._element.spPr.append(OxmlElement("a:effectLst"))
+
+
 def render(output):
     environment = os.environ.copy()
     program = Path(shutil.which("soffice")).resolve().parent
@@ -118,14 +192,16 @@ def render(output):
 
 def main():
     directory = Path(__file__).resolve().parent
-    regular = directory / "recsys_diagram.pptx"
+    regular = directory / "recsys_diagram_large.pptx"
     presentation = Presentation(regular)
     shared_projection(presentation)
+    node_type_addition(presentation)
     title_projection = next(
         shape for shape in presentation.slides[0].shapes
         if shape.has_text_frame and shape.left == Inches(9.7) and shape.top == Inches(3.87)
     )
     title_projection.text_frame.paragraphs[0].runs[0].text = "Linear Projection"
+    shared_projection_format(presentation)
     presentation.save(regular)
     render(regular)
     small_model(presentation)
