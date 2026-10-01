@@ -1,8 +1,10 @@
 # ViewingContextPipeline
 
-![ViewingContextPipeline 실험 흐름](docs/design/Diagram.png)
+![ViewingContextPipeline 실험 흐름](docs/design/main_diagram.png)
 
-[다이어그램 PPTX 원본](docs/design/Diagram.pptx)
+![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram_small.png)
+
+[다이어그램 PPTX 원본](docs/design/main_diagram.pptx) · [다이어그램 생성 코드](docs/design/generate_main_diagram.py)
 
 MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시각 정보를 더했을 때 추천 성능이 어떻게 달라지는지 비교하는 실험 파이프라인입니다. Qwen·Gemini로 Graph와 Description을 생성하고, 동일한 사용자·후보 catalog·평가 구간에서 SASRec을 학습합니다.
 
