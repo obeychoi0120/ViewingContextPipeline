@@ -56,7 +56,7 @@ class RoleLayer(nn.Module):
 
 
 class RoleGraphEncoder(nn.Module):
-    def __init__(self, feature_dim=384, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
+    def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
         super().__init__()
         if aggregation not in ("mean", "attention"):
             raise ValueError("unknown scene aggregation")

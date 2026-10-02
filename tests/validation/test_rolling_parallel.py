@@ -54,7 +54,7 @@ def prepare_embeddings(context):
     )
     write_json(context.representations_dir / "graph_gemini_fallbacks.json", {"fallbacks": []})
     for branch in registry(context.config):
-        values = np.random.default_rng(4).normal(size=(4, 384)).astype(np.float32)
+        values = np.random.default_rng(4).normal(size=(4, 1024)).astype(np.float32)
         np.savez(context.representations_dir / f"{branch}_embeddings.npz", title_values=values, video_values=np.zeros_like(values),
                  title_available=np.any(values != 0, axis=1),
                  video_available=np.zeros(len(values), dtype=bool))

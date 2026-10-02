@@ -447,7 +447,7 @@ def test_embedding_never_sends_combined_title_summary(ready_context, fake_models
         def encode(self, texts):
             calls.extend(texts)
             self.last_truncated_flags = [False] * len(texts)
-            return np.ones((len(texts), 384), dtype=np.float32)
+            return np.ones((len(texts), 1024), dtype=np.float32)
 
     monkeypatch.setattr('validation.features.BGETextEncoder', Encoder)
     arms = registry(ready_context.config)

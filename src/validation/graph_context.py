@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pipeline_runtime import RunContext
 
 GRAPH_ARMS = frozenset({"meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"})
-GRAPH_ARCHITECTURE = "sasrec-role-graph/v5"
+GRAPH_ARCHITECTURE = "sasrec-role-graph/v6"
 GRAPH_MODEL = {
     "layers": 1,
     "hidden_dim": 128,
@@ -14,7 +14,7 @@ GRAPH_MODEL = {
     "attention_dim": 128,
     "fusion": "title_then_video_concat_layernorm",
     "scene_readout": "entity_action_context_concat",
-    "input_dim": 384,
+    "input_dim": 1024,
     "state_lookup": "embedding",
 }
 

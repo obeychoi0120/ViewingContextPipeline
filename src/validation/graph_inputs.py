@@ -237,18 +237,21 @@ def encode_texts(settings, texts):
         return np.concatenate([np.load(Path(temp) / f"{i}.npy") for i in range(count)])
 
 
-def bundle_valid(directory, signature):
+def bundle_valid(directory, signature, embedding_dim):
     try:
         manifest = read_json(directory / "manifest.json")
+        features = np.load(directory / "features.npy", mmap_mode="r", allow_pickle=False)
         return (
             manifest["input_hash"] == signature
             and manifest["version"] == VERSION
+            and features.shape == (manifest["feature_count"], embedding_dim)
+            and features.dtype == np.float32
             and set(manifest["checksums"]) == {f"{n}.npy" for n in ARRAYS} | {"statistics.json"}
             and all(
                 checksum(directory / n) == digest for n, digest in manifest["checksums"].items()
             )
         )
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, EOFError):
         return False
 
 
@@ -266,13 +269,13 @@ def prepare(context, *, target, force=False):
         signature = source_identity(context, cohort, arm)
         destination = context.representations_dir / f"{name}_embeddings"
         cache = SharedCache(context, "graph_inputs", signature)
-        if not force and bundle_valid(destination, signature):
+        if not force and bundle_valid(destination, signature, settings.embedding_dim):
             reused.append(name)
             continue
         if not force:
             with tempfile.TemporaryDirectory() as temp:
                 temp = Path(temp)
-                if cache.restore(temp) and bundle_valid(temp, signature):
+                if cache.restore(temp) and bundle_valid(temp, signature, settings.embedding_dim):
                     destination.mkdir(parents=True, exist_ok=True)
                     for p in temp.iterdir():
                         if p.name != "cache.json":
@@ -344,7 +347,7 @@ def verify(context, cohort, arms):
     for name, arm in select_arms(context.config, list(arms)).items():
         signature = source_identity(context, cohort, arm)
         path = context.representations_dir / f"{name}_embeddings"
-        if not bundle_valid(path, signature):
+        if not bundle_valid(path, signature, context.config["validation"]["encoder"]["embedding_dim"]):
             raise ValueError(
                 f"missing/stale/corrupt graph inputs: {name}; rerun embed-representations"
             )

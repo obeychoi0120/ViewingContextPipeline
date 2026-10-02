@@ -5,6 +5,7 @@
 | 우선순위 | 항목 | 상태 | 선행 조건 | 완료 기준 |
 |---|---|---|---|---|
 | P0 | Graph 입력 준비, 역할별 encoder, mean/attention, SASRec 공동 학습, 진단 | 구현·검증 완료, 전체 실험 대기 | v7 Scene Graph, BGE 로컬 가중치 | 입력·구조·gradient·재개·진단 CPU 검사와 GPU smoke 통과. 전체 실험 결과는 별도 확인 |
+| P0 | BGE Large 전용 v6 모델·특징 전환 | 구현·CPU/CUDA 검증 완료, 전체 실험 대기 | 로컬 bge-large-en-v1.5 및 현재 Run 입력 | 1024 계약·projection 학습·small 캐시 거부·CPU/CUDA smoke 확인 후 Text/Graph 재임베딩·재학습 |
 | P1 | 장면 간 GNN aggregation | 다음 단계 | 장면 연결 기준과 시간 정보 사용 결정 | 동일 데이터·seed에서 mean/attention과 비교, 시간·연결 ablation 포함 |
 | P2 | 사용자 평균 aggregation | 대기 | 직접 Graph 영상 표현 기준선 확보 | 같은 후보·이력·평가 분할로 SASRec과 비교 |
 | P2 | LightGCN·clustering 기반 사용자 표현 | 대기 | 사용자–아이템 학습 구간과 clustering 갱신 규칙 결정 | test leakage 없이 학습·추론·비교 재현 |
@@ -16,7 +17,9 @@
 
 - `260928_v7` 실행 최적화: [변경 사항·수치 검증·벤치마크](../artifacts/runs/260928_v7/reports/graph_execution_optimization.md)
 
-- Graph 모델 v3: 1층·장면 384·제목 128 결합과 추천 단계별 프로파일링 구현. 실제 추천 성능/RTX 처리량 비교는 대기. [현재 모델·프로파일링 사용법](graph_training.md#graph-모델-v3-1층-encoder와-128384-결합-2026-09-30).
+- Graph 모델 v3: 1층·장면 384·제목 128 결합과 추천 단계별 프로파일링 구현. 실제 추천 성능/RTX 처리량 비교는 대기. [이전 모델 v3 이력](graph_training.md#이전-graph-모델-v3-1층-encoder와-128384-결합-2026-09-30).
 - `260928_v7` Graph v3·프로파일링 검증: [변경 위치·재학습 범위·검사 결과](../artifacts/runs/260928_v7/reports/graph_v3_profiling_implementation.md).
 
 - 모델 v4: Meta 제목 512 기준선, Text 제목·Summary 독립 BGE, 공통 최종 LayerNorm, 아이템 MLP 제거. 전체 추천 성능 실험은 대기. [구현·검증 보고서](../artifacts/runs/260928_v7/reports/model_v4_implementation.md).
+
+- 현재 모델 v6: Large 1024 전용, Text Summary Linear 384, Graph 공유 Linear 128, 기존 state lookup·배치 최적화 유지. [구조·변경 근거·재실행 명령](graph_training.md#모델-v6-bge-large-전용-전환). Small v5 설명은 과거 이력으로 보존합니다.

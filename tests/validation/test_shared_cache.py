@@ -5,14 +5,15 @@ from copy import deepcopy
 from dataclasses import replace
 import shutil
 
+import numpy as np
 import pytest
 
 from arm_registry import registry
-from validation.shared_cache import SharedCache
+from validation.shared_cache import SharedCache, checksum
 from validation.cache_identity import shareable_document
 from artifact_io import read_json, write_json
 from validation.steps import embed_representations
-from validation.representation_provenance import read_state, state_path
+from validation.representation_provenance import matrix_hash, read_state, state_path
 
 
 @pytest.mark.parametrize("scene_hash", [None, "", "unknown", "z" * 64, 123, []])
@@ -82,6 +83,34 @@ def test_existing_local_embeddings_can_be_published_without_encoding(
     assert embed_representations(other, target=targets)["reuse"]["shared"] == targets
     with pytest.raises(pytest.fail.Exception, match="must not load BGE"):
         embed_representations(other, target=targets, force=True)
+
+
+@pytest.mark.parametrize("arm", ["meta", "graph_qwen_meta"])
+def test_small_text_arrays_rejected_in_local_and_shared_cache(
+    ready_context, fake_models, generate_all, arm
+):
+    generate_all(ready_context)
+    embed_representations(ready_context, target=[arm])
+    path = ready_context.representations_dir / f"{arm}_embeddings.npz"
+    with np.load(path) as saved:
+        arrays = {name: saved[name] for name in saved.files}
+    for component in ("title_values", "video_values"):
+        arrays[component] = arrays[component][:, :384]
+    np.savez(path, **arrays)
+    state = read_state(ready_context, arm)
+    state["embedding_hash"] = matrix_hash(path)
+    write_json(state_path(ready_context, arm), state)
+    cache = SharedCache(ready_context, "embeddings", state["input_hash"])
+    shutil.copy2(path, cache.path / "values.npz")
+    manifest = read_json(cache.path / "cache.json")
+    manifest["files"]["values.npz"] = checksum(cache.path / "values.npz")
+    write_json(cache.path / "cache.json", manifest)
+    assert cache.valid()  # Even matching provenance and checksums cannot permit small features.
+    result = embed_representations(ready_context, target=[arm])
+    assert result["generated_arms"] == [arm]
+    assert result["reuse"] == {"local": [], "shared": []}
+    with np.load(path) as saved:
+        assert saved["title_values"].shape == saved["video_values"].shape == (4, 1024)
 
 
 def test_atomic_concurrent_publication_and_corruption(current_context, tmp_path):

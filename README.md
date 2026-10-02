@@ -2,7 +2,7 @@
 
 ![ViewingContextPipeline 실험 흐름](docs/design/main_diagram.png)
 
-![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram_small.png)
+![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram_large.png)
 
 [다이어그램 PPTX 원본](docs/design/main_diagram.pptx) · [다이어그램 생성 코드](docs/design/generate_main_diagram.py)
 
@@ -26,7 +26,7 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시�
 
 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `desc_qwen`, `desc_gemini`입니다. 접미사는 **Scene 추출 모델**이며, Summary 모델은 `--model`로 따로 선택합니다. 생성에는 결합 Arm을 지정하지 않습니다. 평가에는 `--target`과 `--representation-mode`를 항상 명시합니다.
 
-현재 모델(v5)은 **BGE small-en-v1.5 / 384차원만 지원**합니다. `meta`는 제목 384→Linear 512, Text는 제목 384→128 + Summary 384 직접 사용, Graph는 노드·Context 384→공유 Linear 128로 영상 384를 만든 뒤 제목 128과 결합합니다. 최종 LayerNorm 512와 SASRec·User MLP는 유지합니다. 결정성 강제는 기본 해제하며 seed는 고정합니다. [small 전환 및 서버 실행 안내](docs/graph_training.md#모델-v5-bge-small-전환과-state-lookup-최적화)를 참고하세요. [편집 가능한 PPTX](docs/design/recsys_diagram_small.pptx) · [PNG](docs/design/recsys_diagram_small.png)
+현재 모델(v6)은 **BGE large-en-v1.5 / 1024차원만 지원**합니다. `meta`는 제목 1024→Linear 512, Text는 제목 1024→128 + Summary 1024→Linear 384, Graph는 Entity·Action·Context 1024→공유 Linear 128로 영상 384를 만든 뒤 제목 128과 결합합니다. 최종 LayerNorm 512와 SASRec·User MLP는 유지합니다. 결정성 강제는 기본 해제하며 seed는 고정합니다. [Large 전환 및 재실행 안내](docs/graph_training.md#모델-v6-bge-large-전용-전환)를 참고하세요. [편집 가능한 PPTX](docs/design/recsys_diagram_large.pptx) · [PNG](docs/design/recsys_diagram_large.png)
 
 주 비교는 `graph_qwen_meta − meta`입니다. Text 전체 평가는 기본 설정에서 7일 × 3 seed × 6 Arm입니다. 사용자 단위 paired bootstrap을 사용하며, seed 평균 후 날짜별 평균을 동일 가중치로 합칩니다. 현재 비교군은 제목 기준선 대비 5개, Graph/Description 비교 2개, 제목 추가 효과 1개이고 각 군에 Bonferroni 보정을 적용합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다.
 

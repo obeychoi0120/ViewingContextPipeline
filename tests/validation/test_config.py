@@ -16,7 +16,7 @@ from conftest import config_data
         lambda value: value.update(schema_version="validation-config/v1"),
         lambda value: value.update(schema_version="validation-config/v2"),
         lambda value: value.update(schema_version="validation-config/v5"),
-        lambda value: value["encoder"].update(embedding_dim=1024),
+        lambda value: value["encoder"].update(embedding_dim=384),
         lambda value: value["encoder"].update(embedding_dim=768),
         lambda value: value["model"].update(deterministic="false"),
         lambda value: value["dataset"].pop("titles_csv"),
