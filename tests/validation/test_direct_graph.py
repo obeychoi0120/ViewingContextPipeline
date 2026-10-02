@@ -257,8 +257,18 @@ def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     monkeypatch.setattr('validation.rolling_diagnosis.load_validation_cohort', lambda *a, **k: mini)
     monkeypatch.setattr('validation.steps.validation_config', lambda ctx: config)
     monkeypatch.setattr('validation.rolling_diagnosis.training_signature', lambda *a: identity['training_input_hash'])
+    reuse = {'run_id': context.run_id, 'local': 0, 'shared': 0, 'generated': 1}
+    (context.recommendations_dir / 'reuse.json').write_text(json.dumps(reuse))
     assert run_diagnosis(context, target=['graph_qwen_meta'], representation_mode='graph',
                          scene_aggregation=pool)['status'] == 'pass'
+    diagnosis = json.loads(context.diagnosis_path.read_text())
+    assert diagnosis['schema_version'] == 'rolling-diagnosis/v3'
+    assert 'graph_inputs' not in diagnosis
+    assert diagnosis['recommendations']['combination_count'] == 1
+    assert diagnosis['recommendations']['reuse'] == reuse
+    assert diagnosis['statistics']['status'] == 'computed'
+    assert diagnosis['runtime_decision'] == {'status': 'pass', 'errors': []}
+    assert diagnosis['paper_reference']['metadata_hr10'] == 0.046
 
 
 def test_title_order_and_missing_inputs(graph_data):

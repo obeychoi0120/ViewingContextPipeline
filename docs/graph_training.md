@@ -41,9 +41,14 @@ Run 루트는 `artifacts/runs/<RUN_ID>/`입니다.
 |---|---|
 | `validation/representations/graph/<arm>_embeddings/` | memory-mapped BGE·노드·연결·offset·제목 배열, manifest, statistics |
 | `validation/recommendations/graph/<mean 또는 attention>/<date>/seed_<seed>/<arm>/` | 전체 모듈 checkpoint, 최종 catalog_vectors.npy, training, per-event metrics, complete |
-| `validation/diagnosis/graph_<mean 또는 attention>_diagnosis.json` | 동일 모드 내 paired 통계와 장면 제외·결측·제목 사용 집계 |
+| `validation/diagnosis/graph_<mean 또는 attention>_diagnosis.json` | 날짜·seed·Arm별 추천 지표, 평균 지표, 동일 모드 내 paired 통계와 실행 판정 |
 
 `catalog_vectors.npy`의 행 순서는 Graph 입력 manifest의 catalog와 같습니다. padding 행은 저장하지 않습니다. checkpoint를 읽을 때는 동일 해시의 Graph 입력으로 `new_graph_model`을 생성하고 state_dict를 읽습니다. BGE 특징은 checkpoint에 중복 저장하지 않습니다.
+
+Graph diagnosis는 Text와 같은 `rolling-diagnosis/v3` 계약으로 `recommendations`, `statistics`,
+`runtime_decision`, `paper_reference`를 기록합니다. Run·Arm·cohort와 Graph 모드·aggregation 식별은 유지하고,
+입력 상세 정보인 `graph_inputs`는 포함하지 않습니다. 영상별 장면 수·제외 사유·제목 사용 여부는
+`validation/representations/graph/<arm>_embeddings/statistics.json`에서 확인합니다.
 
 캐시는 실제 Scene Graph 파일 바이트·catalog 순서·제목·BGE 설정/로컬 모델 식별 정보·변환 버전으로 구분합니다. 추천 결과에는 특징 해시, Graph 구조 설정, aggregation과 기존 학습 해시·구간·seed가 들어갑니다. 변환/모델 의미를 변경하면 해당 버전도 갱신해야 합니다. Text 표현 계약 v4는 분리 특징 배열과 새 캐시 키를 사용하며 저장 위치는 `validation/representations/text/`, `validation/recommendations/text/`, `validation/diagnosis/text_diagnosis.json`입니다.
 
