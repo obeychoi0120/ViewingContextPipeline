@@ -19,15 +19,16 @@ python -m validation run-diagnosis --run-id 260928_v7 --representation-mode grap
 
 위 추천 명령은 각각 **7일 × 3 seed × 4 Arm = 84개 조합**의 전체 실험입니다. 완료된 조합은 체크섬과 입력 해시를 검증해 재사용하고, 중단된 조합은 초기화부터 다시 실행합니다. `--force`는 완료 조합도 재계산합니다. 실패한 epoch 중간 상태에서 이어 학습하는 방식은 아닙니다.
 
-기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 text와 같은 제목 384→512 projection + LayerNorm 기준선이며 Graph encoder를 사용하지 않습니다. 현재 small 전환의 재임베딩 절차는 아래 모델 v5 절을 참고하세요.
+기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 text와 같은 제목 1024→512 projection + LayerNorm 기준선이며 Graph encoder를 사용하지 않습니다. 현재 Large 전환의 재임베딩 절차는 아래 모델 v6 절을 참고하세요.
 
 ## 모델 및 데이터 계약
 
+- 고정 BGE Large 출력은 1024차원입니다. Entity·Action·Context는 같은 Linear(1024, 128)를 공유하며 node-type embedding은 Entity·Action에만 적용합니다.
 - BGE 입력: entity의 종류·attributes, action 문구, Context의 medium·format·topics, 필요한 Arm의 영문 제목. 고유 문자열만 인코딩하며 float32 특징은 학습하지 않습니다.
 - entity/action 노드 사이 actor·target·tool·location별 양방향 메시지를 1층·128차원에서 전달합니다. `none`/`unknown`은 역할별 서로 다른 상태 벡터이며 공유 개체 노드가 아닙니다.
 - entity 평균 128, action 평균 128, projection한 Context 128을 단순 결합해 장면 384차원을 만듭니다. 영상 mean 또는 attention pooling은 순서 불변이며 시간 위치 정보와 장면 간 메시지는 사용하지 않습니다.
-- `_meta`는 제목 BGE 384를 Linear 384→128로 변환하고 `[제목 128; Graph 384]`를 결합한 뒤 LayerNorm(512)를 적용합니다. 제목 및 장면 concat 직후 별도 LayerNorm과 아이템 MLP는 없습니다. Role Graph Encoder와 SASRec 내부 정규화는 유지합니다.
-- 누락된 제목·영상 부분은 최종 LayerNorm 전 영벡터입니다. 부분 결측 영역이 정규화 이후에도 0일 필요는 없습니다. 전체 결측과 padding은 LayerNorm 이후 다시 0으로 마스킹하며 후보·interaction은 제거하지 않습니다. `meta`는 제목 384→512→LayerNorm을 사용합니다.
+- `_meta`는 제목 BGE 1024를 Linear 1024→128로 변환하고 `[제목 128; Graph 384]`를 결합한 뒤 LayerNorm(512)를 적용합니다. 제목 및 장면 concat 직후 별도 LayerNorm과 아이템 MLP는 없습니다. Role Graph Encoder와 SASRec 내부 정규화는 유지합니다.
+- 누락된 제목·영상 부분은 최종 LayerNorm 전 영벡터입니다. 부분 결측 영역이 정규화 이후에도 0일 필요는 없습니다. 전체 결측과 padding은 LayerNorm 이후 다시 0으로 마스킹하며 후보·interaction은 제거하지 않습니다. `meta`는 제목 1024→512→LayerNorm을 사용합니다.
 - raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver는 기존 데이터에 있어도 무시하고 location 누락은 `unknown`으로 해석합니다. 모델 텐서의 receiver 슬롯은 형태 호환성을 위해 남기되 항상 `none` 상태로 두고 해당 간선은 만들지 않습니다. 입력 버전을 갱신해 receiver를 사용한 기존 특징 캐시를 재사용하지 않습니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
 - 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 기본 분할 크기는 256개 영상·32,768개 노드이며 이를 넘는 단일 영상도 그대로 유지합니다. Checkpoint는 아래 실행 설정에 따라 사용하며, 배치 조립과 전송은 backward에서 반복하지 않습니다.
 - SASRec의 loss, 인기도 보정, 후보 마스킹, 이력 길이 10, 차원 512, 날짜별 selection/refit/test는 기존과 같습니다. 각 refit은 모든 학습 모듈을 초기화합니다. 학습 배치의 이력·정답 아이템 합집합만 계산하고 optimizer 갱신 후 캐시를 버립니다.
@@ -40,11 +41,16 @@ Run 루트는 `artifacts/runs/<RUN_ID>/`입니다.
 |---|---|
 | `validation/representations/graph/<arm>_embeddings/` | memory-mapped BGE·노드·연결·offset·제목 배열, manifest, statistics |
 | `validation/recommendations/graph/<mean 또는 attention>/<date>/seed_<seed>/<arm>/` | 전체 모듈 checkpoint, 최종 catalog_vectors.npy, training, per-event metrics, complete |
-| `validation/diagnosis/graph_<mean 또는 attention>_diagnosis.json` | 동일 모드 내 paired 통계와 장면 제외·결측·제목 사용 집계 |
+| `validation/diagnosis/graph_<mean 또는 attention>_diagnosis.json` | 날짜·seed·Arm별 추천 지표, 평균 지표, 동일 모드 내 paired 통계와 실행 판정 |
 
 `catalog_vectors.npy`의 행 순서는 Graph 입력 manifest의 catalog와 같습니다. padding 행은 저장하지 않습니다. checkpoint를 읽을 때는 동일 해시의 Graph 입력으로 `new_graph_model`을 생성하고 state_dict를 읽습니다. BGE 특징은 checkpoint에 중복 저장하지 않습니다.
 
-캐시는 실제 Scene Graph 파일 바이트·catalog 순서·제목·BGE 설정/로컬 모델 식별 정보·변환 버전으로 구분합니다. 추천 결과에는 특징 해시, Graph 구조 설정, aggregation과 기존 학습 해시·구간·seed가 들어갑니다. 변환/모델 의미를 변경하면 해당 버전도 갱신해야 합니다. Text v4는 분리 특징 배열과 새 캐시 키를 사용하며 저장 위치는 `validation/representations/text/`, `validation/recommendations/text/`, `validation/diagnosis/text_diagnosis.json`입니다.
+Graph diagnosis는 Text와 같은 `rolling-diagnosis/v3` 계약으로 `recommendations`, `statistics`,
+`runtime_decision`, `paper_reference`를 기록합니다. Run·Arm·cohort와 Graph 모드·aggregation 식별은 유지하고,
+입력 상세 정보인 `graph_inputs`는 포함하지 않습니다. 영상별 장면 수·제외 사유·제목 사용 여부는
+`validation/representations/graph/<arm>_embeddings/statistics.json`에서 확인합니다.
+
+캐시는 실제 Scene Graph 파일 바이트·catalog 순서·제목·BGE 설정/로컬 모델 식별 정보·변환 버전으로 구분합니다. 추천 결과에는 특징 해시, Graph 구조 설정, aggregation과 기존 학습 해시·구간·seed가 들어갑니다. 변환/모델 의미를 변경하면 해당 버전도 갱신해야 합니다. Text 표현 계약 v4는 분리 특징 배열과 새 캐시 키를 사용하며 저장 위치는 `validation/representations/text/`, `validation/recommendations/text/`, `validation/diagnosis/text_diagnosis.json`입니다.
 
 `--compare-run-id`는 선택한 모드와 aggregation의 상대 Run 결과만 읽습니다. 다른 모드 또는 pooling의 결과를 대신 읽지 않습니다. 방식 간 자동 paired 비교와 장면 간 GNN은 [TODO](TODO.md)에 기록했습니다.
 
@@ -115,7 +121,7 @@ v3에서는 가중치 구조가 달라졌으므로 당시 v2 비교 스크립트
 
 ## 이전 Graph 모델 v3: 1층 encoder와 128+384 결합 (2026-09-30)
 
-아래는 이전 v3의 변경 이력입니다. 현재 계약은 v5이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
+아래는 이전 v3의 변경 이력입니다. 현재 계약은 v6이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
 
 | 부분 | 이전 v2 | 현재 v3 |
 |---|---|---|
@@ -271,9 +277,96 @@ device 시간이 수집되지 않았다면 CPU 비율로 GPU projection 비중�
 측정 구간은 한 배치이므로 전체 epoch의 projection 비중으로 확정하지 않습니다.
 
 
-## 모델 v5: BGE small 전환과 state lookup 최적화
+## 모델 v6: BGE Large 전용 전환
 
-새 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
+현재 지원 가중치는 `/home_nvme/shared/models/bge-large-en-v1.5`이며 BGE 출력은 1024차원입니다.
+[Large 구조 PNG](design/recsys_diagram_large.png)와 [편집 가능한 PPTX](design/recsys_diagram_large.pptx)를 기준으로 합니다.
+Small/Large 선택 옵션은 없습니다. `EncoderConfig`는 1024만 허용하고 실제 모델의 `hidden_size`와
+출력 배열 차원이 설정과 일치하는지 검사합니다. 서버 경로가 다른 환경에서는 테스트용 설정 파일의
+`models.bge`만 실제 로컬 가중치 경로로 지정합니다. 자동 다운로드는 하지 않습니다.
+
+| 경로 | 현재 학습 구조 |
+|---|---|
+| Baseline `meta` | 제목 BGE 1024 → Linear 512 → LayerNorm 512 |
+| Text | 제목 BGE 1024 → Linear 128; Summary BGE 1024 → Linear 384 → concat 512 → LayerNorm 512 |
+| Graph | Entity·Action·Context BGE 1024 → 공유 Linear 128; Entity·Action만 node-type embedding 및 1층 역할별 Graph Encoder; 장면 concat 384 → mean/attention 384 |
+| Graph 제목 결합 | 제목 BGE 1024 → Linear 128; `[제목 128; 영상 384]` → LayerNorm 512 |
+
+Text의 제목과 Summary는 독립적으로 BGE에 입력하며 Summary projection도 추천 loss로 학습합니다.
+BGE 특징은 고정합니다. 제목 없는 Arm은 concat 전 왼쪽 128차원을 0으로 마스킹합니다.
+부분 결측은 concat 전에, 전체 결측·padding은 최종 LayerNorm 이후 다시 마스킹합니다.
+아이템 MLP는 없으며 SASRec 512·2 blocks·2 heads, User MLP, loss·평가·selection/refit 조건은 유지합니다.
+역할 상태의 `F.embedding` 조회, chunk/checkpoint/GPU 특징 캐시 최적화와 결정성 기본값 `false`도 유지합니다.
+
+Text 모델은 `sasrec-content-v6`, Graph 모델은 `sasrec-role-graph/v6`입니다.
+Text 분리 특징 계약 `shared-scenes-representation/v4`와 Graph 입력 계약 `role-graph-inputs/v2` 및
+파일 키·CLI·저장 경로는 유지합니다. Text의 두 특징 배열과 Graph의 `features.npy`는 float32 1024차원입니다.
+BGE 설정·가중치 식별·입력 내용·catalog와 실제 배열 차원을 확인해 small 특징을 배제합니다.
+과거 large 특징도 현재 입력과 provenance가 모두 일치할 때만 재사용하며 차원만 같다고 허용하지 않습니다.
+모델 버전·입력 차원·projection 정책은 결과/checkpoint/profiler identity에 포함되므로 이전 모델 결과로
+완료 판정하거나 재개하지 않습니다. 진단과 Run 비교도 현재 모델 계약을 확인합니다.
+Text profiler에는 학습 가능한 Summary 변환을 `video_projection` 구간으로 기록합니다.
+
+### 변경 위치와 근거
+
+| 위치 | 변경 및 근거 |
+|---|---|
+| `config.yaml`, `src/validation/config.py`, `features.py` | Large 경로·1024 고정 및 실제 hidden size 검사: small 입력 혼용 방지 |
+| `src/validation/model.py` | Text Summary Identity를 Linear 1024→384로 교체: Large 특징을 최종 영상 슬롯에 학습 투영 |
+| `src/validation/graph_model.py`, `graph_context.py` | 공유 projection 기본 입력 1024·Graph v6: 확정 다이어그램과 기존 최적화 유지 |
+| `src/validation/recommendation_contracts.py`, `representation_provenance.py` | 모델 v6·input_dim 1024·Text video_transform=linear: 이전 결과/checkpoint 혼용 방지 |
+| `src/validation/graph_inputs.py` | 재사용 및 실행 전 실제 feature shape/dtype 검사: 해시·체크섬이 일치해도 384차원 특징 거부 |
+| `tests/validation/`, `tests/conftest.py` | production 입력 1024, 학습·결측·캐시·checkpoint·프로파일 회귀 검증 |
+
+### Text·Graph 재실행 명령
+
+두 모드 모두 **embed-representations부터** 실행하고 선택한 모든 Arm을 selection부터 재학습합니다.
+기존 extraction과 Summary를 재생성할 필요는 없습니다. 같은 Run을 사용하면 기존 특징·추천 결과·진단이
+갱신되므로 이전 산출물이 필요하면 **실행 전에 별도로 보관**하십시오. 일괄 삭제는 하지 않습니다.
+아래 `RUN_ID`는 실제 사용할 Run으로 지정합니다. 명령은 전체 날짜×seed 실험을 실행합니다.
+
+```bash
+conda activate vc_cloud
+export RUN_ID=260930_v8
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+
+# Text: 독립 제목·Summary 특징을 Large로 준비한 뒤 전체 선택 Arm 학습
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+
+# Graph: 고정 특징 준비를 mean/attention이 공유
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+```
+
+Attention은 추천·진단의 `--scene-aggregation mean`을 `attention`으로 바꿉니다.
+기존 Gemini Graph의 전체 결측 문제는 별도 입력 문제입니다. 재학습 전 해당 Arm의
+`statistics.json`에서 유효 장면 수와 제외 사유를 확인해야 하며 이번 모델 변경이 이를 해결하지 않습니다.
+
+### 구현 검증 (2026-10-02)
+
+- `vc_cloud` CPU validation: **160개 통과**. 이후 빈 특징 파일 복구 case를 추가해 Graph 캐시 관련 검사도 별도로 실행했습니다.
+- NVIDIA L4 / CUDA: 1024차원 production 모델 및 기존 Graph packing/checkpoint 회귀 **40개 통과**(CPU·CUDA parametrization 포함). CUDA 전용 Text/mean/attention 프로파일 회귀 **6개 통과**. 대량 입력·RTX 6000 Ada 처리량은 측정하지 않았습니다.
+- 실제 로컬 `/home/junsu2.choi/workspace/models/bge-large-en-v1.5`로 CUDA 인코딩: `hidden_size=1024`, 짧은 문장 2개의 float32 `(2, 1024)` 출력·finite·L2 norm=1 확인. `vc_cloud`에 embedding 의존성 `transformers` 4.57.6을 설치했으며 모델은 로컬 가중치만 읽었습니다. 서버 기본 경로는 변경하지 않았습니다.
+- Ruff 및 `git diff --check` 통과. 프롬프트·그림·기존 Run 산출물은 수정하지 않았으며 전체 임베딩·추천 실험은 실행하지 않았습니다.
+- 추가 integration 검사: **68개 통과, 11개 실패**. 실패는 기존 `run_pipeline_v7.sh`/`script_graph_v7.sh` 및 그림 링크 누락, 과거 v7 semantic/representation hash fixture 불일치입니다. 변경 전 HEAD의 임시 복사본에서도 동일 실패를 재현했고 이번 범위에서 고치지 않았습니다.
+- 이 환경에서 CPU와 CUDA operator profiler를 같은 프로세스에서 순서대로 실행하면 GPU backward 시간이 0으로 수집되어 6개 검사가 실패합니다. 변경 전 HEAD에서도 재현됐고 CUDA 전용 새 프로세스에서는 6개 모두 통과했습니다. GPU 비용 해석에는 실제 device 시간 수집 여부를 확인해야 합니다.
+
+재현 명령(전체 실험 및 실제 가중치 대량 인코딩 제외):
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation
+CUBLAS_WORKSPACE_CONFIG=:4096:8 GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_large_optimizations.py tests/validation/test_graph_execution.py
+# CUDA operator profiler는 CPU 테스트와 분리한 새 프로세스에서 실행
+CUBLAS_WORKSPACE_CONFIG=:4096:8 GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_profiling.py -k cuda
+python -m ruff check src/validation tests/validation tests/conftest.py
+```
+
+## 이전 모델 v5: BGE small 전환과 state lookup 최적화
+
+아래는 과거 small 전환 기록입니다. 현재 실행에는 적용되지 않으며, 위 모델 v6 절을 따릅니다. 당시 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
 설정 계약은 `validation-config/v6`, Text 모델은 `sasrec-content-v5`, Graph 모델은
 `sasrec-role-graph/v5`, 학습 구현은 `shared-scenes-training-evaluation/v5`입니다.
 Text의 분리 입력 포맷(v4)과 Graph 입력 포맷(v2)은 유지하지만 BGE 모델 식별과 차원이
@@ -377,7 +470,7 @@ Encoder는 Entity·Action 분기에만 적용하고, Context 분기는 장면 co
 
 ## 이전 모델 v4: Baseline·Text·Graph 최종 구조
 
-아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 v5의 small 전환 절차를 따릅니다.
+아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 v6의 Large 전환 절차를 따릅니다.
 
 최종 다이어그램과 일치하는 모델 계약은 Text `sasrec-content-v4`, Graph `sasrec-role-graph/v4`입니다.
 

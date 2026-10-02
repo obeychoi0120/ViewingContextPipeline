@@ -83,9 +83,11 @@ def test_component_order_masks_and_gradients(arm):
         assert model.item_projection.weight.grad is not None
     else:
         assert model.title_projection.weight.grad is not None
-        assert isinstance(model.video_projection, torch.nn.Identity)
-        assert not any(k.startswith("video_projection.") for k in model.state_dict())
-        torch.testing.assert_close(captured[0][1, 2:], model.video_features[1])
+        assert model.video_projection.weight.grad is not None
+        assert model.video_projection.weight.grad.abs().sum() > 0
+        torch.testing.assert_close(
+            captured[0][1, 2:], model.video_projection(model.video_features[1]).detach()
+        )
     optimizer.step()
     assert not model.item_vectors(torch.tensor([0, 4])).any()
     if arm == "metadata":

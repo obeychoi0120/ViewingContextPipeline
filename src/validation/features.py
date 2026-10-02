@@ -24,7 +24,7 @@ def _load_bge_runtime(settings: EncoderConfig, device=None):
     if model.config.hidden_size != settings.embedding_dim:
         raise FeatureError(
             f"encoder hidden_size {model.config.hidden_size} does not match "
-            f"the required BGE small dimension {settings.embedding_dim}"
+            f"the required BGE large dimension {settings.embedding_dim}"
         )
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device).eval()

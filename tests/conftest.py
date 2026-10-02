@@ -124,7 +124,7 @@ def fake_models(monkeypatch):
 
         def encode(self, texts):
             self.last_truncation = {"text_count": len(texts), "truncated_count": 0}
-            return np.ones((len(texts), 384), dtype=np.float32)
+            return np.ones((len(texts), 1024), dtype=np.float32)
 
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     monkeypatch.setattr("extraction.steps.GeminiWorkerPool", Gemini)

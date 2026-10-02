@@ -270,7 +270,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     assert backward["matched_nodes"] > 0
     assert 0 < backward["projection_cpu_pct_of_backward_nodes"] <= 100
     paths = backward["projection_nodes"]
-    expected = {"title_projection"} if mode == "text" else {
+    expected = {"title_projection", "video_projection"} if mode == "text" else {
         "node_linear", "context_projection", "title_projection"
     }
     assert expected <= {path.rsplit("/", 1)[-1] for path in paths}

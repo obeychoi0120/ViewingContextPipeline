@@ -2,7 +2,7 @@
 
 from artifact_io import read_json, write_json
 from validation.recommendation_contracts import resolve_target_arms, target_scope
-from validation.rolling_diagnosis import collect_metrics, cluster_bootstrap, comparisons
+from validation.rolling_diagnosis import collect_metrics, cluster_bootstrap, comparisons, paper_reference
 from validation.diagnosis_statistics import multiple_comparison_policy
 
 
@@ -13,7 +13,7 @@ def diagnose_graph(context, *, target, compare_run_id=None):
     config = validation_config(context)
     arms = resolve_target_arms(target, config=context.config)
     document = {
-        "schema_version": "graph-diagnosis/v1",
+        "schema_version": "rolling-diagnosis/v3",
         "run_id": context.run_id,
         "representation_mode": "graph",
         "scene_aggregation": context.scene_aggregation,
@@ -24,12 +24,11 @@ def diagnose_graph(context, *, target, compare_run_id=None):
     try:
         cohort = load_validation_cohort(context)
         document["cohort"] = cohort["plan"]
-        document["graph_inputs"] = {
-            arm: read_json(context.representations_dir / f"{arm}_embeddings" / "statistics.json")
-            for arm in arms
-        }
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
+        reuse_path = context.recommendations_dir / "reuse.json"
+        if reuse_path.is_file():
+            document["recommendations"]["reuse"] = read_json(reuse_path)
         observed, draws, bootstrap = cluster_bootstrap(
             sums, counts, samples=config.evaluation.bootstrap_samples
         )
@@ -50,6 +49,7 @@ def diagnose_graph(context, *, target, compare_run_id=None):
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_graph_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
+    document["paper_reference"] = paper_reference(document.get("recommendations"), arms)
     write_json(context.diagnosis_path, document)
     if errors:
         raise RuntimeError(f"graph diagnosis failed; see {context.diagnosis_path}")

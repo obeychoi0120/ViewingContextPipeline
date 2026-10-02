@@ -14,7 +14,7 @@ class ArrayStore:
         return len(self["titles"])
 
 
-def synthetic_store(videos=64, feature_dim=384, seed=42):
+def synthetic_store(videos=64, feature_dim=1024, seed=42):
     rng = np.random.default_rng(seed)
     features = rng.normal(size=(max(videos, 256), feature_dim)).astype(np.float32)
     features /= np.linalg.norm(features, axis=1, keepdims=True)

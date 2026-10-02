@@ -22,7 +22,7 @@ class RollingDatasetConfig(DatasetConfig):
 
 class EncoderConfig(StrictModel):
     model_path: Path
-    embedding_dim: Literal[384]
+    embedding_dim: Literal[1024]
     max_length: Literal[512]
     batch_size: int = Field(default=32, gt=0)
 

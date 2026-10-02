@@ -213,7 +213,7 @@ def test_selection_refit_test_and_old_bundle_compatibility(tmp_path, monkeypatch
     assert all(valid_bundle(p, identity, table, split) for p in bundles)
     assert original == {p.name: p.read_bytes() for p in bundles[0].iterdir()}
     assert cache_for(contexts[0], identity).key == cache_for(contexts[1], identity).key
-    assert ARCHITECTURE_VERSION == "sasrec-content-v5"
+    assert ARCHITECTURE_VERSION == "sasrec-content-v6"
     assert TRAINING_IMPLEMENTATION_VERSION == "shared-scenes-training-evaluation/v5"
     assert seed_calls == [deterministic, deterministic]
 

@@ -130,7 +130,7 @@ def recommendation_identity(context, branch):
 
     item_model = {**ITEM_MODEL, "kind": "baseline" if branch == "meta" else "split"}
     item_model["video_transform"] = (
-        "none" if branch == "meta" else "graph_encoder" if is_graph(context) else "identity"
+        "none" if branch == "meta" else "graph_encoder" if is_graph(context) else "linear"
     )
 
     if is_graph(context):

@@ -253,6 +253,17 @@ def collect_metrics(context, config, cohort, *, arms=None):
     )
 
 
+def paper_reference(recommendations, arms):
+    reference = {
+        "metadata_hr10": 0.046,
+        "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
+    }
+    baseline = "meta" if "meta" in arms else "metadata"
+    if recommendations is not None and baseline in arms:
+        reference["hr10_difference"] = recommendations["means"][baseline]["HR@10"] - 0.046
+    return reference
+
+
 def diagnose(context, *, target=None, compare_run_id=None):
     from validation.steps import validation_config
 
@@ -334,14 +345,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_rolling_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
-    document["paper_reference"] = {
-        "metadata_hr10": 0.046,
-        "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
-    }
-    baseline = "meta" if "meta" in arms else "metadata"
-    if "recommendations" in document and baseline in arms:
-        value = document["recommendations"]["means"][baseline]["HR@10"]
-        document["paper_reference"]["hr10_difference"] = value - 0.046
+    document["paper_reference"] = paper_reference(document.get("recommendations"), arms)
     write_json(context.diagnosis_path, document)
     if errors or document["statistics"]["status"] != "computed":
         raise RuntimeError(f"rolling diagnosis failed; see {context.diagnosis_path}")
