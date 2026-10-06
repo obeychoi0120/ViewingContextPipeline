@@ -1,64 +1,77 @@
 # 직접 Graph 학습 경로
 
-`text`는 기존 요약 텍스트 BGE 경로이고, `graph`는 Scene Graph의 구조를 추천 loss로 학습하는 새 경로입니다. 세 validation 명령 모두 `--representation-mode`가 필수입니다. Graph 추천·진단에는 `--scene-aggregation mean|attention`도 필수이며 embedding 단계나 text 모드에서는 사용할 수 없습니다.
+현재 v7은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean`만 지원**하며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
 
 ## 실행
 
-로컬 BGE 가중치와 torch·transformers가 있는 환경에서 실행합니다. 필요한 Python 의존성은 `pip install -e ".[train,embedding]"`로 설치할 수 있습니다. 4개 GPU가 보이도록 `CUDA_VISIBLE_DEVICES=0,1,2,3`을 설정하면 BGE는 고유 문자열을 결정적으로 분할하고, 추천은 GPU당 독립 조합 하나를 실행합니다. `--workers-per-gpu` 기본값은 1입니다. 단일 모델 DDP는 사용하지 않습니다.
+로컬 BGE 가중치와 torch·transformers 환경을 사용합니다. `pip install -e ".[train,embedding]"`로 의존성을 설치할 수 있습니다. BGE는 GPU별 고유 문자열 분할, 추천은 GPU별 독립 날짜·seed·Arm 조합으로 실행하며 단일 모델 DDP는 사용하지 않습니다.
+
+기존 Run의 추천 산출물을 보존하려면 새 Run ID와 config snapshot을 사용하십시오. 아래 명령은 전체 학습을 실행하므로 이 구현 검증에서는 실행하지 않았습니다.
 
 ```bash
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-python -m validation embed-representations --run-id 260928_v7 --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-recommendation --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-diagnosis --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-recommendation --run-id 260928_v7 --representation-mode graph --scene-aggregation attention --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-diagnosis --run-id 260928_v7 --representation-mode graph --scene-aggregation attention --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+RUN_ID="새_Run_ID"
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 ```
 
-동일 순서를 한 번에 실행하려면 저장소 루트에서 `bash script_graph_v7.sh`를 사용합니다. 모듈 1은 실행하지 않습니다.
-
-위 추천 명령은 각각 **7일 × 3 seed × 4 Arm = 84개 조합**의 전체 실험입니다. 완료된 조합은 체크섬과 입력 해시를 검증해 재사용하고, 중단된 조합은 초기화부터 다시 실행합니다. `--force`는 완료 조합도 재계산합니다. 실패한 epoch 중간 상태에서 이어 학습하는 방식은 아닙니다.
-
-기존 text 명령에는 `--representation-mode text`만 추가합니다. Description Arm은 text에서만 지원합니다. `graph`의 `meta`는 text와 같은 제목 1024→512 projection + LayerNorm 기준선이며 Graph encoder를 사용하지 않습니다. 현재 Large 전환의 재임베딩 절차는 아래 모델 v6 절을 참고하세요.
+Text는 `--representation-mode text`를 사용하며 Description Arm은 text에서만 지원합니다. 두 경로의 `meta`는 동일한 Metadata 모델입니다. 실제 제목 BGE 입력의 동일성은 각 입력 manifest로 별도 확인해야 합니다.
 
 ## 모델 및 데이터 계약
 
-- 고정 BGE Large 출력은 1024차원입니다. Entity·Action·Context는 같은 Linear(1024, 128)를 공유하며 node-type embedding은 Entity·Action에만 적용합니다.
-- BGE 입력: entity의 종류·attributes, action 문구, Context의 medium·format·topics, 필요한 Arm의 영문 제목. 고유 문자열만 인코딩하며 float32 특징은 학습하지 않습니다.
-- entity/action 노드 사이 actor·target·tool·location별 양방향 메시지를 1층·128차원에서 전달합니다. `none`/`unknown`은 역할별 서로 다른 상태 벡터이며 공유 개체 노드가 아닙니다.
-- entity 평균 128, action 평균 128, projection한 Context 128을 단순 결합해 장면 384차원을 만듭니다. 영상 mean 또는 attention pooling은 순서 불변이며 시간 위치 정보와 장면 간 메시지는 사용하지 않습니다.
-- `_meta`는 제목 BGE 1024를 Linear 1024→128로 변환하고 `[제목 128; Graph 384]`를 결합한 뒤 LayerNorm(512)를 적용합니다. 제목 및 장면 concat 직후 별도 LayerNorm과 아이템 MLP는 없습니다. Role Graph Encoder와 SASRec 내부 정규화는 유지합니다.
-- 누락된 제목·영상 부분은 최종 LayerNorm 전 영벡터입니다. 부분 결측 영역이 정규화 이후에도 0일 필요는 없습니다. 전체 결측과 padding은 LayerNorm 이후 다시 0으로 마스킹하며 후보·interaction은 제거하지 않습니다. `meta`는 제목 1024→512→LayerNorm을 사용합니다.
-- raw·warning·구조 오류 장면은 제외하고 장면별 사유를 저장합니다. 행동이 없는 정상 장면과 고립 entity는 유지합니다. 필수 참조는 검사하고 receiver는 기존 데이터에 있어도 무시하고 location 누락은 `unknown`으로 해석합니다. 모델 텐서의 receiver 슬롯은 형태 호환성을 위해 남기되 항상 `none` 상태로 두고 해당 간선은 만들지 않습니다. 입력 버전을 갱신해 receiver를 사용한 기존 특징 캐시를 재사용하지 않습니다. JSONL 손상·ID 불일치·중복 장면 번호는 중단합니다.
-- 개체 ID는 장면 내부 연결에만 쓰며 BGE 입력에 넣지 않습니다. 개체·행동 수나 장면 수를 프롬프트 상한에 맞춰 자르지 않습니다. 가변 길이 배열을 쓰며 영상 단위로 분할 계산합니다. 기본 분할 크기는 256개 영상·32,768개 노드이며 이를 넘는 단일 영상도 그대로 유지합니다. Checkpoint는 아래 실행 설정에 따라 사용하며, 배치 조립과 전송은 backward에서 반복하지 않습니다.
-- SASRec의 loss, 인기도 보정, 후보 마스킹, 이력 길이 10, 차원 512, 날짜별 selection/refit/test는 기존과 같습니다. 각 refit은 모든 학습 모듈을 초기화합니다. 학습 배치의 이력·정답 아이템 합집합만 계산하고 optimizer 갱신 후 캐시를 버립니다.
+공통 Residual MLP는 `R(x) = x + Linear(512,512)(ReLU(Linear(512,512)(x)))`입니다. **Item·Scene 모듈 전체에 LayerNorm이 없으며**, SASRec Transformer와 기존 GELU User MLP의 내부 LayerNorm은 유지합니다.
 
-## 산출물과 재현
-
-Run 루트는 `artifacts/runs/<RUN_ID>/`입니다.
-
-| 위치 | 내용 |
+| 경로 | Item 계산 |
 |---|---|
-| `validation/representations/graph/<arm>_embeddings/` | memory-mapped BGE·노드·연결·offset·제목 배열, manifest, statistics |
-| `validation/recommendations/graph/<mean 또는 attention>/<date>/seed_<seed>/<arm>/` | 전체 모듈 checkpoint, 최종 catalog_vectors.npy, training, per-event metrics, complete |
-| `validation/diagnosis/graph_<mean 또는 attention>_diagnosis.json` | 날짜·seed·Arm별 추천 지표, 평균 지표, 동일 모드 내 paired 통계와 실행 판정 |
+| Metadata | 제목 BGE 1024 → Linear 512 → R |
+| Text Graph·Desc | 제목 BGE 1024 → Linear 128; Summary BGE 1024 → Linear 384 → concat 512 → R |
+| Graph | 네 성분의 독립 Linear 1024→128 → Action 역할 결합 → Scene concat 512 → R_scene → 유효 Scene Mean |
 
-`catalog_vectors.npy`의 행 순서는 Graph 입력 manifest의 catalog와 같습니다. padding 행은 저장하지 않습니다. checkpoint를 읽을 때는 동일 해시의 Graph 입력으로 `new_graph_model`을 생성하고 state_dict를 읽습니다. BGE 특징은 checkpoint에 중복 저장하지 않습니다.
+Graph의 네 Projection은 Title·Entities·Actions·Context마다 독립적이고 모든 Scene에서 공유됩니다. 제목은 영상당 한 번 projection합니다. 각 Action은 `[action, actor, target, tool, location]`의 640차원 concat에서 `a + ReLU(Linear(640,128)(concat))`으로 보정합니다. 역할 연결의 Entity projection을 사용하고 `none`과 `unknown`은 역할별 별도 학습 가능한 상태 벡터를 사용합니다. receiver는 무시하며 Entity→Action 한 번만 전달합니다. 역방향 갱신·node-type embedding·다층 message passing은 없습니다.
 
-Graph diagnosis는 Text와 같은 `rolling-diagnosis/v3` 계약으로 `recommendations`, `statistics`,
-`runtime_decision`, `paper_reference`를 기록합니다. Run·Arm·cohort와 Graph 모드·aggregation 식별은 유지하고,
-입력 상세 정보인 `graph_inputs`는 포함하지 않습니다. 영상별 장면 수·제외 사유·제목 사용 여부는
-`validation/representations/graph/<arm>_embeddings/statistics.json`에서 확인합니다.
+Scene은 `[title; Entity mean; 보정된 Action mean; Context]` 순서로 concat하고 Scene MLP를 적용한 **뒤** 평균냅니다. Entity나 Action이 없으면 해당 슬롯은 0입니다. Scene이 없고 제목만 있으면 `[title; 0; 0; 0]`을 Scene MLP에 넣습니다. 제목과 유효 Scene 모두 없거나 padding이면 최종 Item은 정확히 0입니다. Graph에는 pooling 뒤 Item MLP가 없습니다.
 
-캐시는 실제 Scene Graph 파일 바이트·catalog 순서·제목·BGE 설정/로컬 모델 식별 정보·변환 버전으로 구분합니다. 추천 결과에는 특징 해시, Graph 구조 설정, aggregation과 기존 학습 해시·구간·seed가 들어갑니다. 변환/모델 의미를 변경하면 해당 버전도 갱신해야 합니다. Text 표현 계약 v4는 분리 특징 배열과 새 캐시 키를 사용하며 저장 위치는 `validation/representations/text/`, `validation/recommendations/text/`, `validation/diagnosis/text_diagnosis.json`입니다.
+Text의 누락 성분은 projection 이후 0으로 마스킹하며, 전체 누락과 padding은 Item MLP 이후 다시 0으로 마스킹합니다. 부분 누락 슬롯은 MLP를 거친 후에도 0이어야 하는 것은 아닙니다.
 
-`--compare-run-id`는 선택한 모드와 aggregation의 상대 Run 결과만 읽습니다. 다른 모드 또는 pooling의 결과를 대신 읽지 않습니다. 방식 간 자동 paired 비교와 장면 간 GNN은 [TODO](TODO.md)에 기록했습니다.
+BGE Large 1024차원 float32 특징은 동결됩니다. 기존 Scene 스키마, Entity·Action 인덱스, edge·결측 배열과 `role-graph-inputs/v2` 입력 캐시는 그대로 재사용합니다. receiver 슬롯도 저장 형식 호환성을 위해 유지합니다. raw·warning·구조 오류 Scene은 제외하고 정상적인 Action 없는 Scene·고립 Entity는 유지합니다. location 누락은 unknown이며 Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
 
-검증 명령: `PYTHONPATH=.:src python -m pytest tests/validation/test_direct_graph.py -q`. 실제 BGE 모델 호출을 대체한 작은 CPU 검증입니다. 전체 실험 성능 및 RTX 6000 Ada 자원 측정은 별도 수행해야 합니다.
+학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss·후보 마스킹·이력 길이 10·rolling selection/refit/test는 유지합니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
 
-경로 변경 이전의 Run 내부 산출물은 자동 이동하지 않습니다. 새 경로에서 같은 명령을 실행하면 입력 검증 후 공유 캐시의 유효한 결과를 복구하며, 캐시가 없으면 재계산합니다.
+## 캐시 및 packed 실행
 
-## 학습 비용 조정 (2026-09-30)
+Text 모델은 `sasrec-content-v7`, Graph는 `sasrec-role-graph/v7`, 학습 구현은 `shared-scenes-training-evaluation/v6`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더가 동일한 BGE 입력 캐시는 재사용합니다.
+
+배치 준비에서 Action별 actor·target·tool·location의 Entity 인덱스와 결측 상태를 계산합니다. 학습 중 가중치나 상태 벡터는 준비 단계에서 계산하지 않습니다. GPU 고정 특징 캐시, 영상 chunk, checkpoint, 평가 catalog 캐시는 유지하며 optimizer step마다 Item cache를 폐기합니다. checkpoint 재계산은 이미 준비한 정적 입력의 신경망 연산만 반복합니다.
+
+`validation.graph_execution` 기본값은 `chunk_items: 256`, `chunk_nodes: 32768`, `checkpoint: auto`, `feature_cache_mb: 2048`입니다. CUDA auto checkpoint는 새 Projection·역할 결합·512차원 Scene MLP의 전체 배치 활성값을 추정하여 `min(8 GiB, 여유 메모리의 35%)` 초과 시 사용합니다. CPU auto는 checkpoint를 사용하지 않습니다. 이는 메모리 상한 보장이 아닌 추정 규칙입니다. `always`/`never`로 비교할 수 있습니다. 실행 chunk/cache 옵션은 모델 의미와 training identity를 바꾸지 않습니다.
+
+## 산출물과 검증
+
+| Run 아래 위치 | 내용 |
+|---|---|
+| `validation/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
+| `validation/recommendations/graph/mean/<date>/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
+| `validation/diagnosis/graph_mean_diagnosis.json` | rolling-diagnosis/v3 지표·paired 통계·실행 판정 |
+| `validation/diagnosis/text_diagnosis.json` | Text 진단 |
+
+기존 Attention 산출물과 과거 Run은 수정·이동하지 않습니다. 같은 Run의 기존 결과 경로에서 재학습하면 해당 조합을 대체하므로 보존 실험에는 새 Run을 사용하십시오. `--compare-run-id`는 선택한 경로·aggregation의 결과만 읽습니다.
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation
+GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_graph_execution.py tests/validation/test_large_optimizations.py -k cuda
+# CUDA operator profiler는 CPU profiler와 분리한 새 프로세스에서 실행합니다.
+GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_profiling.py -k cuda
+```
+
+검증은 소형 고정 특징 및 학습·평가·진단 fixture를 사용합니다. 전체 데이터 재학습, 추천 성능 개선, 실제 BGE 추론 처리량은 별도 실험 대상입니다.
+
+2026-10-06 검증: `vc_cloud`, PyTorch 2.13.0+cu129, NVIDIA L4에서 CPU validation **156개**, CUDA 모델 **12개**, CUDA profiler **4개**를 통과했습니다. 참조 구현의 출력·gradient, chunk·checkpoint·특징/catalog cache, 결정적 반복 학습, topology·순서 불변성·결측 상태, optimizer 갱신, 두 Metadata adapter의 동일 입력 일치를 검사했습니다. 소형 rolling 학습→평가→진단과 결과 캐시 검증도 포함됩니다.
+
+별도 integration은 **68개 통과, 11개 실패**입니다. 실패는 기존 root 실행 스크립트·그림 링크 누락 및 과거 v7 hash fixture 불일치이며, 변경 전 HEAD를 별도 디렉터리에서 실행해 같은 11개 실패를 확인했습니다. 변경 파일 Ruff 검사와 shell 문법 검사도 통과했습니다. 전체 Run 학습 및 실제 성능 평가는 실행하지 않았습니다.
+
+## 이전 학습 비용 조정 (2026-09-30)
+
+이 절은 과거 v2 설정 기록입니다. 현재 학습 조건은 위 v7 계약을 따릅니다.
 
 공통 `validation.model` 설정을 학습률 `3e-4`, batch size `512`, patience `3`,
 `min_delta=1e-4`로 변경했습니다. 이 네 설정은 text와 graph 모두에 적용됩니다.
@@ -77,7 +90,9 @@ Graph 모델 계약은 `sasrec-role-graph/v2`, 학습 구현 계약은
 실행 중인 프로세스에는 변경이 자동 적용되지 않으며 다음 실행부터 적용됩니다.
 속도 및 추천 성능 개선은 아직 전체 실험으로 검증하지 않았습니다.
 
-## Graph 실행 최적화 (2026-09-30)
+## 이전 Graph 실행 최적화 (2026-09-30)
+
+이 절은 packed v1 구현 기록이며 현재 역할 조회는 위 packed v2 계약을 따릅니다.
 
 `validation.graph_execution`은 학습 알고리즘과 별개인 실행 설정입니다. 생략해도 다음 기본값을 사용합니다.
 
@@ -121,7 +136,7 @@ v3에서는 가중치 구조가 달라졌으므로 당시 v2 비교 스크립트
 
 ## 이전 Graph 모델 v3: 1층 encoder와 128+384 결합 (2026-09-30)
 
-아래는 이전 v3의 변경 이력입니다. 현재 계약은 v6이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
+아래는 이전 v3의 변경 이력입니다. 현재 계약은 v7이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
 
 | 부분 | 이전 v2 | 현재 v3 |
 |---|---|---|
@@ -177,13 +192,11 @@ python -m validation run-recommendation \
 | `…/feature_cache_init` | 최초 고정 BGE 특징 캐시 준비·할당 시도 |
 | `…/feature_cpu_gather`, `…/feature_transfer` | GPU 캐시 미사용 시 특징 조회·전송 |
 | `…/feature_gpu_gather` | GPU 캐시에서 고정 특징 조회 |
-| `graph_items/graph_encoder/node_projection` | 노드 projection 및 종류 embedding |
-| `…/node_projection/node_linear` | 종류 embedding과 분리한 노드 Linear projection |
-| `…/message_passing` | 역할별 Graph 메시지 전달 |
-| `…/scene_readout`, `…/video_pooling` | 장면 벡터 생성 및 영상 mean/attention |
-| `…/scene_readout/context_projection` | 장면 context의 Linear projection |
-| `graph_items/item_fusion` | 제목 projection·영상 결합 및 최종 LayerNorm |
-| `graph_items/item_fusion/title_projection` | 제목 Linear projection |
+| `graph_items/graph_encoder/title_projection` | 영상별 제목 Linear projection |
+| `…/entity_projection`, `…/action_projection` | Entity·Action의 독립 projection |
+| `…/role_fusion`, `…/role_fusion/state_lookup` | Entity→Action 역할 결합·결측 상태 조회 |
+| `…/scene_readout`, `…/scene_mlp` | Context projection·네 성분 concat·Scene Residual MLP |
+| `…/video_pooling` | 유효 Scene Mean Pooling |
 | `sasrec_forward`, `candidate_vectors`, `logits_loss` | 사용자 표현·학습 후보 벡터·추천 loss |
 | `backward`, `clip_grad`, `optimizer` | 역전파·gradient clipping·가중치 갱신 |
 | `catalog_encode` | 평가용 전체 catalog 벡터 생성 |
@@ -255,9 +268,8 @@ python -m validation run-recommendation \
   `operator_summary`를 기록합니다. start에는 `operator_profiling` 설정을 추가합니다.
   기존 v2 형식의 필드는 유지합니다. 이 파일들은 공유 추천 캐시에 포함하지 않습니다.
 
-`projection_backward.projection_nodes`는 노드·context·제목 projection의 forward
-sequence number와 forward thread를 autograd backward node에 연결해 집계합니다.
-같은 Linear를 노드와 context가 공유해도 호출 구간별로 나눕니다. Text 경로는
+`projection_backward.projection_nodes`는 독립 Entity·Action·Context·Title projection의
+forward sequence number와 forward thread를 autograd backward node에 연결해 집계합니다. Text 경로는
 title/video projection, metadata 경로는 item projection을 기록합니다.
 Checkpoint 재계산이 있으면 해당 forward projection은 `backward/...` 경로로 표시됩니다.
 요약의 `node_types`와 trace를 함께 확인하십시오. 파라미터 gradient 누적과 checkpoint
@@ -277,7 +289,9 @@ device 시간이 수집되지 않았다면 CPU 비율로 GPU projection 비중�
 측정 구간은 한 배치이므로 전체 epoch의 projection 비중으로 확정하지 않습니다.
 
 
-## 모델 v6: BGE Large 전용 전환
+## 이전 모델 v6: BGE Large 전용 전환
+
+이 절의 구조·결정성 설정은 과거 기록입니다. 현재 모델은 위 v7 계약을 따릅니다.
 
 현재 지원 가중치는 `/home_nvme/shared/models/bge-large-en-v1.5`이며 BGE 출력은 1024차원입니다.
 [Large 구조 PNG](design/recsys_diagram_large.png)와 [편집 가능한 PPTX](design/recsys_diagram_large.pptx)를 기준으로 합니다.
@@ -366,7 +380,7 @@ python -m ruff check src/validation tests/validation tests/conftest.py
 
 ## 이전 모델 v5: BGE small 전환과 state lookup 최적화
 
-아래는 과거 small 전환 기록입니다. 현재 실행에는 적용되지 않으며, 위 모델 v6 절을 따릅니다. 당시 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
+아래는 과거 small 전환 기록입니다. 현재 실행에는 적용되지 않으며, 위 v7 계약을 따릅니다. 당시 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
 설정 계약은 `validation-config/v6`, Text 모델은 `sasrec-content-v5`, Graph 모델은
 `sasrec-role-graph/v5`, 학습 구현은 `shared-scenes-training-evaluation/v5`입니다.
 Text의 분리 입력 포맷(v4)과 Graph 입력 포맷(v2)은 유지하지만 BGE 모델 식별과 차원이
@@ -470,7 +484,7 @@ Encoder는 Entity·Action 분기에만 적용하고, Context 분기는 장면 co
 
 ## 이전 모델 v4: Baseline·Text·Graph 최종 구조
 
-아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 v6의 Large 전환 절차를 따릅니다.
+아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 v7 계약을 따릅니다.
 
 최종 다이어그램과 일치하는 모델 계약은 Text `sasrec-content-v4`, Graph `sasrec-role-graph/v4`입니다.
 

@@ -147,7 +147,7 @@ def test_operator_profile_error_preserves_original_and_resets_context(tmp_path):
     assert "operator_trace" not in row
 
 
-@pytest.mark.parametrize("mode", ["text", "mean", "attention"])
+@pytest.mark.parametrize("mode", ["text", "mean"])
 @pytest.mark.parametrize("checkpoint", ["never", "always"])
 def test_profile_preserves_training_weights_ranks_and_records_work(
     tmp_path, device, mode, checkpoint
@@ -245,15 +245,15 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
         assert row["workload"]["checkpoint_batches"] == int(checkpoint == "always")
         for name in (
             "graph_items/graph_batch/cpu_pack",
-            "graph_items/graph_encoder/message_passing",
+            "graph_items/graph_encoder/role_fusion",
             "graph_items/graph_encoder/video_pooling",
-            "graph_items/graph_encoder/node_projection/node_linear",
-            "graph_items/graph_encoder/scene_readout/context_projection",
-            "graph_items/item_fusion/title_projection",
+            "graph_items/graph_encoder/entity_projection",
+            "graph_items/graph_encoder/scene_mlp",
+            "graph_items/graph_encoder/title_projection",
         ):
             assert name in row["seconds"]
         if checkpoint == "always":
-            assert "backward/graph_encoder/message_passing" in row["seconds"]
+            assert "backward/graph_encoder/role_fusion" in row["seconds"]
             assert not any(
                 "graph_batch" in key for key in row["seconds"] if key.startswith("backward/")
             )
@@ -271,7 +271,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
     assert 0 < backward["projection_cpu_pct_of_backward_nodes"] <= 100
     paths = backward["projection_nodes"]
     expected = {"title_projection", "video_projection"} if mode == "text" else {
-        "node_linear", "context_projection", "title_projection"
+        "entity_projection", "action_projection", "context_projection", "title_projection"
     }
     assert expected <= {path.rsplit("/", 1)[-1] for path in paths}
     assert all(g["cpu_total_us"] > 0 for g in paths.values())

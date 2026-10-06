@@ -32,3 +32,8 @@ ARMS=(meta graph_qwen graph_qwen_meta graph_gemini_meta)
 CUDA_VISIBLE_DEVICES=$GPU python -m validation embed-representations --run-id "$RUN_ID" --target "${ARMS[@]}" --representation-mode text
 CUDA_VISIBLE_DEVICES=$GPU python -m validation run-recommendation --run-id "$RUN_ID" --target "${ARMS[@]}" --workers-per-gpu 8 --representation-mode text
 CUDA_VISIBLE_DEVICES=$GPU python -m validation run-diagnosis --run-id "$RUN_ID" --target "${ARMS[@]}" --representation-mode text
+
+# Graph model v7 supports mean pooling only. Use a new Run ID to preserve old results.
+# CUDA_VISIBLE_DEVICES=$GPU python -m validation embed-representations --run-id "$RUN_ID" --target "${ARMS[@]}" --representation-mode graph
+# CUDA_VISIBLE_DEVICES=$GPU python -m validation run-recommendation --run-id "$RUN_ID" --target "${ARMS[@]}" --representation-mode graph --scene-aggregation mean --workers-per-gpu 8
+# CUDA_VISIBLE_DEVICES=$GPU python -m validation run-diagnosis --run-id "$RUN_ID" --target "${ARMS[@]}" --representation-mode graph --scene-aggregation mean

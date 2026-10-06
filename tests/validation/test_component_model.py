@@ -59,16 +59,16 @@ def test_component_order_masks_and_gradients(arm):
     model = SASRec(4, 10, 8, 2, 2, 0.0, arm=arm, item_features=features)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     with torch.no_grad():
-        model.item_norm.bias.fill_(0.4)
+        model.item_mlp.fc2.bias.fill_(0.4)
         if arm != "metadata":
             model.title_projection.bias.fill_(1)
     captured = []
-    hook = model.item_norm.register_forward_pre_hook(
+    hook = model.item_mlp.register_forward_pre_hook(
         lambda _, args: captured.append(args[0].detach())
     )
     values = model.item_vectors(torch.arange(5))
     hook.remove()
-    assert not hasattr(model, "item_mlp")
+    assert not any(isinstance(m, torch.nn.LayerNorm) for m in model.item_mlp.modules())
     assert not model.title_features.requires_grad and not model.video_features.requires_grad
     if arm != "metadata":
         assert not captured[0][3, :2].any() and not captured[0][2, 2:].any()
@@ -78,7 +78,7 @@ def test_component_order_masks_and_gradients(arm):
     users = model.user_vectors(torch.tensor([[1, 2, 0], [2, 1, 3]]))
     loss = torch.nn.functional.cross_entropy(users @ values[1:4].T, torch.tensor([0, 2]))
     loss.backward()
-    assert model.item_norm.weight.grad is not None
+    assert model.item_mlp.fc1.weight.grad is not None
     if arm == "metadata":
         assert model.item_projection.weight.grad is not None
     else:

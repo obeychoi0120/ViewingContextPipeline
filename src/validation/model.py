@@ -34,9 +34,10 @@ if nn is not None:
             dimension: int,
             *,
             activation: Literal["relu", "gelu"],
+            normalize: bool = True,
         ) -> None:
             super().__init__()
-            self.norm = nn.LayerNorm(dimension)
+            self.norm = nn.LayerNorm(dimension) if normalize else nn.Identity()
             self.fc1 = nn.Linear(dimension, dimension)
             self.fc2 = nn.Linear(dimension, dimension)
             self.activation = activation
@@ -109,7 +110,7 @@ if nn is not None:
             else:
                 self.title_projection = nn.Linear(titles.shape[1], embedding_dim // 4)
                 self.video_projection = nn.Linear(videos.shape[1], embedding_dim * 3 // 4)
-            self.item_norm = nn.LayerNorm(embedding_dim, eps=1e-5)
+            self.item_mlp = ResidualMLP(embedding_dim, activation="relu", normalize=False)
             self.position_embedding = nn.Embedding(max_length, embedding_dim)
             layer = nn.TransformerEncoderLayer(
                 d_model=embedding_dim,
@@ -167,7 +168,7 @@ if nn is not None:
                 video = video.masked_fill(~video_present.unsqueeze(-1), 0.0)
                 values = torch.cat([title, video], dim=-1)
                 available = title_present | video_present
-            return self.item_norm(values).masked_fill(~available.unsqueeze(-1), 0.0)
+            return self.item_mlp(values).masked_fill(~available.unsqueeze(-1), 0.0)
 
         def catalog_vectors(self) -> "torch.Tensor":
             ids = torch.arange(
@@ -224,7 +225,7 @@ def require_torch() -> None:
         )
 
 
-def seed_everything(seed: int, *, deterministic: bool = False) -> None:
+def seed_everything(seed: int, *, deterministic: bool = True) -> None:
     require_torch()
     random.seed(seed)
     np.random.seed(seed)

@@ -1,4 +1,4 @@
-"""V3 packing/pooling parity with a loop reference, including real backward passes."""
+"""V7 role gathering/scene pooling parity with a loop reference, including real backward passes."""
 
 import os
 
@@ -7,10 +7,10 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import graph_v4_reference as reference  # noqa: E402
+import graph_v7_reference as reference  # noqa: E402
 from graph_fixture import synthetic_store  # noqa: E402
 from validation.graph_batching import PackedGraphStore  # noqa: E402
-from validation.graph_model import GraphSASRec, RoleGraphEncoder, graph_batch  # noqa: E402
+from validation.graph_model import GraphSASRec, SceneRoleEncoder, graph_batch  # noqa: E402
 from validation.config import GraphExecutionConfig  # noqa: E402
 from validation.rolling_execution import negative_mask  # noqa: E402
 
@@ -35,11 +35,11 @@ def test_ragged_gathers_preserve_order_duplicates_and_empty_videos(device):
                 torch.testing.assert_close(old[name], new[name], rtol=0, atol=0)
 
 
-@pytest.mark.parametrize("pool", ["mean", "attention"])
+@pytest.mark.parametrize("pool", ["mean"])
 def test_encoder_outputs_and_all_parameter_gradients(pool, device):
     store = synthetic_store(20, feature_dim=32)
-    old = reference.RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
-    new = RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
+    old = reference.SceneRoleEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
+    new = SceneRoleEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
     new.load_state_dict(old.state_dict())
     items = [0, 5, 2, 11, 7, 9, 1]
     inputs = [
@@ -87,7 +87,7 @@ def batch_loss(model, device, seed=101):
     return torch.nn.functional.cross_entropy(logits, torch.arange(16, device=device))
 
 
-@pytest.mark.parametrize("pool", ["mean", "attention"])
+@pytest.mark.parametrize("pool", ["mean"])
 @pytest.mark.parametrize("checkpoint", ["always", "never"])
 def test_recommendation_loss_gradients_updates_and_reload(pool, checkpoint, device):
     store = synthetic_store(24, feature_dim=32)
@@ -129,7 +129,7 @@ def test_recommendation_loss_gradients_updates_and_reload(pool, checkpoint, devi
 
 def test_checkpoint_does_not_repeat_preparation_and_catalog_reuses_cache(device, monkeypatch):
     store = synthetic_store(16, feature_dim=32)
-    model = make_model(GraphSASRec, store, "attention", device, "always")
+    model = make_model(GraphSASRec, store, "mean", device, "always")
     calls = []
     batch = model.packed.batch
 
@@ -168,19 +168,69 @@ def test_execution_tuning_does_not_invalidate_training_identity(current_context)
     assert before == after
 
 
-@pytest.mark.parametrize("pool", ["mean", "attention"])
-def test_fully_missing_batches_do_not_create_graph_gradients(pool, device):
+@pytest.mark.parametrize("pool", ["mean"])
+def test_missing_and_title_only_batches(pool, device):
     store = synthetic_store(24, feature_dim=32)
-    old = reference.RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
-    new = RoleGraphEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
+    old = reference.SceneRoleEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
+    new = SceneRoleEncoder(feature_dim=32, hidden=16, aggregation=pool).to(device)
     new.load_state_dict(old.state_dict())
     for model, batch in [
         (old, reference.graph_batch(store, [0, 11, 22], device)),
         (new, PackedGraphStore(store).batch([0, 11, 22], device)),
     ]:
         values = model(batch)
-        assert not values.requires_grad
-        assert torch.count_nonzero(values) == 0
+        assert torch.count_nonzero(values[0]) == 0
+        assert torch.count_nonzero(values[1:]) > 0  # title-only videos
+        values[0].sum().backward()
+        assert all(p.grad is None or not p.grad.any() for p in model.parameters())
+
+
+def test_chunk_feature_cache_and_catalog_outputs_and_gradients_agree(device):
+    store = synthetic_store(12, feature_dim=32)
+    models = [make_model(GraphSASRec, store, "mean", device, "never") for _ in range(2)]
+    models[1].load_state_dict(models[0].state_dict())
+    models[0].execution.chunk_items = 1
+    models[1].execution.chunk_items = 12
+    models[0].packed.feature_cache_mb = 0
+    models[1].packed.feature_cache_mb = 2048
+    outputs = []
+    for model in models:
+        output = model.catalog_vectors()
+        outputs.append(output.detach())
+        (output * torch.linspace(-1, 1, output.numel(), device=device).reshape(output.shape)).sum().backward()
+    torch.testing.assert_close(*outputs, atol=2e-6, rtol=1e-5)
+    for a, b in zip(models[0].parameters(), models[1].parameters(), strict=True):
+        torch.testing.assert_close(a.grad, b.grad, atol=2e-4, rtol=5e-4)
+    if device.type == "cuda":
+        assert models[0].packed.feature_cache is None
+        assert models[1].packed.feature_cache is not None
+    for model in models:
+        model.eval()
+        with torch.no_grad():
+            cached = model.catalog_vectors()
+            assert model.catalog_vectors() is not None
+            torch.testing.assert_close(model.item_vectors(torch.arange(1, 13, device=device)), cached)
+            model.clear_item_cache()
+            torch.testing.assert_close(model.catalog_vectors(), cached)
+
+
+def test_repeated_deterministic_training_is_identical(device):
+    from validation.model import seed_everything
+
+    states = []
+    for _ in range(2):
+        seed_everything(42, deterministic=True)
+        model = make_model(GraphSASRec, synthetic_store(12, 32), "mean", device, "always")
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.1)
+        for step in range(2):
+            optimizer.zero_grad(set_to_none=True)
+            batch_loss(model, device, 101 + step).backward()
+            optimizer.step()
+            model.clear_item_cache()
+        assert torch.are_deterministic_algorithms_enabled()
+        states.append({k: v.detach().clone() for k, v in model.state_dict().items()})
+    for name in states[0]:
+        torch.testing.assert_close(states[0][name], states[1][name], rtol=0, atol=0)
 
 
 def test_checkpoint_auto_uses_total_batch_memory(monkeypatch):
@@ -197,7 +247,7 @@ def test_checkpoint_auto_uses_total_batch_memory(monkeypatch):
         execution=GraphExecutionConfig(),
         packed=packed,
         title_projection=SimpleNamespace(weight=SimpleNamespace(device=torch.device("cuda:0"))),
-        graph_encoder=SimpleNamespace(projection=SimpleNamespace(out_features=128), layers=[None]),
+        graph_encoder=SimpleNamespace(hidden_dim=128),
         store={"features": np.empty((0, 1024))},
         embedding_dim=512,
     )

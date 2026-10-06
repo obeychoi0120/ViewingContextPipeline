@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         "--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only)."
     )
     parser.add_argument("--representation-mode", choices=("text", "graph"), required=True)
-    parser.add_argument("--scene-aggregation", choices=("mean", "attention"))
+    parser.add_argument("--scene-aggregation", choices=("mean",))
     parser.add_argument(
         "--profile-every",
         type=_positive_int,

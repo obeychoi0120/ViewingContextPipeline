@@ -104,8 +104,8 @@ def projection_backward_summary(events):
     Report node-inclusive CPU/device durations, not wall-time shares. Exclude
     engine wrappers to avoid counting both a wrapper and its backward node.
     """
-    names = {"node_linear", "context_projection", "title_projection",
-             "video_projection", "item_projection"}
+    names = {"node_linear", "entity_projection", "action_projection", "context_projection",
+             "title_projection", "video_projection", "item_projection"}
     owners = {}
     for event in events:
         if event.scope == 1 or event.sequence_nr < 0 or not event.name.startswith("aten::"):

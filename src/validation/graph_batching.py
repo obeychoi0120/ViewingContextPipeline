@@ -5,7 +5,7 @@ import numpy as np
 from validation.model import torch
 from validation.profiling import span, timed, workload
 
-GRAPH_EXECUTION_VERSION = "packed-role-graph/v1"
+GRAPH_EXECUTION_VERSION = "packed-role-graph/v2"
 
 
 def ranges(starts, stops):
@@ -99,22 +99,26 @@ class PackedGraphStore:
                 "scene_videos": scene_videos,
             }
             if prepared:
-                counts = np.zeros(len(nodes), dtype=np.int64)
-                for role, (values, bounds) in enumerate(self.roles):
+                action_ids = np.flatnonzero(types == 1)
+                action_rows = np.full(len(nodes), -1, dtype=np.int64)
+                action_rows[action_ids] = np.arange(len(action_ids))
+                role_entities = np.full((len(action_ids), 4), -1, dtype=np.int64)
+                role_states = np.zeros((len(action_ids), 4), dtype=np.int64)
+                for slot, role in enumerate((0, 1, 2, 4)):
+                    values, bounds = self.roles[role]
                     indices, owners, _ = ranges(bounds[items], bounds[items + 1])
                     pairs = values[indices] + shift[owners, None]
-                    arrays[f"role_{role}"] = pairs
-                    counts += np.bincount(pairs[:, 1], minlength=len(nodes))
-                for role, (values, bounds) in enumerate(self.states):
+                    role_entities[action_rows[pairs[:, 1]], slot] = pairs[:, 0]
+                    values, bounds = self.states[role]
                     indices, owners, _ = ranges(bounds[items], bounds[items + 1])
                     pairs = values[indices].copy()
                     pairs[:, 0] += shift[owners]
-                    arrays[f"state_{role}"] = pairs
-                    counts += np.bincount(pairs[:, 0], minlength=len(nodes))
+                    role_states[action_rows[pairs[:, 0]], slot] = pairs[:, 1]
                 arrays.update(
-                    message_counts=counts.clip(min=1),
+                    role_entities=role_entities,
+                    role_states=role_states,
                     entity_ids=np.flatnonzero(types == 0),
-                    action_ids=np.flatnonzero(types == 1),
+                    action_ids=action_ids,
                 )
             else:
                 indices, owners, _ = ranges(self.video_edges[items], self.video_edges[items + 1])
@@ -148,7 +152,4 @@ class PackedGraphStore:
             titles=values[len(nodes) + len(scenes) :],
             offsets=offsets.tolist(),
         )
-        if prepared:
-            batch["roles"] = [batch.pop(f"role_{r}") for r in range(10)]
-            batch["states"] = [batch.pop(f"state_{r}") for r in range(5)]
         return batch

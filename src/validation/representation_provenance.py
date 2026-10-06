@@ -134,6 +134,9 @@ def recommendation_identity(context, branch):
     )
 
     if is_graph(context):
+        if branch != "meta":
+            item_model.update(kind="scene_role", item_mlp=False, scene_mlp=True)
+            item_model["video_transform"] = "scene_role_encoder"
         return {
             "encoder": encoder,
             "item_model": item_model,

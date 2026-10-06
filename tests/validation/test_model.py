@@ -64,9 +64,12 @@ def test_all_item_towers_use_frozen_features_and_trainable_projection(arm) -> No
     assert model.title_features.requires_grad is False
     assert (model.item_projection if arm == "metadata" else model.title_projection).weight.grad is not None
     assert model.user_mlp.fc1.weight.grad is not None
-    assert not hasattr(model, "item_mlp")
+    assert model.item_mlp.activation == "relu"
+    assert not any(isinstance(m, torch.nn.LayerNorm) for m in model.item_mlp.modules())
+    assert isinstance(model.user_mlp.norm, torch.nn.LayerNorm)
+    assert isinstance(model.encoder.layers[0].norm1, torch.nn.LayerNorm)
     assert model.user_mlp.activation == "gelu"
-    assert model.item_norm.normalized_shape == (8,)
+    assert model.item_mlp.fc1.out_features == 8
     assert model.user_mlp.fc1.out_features == 8
 
 

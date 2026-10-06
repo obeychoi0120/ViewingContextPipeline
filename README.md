@@ -26,7 +26,7 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시�
 
 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `desc_qwen`, `desc_gemini`입니다. 접미사는 **Scene 추출 모델**이며, Summary 모델은 `--model`로 따로 선택합니다. 생성에는 결합 Arm을 지정하지 않습니다. 평가에는 `--target`과 `--representation-mode`를 항상 명시합니다.
 
-현재 모델(v6)은 **BGE large-en-v1.5 / 1024차원만 지원**합니다. `meta`는 제목 1024→Linear 512, Text는 제목 1024→128 + Summary 1024→Linear 384, Graph는 Entity·Action·Context 1024→공유 Linear 128로 영상 384를 만든 뒤 제목 128과 결합합니다. 최종 LayerNorm 512와 SASRec·User MLP는 유지합니다. 결정성 강제는 기본 해제하며 seed는 고정합니다. [Large 전환 및 재실행 안내](docs/graph_training.md#모델-v6-bge-large-전용-전환)를 참고하세요. [편집 가능한 PPTX](docs/design/recsys_diagram_large.pptx) · [PNG](docs/design/recsys_diagram_large.png)
+현재 모델(v7)은 **동결 BGE large-en-v1.5 / 1024차원**을 사용합니다. `meta`는 제목 Linear 1024→512 → Residual MLP, Text는 제목 128 + Summary 384 → concat 512 → Residual MLP입니다. Graph는 Title·Entities·Actions·Context를 각각 128차원으로 projection하고 Entity→Action 역할 결합 → concat 512 → Scene Residual MLP → Mean Pooling을 사용합니다. Item·Scene의 LayerNorm은 제거하고 SASRec·User MLP의 LayerNorm은 유지합니다. 학습률 `1e-4`, 배치 `128`, patience `5`, min_delta `0`, `deterministic: true`입니다. [현재 구조와 재실행 안내](docs/graph_training.md#모델-및-데이터-계약)를 참고하세요. 기존 [PPTX](docs/design/recsys_diagram_large.pptx)·[PNG](docs/design/recsys_diagram_large.png)는 이전 v6 구조 기록입니다.
 
 주 비교는 `graph_qwen_meta − meta`입니다. Text 전체 평가는 기본 설정에서 7일 × 3 seed × 6 Arm입니다. 사용자 단위 paired bootstrap을 사용하며, seed 평균 후 날짜별 평균을 동일 가중치로 합칩니다. 현재 비교군은 제목 기준선 대비 5개, Graph/Description 비교 2개, 제목 추가 효과 1개이고 각 군에 Bonferroni 보정을 적용합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다.
 
@@ -126,7 +126,7 @@ python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_q
 python -m validation run-diagnosis --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta --representation-mode graph --scene-aggregation mean
 ```
 
-Attention 평가에서는 추천·진단의 `mean`을 `attention`으로 바꿉니다. 입력 준비는 두 방식을 공유합니다. `bash script_graph_v7.sh`는 직접 Graph 입력 준비와 두 pooling 방식의 추천·진단을 순서대로 실행합니다. 추출·Summary 생성은 실행하지 않습니다. 모델과 결측 처리의 상세 내용은 [직접 Graph 학습](docs/graph_training.md)을 참고하세요.
+현재 Graph 경로는 `mean`만 지원하며 `attention` 요청은 오류로 거절합니다. 기존 Attention 산출물은 보존합니다. 위 명령은 직접 Graph 입력 준비와 추천·진단을 실행합니다. 모델과 결측 처리의 상세 내용은 [직접 Graph 학습](docs/graph_training.md)을 참고하세요.
 
 ## 산출물
 
@@ -150,7 +150,7 @@ artifacts/
 └── <RUN_ID>/reports/                # Run별 분석 코드·보고서·표·이미지
 ```
 
-추천 결과는 날짜 × seed × Arm 단위로 checkpoint·학습 기록·이벤트별 지표·완료 manifest를 저장합니다. text 진단은 `text_diagnosis.json`, graph 진단은 `graph_mean_diagnosis.json` 또는 `graph_attention_diagnosis.json`입니다.
+추천 결과는 날짜 × seed × Arm 단위로 checkpoint·학습 기록·이벤트별 지표·완료 manifest를 저장합니다. text 진단은 `text_diagnosis.json`, 현재 graph 진단은 `graph_mean_diagnosis.json`입니다. `graph_attention_diagnosis.json`은 기존 실험에서 생성한 파일입니다.
 
 ## 재개와 실패 대응
 

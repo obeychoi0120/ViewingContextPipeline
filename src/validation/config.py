@@ -28,7 +28,7 @@ class EncoderConfig(StrictModel):
 
 
 class ModelConfig(StrictModel):
-    deterministic: bool = Field(default=False, strict=True)
+    deterministic: bool = Field(default=True, strict=True)
     max_sequence_length: Literal[10]
     embedding_dim: Literal[512]
     num_blocks: Literal[2]

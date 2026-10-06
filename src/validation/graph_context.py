@@ -5,15 +5,18 @@ from dataclasses import dataclass
 from pipeline_runtime import RunContext
 
 GRAPH_ARMS = frozenset({"meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"})
-GRAPH_ARCHITECTURE = "sasrec-role-graph/v6"
+GRAPH_ARCHITECTURE = "sasrec-role-graph/v7"
 GRAPH_MODEL = {
-    "layers": 1,
     "hidden_dim": 128,
-    "scene_dim": 384,
+    "scene_dim": 512,
     "title_dim": 128,
-    "attention_dim": 128,
-    "fusion": "title_then_video_concat_layernorm",
-    "scene_readout": "entity_action_context_concat",
+    "fusion": "role_gather_scene_residual_mlp_then_mean",
+    "scene_readout": "title_entity_action_context_concat",
+    "projections": "separate_title_entity_action_context",
+    "roles": ["actor", "target", "tool", "location"],
+    "role_fusion": "action_plus_relu_linear_640_to_128",
+    "scene_mlp": {"hidden_dim": 512, "activation": "relu", "normalization": "none"},
+    "aggregation": "mean",
     "input_dim": 1024,
     "state_lookup": "embedding",
 }
@@ -46,8 +49,8 @@ def is_graph(context):
 
 
 def graph_context(context, aggregation=None):
-    if aggregation not in (None, "mean", "attention"):
-        raise ValueError("scene aggregation must be mean or attention")
+    if aggregation not in (None, "mean"):
+        raise ValueError("scene aggregation supports only mean")
     return GraphContext(context.root, context.run_id, context.config, context.run_root, aggregation)
 
 
@@ -57,9 +60,9 @@ def validate_mode(mode, aggregation, step, targets):
     if mode == "graph" and set(targets or ()) - GRAPH_ARMS:
         raise ValueError("graph mode supports: " + ", ".join(sorted(GRAPH_ARMS)))
     needs_pool = mode == "graph" and step != "embed-representations"
-    if needs_pool and aggregation not in ("mean", "attention"):
+    if needs_pool and aggregation != "mean":
         raise ValueError(
-            "--scene-aggregation mean|attention is required for graph recommendation/diagnosis"
+            "--scene-aggregation mean is required; attention is unsupported by model v7"
         )
     if not needs_pool and aggregation is not None:
         raise ValueError("--scene-aggregation is only used for graph recommendation/diagnosis")
