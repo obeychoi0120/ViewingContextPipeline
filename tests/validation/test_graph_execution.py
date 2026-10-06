@@ -162,7 +162,7 @@ def test_execution_tuning_does_not_invalidate_training_identity(current_context)
     config = validation_config(current_context)
     before = training_signature(current_context, cohort, config)
     current_context.config["validation"]["graph_execution"].update(
-        chunk_items=16, checkpoint="always"
+        chunk_items=16, chunk_scene_pairs=16, checkpoint="always"
     )
     after = training_signature(current_context, cohort, validation_config(current_context))
     assert before == after
@@ -244,6 +244,7 @@ def test_checkpoint_auto_uses_total_batch_memory(monkeypatch):
     )
     dummy = SimpleNamespace(
         training=True,
+        aggregation="mean",
         execution=GraphExecutionConfig(),
         packed=packed,
         title_projection=SimpleNamespace(weight=SimpleNamespace(device=torch.device("cuda:0"))),

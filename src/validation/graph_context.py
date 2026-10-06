@@ -20,6 +20,33 @@ GRAPH_MODEL = {
     "input_dim": 1024,
     "state_lookup": "embedding",
 }
+GNN_ARCHITECTURE = "sasrec-role-graph/v8"
+GNN_MODEL = {
+    **GRAPH_MODEL,
+    "fusion": "role_gather_scene_residual_mlp_then_gcn_mean",
+    "aggregation": "gnn",
+    "gcn": {
+        "layers": 1,
+        "hidden_dim": 512,
+        "similarity_input": "entity_action_context_before_scene_mlp",
+        "similarity_dim": 384,
+        "similarity": "nonnegative_cosine",
+        "similarity_eps": 1e-8,
+        "self_loop": "unit_diagonal",
+        "normalization": "symmetric_degree",
+        "residual": True,
+        "activation": "relu",
+        "bias": True,
+        "detach_similarity": False,
+        "connectivity": "all_pairs_within_video",
+    },
+}
+
+
+def graph_contract(aggregation, branch):
+    if aggregation == "gnn":
+        return GNN_ARCHITECTURE, {**GNN_MODEL, "gcn_applied": branch != "meta"}
+    return GRAPH_ARCHITECTURE, GRAPH_MODEL
 
 
 @dataclass(frozen=True)
@@ -49,8 +76,8 @@ def is_graph(context):
 
 
 def graph_context(context, aggregation=None):
-    if aggregation not in (None, "mean"):
-        raise ValueError("scene aggregation supports only mean")
+    if aggregation not in (None, "mean", "gnn"):
+        raise ValueError("scene aggregation supports mean or gnn")
     return GraphContext(context.root, context.run_id, context.config, context.run_root, aggregation)
 
 
@@ -60,9 +87,9 @@ def validate_mode(mode, aggregation, step, targets):
     if mode == "graph" and set(targets or ()) - GRAPH_ARMS:
         raise ValueError("graph mode supports: " + ", ".join(sorted(GRAPH_ARMS)))
     needs_pool = mode == "graph" and step != "embed-representations"
-    if needs_pool and aggregation != "mean":
+    if needs_pool and aggregation not in ("mean", "gnn"):
         raise ValueError(
-            "--scene-aggregation mean is required; attention is unsupported by model v7"
+            "--scene-aggregation mean|gnn is required"
         )
     if not needs_pool and aggregation is not None:
         raise ValueError("--scene-aggregation is only used for graph recommendation/diagnosis")

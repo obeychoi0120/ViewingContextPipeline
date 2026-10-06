@@ -2,11 +2,11 @@
 
 ![ViewingContextPipeline 실험 흐름](docs/design/main_diagram.png)
 
-![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram.png)
+![추천 모델 구조: Baseline, Text, Graph GNN](docs/design/recsys_diagram_gnn.png)
 
 [다이어그램 PPTX 원본](docs/design/main_diagram.pptx) · [다이어그램 생성 코드](docs/design/generate_main_diagram.py)
 
-[추천 구조 PPTX 원본](docs/design/recsys_diagram.pptx) · [추천 구조 갱신 코드](docs/design/generate_recsys_diagram.py)
+[GNN 추천 구조 PPTX 원본](docs/design/recsys_diagram_gnn.pptx) · [GNN 구조 갱신 코드](docs/design/generate_recsys_diagram_gnn.py) · [mean 구조](docs/design/recsys_diagram.pptx)
 
 MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시각 정보를 더했을 때 추천 성능이 어떻게 달라지는지 비교하는 실험 파이프라인입니다. Qwen·Gemini로 Graph와 Description을 생성하고, 동일한 사용자·후보 catalog·평가 구간에서 SASRec을 학습합니다.
 
@@ -128,7 +128,7 @@ python -m validation run-recommendation --run-id "$RUN_ID" --target meta graph_q
 python -m validation run-diagnosis --run-id "$RUN_ID" --target meta graph_qwen graph_qwen_meta graph_gemini_meta --representation-mode graph --scene-aggregation mean
 ```
 
-현재 Graph 경로는 `mean`만 지원하며 `attention` 요청은 오류로 거절합니다. 기존 Attention 산출물은 보존합니다. 위 명령은 직접 Graph 입력 준비와 추천·진단을 실행합니다. 모델과 결측 처리의 상세 내용은 [직접 Graph 학습](docs/graph_training.md)을 참고하세요.
+현재 Graph 경로는 `mean`과 `gnn`을 지원합니다. `gnn`은 제목 제외 장면 특징의 cosine similarity로 영상 내부 연결을 구성하고 1층 residual GCN을 적용합니다. `attention` 요청은 거절하며 과거 산출물은 보존합니다. 위 명령은 직접 Graph 입력 준비와 추천·진단을 실행합니다. 모델과 결측 처리의 상세 내용은 [직접 Graph 학습](docs/graph_training.md)을 참고하세요.
 
 ## 산출물
 
@@ -146,13 +146,13 @@ artifacts/
 │       ├── cohort/
 │       ├── representations/{text,graph}/
 │       ├── recommendations/text/
-│       ├── recommendations/graph/{mean,attention}/
+│       ├── recommendations/graph/{mean,gnn}/
 │       └── diagnosis/
 ├── shared_cache/                   # 검증된 임베딩·Graph 입력·추천 결과
 └── <RUN_ID>/reports/                # Run별 분석 코드·보고서·표·이미지
 ```
 
-추천 결과는 날짜 × seed × Arm 단위로 checkpoint·학습 기록·이벤트별 지표·완료 manifest를 저장합니다. text 진단은 `text_diagnosis.json`, 현재 graph 진단은 `graph_mean_diagnosis.json`입니다. `graph_attention_diagnosis.json`은 기존 실험에서 생성한 파일입니다.
+추천 결과는 날짜 × seed × Arm 단위로 checkpoint·학습 기록·이벤트별 지표·완료 manifest를 저장합니다. text 진단은 `text_diagnosis.json`, graph 진단은 `graph_mean_diagnosis.json` 또는 `graph_gnn_diagnosis.json`입니다. `graph_attention_diagnosis.json`은 기존 실험에서 생성한 파일입니다.
 
 ## 재개와 실패 대응
 

@@ -1,6 +1,6 @@
 # 직접 Graph 학습 경로
 
-현재 v7은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean`만 지원**하며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
+현재 v7은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean|gnn`**을 필수로 받으며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
 
 ## 실행
 
@@ -19,7 +19,7 @@ Text는 `--representation-mode text`를 사용하며 Description Arm은 text에�
 
 ## 모델 및 데이터 계약
 
-현재 v7 구조: [추천 구조 PNG](design/recsys_diagram.png) · [편집 가능한 PPTX](design/recsys_diagram.pptx) · [갱신 코드](design/generate_recsys_diagram.py). 전체 파이프라인은 [main_diagram](design/main_diagram.png)을 참고하십시오.
+현재 GNN 구조: [추천 구조 PNG](design/recsys_diagram_gnn.png) · [편집 가능한 PPTX](design/recsys_diagram_gnn.pptx) · [갱신 코드](design/generate_recsys_diagram_gnn.py). 기존 mean v7 구조는 [PNG](design/recsys_diagram.png) · [PPTX](design/recsys_diagram.pptx)로 보존합니다. 전체 파이프라인은 [main_diagram](design/main_diagram.png)을 참고하십시오.
 
 공통 Residual MLP는 `R(x) = x + Linear(512,512)(ReLU(Linear(512,512)(x)))`입니다. **Item·Scene 모듈 전체에 LayerNorm이 없으며**, SASRec Transformer와 기존 GELU User MLP의 내부 LayerNorm은 유지합니다.
 
@@ -89,6 +89,56 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 2026-10-06 검증: `vc_cloud`, PyTorch 2.13.0+cu129, NVIDIA L4에서 CPU validation **156개**, CUDA 모델 **12개**, CUDA profiler **4개**를 통과했습니다. 참조 구현의 출력·gradient, chunk·checkpoint·특징/catalog cache, 결정적 반복 학습, topology·순서 불변성·결측 상태, optimizer 갱신, 두 Metadata adapter의 동일 입력 일치를 검사했습니다. 소형 rolling 학습→평가→진단과 결과 캐시 검증도 포함됩니다.
 
 별도 integration은 **68개 통과, 11개 실패**입니다. 실패는 기존 root 실행 스크립트·그림 링크 누락 및 과거 v7 hash fixture 불일치이며, 변경 전 HEAD를 별도 디렉터리에서 실행해 같은 11개 실패를 확인했습니다. 변경 파일 Ruff 검사와 shell 문법 검사도 통과했습니다. 전체 Run 학습 및 실제 성능 평가는 실행하지 않았습니다.
+
+## 장면 GCN aggregation (2026-10-06)
+
+`mean`은 위 v7 구조를 그대로 사용하며, `gnn`은 기존 장면 MLP 출력 뒤에 영상 내부 메시지 전달을 추가합니다. [DCGN §3.1](https://arxiv.org/html/1906.00377#S3.SS1)의 유사도 그래프를 참고한 추천용 변형입니다. 시간 convolution·계층적 pooling·분류 head를 재현한 모델은 아닙니다.
+
+```text
+[Entity 평균; 역할 보정 Action 평균; Context] 384 → 장면 유사도
+[Title; Entity 평균; Action 평균; Context] 512 → Scene MLP → GCN → Mean → 영상 512
+```
+
+유사도 입력에는 제목이 없습니다. 각 영상의 모든 유효 장면 쌍에 대해 현재 384차원 특징의 cosine을 계산하고 음수는 0, self-loop는 1로 설정합니다. `eps=1e-8`의 L2 정규화로 영벡터를 처리하고, `A`의 행합 `D`로 `Â = D⁻¹ᐟ² A D⁻¹ᐟ²`를 만듭니다. 1층 residual GCN은 `H′ = H + ReLU(Â H W + b)`이며 `W`는 512→512입니다. 이후 유효 장면 평균을 구합니다. 별도 LayerNorm·attention·gate·dropout과 시간 위치는 없습니다.
+
+유사도는 매 forward 다시 계산하며 gradient를 차단하지 않습니다. 기존 projection·역할 결합·Scene MLP·GCN·SASRec을 추천 loss로 학습하고 BGE는 계속 동결합니다. 단일 장면도 self-loop GCN을 거칩니다. 장면 없이 제목만 있는 영상은 기존 fallback을 사용하고 GCN을 건너뜁니다. 전체 결측·padding은 최종 0입니다. `meta`는 동일 제목 전용 모델이며 GCN을 적용하지 않습니다.
+
+장면 수가 같은 영상들을 묶어 batched matrix 연산을 수행하고 영상 간 연결을 만들지 않습니다. 정적 묶음 인덱스는 checkpoint 재계산에서 재사용하지만 학습된 유사도는 optimizer 갱신 이후 재사용하지 않습니다. `validation.graph_execution.chunk_scene_pairs` 기본값은 **1048576**이며 기존 item/node 제한과 함께 영상별 `S²` 합으로 chunk를 나눕니다. 단일 영상이 기준보다 크면 단독 처리하며 장면을 삭제하지 않습니다. 이 기준은 엄격한 메모리 상한이 아닙니다. Auto checkpoint 추정에는 유사도·GCN 활성값도 포함합니다.
+
+Profiler는 `graph_encoder/scene_similarity`, `graph_encoder/scene_gcn`과 `workload.scene_pairs`를 기록합니다. Checkpoint 재계산이 수집되면 해당 연산·장면 쌍도 누적됩니다.
+
+기존 Text·mean identity와 모델 버전은 그대로입니다. 신규 `gnn` 실험은 `sasrec-role-graph/v8`이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v3`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
+
+| 경로 | 신규 산출물 |
+|---|---|
+| 추천 | `validation/recommendations/graph/gnn/<date>/seed_<seed>/<arm>/` |
+| 진단 | `validation/diagnosis/graph_gnn_diagnosis.json` |
+
+유효한 현재 Graph 입력이 있다면 재임베딩 없이 추천부터 실행합니다. GNN은 selection부터 새 학습이며 기존 mean·과거 attention 산출물은 보존합니다.
+
+```bash
+RUN_ID="사용할_Run_ID"
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+```
+
+같은 synthetic 입력과 공통 가중치에서 profiler를 끈 mean/gnn 학습 비용을 측정하는 코드는 `benchmarks/scene_gcn_benchmark.py`입니다. BGE나 Run 입력은 읽지 않으며 실제 추천 품질·RTX 6000 Ada 처리량을 검증하는 실험이 아닙니다. 저장할 경우 Run별 측정 결과는 `artifacts/runs/<RUN_ID>/reports/` 아래에 지정합니다.
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --device cuda:0 --videos 64 --batch-size 128 --warmup 5 --steps 10 --repeats 3
+GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_gcn.py
+```
+
+이번 변경의 검증은 `vc_cloud`, PyTorch 2.13.0+cu129에서 CPU validation **171개**, CLI/profiling integration **14개**, GCN CPU/CUDA 검사 **16개**, 기존 mean CUDA 회귀 **12개**가 통과했습니다. GCN 수학은 독립 NumPy 계산과 비교했으며 작은 selection→refit→test→diagnosis, 결과 재사용, checkpoint 재로딩, 유사도 gradient, 영상 격리, 순열 및 결측 처리를 검사했습니다. 변경 전 HEAD의 mean 모델과 같은 seed·입력에서 초기 state 전체·catalog 벡터·추천 점수가 정확히 일치했습니다. 관련 Ruff와 `git diff --check`도 통과했습니다.
+
+Profiler를 끈 synthetic 측정은 영상 64개, 유효 장면 315개, 장면 쌍 2105개, batch 128, 고정 특징 1024, 추천 차원 512, seed 42, dropout 0을 사용했습니다. 공통 모델 가중치를 맞추고 순전파·loss·backward·gradient clipping·AdamW·캐시 초기화를 포함했습니다. 3회 반복의 각 배치 시간 중앙값을 다시 중앙값으로 집계했습니다. CPU는 warmup 3/측정 5배치, CUDA는 warmup 5/측정 10배치이며 CUDA는 배치 전후 동기화했습니다.
+
+| 환경 | mean 배치 시간 | gnn 배치 시간 | mean / gnn CUDA peak allocated |
+|---|---:|---:|---:|
+| CPU, 1 thread | 609.0 ms | 642.7 ms | 해당 없음 |
+| NVIDIA L4 | 21.1 ms | 44.6 ms | 282.0 / 288.4 MiB |
+
+이 소형 CUDA workload에서 GNN 시간이 약 2.1배였습니다. 장면 수별 연산 묶음과 `S²` 비용은 실제 데이터 분포에 따라 달라집니다. 전체 Run, RTX 6000 Ada 처리량, 추천 품질 개선, 대량 BGE 생성은 검증하지 않았습니다. 기존 입력·mean 결과·과거 attention 산출물과 다이어그램은 변경하지 않았습니다.
 
 ## 이전 학습 비용 조정 (2026-09-30)
 
@@ -353,7 +403,7 @@ Text profiler에는 학습 가능한 Summary 변환을 `video_projection` 구간
 | `src/validation/graph_inputs.py` | 재사용 및 실행 전 실제 feature shape/dtype 검사: 해시·체크섬이 일치해도 384차원 특징 거부 |
 | `tests/validation/`, `tests/conftest.py` | production 입력 1024, 학습·결측·캐시·checkpoint·프로파일 회귀 검증 |
 
-### Text·Graph 재실행 명령
+### 이전 v6 Text·Graph 재실행 명령
 
 두 모드 모두 **embed-representations부터** 실행하고 선택한 모든 Arm을 selection부터 재학습합니다.
 기존 extraction과 Summary를 재생성할 필요는 없습니다. 같은 Run을 사용하면 기존 특징·추천 결과·진단이
@@ -370,13 +420,13 @@ python -m validation embed-representations --run-id "$RUN_ID" --representation-m
 python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
 python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
 
-# Graph: 고정 특징 준비를 mean/attention이 공유
+# Graph: 고정 특징 준비를 mean/gnn이 공유
 python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 ```
 
-Attention은 추천·진단의 `--scene-aggregation mean`을 `attention`으로 바꿉니다.
+이 절은 과거 v6 기록입니다. 현재 `attention` 실행은 지원하지 않으며, 신규 GNN 실행은 아래가 아닌 상단의 현재 계약을 따릅니다.
 기존 Gemini Graph의 전체 결측 문제는 별도 입력 문제입니다. 재학습 전 해당 Arm의
 `statistics.json`에서 유효 장면 수와 제외 사유를 확인해야 하며 이번 모델 변경이 이를 해결하지 않습니다.
 
@@ -455,7 +505,7 @@ python -m validation embed-representations --run-id "$RUN_ID" --representation-m
 python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
 python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
 
-# Graph도 small 특징을 먼저 재생성합니다. Attention은 pooling 옵션만 바꿉니다.
+# 과거 small 특징 생성 명령입니다. 현재 모델은 Large이며 attention 실행은 지원하지 않습니다.
 python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
@@ -531,7 +581,7 @@ python -m validation embed-representations --run-id 260928_v7 --representation-m
 python -m validation run-recommendation --run-id 260928_v7 --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
 python -m validation run-diagnosis --run-id 260928_v7 --representation-mode text --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
 
-# Graph: 유효한 기존 입력 캐시 재사용. attention 실험은 mean을 attention으로 변경.
+# 과거 v4 명령입니다. 현재 attention 실행은 지원하지 않습니다.
 python -m validation run-recommendation --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 python -m validation run-diagnosis --run-id 260928_v7 --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 ```

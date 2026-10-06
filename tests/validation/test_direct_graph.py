@@ -256,7 +256,7 @@ def test_cli_rejects_invalid_modes_before_loading(monkeypatch):
         assert main([step, '--run-id', 'x', '--representation-mode', mode, '--target', arm, *extra]) == 1
 
 
-@pytest.mark.parametrize('pool', ['mean'])
+@pytest.mark.parametrize('pool', ['mean', 'gnn'])
 def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     torch = pytest.importorskip('torch')
     from validation.steps import validation_config, run_diagnosis
@@ -370,8 +370,8 @@ def test_empty_and_single_scene_pooling(graph_data):
         torch.testing.assert_close(a, expected(batch))
         assert torch.isfinite(a).all() and torch.count_nonzero(a[0]) == 0
         assert torch.count_nonzero(encoder(graph_batch(store, [1], 'cpu'))) == 0
-    with pytest.raises(ValueError, match='only mean'):
-        SceneRoleEncoder(aggregation='attention')
+    with pytest.raises(ValueError, match='mean or gnn'):
+        SceneRoleEncoder(aggregation='invalid')
 
 
 def test_four_gpu_feature_partition_and_order(monkeypatch, tmp_path):
@@ -497,8 +497,7 @@ def test_deprecated_receiver_is_ignored_in_graph_inputs(graph_data):
 
 
 def test_v7_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
-    pytest.importorskip('torch')
-    import graph_reference as v2
+    torch = pytest.importorskip('torch')
     from validation.graph_context import GRAPH_ARCHITECTURE, GRAPH_MODEL
     from validation.graph_model import new_graph_model
     from validation.representation_provenance import recommendation_identity
@@ -514,26 +513,27 @@ def test_v7_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
     assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v7'
     assert (GRAPH_MODEL['hidden_dim'], GRAPH_MODEL['scene_dim'], GRAPH_MODEL['title_dim']) == (128, 512, 128)
     previous = {**current, 'graph_architecture': 'sasrec-role-graph/v2',
-                'graph_model': {'layers': 2, 'hidden_dim': 128, 'scene_dim': 512, 'attention_dim': 128}}
+                'graph_model': {'layers': 2, 'hidden_dim': 128, 'scene_dim': 512}}
     assert cache_for(context, current).key != cache_for(context, previous).key
     model = new_graph_model(context, config, arm.name, 'cpu')
-    old = v2.GraphSASRec(store=model.store, aggregation='attention', item_count=len(model.store),
-                        max_length=10, embedding_dim=512, num_blocks=2, num_heads=2, dropout=0.1,
-                        arm='graph')
+    # Tiny legacy weight fixture exercises strict loading without historical models.
+    old = {'graph_encoder.projection.weight': torch.zeros(128, 1024)}
     with pytest.raises(RuntimeError, match='state_dict'):
-        model.load_state_dict(old.state_dict())
+        model.load_state_dict(old)
     assert 'graph_encoder.title_projection.weight' in model.state_dict()
     assert 'item_projection.weight' not in model.state_dict()
     assert 'graph_encoder.layers.1.states' not in model.state_dict()
 
 
-def test_title_only_meta_uses_common_v7_baseline(graph_data):
+@pytest.mark.parametrize("pool", ["mean", "gnn"])
+def test_title_only_meta_uses_common_v7_baseline(graph_data, pool):
     torch = pytest.importorskip('torch')
     from validation.model import seed_everything
     from validation.recommendation import _new_model
     from validation.graph_model import new_graph_model
     from validation.steps import validation_config
     context, _ = graph_data
+    context = graph_context(context, pool)
     config = validation_config(context)
     store = GraphStore(context.representations_dir / 'meta_embeddings')
     seed_everything(42)
@@ -548,15 +548,21 @@ def test_title_only_meta_uses_common_v7_baseline(graph_data):
     assert not hasattr(actual, 'graph_encoder')
     for key, value in expected.state_dict().items():
         torch.testing.assert_close(value, actual.state_dict()[key], rtol=0, atol=0)
+    actual.eval()
+    expected.eval()
     with torch.no_grad():
         torch.testing.assert_close(actual.catalog_vectors(), expected.catalog_vectors(), rtol=0, atol=0)
+        history = torch.tensor([[1, 2, 0]])
+        torch.testing.assert_close(actual.score_catalog(history), expected.score_catalog(history))
 
 
-def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data):
+@pytest.mark.parametrize("pool", ["mean", "gnn"])
+def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data, pool):
     torch = pytest.importorskip('torch')
     from validation.graph_model import new_graph_model
     from validation.steps import validation_config
     context, cohort = graph_data
+    context = graph_context(context, pool)
     cid = cohort['catalog'][0]['content_id']
     first, second = scene(), scene()
     first['actions'].append({**first['actions'][0], 'action': 'washing'})
@@ -641,3 +647,24 @@ def test_scene_without_entities_or_actions_keeps_context(graph_data):
     assert not captured[0][:, :384].any() and captured[0][:, 384:].any()
     values.sum().backward()
     assert model.graph_encoder.context_projection.weight.grad.abs().sum() > 0
+
+
+def test_gnn_contract_reuses_features_but_separates_recommendation_cache(graph_data):
+    from validation.representation_provenance import recommendation_identity
+    from validation.recommendation_cache import cache_for
+    from validation.graph_context import GRAPH_MODEL
+    context, cohort = graph_data
+    gnn = graph_context(context, 'gnn')
+    arm = registry(context.config)['graph_qwen_meta']
+    assert source_identity(context, cohort, arm) == source_identity(gnn, cohort, arm)
+    assert prepare(gnn, target=[arm.name])['reused_arms'] == [arm.name]
+    mean_identity = recommendation_identity(context, arm.name)
+    gnn_identity = recommendation_identity(gnn, arm.name)
+    assert mean_identity['embedding_hash'] == gnn_identity['embedding_hash']
+    assert mean_identity['graph_model'] == GRAPH_MODEL
+    assert mean_identity['graph_architecture'] == 'sasrec-role-graph/v7'
+    assert gnn_identity['graph_architecture'] == 'sasrec-role-graph/v8'
+    assert cache_for(context, mean_identity).key != cache_for(gnn, gnn_identity).key
+    assert recommendation_identity(gnn, 'meta')['graph_model']['gcn_applied'] is False
+    assert gnn.recommendations_dir.name == 'gnn'
+    assert gnn.diagnosis_path.name == 'graph_gnn_diagnosis.json'

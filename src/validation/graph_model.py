@@ -7,6 +7,7 @@ from validation.graph_inputs import GraphStore
 from validation.graph_context import GRAPH_MODEL
 from validation.graph_batching import PackedGraphStore, GRAPH_EXECUTION_VERSION
 from validation.config import GraphExecutionConfig
+from validation.scene_gcn import SceneGCN, scene_groups
 from validation.profiling import span, timed, workload, is_profiling, checkpoint_contexts
 
 
@@ -19,14 +20,15 @@ def segment_mean(values, indices, count):
 
 
 class SceneRoleEncoder(nn.Module):
-    """One Entity→Action role gather, followed by scene MLP and mean pooling."""
+    """Entity→Action role gather, scene MLP, optional scene GCN, and mean pooling."""
 
     ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, location; receiver is ignored.
 
     def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
         super().__init__()
-        if aggregation != "mean":
-            raise ValueError("Scene role encoder supports only mean pooling")
+        if aggregation not in ("mean", "gnn"):
+            raise ValueError("Scene role encoder supports mean or gnn pooling")
+        self.aggregation = aggregation
         self.hidden_dim = hidden
         self.output_dim = hidden * 4
         self.title_projection = nn.Linear(feature_dim, hidden)
@@ -37,6 +39,8 @@ class SceneRoleEncoder(nn.Module):
         self.role_states = nn.Parameter(torch.empty(4, 2, hidden))
         nn.init.normal_(self.role_states, std=0.02)
         self.scene_mlp = ResidualMLP(self.output_dim, activation="relu", normalize=False)
+        if aggregation == "gnn":
+            self.gcn = SceneGCN(self.output_dim)
 
     def _role_inputs(self, batch, action_ids):
         if "role_entities" in batch:
@@ -96,8 +100,16 @@ class SceneRoleEncoder(nn.Module):
                 with span("context_projection", cuda=True):
                     context = self.context_projection(batch["contexts"])
                 scenes = torch.cat([title[batch["scene_videos"]], entity_mean, action_mean, context], dim=-1)
+                if self.aggregation == "gnn":
+                    similarity_features = torch.cat([entity_mean, action_mean, context], dim=-1)
             with span("scene_mlp", cuda=True):
                 scenes = self.scene_mlp(scenes)
+            if self.aggregation == "gnn":
+                groups = [value for key, value in batch.items() if key.startswith("scene_group_")]
+                if not groups:
+                    groups = [torch.as_tensor(value, device=scenes.device)
+                              for value in scene_groups(batch["offsets"]).values()]
+                scenes = self.gcn(scenes, similarity_features, groups)
         with span("video_pooling", cuda=True):
             output = segment_mean(scenes, batch["scene_videos"], video_count)
         # Only videos with no valid scenes use the title-only scene path.
@@ -154,6 +166,7 @@ class GraphSASRec(SASRec):
         self.graph_encoder.apply(self._reset_parameters)
         self._vectors = self._indices = None
         self.embedding_dim = embedding_dim
+        self.aggregation = aggregation
         self.execution = execution or GraphExecutionConfig()
         self.packed = PackedGraphStore(store, self.execution.feature_cache_mb)
         self.execution_counts = {"checkpoint_batches": 0, "direct_batches": 0, "chunks": 0}
@@ -196,6 +209,9 @@ class GraphSASRec(SASRec):
             + edges * hidden * 4
             + scenes * (feature + self.embedding_dim * 12)
         )
+        if self.aggregation == "gnn":
+            pairs = int(np.square(self.packed.scene_counts[indices]).sum())
+            estimate += 4 * (pairs * 8 + scenes * self.embedding_dim * 8)
         free, _ = torch.cuda.mem_get_info(device)
         return estimate > min(8 * 1024**3, int(free * 0.35))
 
@@ -203,17 +219,21 @@ class GraphSASRec(SASRec):
         from torch.utils.checkpoint import checkpoint
 
         vectors, chunks = [], []
-        chunk, nodes = [], 0
+        chunk, nodes, scene_pairs = [], 0, 0
         for item in ids:
             count = int(self.packed.node_counts[item - 1])
+            pairs = int(self.packed.scene_counts[item - 1]) ** 2
             if chunk and (
                 len(chunk) >= self.execution.chunk_items
                 or nodes + count > self.execution.chunk_nodes
+                or (self.aggregation == "gnn"
+                    and scene_pairs + pairs > self.execution.chunk_scene_pairs)
             ):
                 chunks.append(chunk)
-                chunk, nodes = [], 0
+                chunk, nodes, scene_pairs = [], 0, 0
             chunk.append(item)
             nodes += count
+            scene_pairs += pairs
         if chunk:
             chunks.append(chunk)
         use_checkpoint = self._use_checkpoint(ids)
@@ -231,7 +251,8 @@ class GraphSASRec(SASRec):
             self.execution_counts["checkpoint_batches" if use_checkpoint else "direct_batches"] += 1
         device = self.title_projection.weight.device
         for items in chunks:
-            batch = self.packed.batch(np.asarray(items) - 1, device)
+            batch = self.packed.batch(np.asarray(items) - 1, device,
+                                      group_scenes=self.aggregation == "gnn")
             self.execution_counts["chunks"] += 1
             if use_checkpoint:
                 options = {"context_fn": checkpoint_contexts} if is_profiling() else {}

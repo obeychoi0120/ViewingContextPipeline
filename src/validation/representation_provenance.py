@@ -117,7 +117,7 @@ def recommendation_identity(context, branch):
     value = read_state(context, branch).get("recommendation_hash")
     if value is None:
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
-    from validation.graph_context import is_graph, GRAPH_MODEL, GRAPH_ARCHITECTURE
+    from validation.graph_context import is_graph, graph_contract
 
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION
     from model_provenance import canonical, local_model_identity
@@ -134,6 +134,7 @@ def recommendation_identity(context, branch):
     )
 
     if is_graph(context):
+        architecture, graph_model = graph_contract(context.scene_aggregation, branch)
         if branch != "meta":
             item_model.update(kind="scene_role", item_mlp=False, scene_mlp=True)
             item_model["video_transform"] = "scene_role_encoder"
@@ -143,8 +144,8 @@ def recommendation_identity(context, branch):
             "embedding_hash": value,
             "representation_mode": "graph",
             "scene_aggregation": context.scene_aggregation,
-            "graph_model": GRAPH_MODEL,
-            "graph_architecture": GRAPH_ARCHITECTURE,
+            "graph_model": graph_model,
+            "graph_architecture": architecture,
         }
     return {
         "encoder": encoder,

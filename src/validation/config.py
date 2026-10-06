@@ -82,6 +82,7 @@ class GraphExecutionConfig(StrictModel):
     # Execution choices only: no change to model weights, loss or cache identity.
     chunk_items: int = Field(default=256, gt=0)
     chunk_nodes: int = Field(default=32768, gt=0)
+    chunk_scene_pairs: int = Field(default=1048576, gt=0)
     checkpoint: Literal["auto", "always", "never"] = "auto"
     feature_cache_mb: int = Field(default=2048, ge=0)
 

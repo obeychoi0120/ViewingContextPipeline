@@ -47,7 +47,7 @@ def test_profile_interval_must_be_positive(value, monkeypatch):
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize("mode", ["text", "graph"])
+@pytest.mark.parametrize("mode", ["text", "mean", "gnn"])
 @pytest.mark.parametrize("operators", [False, True])
 def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, mode, operators):
     calls = []
@@ -56,7 +56,8 @@ def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, 
         "validation.rolling_recommendation.run_rolling",
         lambda context, **kwargs: calls.append((context, kwargs)),
     )
-    extra = ["--scene-aggregation", "mean"] if mode == "graph" else []
+    representation_mode = "text" if mode == "text" else "graph"
+    extra = ["--scene-aggregation", mode] if representation_mode == "graph" else []
     if operators:
         extra.append("--profile-operators")
     assert (
@@ -68,7 +69,7 @@ def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, 
                 "--target",
                 "meta",
                 "--representation-mode",
-                mode,
+                representation_mode,
                 "--profile-every",
                 "17",
                 *extra,
@@ -78,8 +79,8 @@ def test_profile_cli_passes_through_step_to_rolling(ready_context, monkeypatch, 
     )
     assert calls[0][1]["profile_every"] == 17
     assert calls[0][1].get("profile_operators", False) == operators
-    if mode == "graph":
-        assert calls[0][0].scene_aggregation == "mean"
+    if representation_mode == "graph":
+        assert calls[0][0].scene_aggregation == mode
 
 
 @pytest.mark.parametrize("step", ["run-recommendation", "embed-representations", "run-diagnosis"])

@@ -98,6 +98,7 @@ validation:
   graph_execution:
     chunk_items: 256
     chunk_nodes: 32768
+    chunk_scene_pairs: 1048576
     checkpoint: auto
     feature_cache_mb: 2048
   model:

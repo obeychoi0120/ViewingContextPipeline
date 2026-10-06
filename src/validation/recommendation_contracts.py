@@ -3,7 +3,9 @@ from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms
 
 ARCHITECTURE_VERSION = "sasrec-content-v7"
 # Current text and direct-graph architectures.
-DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({"sasrec-content-v7", "sasrec-role-graph/v7"})
+DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({
+    "sasrec-content-v7", "sasrec-role-graph/v7", "sasrec-role-graph/v8"
+})
 ITEM_MODEL = {
     "baseline_dim": 512,
     "title_dim": 128,
