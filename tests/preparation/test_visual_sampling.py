@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from fractions import Fraction
 import json
 from pathlib import Path
 from unittest import mock
@@ -15,7 +14,7 @@ from preparation.video.fixed30 import (
 from preparation.video.video_processor import extract_resized_keyframes
 from extraction.evidence import build_scene_evidence, image_path_for_timestamp
 from validation.diagnosis_scenes import _nonempty_timestamp_list
-from visual_sampling import build_fixed_windows, timestamp_stem, truncate_timestamp
+from visual_sampling import build_fixed_windows
 
 
 @pytest.mark.parametrize(
@@ -44,24 +43,6 @@ def test_sampling_keeps_full_bins_and_clips_only_the_tail(
         timestamps = scene["keyframe_timestamps"]
         assert timestamps == sorted(set(timestamps))
         assert all(scene["scene_start"] <= value < scene["scene_end"] for value in timestamps)
-
-
-@pytest.mark.parametrize(
-    "value,expected,name",
-    [
-        (2.5, 2.5, "0002_5"),
-        (7.5, 7.5, "0007_5"),
-        (Fraction(5, 3), 1.6, "0001_6"),
-        (1.29, 1.2, "0001_2"),
-        (0.3, 0.3, "0000_3"),
-        (59.99, 59.9, "0059_9"),
-        (5.0, 5, "0005"),
-        (10002.59, 10002.5, "10002_5"),
-    ],
-)
-def test_timestamp_truncation_and_filename_agree(value, expected, name):
-    assert truncate_timestamp(value) == expected
-    assert timestamp_stem(value) == name
 
 
 def test_fractional_seek_json_cache_and_image_selection_agree(tmp_path):

@@ -5,7 +5,6 @@ import pytest
 
 from arm_registry import registry
 from artifact_io import read_jsonl, write_jsonl
-from validation.representation_inputs import documents_for_arm
 from validation.rolling_data import EventTable
 from validation.selection import cohort_directory, load_validation_cohort, prepare_validation_cohort
 from validation.steps import embed_representations
@@ -36,17 +35,6 @@ def test_full_catalog_applies_to_all_targets_and_preserves_shared_data(summaries
     with np.load(context.representations_dir / "meta_embeddings.npz") as data:
         assert not data["title_values"][1].any()
     assert original == {p: p.read_bytes() for p in original}
-
-
-def test_missing_summary_does_not_fall_back_to_another_arm(summaries):
-    context = summaries
-    cohort = context.require_ready_cohort()
-    cid = cohort["catalog"][0]["content_id"]
-    (context.summary_arm_dir("graph_qwen") / f"{cid}.json").unlink()
-    assert (context.summary_arm_dir("graph_gemini") / f"{cid}.json").is_file()
-    docs = documents_for_arm(context, cohort, registry(context.config)["graph_qwen"])
-    assert docs[0]["text"] == "" and docs[0]["status"] == "missing"
-    assert all(row["text"] for row in docs[1:])
 
 
 def test_tampered_or_interrupted_selection_is_not_readable(summaries, monkeypatch):

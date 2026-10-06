@@ -41,8 +41,8 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation"}
     embed_representations(context, target=["meta"])
     with np.load(context.representations_dir / "meta_embeddings.npz") as arrays:
-        assert np.all(arrays["values"][3] == 0)
-        assert np.any(arrays["values"][1] != 0)
+        assert np.all(arrays["title_values"][3] == 0)
+        assert np.any(arrays["title_values"][1] != 0)
     supplement.write_text("item,title\n2,Updated title\n3,Third title\n4,Fourth title\n")
     assert main(["prepare-cohort", "--run-id", context.run_id]) == 0
     titles = read_jsonl(context.cohort_dir / "metadata_titles.jsonl")

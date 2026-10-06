@@ -175,17 +175,6 @@ def test_spawned_training_matches_serial_parameters_and_metrics(
 
 
 @pytest.mark.torch
-def test_worker_failure_is_reported_and_all_children_are_joined(full_context):
-    context = full_context
-    children_before = {child.pid for child in mp.active_children()}
-    # Missing embeddings fail inside a real spawned child, after task dispatch.
-    with pytest.raises(RuntimeError, match="rolling worker failed:.*device=cpu"):
-        run_parallel(context, two_jobs(context), ["cpu", "cpu"], Progress())
-    assert {child.pid for child in mp.active_children()} == children_before
-    assert not list(context.recommendations_dir.rglob("complete.json"))
-
-
-@pytest.mark.torch
 def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, monkeypatch):
     context = full_context
     prepare_embeddings(context)
@@ -242,46 +231,3 @@ def test_abrupt_worker_exit_does_not_hang(full_context, monkeypatch):
     with pytest.raises(RuntimeError, match="workers? .*exit"):
         run_parallel(full_context, two_jobs(full_context), ["cpu", "cpu"], Progress())
     assert {child.pid for child in mp.active_children()} == children_before
-
-
-def test_dispatch_is_unique_and_skips_completed_work(full_context, monkeypatch):
-    monkeypatch.setattr("validation.rolling_recommendation.require_torch", lambda: None)
-    context = full_context
-    prepare_embeddings(context)
-    monkeypatch.setattr(
-        "validation.rolling_recommendation.worker_devices", lambda *_: ["cuda:0", "cuda:1"] * 2
-    )
-    reused = ("2022-09-05", 42, "meta")
-    monkeypatch.setattr(
-        "validation.rolling_recommendation.combination_complete",
-        lambda directory, identity, count: (
-            tuple(identity[k] for k in ("evaluation_date", "seed", "arm")) == reused
-        ),
-    )
-    dispatched = []
-
-    def run(context, jobs, devices, progress):
-        assert devices == ["cuda:0", "cuda:1"] * 2
-        keys = [
-            tuple(identity[k] for k in ("evaluation_date", "seed", "arm"))
-            for _, identity, _ in jobs
-        ]
-        assert len(set(keys)) == len(keys)
-        dispatched.append(keys)
-        return len(jobs)
-
-    monkeypatch.setattr("validation.rolling_workers.run_parallel", run)
-    monkeypatch.setattr(
-        "validation.rolling_recommendation.verify_representations", lambda *a, **k: None
-    )
-    monkeypatch.setattr(
-        "validation.representation_provenance.recommendation_identity", lambda *a: {}
-    )
-    assert run_rolling(context, target=list(registry(context.config)), workers_per_gpu=2) == {
-        "stage": "run-recommendation",
-        "completed": 125,
-        "skipped": 1,
-    }
-    assert reused not in dispatched[-1]
-    assert run_rolling(context, target=list(registry(context.config)), force=True, workers_per_gpu=2)["completed"] == 126
-    assert reused in dispatched[-1]

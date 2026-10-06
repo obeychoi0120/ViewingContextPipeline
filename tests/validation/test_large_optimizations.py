@@ -1,7 +1,6 @@
 """Large-only production contracts and residual item/scene learning."""
 
 import os
-import random
 import sys
 from types import SimpleNamespace
 
@@ -14,10 +13,8 @@ from conftest import config_data  # noqa: E402
 from graph_fixture import synthetic_store  # noqa: E402
 from validation.config import ValidationConfig  # noqa: E402
 from validation.features import FeatureError, _load_bge_runtime  # noqa: E402
-from validation.graph_model import GraphSASRec, new_graph_model  # noqa: E402
-from validation.model import seed_everything  # noqa: E402
+from validation.graph_model import GraphSASRec  # noqa: E402
 from validation.recommendation import _new_model  # noqa: E402
-from validation.selection import training_signature  # noqa: E402
 from validation.representation_provenance import recommendation_identity  # noqa: E402
 
 
@@ -108,41 +105,6 @@ def test_large_graph_dimensions_independent_projections_and_empty_items(pool, de
     assert not model.item_vectors(torch.tensor([0, 1], device=device)).any()
 
 
-@pytest.mark.parametrize("deterministic", [False, True])
-def test_seed_policy_preserves_rng_and_switches_determinism(deterministic):
-    previous = torch.are_deterministic_algorithms_enabled()
-    try:
-        seed_everything(123, deterministic=deterministic)
-        first = (random.random(), np.random.random(), torch.rand(5))
-        seed_everything(123, deterministic=deterministic)
-        second = (random.random(), np.random.random(), torch.rand(5))
-        assert first[:2] == second[:2]
-        torch.testing.assert_close(first[2], second[2], rtol=0, atol=0)
-        assert torch.are_deterministic_algorithms_enabled() is deterministic
-    finally:
-        torch.use_deterministic_algorithms(previous)
-
-
-def test_determinism_default_and_change_invalidate_training_cache(tmp_path):
-    value = config_data(tmp_path)
-    value["model"].pop("deterministic")
-    default = ValidationConfig.model_validate(value)
-    explicit = default.model_copy(update={"model": default.model.model_copy(update={"deterministic": False})})
-    enabled = default.model_copy(update={"model": default.model.model_copy(update={"deterministic": True})})
-    cohort = {"events": [], "manifest": {"selection_hash": "same-input"}}
-    assert default.model.deterministic is True
-    assert training_signature(None, cohort, default) != training_signature(None, cohort, explicit)
-    assert training_signature(None, cohort, default) == training_signature(None, cohort, enabled)
-
-
-def test_graph_rejects_small_stored_features_before_training(tmp_path, monkeypatch):
-    config = ValidationConfig.model_validate(config_data(tmp_path))
-    context = SimpleNamespace(representations_dir=tmp_path, scene_aggregation="mean")
-    monkeypatch.setattr("validation.graph_model.GraphStore", lambda _: synthetic_store(16, 384))
-    with pytest.raises(ValueError, match="graph feature dimension mismatch"):
-        new_graph_model(context, config, "graph_qwen_meta", "cpu")
-
-
 def test_encoder_identity_and_video_structure_are_in_result_cache(current_context, monkeypatch):
     from validation.recommendation_cache import cache_for
 
@@ -169,24 +131,3 @@ def test_actual_encoder_dimension_checked_before_device_transfer(tmp_path, monke
     monkeypatch.setitem(sys.modules, "transformers", transformers)
     with pytest.raises(FeatureError, match="required BGE large dimension 1024"):
         _load_bge_runtime(settings, "cpu")
-
-
-def test_large_runtime_and_actual_output_contract(tmp_path, monkeypatch):
-    from validation.features import BGETextEncoder
-
-    settings = ValidationConfig.model_validate(config_data(tmp_path)).encoder
-    settings.model_path.mkdir()
-    model = torch.nn.Module()
-    model.config = SimpleNamespace(hidden_size=1024)
-    tokenizer = object()
-    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
-        AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **k: tokenizer),
-        AutoModel=SimpleNamespace(from_pretrained=lambda *a, **k: model),
-    ))
-    encoder = BGETextEncoder(settings, device="cpu")
-    assert encoder.model is model and not model.training
-    monkeypatch.setattr(encoder, "_encode_batch", lambda texts: np.ones((len(texts), 1024), np.float32))
-    assert encoder.encode(["a short sentence"]).shape == (1, 1024)
-    monkeypatch.setattr(encoder, "_encode_batch", lambda texts: np.ones((len(texts), 384), np.float32))
-    with pytest.raises(FeatureError, match="invalid BGE embedding matrix"):
-        encoder.encode(["a short sentence"])

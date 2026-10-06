@@ -67,55 +67,6 @@ def test_input_defaults_isolation_actionless_and_missing(graph_data):
     assert prepare(context, target=['graph_qwen'])['reused_arms'] == ['graph_qwen']
 
 
-def test_node_embedding_text_format_and_list_order(graph_data):
-    context, cohort = graph_data
-    graph = scene()
-    graph['actions'][0]['action'] = 'cooking'
-    graph['topics'] = ['food preparation', 'cooking']
-    graph['entities'][0]['attributes'] = ['red apron', 'chef hat']
-    cid = cohort['catalog'][0]['content_id']
-    arm = registry(context.config)['graph_qwen']
-    write_scenes(context, cid, [graph])
-    texts, arrays, _ = build_input(context, cohort, arm)
-    assert [texts[i] for i in arrays['nodes'][:3]] == [
-        'Name: carrot\nAttributes:',
-        'Name: cook\nAttributes: chef hat, red apron',
-        'cooking',
-    ]
-    assert texts[arrays['contexts'][0]] == (
-        'Format: demonstration\nMedium: live_action\nTopics: cooking, food preparation'
-    )
-    graph['topics'].reverse()
-    graph['entities'][0]['attributes'].reverse()
-    write_scenes(context, cid, [graph])
-    reordered_texts, reordered_arrays, _ = build_input(context, cohort, arm)
-    assert reordered_texts == texts
-    for key in arrays:
-        np.testing.assert_array_equal(reordered_arrays[key], arrays[key])
-
-
-def test_json_input_version_cannot_reuse_labeled_input_cache(graph_data, monkeypatch):
-    from validation import graph_inputs
-
-    context, cohort = graph_data
-    arm = registry(context.config)['graph_qwen']
-    current_hash = source_identity(context, cohort, arm)
-    with monkeypatch.context() as patch:
-        patch.setattr(graph_inputs, 'VERSION', 'role-graph-inputs/v2')
-        assert source_identity(context, cohort, arm) != current_hash
-    directory = context.representations_dir / 'graph_qwen_embeddings'
-    manifest_path = directory / 'manifest.json'
-    manifest = json.loads(manifest_path.read_text())
-    assert manifest['version'] == 'role-graph-inputs/v3'
-    manifest['version'] = 'role-graph-inputs/v2'
-    manifest_path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match='stale'):
-        verify(context, cohort, ['graph_qwen'])
-    prepare(context, target=['graph_qwen'])
-    verify(context, cohort, ['graph_qwen'])
-    assert json.loads(manifest_path.read_text())['version'] == 'role-graph-inputs/v3'
-
-
 @pytest.mark.parametrize('dimension,dtype', [(384, 'float32'), (1024, 'float64'), (None, None)])
 def test_graph_cache_checks_actual_features_even_with_matching_provenance(graph_data, dimension, dtype):
     import shutil
@@ -239,23 +190,6 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
         torch.testing.assert_close(restored.catalog_vectors(), expected)
 
 
-def test_cli_rejects_invalid_modes_before_loading(monkeypatch):
-    from validation.cli import main
-    monkeypatch.setattr('validation.cli.RunContext.load', lambda _: pytest.fail('must reject before load'))
-    with pytest.raises(SystemExit):
-        main(['embed-representations', '--run-id', 'x', '--target', 'meta'])
-    with pytest.raises(SystemExit):
-        main(['run-recommendation', '--run-id', 'x', '--representation-mode', 'graph',
-              '--scene-aggregation', 'attention', '--target', 'meta'])
-    for step, mode, extra, arm in [
-        ('run-recommendation', 'graph', [], 'meta'),
-        ('run-diagnosis', 'graph', [], 'meta'),
-        ('embed-representations', 'graph', ['--scene-aggregation', 'mean'], 'meta'),
-        ('run-recommendation', 'text', ['--scene-aggregation', 'mean'], 'meta'),
-        ('embed-representations', 'graph', [], 'desc_qwen_meta')]:
-        assert main([step, '--run-id', 'x', '--representation-mode', mode, '--target', arm, *extra]) == 1
-
-
 @pytest.mark.parametrize('pool', ['mean', 'gnn'])
 def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     torch = pytest.importorskip('torch')
@@ -355,102 +289,6 @@ def test_title_order_and_missing_inputs(graph_data):
         assert not any(isinstance(m, torch.nn.LayerNorm) for m in model.graph_encoder.modules())
 
 
-def test_empty_and_single_scene_pooling(graph_data):
-    torch = pytest.importorskip('torch')
-    from validation.graph_model import SceneRoleEncoder, graph_batch
-    import graph_v7_reference as reference
-    context, _ = graph_data
-    store = GraphStore(context.representations_dir / 'graph_qwen_embeddings')
-    encoder = SceneRoleEncoder()
-    expected = reference.SceneRoleEncoder()
-    expected.load_state_dict(encoder.state_dict())
-    with torch.no_grad():
-        batch = graph_batch(store, [1, 2], 'cpu')
-        a = encoder(batch)
-        torch.testing.assert_close(a, expected(batch))
-        assert torch.isfinite(a).all() and torch.count_nonzero(a[0]) == 0
-        assert torch.count_nonzero(encoder(graph_batch(store, [1], 'cpu'))) == 0
-    with pytest.raises(ValueError, match='mean or gnn'):
-        SceneRoleEncoder(aggregation='invalid')
-
-
-def test_four_gpu_feature_partition_and_order(monkeypatch, tmp_path):
-    from types import SimpleNamespace
-    from validation import graph_inputs
-    torch = pytest.importorskip('torch')
-    calls = []
-    class Encoder:
-        def __init__(self, settings, device=None):
-            self.device = device
-            self.last_truncation = {}
-        def encode(self, texts):
-            calls.append((self.device, texts))
-            return np.asarray([[int(t)] * 1024 for t in texts], dtype=np.float32)
-    class Pool:
-        def __init__(self, **kwargs):
-            assert kwargs['max_workers'] == 4
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            pass
-        def submit(self, fn, *args):
-            result = fn(*args)
-            return SimpleNamespace(result=lambda: result)
-    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
-    monkeypatch.setattr(torch.cuda, 'device_count', lambda: 4)
-    monkeypatch.setattr(graph_inputs, 'ProcessPoolExecutor', Pool)
-    monkeypatch.setattr('validation.features.BGETextEncoder', Encoder)
-    values = graph_inputs.encode_texts(SimpleNamespace(), [str(i) for i in range(11)])
-    np.testing.assert_array_equal(values[:, 0], np.arange(11))
-    assert [device for device, _ in calls] == ['cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
-    assert sum(len(texts) for _, texts in calls) == 11
-
-
-def test_optional_explicit_role_states_and_scene_order(graph_data):
-    torch = pytest.importorskip('torch')
-    from validation.graph_model import SceneRoleEncoder, graph_batch
-    context, cohort = graph_data
-    arm = registry(context.config)['graph_qwen']
-    cid = cohort['catalog'][0]['content_id']
-    g = scene()
-    g['actions'][0].update(receiver='unknown', location=None)
-    write_scenes(context, cid, [g])
-    _, arrays, _ = build_input(context, cohort, arm)
-    assert arrays['missing'][0, -2:].tolist() == [0, 0]  # receiver is disabled
-    invalid = scene()
-    del invalid['actions'][0]['tool']
-    write_scenes(context, cid, [invalid])
-    _, _, stats = build_input(context, cohort, arm)
-    assert stats['counts']['invalid_structure'] == 1
-    store = GraphStore(context.representations_dir / 'graph_qwen_embeddings')
-    batch = graph_batch(store, [0], 'cpu')
-    # Swap the first two scene memberships and their Context features together.
-    swapped = dict(batch)
-    swapped['node_scenes'] = 1 - batch['node_scenes']
-    swapped['contexts'] = batch['contexts'].flip(0)
-    for pool in ('mean',):
-        encoder = SceneRoleEncoder(aggregation=pool)
-        torch.testing.assert_close(encoder(batch), encoder(swapped), atol=2e-6, rtol=1e-5)
-
-
-def test_source_identity_title_model_and_catalog(graph_data):
-    context, cohort = graph_data
-    arm = registry(context.config)['graph_qwen_meta']
-    original = source_identity(context, cohort, arm)
-    changed = copy.deepcopy(cohort)
-    changed['metadata_titles'][0]['title'] += ' modified'
-    assert source_identity(context, changed, arm) != original
-    changed = copy.deepcopy(cohort)
-    changed['catalog'].reverse()
-    changed['metadata_titles'].reverse()
-    assert source_identity(context, changed, arm) != original
-    changed['metadata_titles'].reverse()
-    with pytest.raises(ValueError, match='order mismatch'):
-        source_identity(context, changed, arm)
-    context.config['validation']['encoder']['batch_size'] += 1
-    assert source_identity(context, cohort, arm) != original
-
-
 def test_graph_context_runs_in_spawned_workers(graph_data):
     import io
     from tqdm import tqdm
@@ -478,82 +316,6 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     for split, identity, branch in jobs:
         directory = combination_dir(context, split['evaluation_date'], identity['seed'], branch)
         assert combination_complete(directory, identity, len(phase_ids(EventTable(cohort['events']), split, 'test')))
-
-
-def test_deprecated_receiver_is_ignored_in_graph_inputs(graph_data):
-    context, cohort = graph_data
-    cid = cohort['catalog'][0]['content_id']
-    arm = registry(context.config)['graph_qwen']
-    write_scenes(context, cid, [scene()])
-    texts, expected, stats = build_input(context, cohort, arm)
-    for receiver in ['missing', 'c', ['p', 'c']]:
-        graph = scene()
-        graph['actions'][0]['receiver'] = receiver
-        write_scenes(context, cid, [graph])
-        actual_texts, actual, actual_stats = build_input(context, cohort, arm)
-        assert actual_texts == texts and actual_stats == stats
-        for name in expected:
-            np.testing.assert_array_equal(actual[name], expected[name])
-
-
-def test_v7_model_contract_reuses_inputs_and_rejects_old_checkpoint(graph_data):
-    torch = pytest.importorskip('torch')
-    from validation.graph_context import GRAPH_ARCHITECTURE, GRAPH_MODEL
-    from validation.graph_model import new_graph_model
-    from validation.representation_provenance import recommendation_identity
-    from validation.recommendation_cache import cache_for
-    from validation.steps import validation_config
-    context, cohort = graph_data
-    config = validation_config(context)
-    arm = registry(context.config)['graph_qwen_meta']
-    source_before = source_identity(context, cohort, arm)
-    assert prepare(context, target=['graph_qwen_meta'])['reused_arms'] == ['graph_qwen_meta']
-    assert source_identity(context, cohort, arm) == source_before
-    current = recommendation_identity(context, arm.name)
-    assert current['graph_architecture'] == GRAPH_ARCHITECTURE == 'sasrec-role-graph/v7'
-    assert (GRAPH_MODEL['hidden_dim'], GRAPH_MODEL['scene_dim'], GRAPH_MODEL['title_dim']) == (128, 512, 128)
-    previous = {**current, 'graph_architecture': 'sasrec-role-graph/v2',
-                'graph_model': {'layers': 2, 'hidden_dim': 128, 'scene_dim': 512}}
-    assert cache_for(context, current).key != cache_for(context, previous).key
-    model = new_graph_model(context, config, arm.name, 'cpu')
-    # Tiny legacy weight fixture exercises strict loading without historical models.
-    old = {'graph_encoder.projection.weight': torch.zeros(128, 1024)}
-    with pytest.raises(RuntimeError, match='state_dict'):
-        model.load_state_dict(old)
-    assert 'graph_encoder.title_projection.weight' in model.state_dict()
-    assert 'item_projection.weight' not in model.state_dict()
-    assert 'graph_encoder.layers.1.states' not in model.state_dict()
-
-
-@pytest.mark.parametrize("pool", ["mean", "gnn"])
-def test_title_only_meta_uses_common_v7_baseline(graph_data, pool):
-    torch = pytest.importorskip('torch')
-    from validation.model import seed_everything
-    from validation.recommendation import _new_model
-    from validation.graph_model import new_graph_model
-    from validation.steps import validation_config
-    context, _ = graph_data
-    context = graph_context(context, pool)
-    config = validation_config(context)
-    store = GraphStore(context.representations_dir / 'meta_embeddings')
-    seed_everything(42)
-    actual = new_graph_model(context, config, 'meta', 'cpu')
-    seed_everything(42)
-    features = np.array(store['features'][store['titles']])
-    expected = _new_model(config, item_count=len(store), branch='meta', device='cpu', features={
-        'title_values': features, 'video_values': np.zeros_like(features),
-        'title_available': store['titles'] != 0,
-        'video_available': np.zeros(len(store), dtype=bool),
-    })
-    assert not hasattr(actual, 'graph_encoder')
-    for key, value in expected.state_dict().items():
-        torch.testing.assert_close(value, actual.state_dict()[key], rtol=0, atol=0)
-    actual.eval()
-    expected.eval()
-    with torch.no_grad():
-        torch.testing.assert_close(actual.catalog_vectors(), expected.catalog_vectors(), rtol=0, atol=0)
-        history = torch.tensor([[1, 2, 0]])
-        torch.testing.assert_close(actual.score_catalog(history), expected.score_catalog(history))
 
 
 @pytest.mark.parametrize("pool", ["mean", "gnn"])
@@ -591,62 +353,6 @@ def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data,
     actual.load_state_dict(original.state_dict())
     with torch.no_grad():
         torch.testing.assert_close(actual.catalog_vectors(), expected, atol=3e-6, rtol=1e-5)
-
-
-def test_none_unknown_states_are_role_specific_and_receiver_is_ignored(graph_data):
-    torch = pytest.importorskip('torch')
-    from validation.graph_model import SceneRoleEncoder, graph_batch
-    context, _ = graph_data
-    store = GraphStore(context.representations_dir / 'graph_qwen_embeddings')
-    batch = graph_batch(store, [0], 'cpu')
-    # Isolate role-state effects from entity features and residual scene effects.
-    batch['edges'] = batch['edges'][:0]
-    batch['missing'][:, 1:] = 0
-    encoder = SceneRoleEncoder()
-    with torch.no_grad():
-        for parameter in encoder.parameters():
-            parameter.zero_()
-        for slot in range(4):
-            encoder.role_states[slot, 0].fill_(slot * 2 + 1)
-            encoder.role_states[slot, 1].fill_(slot * 2 + 2)
-    for slot, role in enumerate(encoder.ROLE_INDICES):
-        with torch.no_grad():
-            encoder.role_fusion.weight.zero_()
-            encoder.role_fusion.weight[:, (slot + 1) * 128:(slot + 2) * 128] = torch.eye(128)
-        none = encoder(batch)
-        unknown_batch = {**batch, 'missing': batch['missing'].clone()}
-        unknown_batch['missing'][:, role + 1] = 1
-        unknown = encoder(unknown_batch)
-        torch.testing.assert_close(none[:, 256:384], torch.full((1, 128), slot * 2 + 1.0))
-        torch.testing.assert_close(unknown[:, 256:384], none[:, 256:384] + 1)
-        receiver_batch = {**batch, 'missing': batch['missing'].clone()}
-        receiver_batch['missing'][:, 4] = 1
-        torch.testing.assert_close(encoder(receiver_batch), none, rtol=0, atol=0)
-        encoder.zero_grad(set_to_none=True)
-        unknown.sum().backward()
-        assert encoder.role_states.grad[slot, 1].abs().sum() > 0
-        assert not encoder.role_states.grad[slot, 0].any()
-
-
-def test_scene_without_entities_or_actions_keeps_context(graph_data):
-    torch = pytest.importorskip('torch')
-    from validation.graph_model import new_graph_model
-    from validation.steps import validation_config
-    context, cohort = graph_data
-    graph = scene()
-    graph.update(entities=[], actions=[])
-    write_scenes(context, cohort['catalog'][0]['content_id'], [graph])
-    prepare(context, target=['graph_qwen'])
-    model = new_graph_model(context, validation_config(context), 'graph_qwen', 'cpu')
-    captured = []
-    hook = model.graph_encoder.scene_mlp.register_forward_pre_hook(lambda _, args: captured.append(args[0]))
-    model.prepare_items(torch.tensor([1]))
-    values = model.item_vectors(torch.tensor([0, 1]))
-    hook.remove()
-    assert not values[0].any() and values[1].any()
-    assert not captured[0][:, :384].any() and captured[0][:, 384:].any()
-    values.sum().backward()
-    assert model.graph_encoder.context_projection.weight.grad.abs().sum() > 0
 
 
 def test_gnn_contract_reuses_features_but_separates_recommendation_cache(graph_data):

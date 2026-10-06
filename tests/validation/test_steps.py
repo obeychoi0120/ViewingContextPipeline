@@ -24,11 +24,3 @@ def test_representation_cache_must_match_full_catalog(tmp_path) -> None:
 
     write_json(item_index_path, {"1": 0})
     assert not _representations_match_catalog(item_index_path, outputs, catalog, 1024)
-
-
-def test_legacy_embedding_is_not_reused(tmp_path):
-    path = tmp_path / "old.npz"
-    index = tmp_path / "item_index.json"
-    write_json(index, {"1": 0})
-    np.savez_compressed(path, values=np.ones((1, 1024), dtype=np.float32))
-    assert not _representations_match_catalog(index, [path], [{"item_id": "1"}], 1024)

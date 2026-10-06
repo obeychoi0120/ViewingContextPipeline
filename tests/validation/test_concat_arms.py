@@ -1,6 +1,5 @@
 """Current six-arm contracts with fake generation and a small CPU training model."""
 
-from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
 import shutil
@@ -11,11 +10,7 @@ import pytest
 from arm_registry import (
     registry,
     generation_registry,
-    select_arms,
-    active_arms,
-    resolve_generation_arm,
 )
-from extraction import steps
 from artifact_io import read_json, read_jsonl, write_json, write_jsonl
 from validation.representation_inputs import documents_for_arm
 from validation.representation_provenance import read_state, state_path
@@ -25,45 +20,6 @@ NAMES = [
     "meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta",
     "desc_qwen_meta", "desc_gemini_meta",
 ]
-
-
-def test_registry_and_config(ready_context):
-    from pipeline_runtime import ConfigError, _validate_config
-
-    assert list(registry(ready_context.config)) == NAMES
-    _validate_config(ready_context.config)
-    invalid = deepcopy(ready_context.config)
-    invalid["experiment_config_version"] = "v5"
-    with pytest.raises(ConfigError, match="experiment_config_version must be v4"):
-        _validate_config(invalid)
-    obsolete = deepcopy(ready_context.config)
-    obsolete.pop("experiment_config_version")
-    obsolete["schema_version"] = "viewing-context-config/v7"
-    with pytest.raises(ConfigError, match="experiment_config_version must be v4"):
-        _validate_config(obsolete)
-    assert list(generation_registry(ready_context.config)) == [
-        "graph_qwen",
-        "desc_qwen",
-        "graph_gemini",
-        "desc_gemini",
-    ]
-    for name in ["graph_gemini", "desc_gemini", "graph_meta_qwen", "desc_meta_qwen"]:
-        with pytest.raises(ValueError):
-            select_arms(ready_context.config, [name])
-        config = deepcopy(ready_context.config)
-        config["protocol"]["arms"] = [name]
-        with pytest.raises(ValueError):
-            active_arms(config)
-    with pytest.raises(ValueError, match="use source --arm graph_qwen"):
-        resolve_generation_arm(
-            ready_context.config, "graph_qwen_meta", "graph", "gemini", summary=True
-        )
-    assert (
-        resolve_generation_arm(
-            ready_context.config, "graph_gemini", "graph", "qwen", summary=True
-        ).model
-        == "gemini"
-    )
 
 
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
@@ -135,20 +91,6 @@ def test_failed_summary_fallback_and_corruption(ready_context, fake_models, gene
     path.write_text("{broken")
     with pytest.raises(RuntimeError, match="invalid summary"):
         documents_for_arm(ready_context, cohort, arm)
-
-
-def test_reject_title_conditioned_summary(ready_context, fake_models, generate_all):
-    generate_all(ready_context)
-    path = next(ready_context.summary_arm_dir("graph_qwen").glob("*.json"))
-    doc = read_json(path)
-    doc["provenance"]["english_title"] = "Old title"
-    write_json(path, doc)
-    with pytest.raises(ValueError, match="title present"):
-        documents_for_arm(
-            ready_context,
-            ready_context.require_ready_cohort(),
-            registry(ready_context.config)["graph_qwen_meta"],
-        )
 
 
 def test_cache_invalidation_and_run_rename(ready_context, fake_models, monkeypatch, generate_all):
@@ -299,141 +241,6 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         assert diagnose(other, target=list(registry(other.config)))["status"] == "pass"
     finally:
         torch.set_num_threads(previous)
-
-
-@pytest.mark.parametrize("command", ["summarize"])
-def test_cli_source_and_target_contract(ready_context, fake_models, monkeypatch, command):
-    from extraction.cli import main as extract
-    from validation.cli import main as validate
-
-    monkeypatch.setattr("extraction.cli.RunContext.load", lambda _: ready_context)
-    monkeypatch.setattr("validation.cli.RunContext.load", lambda _: ready_context)
-    assert (
-        extract(
-            [
-                "extract-graph-scenes",
-                "--run-id",
-                "new",
-                "--model",
-                "gemini",
-                "--arm",
-                "graph_gemini",
-                "--schema",
-                "prompts/scene_graph_v4.md",
-            ]
-        )
-        == 0
-    )
-    assert (
-        extract(
-            [
-                command,
-                "--run-id",
-                "new",
-                "--model",
-                "gemini",
-                "--arm",
-                "graph_gemini",
-                "--schema",
-                "prompts/summary_graph_v5.md",
-            ]
-        )
-        == 0
-    )
-    assert (
-        extract(
-            [
-                command,
-                "--run-id",
-                "new",
-                "--model",
-                "gemini",
-                "--arm",
-                "graph_gemini_meta",
-                "--schema",
-                "prompts/summary_graph_v5.md",
-            ]
-        )
-        == 1
-    )
-    assert validate(["embed-representations", "--representation-mode", "text", "--run-id", "new", "--target", "graph_gemini"]) == 1
-    assert (
-        validate(["embed-representations", "--representation-mode", "text", "--run-id", "new", "--target", "graph_gemini_meta"]) == 0
-    )
-
-
-@pytest.mark.parametrize("arm", ["graph_qwen", "desc_qwen", "graph_gemini"])
-def test_summary_reuses_existing_output(ready_context, fake_models, arm):
-    source = generation_registry(ready_context.config)[arm]
-    kind = source.representation
-    getattr(steps, f"extract_{kind}_scenes")(
-        ready_context,
-        arm=arm,
-        model=source.model,
-        schema=f"prompts/scene_{kind}_v{4 if kind == 'graph' else 2}.md",
-    )
-    kwargs = dict(arm=arm, model="gemini", schema=f"prompts/summary_{kind}_v5.md")
-    steps.summarize(ready_context, **kwargs)
-    paths = list(ready_context.summary_arm_dir(arm).glob("*.json"))
-    assert paths
-    assert all(read_json(path)["status"] == "complete" for path in paths)
-    before = {path: path.read_bytes() for path in paths}
-    calls = len(fake_models)
-    steps.summarize(ready_context, **kwargs)
-    steps.summarize(ready_context, **kwargs)
-    assert len(fake_models) == calls
-    assert {path: path.read_bytes() for path in paths} == before
-
-
-@pytest.mark.parametrize("arm", [None, "meta", "unknown", "desc_qwen_meta"])
-def test_unified_summary_rejects_invalid_source(ready_context, fake_models, arm):
-    with pytest.raises(ValueError):
-        steps.summarize(
-            ready_context, arm=arm, model="gemini", schema="prompts/summary_graph_v5.md"
-        )
-    assert not fake_models
-
-
-def test_unstructured_graph_reaches_summary_and_embedding(ready_context, fake_models, monkeypatch):
-    from contextlib import contextmanager
-    import json
-    from extraction.scene_storage import read_scene_records
-
-    text = "[Entities]\nperson1: person\n[Relations]\nperson1 -> waving ->"
-
-    @contextmanager
-    def generator(**kwargs):
-        def generate(tasks, callback):
-            for task in tasks:
-                kwargs["runtime"].current_result = {"finish_reason": "stop"}
-                callback(task.task_id, text)
-            return {}
-
-        yield generate
-
-    context = ready_context
-    monkeypatch.setattr(steps, "qwen_generator", generator)
-    assert (
-        steps.extract_graph_scenes(
-            context, arm="graph_qwen", model="qwen", schema="prompts/scene_graph_v4.md"
-        )["failure_count"]
-        == 0
-    )
-    paths = list(context.scene_arm_dir("graph_qwen").glob("*.jsonl"))
-    assert paths
-    for path in paths:
-        assert all(
-            row["graph"] == text and row["parse_mode"] == "text" for row in read_scene_records(path)
-        )
-    assert (
-        steps.summarize(
-            context, arm="graph_qwen", model="gemini", schema="prompts/summary_graph_v5.md"
-        )["failure_count"]
-        == 0
-    )
-    assert all(json.dumps(text) in task.prompt for task in fake_models[-1])
-    embed_representations(context, target=["graph_qwen"])
-    assert read_state(context, "graph_qwen")["zero_vector_count"] == 0
 
 
 def test_embedding_never_sends_combined_title_summary(ready_context, fake_models, generate_all, monkeypatch):

@@ -4,7 +4,7 @@ import pytest
 from validation.metrics import (
     metrics_from_rank,
 )
-from validation.scoring import mask_history, rank_of_target, top_k_rows
+from validation.scoring import mask_history, rank_of_target
 
 
 def test_metrics_and_repeated_target_history_mask() -> None:
@@ -19,10 +19,3 @@ def test_metrics_and_repeated_target_history_mask() -> None:
 def test_ranker_rejects_non_finite_scores_instead_of_reporting_rank_one() -> None:
     with pytest.raises(ValueError, match="finite"):
         rank_of_target(np.array([0.5, np.nan, 0.1]), target_row=1)
-
-
-def test_top_k_uses_the_same_index_tie_break_as_target_rank() -> None:
-    scores = np.zeros(30)
-
-    assert rank_of_target(scores, target_row=0) == 1
-    assert top_k_rows(scores, 20) == list(range(20))

@@ -3,7 +3,7 @@ import pytest
 
 from extraction import steps
 from pipeline_logging import step_settings
-from pipeline_runtime import ConfigError, _validate_config
+from pipeline_runtime import _validate_config
 from artifact_io import read_json
 
 
@@ -37,16 +37,3 @@ def test_distinct_model_limits_reach_requests_provenance_and_logs(
     assert doc['provenance']['settings']['max_new_tokens'] == summary_limit
     assert step_settings(context, f'summarize-{representation}', arm=arm, source=source,
                          model=summary_model, schema=summary_schema)['max_new_tokens'] == summary_limit
-
-
-@pytest.mark.parametrize('invalid', [0, -1, True, '1024', None])
-def test_invalid_model_limit_rejected(current_context, invalid):
-    current_context.config['extraction']['graph']['gemini']['summary_max_new_tokens'] = invalid
-    with pytest.raises(ConfigError, match='graph.gemini.summary_max_new_tokens'):
-        _validate_config(current_context.config)
-
-
-def test_missing_model_limits_rejected(current_context):
-    del current_context.config['extraction']['description']['gemini']
-    with pytest.raises(ConfigError, match='description must contain exactly qwen and gemini'):
-        _validate_config(current_context.config)

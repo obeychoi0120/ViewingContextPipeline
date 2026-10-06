@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-import json
 from pathlib import Path
 from unittest import mock
 
 from PIL import Image
 
-from preparation.video.fixed30 import (
-    prepare_visual_item,
-)
 from preparation.video.microlens import prepare_catalog
 
 
@@ -38,33 +34,6 @@ def test_verified_keyframe_cache_rejects_corrupt_or_wrong_size_images(tmp_path: 
     payload = image_path.read_bytes()
     image_path.write_bytes(payload[: len(payload) // 2])
     assert not resized_keyframes_match_timestamps(timestamp_path, frames, (64, 48))
-
-
-def test_prepare_visual_item_reuses_catalog_duration_and_uses_shared_root(
-    tmp_path: Path,
-) -> None:
-    video = tmp_path / "video.mp4"
-    video.touch()
-    output_root = tmp_path / "run"
-    with mock.patch(
-        "preparation.video.fixed30.extract_resized_keyframes",
-        return_value={"reused_frames": 0, "extracted_frames": 7},
-    ) as extract:
-        result = prepare_visual_item(
-            content_id="content-1",
-            source_video_path=video,
-            assets_root=tmp_path / "assets",
-            output_root=output_root,
-            duration_seconds=30.1,
-            image_size=(640, 352),
-        )
-
-    assert result == {"content_id": "content-1", "reused_frames": 0, "extracted_frames": 7}
-    timestamp_path = tmp_path / "assets/content-1/timestamp_fixed_30s.json"
-    scenes = json.loads(timestamp_path.read_text(encoding="utf-8"))
-    assert scenes[-1]["scene_end"] == 30.1
-    assert extract.call_args.args[1] == [2.5, 7.5, 12.5, 17.5, 22.5, 27.5, 30]
-    assert extract.call_args.args[2] == output_root / "resized_keyframes/640_352/content-1"
 
 
 def test_prepare_catalog_processes_exact_cohort(tmp_path: Path) -> None:

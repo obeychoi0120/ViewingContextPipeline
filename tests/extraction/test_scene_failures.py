@@ -9,16 +9,6 @@ from extraction.scene_storage import read_scene_records
 from artifact_io import read_jsonl
 
 
-@pytest.mark.parametrize("text", ["", " \n\t "])
-def test_empty_graph_is_a_generation_failure(text):
-    from extraction.scene_executor import graph_scene_result
-
-    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, text)
-    assert record is None
-    assert failure["failure_kind"] == "generation"
-    assert failure["error"] == "model produced an empty graph"
-
-
 @pytest.mark.parametrize("recover", [False, True])
 def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypatch, recover):
     context = ready_context

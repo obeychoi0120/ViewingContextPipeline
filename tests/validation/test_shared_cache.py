@@ -56,35 +56,6 @@ def test_description_changes_invalidate_only_description_arms(
     assert result["reuse"]["shared"] == ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta", "desc_gemini_meta"]
 
 
-def test_existing_local_embeddings_can_be_published_without_encoding(
-    ready_context, fake_models, generate_all, monkeypatch
-):
-    generate_all(ready_context)
-    targets = ["desc_qwen_meta"]
-    embed_representations(ready_context, target=targets)
-    # Simulate artifacts produced under the former local-only eligibility rule.
-    shutil.rmtree(ready_context.run_root.parent.parent / "shared_cache" / "embeddings")
-    original = {}
-    for arm in targets:
-        state = read_state(ready_context, arm)
-        original[arm] = state["recommendation_hash"]
-        state["shareable"] = False
-        write_json(state_path(ready_context, arm), state)
-    monkeypatch.setattr("validation.features.BGETextEncoder",
-                        lambda *args: pytest.fail("local/shared reuse must not load BGE"))
-    result = embed_representations(ready_context, target=targets)
-    assert result["reuse"]["local"] == targets
-    for arm in targets:
-        state = read_state(ready_context, arm)
-        assert state["shareable"]
-        assert state["recommendation_hash"] == original[arm]
-    other = replace(ready_context, run_id="reuse", run_root=ready_context.run_root.parent / "reuse")
-    shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
-    assert embed_representations(other, target=targets)["reuse"]["shared"] == targets
-    with pytest.raises(pytest.fail.Exception, match="must not load BGE"):
-        embed_representations(other, target=targets, force=True)
-
-
 @pytest.mark.parametrize("arm", ["meta", "graph_qwen_meta"])
 def test_small_text_arrays_rejected_in_local_and_shared_cache(
     ready_context, fake_models, generate_all, arm

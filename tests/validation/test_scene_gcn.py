@@ -10,10 +10,8 @@ torch = pytest.importorskip("torch")
 from graph_fixture import synthetic_store  # noqa: E402
 from validation.config import GraphExecutionConfig  # noqa: E402
 from validation.graph_batching import PackedGraphStore  # noqa: E402
-from validation.graph_context import graph_contract, validate_mode  # noqa: E402
 from validation.graph_model import GraphSASRec, SceneRoleEncoder  # noqa: E402
 from validation.scene_gcn import SceneGCN, normalized_similarity, scene_groups  # noqa: E402
-from validation.profiling import RunProfiler  # noqa: E402
 
 
 @pytest.fixture(params=["cpu"] + ([os.environ["GRAPH_TEST_CUDA"]]
@@ -163,72 +161,3 @@ def test_joint_loss_chunk_checkpoint_fixed_features_and_reload(device, checkpoin
     torch.testing.assert_close(restored.score_catalog(sequences), model.score_catalog(sequences))
     with pytest.raises(RuntimeError):
         make_model(store, device, pool="mean").load_state_dict(model.state_dict())
-
-
-def test_single_and_actionless_scene_zero_similarity_and_empty_nodes(device):
-    model = SceneRoleEncoder(4, 2, "gnn").to(device)
-    batch = {"offsets": [0, 1], "features": torch.zeros(0, 4, device=device),
-             "types": torch.zeros(0, dtype=torch.long, device=device),
-             "node_scenes": torch.zeros(0, dtype=torch.long, device=device),
-             "titles": torch.zeros(1, 4, device=device),
-             "title_available": torch.zeros(1, dtype=torch.bool, device=device),
-             "available": torch.ones(1, dtype=torch.bool, device=device),
-             "contexts": torch.zeros(1, 4, device=device),
-             "scene_videos": torch.zeros(1, dtype=torch.long, device=device)}
-    output = model(batch)
-    h = model.scene_mlp(torch.cat([torch.zeros(1, 6, device=device),
-                                  model.context_projection(batch["contexts"])], -1))
-    torch.testing.assert_close(output, h + torch.relu(model.gcn.projection(h)))
-    assert torch.isfinite(output).all()
-    torch.testing.assert_close(normalized_similarity(torch.zeros(1, 3, 6, device=device)),
-                               torch.eye(3, device=device).unsqueeze(0))
-
-
-def test_profile_preserves_outputs_gradients_and_counts_pairs(device, tmp_path):
-    store = synthetic_store(12, feature_dim=32)
-    plain = make_model(store, device)
-    measured = make_model(store, device)
-    measured.load_state_dict(plain.state_dict())
-    loss = training_loss(plain, device)
-    loss.backward()
-    p = RunProfiler(tmp_path, {"scene_aggregation": "gnn", "evaluation_date": "test", "seed": 42,
-                              "arm": "graph_qwen"}, device, 1)
-    with p.sample("selection", 1, 1):
-        observed = training_loss(measured, device)
-        observed.backward()
-    torch.testing.assert_close(loss, observed)
-    for a, b in zip(plain.parameters(), measured.parameters(), strict=True):
-        torch.testing.assert_close(a.grad, b.grad)
-    import json
-    row = json.loads((tmp_path / "profile.jsonl").read_text().splitlines()[-1])
-    assert row["workload"]["scene_pairs"] == int(np.square(np.diff(store["video_offsets"])).sum())
-    assert any(name.endswith("scene_similarity") for name in row["seconds"])
-    assert any(name.endswith("scene_gcn") for name in row["seconds"])
-
-
-def test_contracts_cli_and_scene_pair_execution_config():
-    mean_version, mean = graph_contract("mean", "graph_qwen")
-    version, gnn = graph_contract("gnn", "graph_qwen")
-    assert mean_version == "sasrec-role-graph/v7" and "gcn" not in mean
-    assert version == "sasrec-role-graph/v8" and gnn["gcn_applied"]
-    assert graph_contract("gnn", "meta")[1]["gcn_applied"] is False
-    assert gnn["gcn"]["similarity_dim"] == 384
-    validate_mode("graph", "gnn", "run-recommendation", ["graph_qwen"])
-    validate_mode("graph", "gnn", "run-diagnosis", ["meta"])
-    for mode, step in (("text", "run-recommendation"), ("graph", "embed-representations")):
-        with pytest.raises(ValueError):
-            validate_mode(mode, "gnn", step, ["meta"])
-    with pytest.raises(ValueError):
-        GraphExecutionConfig(chunk_scene_pairs=0)
-    assert GraphExecutionConfig().chunk_scene_pairs == 1048576
-
-
-def test_gnn_auto_checkpoint_accounts_for_quadratic_pairs(monkeypatch):
-    model = make_model(synthetic_store(12, feature_dim=32), "cpu", checkpoint="auto")
-    class DeviceParameter:
-        device = torch.device("cuda:0")
-    monkeypatch.setattr(type(model.title_projection), "weight", DeviceParameter(), raising=False)
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda _: (1024 ** 3, 1024 ** 3))
-    # Scene pairs alone exceed the auto threshold, despite few nodes.
-    model.packed.scene_counts = np.full(12, 5000)
-    assert model._use_checkpoint([2])

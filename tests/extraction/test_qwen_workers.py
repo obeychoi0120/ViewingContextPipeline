@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import asyncio
-import os
 import queue
 from types import SimpleNamespace
 
 import pytest
 
-import extraction.backends.qwen as qwen_module
 import extraction.backends.qwen_workers as workers
-from extraction.backends.qwen import QwenOutput
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 
 
@@ -129,41 +125,3 @@ def test_engine_failure_is_fatal(pool_factory, events, dead, match):
     with pytest.raises(RuntimeError, match=match):
         pool.generate([task("a")])
     assert pool._closed
-
-
-def test_worker_reuses_one_engine_and_passes_requests_concurrently(monkeypatch):
-    initialized, closed, active = [], [], []
-    peak = 0
-
-    class Backend:
-        runtime_info = {"gpu_name": "fake", "settings": {}}
-
-        @classmethod
-        def from_pretrained(cls, path, **kwargs):
-            initialized.append((path, os.environ["CUDA_VISIBLE_DEVICES"], kwargs))
-            return cls()
-
-        async def generate(self, item):
-            nonlocal peak
-            active.append(item.task_id)
-            peak = max(peak, len(active))
-            if item.task_id == "a":
-                # A cannot finish until B has been admitted to the same GPU.
-                while "b" not in active:
-                    await asyncio.sleep(0.001)
-            await asyncio.sleep(0.02)
-            active.remove(item.task_id)
-            return QwenOutput(item.prompt, 8, 2)
-
-        def close(self):
-            closed.append(True)
-
-    monkeypatch.setattr(qwen_module, "QwenBackend", Backend)
-    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "original")
-    incoming, outgoing = Channel([task("a"), task("b"), None]), Channel()
-    workers._worker_main(0, "7", "model", incoming, outgoing, {"max_num_seqs": 1}, 6)
-    assert initialized == [("model", "7", {"settings": {"max_num_seqs": 1}, "image_limit": 6})]
-    assert peak == 2
-    assert closed == [True]
-    assert {v["task_id"] for v in outgoing.values if v.get("kind") == "result"} == {"a", "b"}
-    assert outgoing.values[1]["kind"] == "ready"

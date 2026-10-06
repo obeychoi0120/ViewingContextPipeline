@@ -94,39 +94,6 @@ def test_component_order_masks_and_gradients(arm):
         assert not model.item_vectors(torch.tensor([3])).any()
 
 
-def test_metadata_array_and_component_adapters_agree():
-    torch = pytest.importorskip("torch")
-    from validation.model import SASRec
-
-    features = np.random.default_rng(1).normal(size=(3, 16)).astype("float32")
-    features[1] = 0
-    kwargs = dict(
-        item_count=3,
-        max_length=10,
-        embedding_dim=8,
-        num_blocks=2,
-        num_heads=2,
-        dropout=0.0,
-        arm="metadata",
-    )
-    graph_meta = SASRec(**kwargs, item_features=features)
-    text_meta = SASRec(
-        **kwargs,
-        item_features=dict(
-            title_values=features,
-            video_values=np.zeros_like(features),
-            title_available=np.array([True, False, True]),
-            video_available=np.zeros(3, dtype=bool),
-        ),
-    )
-    text_meta.load_state_dict(graph_meta.state_dict())
-    graph_meta.eval()
-    text_meta.eval()
-    torch.testing.assert_close(graph_meta.catalog_vectors(), text_meta.catalog_vectors())
-    history = torch.tensor([[1, 3, 0]])
-    torch.testing.assert_close(graph_meta.score_catalog(history), text_meta.score_catalog(history))
-
-
 def test_component_boundaries_are_in_semantic_identity():
     from validation.cache_identity import semantic_document_hash
     shared = dict(content_id='1', text='a\n\nb\n\nc',

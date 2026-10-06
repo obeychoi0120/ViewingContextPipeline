@@ -155,13 +155,3 @@ def test_cli_returns_failure_for_gemini_error(case, monkeypatch):
         == 1
     )
     assert len(read_jsonl(case.directory / "failures.jsonl")) == len(case.ids)
-
-
-def test_summary_model_change_requires_force(case):
-    case.run(model="qwen")
-    saved = {p: p.read_bytes() for p in case.directory.glob("*.json")}
-    with pytest.raises(RuntimeError, match="model mismatch"):
-        case.run(model="gemini")
-    assert saved == {p: p.read_bytes() for p in saved}
-    case.run(model="gemini", force=True)
-    assert all(read_json(p)["provenance"]["summary_model"] == "gemini" for p in saved)

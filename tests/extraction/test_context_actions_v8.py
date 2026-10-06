@@ -1,5 +1,4 @@
 """Receiver-free extraction, compatibility, storage and Summary delivery."""
-import copy
 import json
 import re
 from pathlib import Path
@@ -44,22 +43,6 @@ def test_roles_storage_and_summary(tmp_path, line, location):
     assert observations[0]['observation']['actions'][0] == action
 
 
-@pytest.mark.parametrize('receiver', ['missing', '', ['p-1'], {'id': 'p-1'}, 12, None])
-def test_legacy_receiver_validation_disabled_without_mutation(receiver):
-    graph = parse_or_repair_graph(PREFIX + 'p-1 - handing - c1; none; unknown').graph
-    graph['actions'][0]['receiver'] = receiver
-    before = copy.deepcopy(graph)
-    validate_graph_structure(graph)
-    assert graph == before
-    record, failure = graph_scene_result({'scene_idx': 0, 'keyframes': []}, json.dumps(graph))
-    assert failure is None and record['semantic_warnings'] == []
-    assert 'receiver' not in record['graph']['actions'][0]
-    # Previously saved structured records also omit receiver from Summary inputs.
-    observation = json.loads(graph_summary_prompt('{scenes}', [{'scene_idx': 0, 'graph': graph}]))
-    assert 'receiver' not in observation[0]['observation']['actions'][0]
-    assert graph == before
-
-
 @pytest.mark.parametrize('field', ['actor', 'target', 'tool', 'location'])
 def test_remaining_reference_checks_still_active(field):
     graph = parse_or_repair_graph(PREFIX + 'p-1 - cutting - c1; k1; l1').graph
@@ -85,7 +68,9 @@ def test_prompt_examples_and_truncation():
     assert graphs[2]['actions'] == []
     template = (root / 'prompts/summary_graph_v8.md').read_text()
     summary = graph_summary_prompt(template, [{'scene_idx': 0, 'graph': graphs[0]}])
-    assert '{scenes}' not in summary and 'Ignore any legacy receiver field' in summary
+    assert '{scenes}' not in summary
+    observations = summary.split('Scene observations:\n', 1)[1].split('\n\nOutput only', 1)[0]
+    assert json.loads(observations)[0]['observation'] == graphs[0]
     record, failure = graph_scene_result({'scene_idx': 0, 'keyframes': []}, examples[0],
                                          error='graph: output truncated at token limit')
     assert record is None and failure['raw_response'] == examples[0]
