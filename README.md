@@ -2,9 +2,11 @@
 
 ![ViewingContextPipeline 실험 흐름](docs/design/main_diagram.png)
 
-![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram_large.png)
+![추천 모델 구조: Baseline, Text, Graph](docs/design/recsys_diagram.png)
 
 [다이어그램 PPTX 원본](docs/design/main_diagram.pptx) · [다이어그램 생성 코드](docs/design/generate_main_diagram.py)
+
+[추천 구조 PPTX 원본](docs/design/recsys_diagram.pptx) · [추천 구조 갱신 코드](docs/design/generate_recsys_diagram.py)
 
 MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시각 정보를 더했을 때 추천 성능이 어떻게 달라지는지 비교하는 실험 파이프라인입니다. Qwen·Gemini로 Graph와 Description을 생성하고, 동일한 사용자·후보 catalog·평가 구간에서 SASRec을 학습합니다.
 
@@ -26,7 +28,7 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, 영문 제목에 시�
 
 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `desc_qwen`, `desc_gemini`입니다. 접미사는 **Scene 추출 모델**이며, Summary 모델은 `--model`로 따로 선택합니다. 생성에는 결합 Arm을 지정하지 않습니다. 평가에는 `--target`과 `--representation-mode`를 항상 명시합니다.
 
-현재 모델(v7)은 **동결 BGE large-en-v1.5 / 1024차원**을 사용합니다. `meta`는 제목 Linear 1024→512 → Residual MLP, Text는 제목 128 + Summary 384 → concat 512 → Residual MLP입니다. Graph는 Title·Entities·Actions·Context를 각각 128차원으로 projection하고 Entity→Action 역할 결합 → concat 512 → Scene Residual MLP → Mean Pooling을 사용합니다. Item·Scene의 LayerNorm은 제거하고 SASRec·User MLP의 LayerNorm은 유지합니다. 학습률 `1e-4`, 배치 `128`, patience `5`, min_delta `0`, `deterministic: true`입니다. [현재 구조와 재실행 안내](docs/graph_training.md#모델-및-데이터-계약)를 참고하세요. 기존 [PPTX](docs/design/recsys_diagram_large.pptx)·[PNG](docs/design/recsys_diagram_large.png)는 이전 v6 구조 기록입니다.
+현재 모델(v7)은 **동결 BGE large-en-v1.5 / 1024차원**을 사용합니다. `meta`는 제목 Linear 1024→512 → Residual MLP, Text는 제목 128 + Summary 384 → concat 512 → Residual MLP입니다. Graph는 Title·Entities·Actions·Context를 각각 128차원으로 projection하고 Entity→Action 역할 결합 → concat 512 → Scene Residual MLP → Mean Pooling을 사용합니다. Item·Scene의 LayerNorm은 제거하고 SASRec·User MLP의 LayerNorm은 유지합니다. 학습률 `1e-4`, 배치 `128`, patience `5`, min_delta `0`, `deterministic: true`입니다. [현재 구조와 재실행 안내](docs/graph_training.md#모델-및-데이터-계약)를 참고하세요. 위 두 다이어그램은 현재 v7 구현을 반영합니다.
 
 주 비교는 `graph_qwen_meta − meta`입니다. Text 전체 평가는 기본 설정에서 7일 × 3 seed × 6 Arm입니다. 사용자 단위 paired bootstrap을 사용하며, seed 평균 후 날짜별 평균을 동일 가중치로 합칩니다. 현재 비교군은 제목 기준선 대비 5개, Graph/Description 비교 2개, 제목 추가 효과 1개이고 각 군에 Bonferroni 보정을 적용합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다.
 

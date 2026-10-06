@@ -34,7 +34,11 @@ def color(value):
 
 
 class Diagram:
-    def __init__(self):
+    def __init__(self, presentation=None):
+        if presentation is not None:
+            self.presentation = presentation
+            self.slide = presentation.slides[0]
+            return
         self.presentation = Presentation()
         self.presentation.slide_width = Inches(24)
         self.presentation.slide_height = Inches(13.5)
@@ -149,24 +153,25 @@ def build():
 
     # Each path has its own title branch; no optional-title trunks or dashed wires.
     d.node("Baseline title", 6.4, 2.4, 3.6, 1.0, "Title", ink=GRAY)
-    d.node("Baseline embedding", 10.35, 2.4, 3.7, 1.0, "Text Embedding", "384",
+    d.node("Baseline embedding", 10.35, 2.4, 3.7, 1.0, "BGE [frozen]", "1,024",
            ink=GRAY)
-    d.node("Baseline", 14.75, 2.4, 2.55, 1.0, "Baseline", "512", ink=GRAY)
+    d.node("Baseline", 14.75, 2.4, 2.55, 1.0, "Projection + MLP", "Item 512",
+           ink=GRAY, size=18)
     d.wire("Baseline title to embedding", [(10.0, 2.9), (10.35, 2.9)], GRAY)
     d.wire("Baseline embedding to output", [(14.05, 2.9), (14.75, 2.9)], GRAY)
 
-    # Title embeddings include the 384→128 projection; summary uses BGE's 384 directly.
+    # Independently project frozen 1024-dimensional title and Summary features.
     d.label("Text heading", 6.4, 4.4, 3.0, 0.42, "TEXT PATH", 28, BLUE, True,
             PP_ALIGN.LEFT)
     d.node("Text title", 6.4, 4.95, 3.6, 1.0, "Title", ink=BLUE)
-    d.node("Text title embedding", 10.35, 4.95, 3.7, 1.0, "Text Embedding", "128",
-           ink=BLUE)
+    d.node("Text title embedding", 10.35, 4.95, 3.7, 1.0, "BGE + Projection", "1,024 → 128",
+           ink=BLUE, size=22)
     d.node("Video summary", 6.4, 6.5, 3.6, 1.0, "Video-wise Summary", ink=BLUE,
            size=22)
-    d.node("Summary embedding", 10.35, 6.5, 3.7, 1.0, "Text Embedding", "384",
-           ink=BLUE)
-    d.node("Text fusion", 14.75, 5.75, 2.55, 1.3, "Fusion", "512", ink=BLUE,
-           fill="E2EEFF")
+    d.node("Summary embedding", 10.35, 6.5, 3.7, 1.0, "BGE + Projection", "1,024 → 384",
+           ink=BLUE, size=22)
+    d.node("Text fusion", 14.75, 5.75, 2.55, 1.3, "Concat + MLP", "Item 512", ink=BLUE,
+           fill="E2EEFF", size=20)
     d.wire("Descriptions to summary", [(5.1, 7.45), (5.67, 7.45),
                                          (5.67, 6.7), (6.4, 6.7)], BLUE)
     d.wire("Graphs to summary", [(5.1, 9.35), (5.9, 9.35),
@@ -180,41 +185,43 @@ def build():
     d.junction("Text embedding merge", 14.45, 6.4, BLUE)
     d.wire("Text embeddings to fusion", [(14.45, 6.4), (14.75, 6.4)], BLUE)
 
-    # Graph Embedding is a video encoder: BGE features, shared projection,
-    # Entity/Action role encoding, scene readout, then mean/attention over scenes.
-    # Raw graph elements are not pooled before their scene representations exist.
+    # The projected title joins role-enriched scene features BEFORE scene MLP
+    # and video mean pooling. No separate Item MLP follows pooling.
     d.label("Graph heading", 6.4, 8.4, 3.0, 0.42, "GRAPH PATH", 28, TEAL, True,
             PP_ALIGN.LEFT)
     d.node("Graph title", 6.4, 8.95, 3.6, 1.0, "Title", ink=TEAL)
-    d.node("Graph title embedding", 10.35, 8.95, 3.7, 1.0, "Text Embedding", "128",
-           ink=TEAL)
+    d.node("Graph title embedding", 10.35, 8.95, 3.7, 1.0, "BGE + Projection", "1,024 → 128",
+           ink=TEAL, size=22)
     d.node("Graph elements", 6.4, 10.45, 3.6, 1.0, "Graph Elements",
            "Entities · Actions · Context", ink=TEAL, subtitle_size=20)
     d.box("Graph embedding", 10.35, 10.3, 3.7, 1.3, WHITE, TEAL)
     d.text("Graph embedding text", 10.45, 10.36, 3.5, 1.18,
-           [("Graph Embedding", 24, TEAL, True),
-            ("Video-wise mean / attention", 18, MUTED, False),
-            ("384", 22, MUTED, False)])
-    d.node("Graph fusion", 14.75, 9.7, 2.55, 1.3, "Fusion", "512", ink=TEAL,
-           fill="DFF2F0")
+           [("Scene Features", 24, TEAL, True),
+            ("BGE + independent projections", 17, MUTED, False),
+            ("Role fusion E → A · 384", 18, MUTED, False)])
+    d.node("Graph scene MLP", 14.75, 9.45, 2.55, 0.9, "Scene MLP", "Concat 512", ink=TEAL,
+           fill="DFF2F0", size=22, subtitle_size=19)
+    d.node("Graph mean pooling", 14.75, 10.65, 2.55, 0.8, "Mean Pooling", "Item 512",
+           ink=TEAL, fill="DFF2F0", size=20, subtitle_size=18)
     d.wire("Graphs to graph elements", [(5.9, 9.35), (5.9, 10.95), (6.4, 10.95)], TEAL)
     d.junction("Graph source fork", 5.9, 9.35, TEAL)
     d.wire("Graph title to embedding", [(10.0, 9.45), (10.35, 9.45)], TEAL)
     d.wire("Graph elements to embedding", [(10.0, 10.95), (10.35, 10.95)], TEAL)
     d.wire("Graph title embedding to merge", [(14.05, 9.45), (14.45, 9.45),
-                                              (14.45, 10.35)], TEAL, arrow=False)
+                                              (14.45, 9.9)], TEAL, arrow=False)
     d.wire("Graph video embedding to merge", [(14.05, 10.95), (14.45, 10.95),
-                                              (14.45, 10.35)], TEAL, arrow=False)
-    d.junction("Graph embedding merge", 14.45, 10.35, TEAL)
-    d.wire("Graph embeddings to fusion", [(14.45, 10.35), (14.75, 10.35)], TEAL)
+                                              (14.45, 9.9)], TEAL, arrow=False)
+    d.junction("Graph scene input merge", 14.45, 9.9, TEAL)
+    d.wire("Graph features to scene MLP", [(14.45, 9.9), (14.75, 9.9)], TEAL)
+    d.wire("Scene MLP to mean pooling", [(16.025, 10.35), (16.025, 10.65)], TEAL)
 
     # Alternative per-path models, not concatenation of their final outputs.
     d.wire("Baseline item vectors", [(17.3, 2.9), (17.8, 2.9)], GRAY, arrow=False)
     d.wire("Text item vectors", [(17.3, 6.4), (17.8, 6.4)], BLUE, arrow=False)
-    d.wire("Graph item vectors", [(17.3, 10.35), (17.8, 10.35)], TEAL, arrow=False)
-    d.wire("Alternative item vector bus", [(17.8, 2.9), (17.8, 10.35)], NAVY,
+    d.wire("Graph item vectors", [(17.3, 11.05), (17.8, 11.05)], TEAL, arrow=False)
+    d.wire("Alternative item vector bus", [(17.8, 2.9), (17.8, 11.05)], NAVY,
            arrow=False)
-    for y in (2.9, 6.4, 7.4, 10.35):
+    for y in (2.9, 6.4, 7.4, 11.05):
         d.junction("Item bus junction", 17.8, y, NAVY)
     d.box("Recommendation", 18.55, 4.0, 4.4, 7.8, "E7EDF5", NAVY)
     d.label("Recommendation heading", 18.75, 4.3, 4.0, 0.6,
@@ -231,12 +238,10 @@ def build():
                 "Meta", "Graph_Qwen", "Graph_Qwen_Meta", "Graph_Gemini_Meta",
             )]], align=PP_ALIGN.LEFT)
     d.wire("Item vectors to recommendation", [(17.8, 7.4), (18.55, 7.4)], NAVY)
-    d.label("BGE legend", 0.6, 12.1, 10.5, 0.4,
-            "Text embedding: bge-small-en-v1.5", 20, NAVY, align=PP_ALIGN.LEFT)
     return d.presentation
 
 
-def render(output):
+def render(output, *, expected_size=(3840, 2160)):
     environment = os.environ.copy()
     program = Path(shutil.which("soffice")).resolve().parent
     environment["LD_LIBRARY_PATH"] = str(program) + ":" + environment.get("LD_LIBRARY_PATH", "")
@@ -250,7 +255,7 @@ def render(output):
             assert len(pdf) == 1
             page = pdf[0]
             pixmap = page.get_pixmap(matrix=pymupdf.Matrix(160 / 72, 160 / 72), alpha=False)
-            assert (pixmap.width, pixmap.height) == (3840, 2160)
+            assert (pixmap.width, pixmap.height) == expected_size
             pixmap.save(output.with_suffix(".png"))
 
 

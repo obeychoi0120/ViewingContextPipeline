@@ -19,6 +19,8 @@ Text는 `--representation-mode text`를 사용하며 Description Arm은 text에�
 
 ## 모델 및 데이터 계약
 
+현재 v7 구조: [추천 구조 PNG](design/recsys_diagram.png) · [편집 가능한 PPTX](design/recsys_diagram.pptx) · [갱신 코드](design/generate_recsys_diagram.py). 전체 파이프라인은 [main_diagram](design/main_diagram.png)을 참고하십시오.
+
 공통 Residual MLP는 `R(x) = x + Linear(512,512)(ReLU(Linear(512,512)(x)))`입니다. **Item·Scene 모듈 전체에 LayerNorm이 없으며**, SASRec Transformer와 기존 GELU User MLP의 내부 LayerNorm은 유지합니다.
 
 | 경로 | Item 계산 |
@@ -33,7 +35,26 @@ Scene은 `[title; Entity mean; 보정된 Action mean; Context]` 순서로 concat
 
 Text의 누락 성분은 projection 이후 0으로 마스킹하며, 전체 누락과 padding은 Item MLP 이후 다시 0으로 마스킹합니다. 부분 누락 슬롯은 MLP를 거친 후에도 0이어야 하는 것은 아닙니다.
 
-BGE Large 1024차원 float32 특징은 동결됩니다. 기존 Scene 스키마, Entity·Action 인덱스, edge·결측 배열과 `role-graph-inputs/v2` 입력 캐시는 그대로 재사용합니다. receiver 슬롯도 저장 형식 호환성을 위해 유지합니다. raw·warning·구조 오류 Scene은 제외하고 정상적인 Action 없는 Scene·고립 Entity는 유지합니다. location 누락은 unknown이며 Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
+BGE Large 1024차원 float32 특징은 동결됩니다. 기존 Scene 스키마, Entity·Action 인덱스, edge·결측 배열은 유지하며 입력 계약은 `role-graph-inputs/v3`입니다. receiver 슬롯도 저장 형식 호환성을 위해 유지합니다. raw·warning·구조 오류 Scene은 제외하고 정상적인 Action 없는 Scene·고립 Entity는 유지합니다. location 누락은 unknown이며 Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
+
+Entity·Action·Context는 각각 별도로 BGE에 입력합니다. Entity는 `Name` 다음 `Attributes`, Context는 `Format`·`Medium`·`Topics` 순서로 줄바꿈하며, Action은 동작 텍스트만 사용합니다. Attributes와 Topics 원소는 기존처럼 정렬하고 `, `로 연결합니다. 빈 목록은 필드명과 콜론만 남깁니다. 예시 입력은 다음과 같습니다.
+
+```text
+Name: cook
+Attributes: red apron
+```
+
+```text
+cooking
+```
+
+```text
+Format: demonstration
+Medium: live_action
+Topics: cooking, food preparation
+```
+
+Context는 위 세 필드를 합친 문자열 하나를 Scene별로 임베딩합니다. `v2`의 JSON 문자열 입력 캐시는 새 입력으로 재사용하지 않으며, 입력 hash 변경으로 해당 추천 결과와 체크포인트도 구분됩니다. 새 Run에서 Graph embedding → 추천 학습 → 진단을 다시 실행하십시오. 기존 추출 Scene과 Text Summary 입력은 그대로 사용할 수 있습니다. 기존 Run 산출물은 이 코드 변경으로 수정하지 않습니다.
 
 학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss·후보 마스킹·이력 길이 10·rolling selection/refit/test는 유지합니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
 

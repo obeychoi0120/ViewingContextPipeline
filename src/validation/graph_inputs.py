@@ -18,7 +18,7 @@ from artifact_io import read_json, write_json
 from validation.graph_context import GRAPH_ARMS
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "role-graph-inputs/v2"
+VERSION = "role-graph-inputs/v3"
 ROLES = ("actor", "target", "tool", "receiver", "location")
 # Keep the receiver tensor slot for model/checkpoint shape compatibility; input
 # normalization disables its edges and always supplies the absent state.
@@ -154,10 +154,9 @@ def build_input(context, cohort, arm):
             lookup = {}
             for entity in entities:
                 lookup[entity["id"]] = len(data["nodes"])
-                text = json.dumps(
-                    {"kind": entity["name"], "attributes": sorted(entity["attributes"])},
-                    ensure_ascii=False,
-                    sort_keys=True,
+                text = (
+                    f"Name: {entity['name']}\n"
+                    f"Attributes: {', '.join(sorted(entity['attributes']))}"
                 )
                 data["nodes"].append(text_id(text))
                 data["types"].append(0)
@@ -176,13 +175,10 @@ def build_input(context, cohort, arm):
                     else:
                         states.append(1 if value == "unknown" else 0)
                 data["missing"].append(states)
-            context_text = json.dumps(
-                {
-                    k: sorted(g[k]) if k == "topics" else g[k]
-                    for k in ("medium", "format", "topics")
-                },
-                ensure_ascii=False,
-                sort_keys=True,
+            context_text = (
+                f"Format: {g['format']}\n"
+                f"Medium: {g['medium']}\n"
+                f"Topics: {', '.join(sorted(g['topics']))}"
             )
             data["contexts"].append(text_id(context_text))
             data["scene_offsets"].append(len(data["nodes"]))

@@ -67,6 +67,55 @@ def test_input_defaults_isolation_actionless_and_missing(graph_data):
     assert prepare(context, target=['graph_qwen'])['reused_arms'] == ['graph_qwen']
 
 
+def test_node_embedding_text_format_and_list_order(graph_data):
+    context, cohort = graph_data
+    graph = scene()
+    graph['actions'][0]['action'] = 'cooking'
+    graph['topics'] = ['food preparation', 'cooking']
+    graph['entities'][0]['attributes'] = ['red apron', 'chef hat']
+    cid = cohort['catalog'][0]['content_id']
+    arm = registry(context.config)['graph_qwen']
+    write_scenes(context, cid, [graph])
+    texts, arrays, _ = build_input(context, cohort, arm)
+    assert [texts[i] for i in arrays['nodes'][:3]] == [
+        'Name: carrot\nAttributes:',
+        'Name: cook\nAttributes: chef hat, red apron',
+        'cooking',
+    ]
+    assert texts[arrays['contexts'][0]] == (
+        'Format: demonstration\nMedium: live_action\nTopics: cooking, food preparation'
+    )
+    graph['topics'].reverse()
+    graph['entities'][0]['attributes'].reverse()
+    write_scenes(context, cid, [graph])
+    reordered_texts, reordered_arrays, _ = build_input(context, cohort, arm)
+    assert reordered_texts == texts
+    for key in arrays:
+        np.testing.assert_array_equal(reordered_arrays[key], arrays[key])
+
+
+def test_json_input_version_cannot_reuse_labeled_input_cache(graph_data, monkeypatch):
+    from validation import graph_inputs
+
+    context, cohort = graph_data
+    arm = registry(context.config)['graph_qwen']
+    current_hash = source_identity(context, cohort, arm)
+    with monkeypatch.context() as patch:
+        patch.setattr(graph_inputs, 'VERSION', 'role-graph-inputs/v2')
+        assert source_identity(context, cohort, arm) != current_hash
+    directory = context.representations_dir / 'graph_qwen_embeddings'
+    manifest_path = directory / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest['version'] == 'role-graph-inputs/v3'
+    manifest['version'] = 'role-graph-inputs/v2'
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='stale'):
+        verify(context, cohort, ['graph_qwen'])
+    prepare(context, target=['graph_qwen'])
+    verify(context, cohort, ['graph_qwen'])
+    assert json.loads(manifest_path.read_text())['version'] == 'role-graph-inputs/v3'
+
+
 @pytest.mark.parametrize('dimension,dtype', [(384, 'float32'), (1024, 'float64'), (None, None)])
 def test_graph_cache_checks_actual_features_even_with_matching_provenance(graph_data, dimension, dtype):
     import shutil
