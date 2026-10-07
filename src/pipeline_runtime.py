@@ -81,7 +81,7 @@ class RunContext:
 
     @property
     def cohort_dir(self) -> Path:
-        return self.preparation_dir / "cohort"
+        return self.preparation_dir / "cohort" / "leave_one_out"
 
     @property
     def evidence_dir(self) -> Path:
@@ -137,16 +137,20 @@ class RunContext:
         return path
 
     @property
+    def validation_dir(self) -> Path:
+        return self.run_root / "validation" / "leave_one_out"
+
+    @property
     def representations_dir(self) -> Path:
-        return self.run_root / "validation" / "representations" / "text"
+        return self.validation_dir / "representations" / "text"
 
     @property
     def recommendations_dir(self) -> Path:
-        return self.run_root / "validation" / "recommendations" / "text"
+        return self.validation_dir / "recommendations" / "text"
 
     @property
     def diagnosis_path(self) -> Path:
-        return self.run_root / "validation" / "diagnosis" / "text_diagnosis.json"
+        return self.validation_dir / "diagnosis" / "text_diagnosis.json"
 
     def path(self, section: str, key: str) -> Path:
         values = _require_mapping(self.config, section)
@@ -181,8 +185,8 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "dataset": "microlens_100k",
         "modality": "visual_only",
         "sampling": "fixed_windows",
-        "cohort_sampling": "full_rolling",
-        "catalog_scope": "full_source_catalog",
+        "cohort_sampling": "leave_one_out",
+        "catalog_scope": "retained_sequence_catalog",
         "graph_extractors": ["qwen", "gemini"],
         "description_extractors": ["qwen", "gemini"],
     }

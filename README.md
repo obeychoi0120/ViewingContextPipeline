@@ -36,7 +36,7 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, **영문 제목에 �
 | Graph와 Description을 모두 생성 | 같은 추출 모델에서 구조화 관측과 자연어 관측을 비교할 입력 제공 |
 | 동결 BGE와 학습 가능한 영상 encoder를 분리 | 고정 텍스트 특징을 준비한 뒤, projection·역할 결합·집계를 추천 목적함수로 학습 |
 | 사용자·catalog·평가 구간을 공통으로 유지 | 표현별로 평가 대상을 달리하지 않도록 구성. 결측 정보 때문에 아이템·interaction을 제거하지 않음 |
-| 시간순 rolling 평가 | 각 평가 이벤트보다 이전의 시청 이력만 사용하고, 학습·검증·test 구간을 시간으로 분리 |
+| 사용자별 leave-one-out 평가 | 사용자별 마지막 상호작용은 test, 직전은 validation으로 보류하고 최적 checkpoint를 평가 |
 
 BGE Large, 30초 창·6개 키프레임, 각 성분의 차원 배분은 현재 구현·설정 값입니다. 이 값의 최적성이나 추천 성능 개선을 주장하려면 별도의 비교 실험이 필요합니다.
 
@@ -46,14 +46,14 @@ BGE Large, 30초 창·6개 키프레임, 각 성분의 차원 배분은 현재 �
 
 | 단계 | 입력 | 처리 → 출력 | 명령·담당 코드 |
 | --- | --- | --- | --- |
-| 1. 데이터·평가 준비 | 사용자–영상–시간 기록, 제목, 영상 목록 | 원본 검증·제목 보완·시간 분할 → catalog, interaction, 제목 매핑, 평가 계획 | `prepare-cohort` · [preparation](src/preparation/cohort.py), [rolling 분할](src/validation/rolling_data.py) |
+| 1. 데이터 준비 | 사용자–영상–시간 기록, 제목, 영상 목록 | 원본 검증·제목 보완 → 전체 원본 catalog, interaction, 제목 매핑 | `prepare-cohort` · [preparation](src/preparation/cohort.py) |
 | 2. 영상 관측 준비 | 영상 파일, sampling 설정 | 시간 창별 프레임 추출 → 키프레임 이미지·timestamp | `prepare-input-data` · [입력 준비](src/preparation/input_data.py), [sampling](src/visual_sampling.py) |
 | 3. 장면 정보 추출 | 키프레임, Graph/Description 프롬프트 | Qwen/Gemini 추론·파싱 → 장면별 Graph 또는 Description JSONL | `extract-graph-scenes` / `extract-description-scenes` · [extraction](src/extraction/steps.py) |
 | 4. 영상 요약 — Text 경로 | 장면별 관측, Summary 프롬프트 | 영상 단위 영문 요약 → Summary JSON | `summarize` · [Summary 실행](src/extraction/summary_executor.py) |
-| 5. 고정 특징 준비 | 제목·Summary 또는 Graph 요소·역할 연결 | 동결 BGE 인코딩 → 1024차원 특징, 가용성 마스크; Graph는 노드·edge·장면 경계도 저장 | `embed-representations` · [Text 특징](src/validation/steps.py), [Graph 입력](src/validation/graph_inputs.py) |
+| 5. 평가·고정 특징 준비 | 원본 이력, 제목·Summary 또는 Graph 요소·역할 연결 | 사용자 필터·최근 13개·마지막 2개 분할·평가 catalog 구성; 동결 BGE 인코딩 → 1024차원 특징, 가용성 마스크; Graph는 노드·edge·장면 경계도 저장 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Text 특징](src/validation/steps.py), [Graph 입력](src/validation/graph_inputs.py) |
 | 6. 영상 표현 학습 | 고정 특징, Graph 구조 | projection·MLP·역할 결합·장면 집계 → 영상당 512차원 벡터 | `run-recommendation` 내부 · [Text 모델](src/validation/model.py), [Graph 모델](src/validation/graph_model.py) |
-| 7. 사용자 표현·추천 평가 | 과거 시청 영상 벡터, 후보 영상 벡터, 평가 계획 | SASRec·내적·순위 평가 → checkpoint, 학습 기록, 이벤트별 지표 | `run-recommendation` · [rolling 학습·평가](src/validation/rolling_recommendation.py) |
-| 8. 진단 | 이벤트별 지표, 추출·표현·학습 기록 | 지표 집계·비교 통계·coverage 확인 → 진단 JSON | `run-diagnosis` · [Text 진단](src/validation/rolling_diagnosis.py), [Graph 진단](src/validation/graph_diagnosis.py) |
+| 7. 사용자 표현·추천 평가 | 과거 시청 영상 벡터, 후보 영상 벡터, 평가 계획 | SASRec·내적·순위 평가 → checkpoint, 학습 기록, 이벤트별 지표 | `run-recommendation` · [leave-one-out 학습·평가](src/validation/leave_one_out_recommendation.py) |
+| 8. 진단 | 이벤트별 지표, 추출·표현·학습 기록 | 지표 집계·비교 통계·coverage 확인 → 진단 JSON | `run-diagnosis` · [Text 진단](src/validation/leave_one_out_diagnosis.py), [Graph 진단](src/validation/graph_diagnosis.py) |
 
 **5단계에서 저장하는 것은 고정 입력 특징입니다. 최종 추천용 영상 벡터는 6단계의 학습된 모델이 생성합니다.** 영상의 장면 순서와 사용자의 시청 순서도 다릅니다. 현재 mean/GCN에는 장면 순서 인코딩이 없으며, SASRec은 사용자의 시간순 시청 이력을 처리합니다.
 
@@ -91,7 +91,7 @@ p1 - cutting - f1; t1; l1
 - 저장: `extraction/scenes/<source>/<content_id>.jsonl`. Graph 행에는 `scene_graph`·`warning`, Description 행에는 `description`이 들어갑니다. 공통으로 콘텐츠·장면 식별자와 토큰 사용량을 기록합니다.
 - 구조화하지 못한 Graph 출력은 원문으로 보존합니다. 원문 관측은 Text Summary에 사용할 수 있지만, 직접 Graph 학습에는 구조·warning 검사를 통과한 장면만 사용합니다.
 
-v8 Actions는 `actor - action - target; tool; location`이며 receiver를 출력·검증·Summary 및 직접 Graph 입력에서 제외합니다. 완전한 v7의 6개 필드 형식과 기존 JSON은 receiver를 무시하고 읽습니다. 5개 필드 행의 마지막 값은 항상 location으로 해석하므로, location을 생략한 과거 v7의 불완전한 행은 자동 구별하지 않습니다. 기존 파일은 수정하지 않습니다.
+구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; location`입니다. Relations·receiver·location 누락을 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 현재 형식의 파일은 Run 이름이나 생성 당시 프롬프트 버전과 무관하게 재사용합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
 
 Text 경로의 Summary는 장면 관측을 영상 단위 자연어로 모읍니다. [Graph Summary](prompts/summary_graph_v8.md)와 [Description Summary](prompts/summary_description_v5.md)의 입력에는 제목이 없으며, `{scenes}`가 필요하고 `{english_title}`은 허용하지 않습니다. 출력은 `extraction/summaries/<source>/<content_id>.json`에 텍스트·상태·장면 수·단어 수·토큰 수·생성 출처(provenance)와 함께 저장합니다.
 
@@ -143,10 +143,10 @@ Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없�
 
 [모듈 3 피드백](docs/feedback_260923.md#모듈-3-관련-user-representation-generation-and-recommendation)은 사용자와 아이템을 동일한 embedding 공간에 투영하는 방향을 제안했습니다. 현재 구현은 이 방향과 대응하며, 과거 시청 영상 벡터를 SASRec에 입력해 사용자 벡터를 만들고 후보 영상 벡터와 내적으로 비교합니다.
 
-영상 encoder와 SASRec은 날짜·seed·Arm별로 독립 학습합니다. 피드백에서 제시한 사용자 평균 aggregation, 사용자 embedding parameter 기반 방식, clustering 기반 표현과 현재 SASRec 구현은 구분하며, 후속 비교 상태는 [이정표](docs/TODO.md)에 기록합니다.
+영상 encoder와 SASRec은 seed·Arm별로 독립 학습합니다. 피드백에서 제시한 사용자 평균 aggregation, 사용자 embedding parameter 기반 방식, clustering 기반 표현과 현재 SASRec 구현은 구분하며, 후속 비교 상태는 [이정표](docs/TODO.md)에 기록합니다.
 
 <details>
-<summary>사용자 encoder·rolling 학습·평가 방식</summary>
+<summary>사용자 encoder·leave-one-out 학습·평가 방식</summary>
 
 최근 최대 10개 시청 영상의 512차원 벡터에 위치 정보를 더해 SASRec의 2개 block·2개 head로 처리합니다. 마지막 유효 위치의 출력에 User Residual MLP를 적용해 512차원 사용자 벡터를 만듭니다. 후보 영상 벡터는 영상 encoder에서 직접 가져옵니다.
 
@@ -154,16 +154,17 @@ Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없�
 추천 점수 = 사용자 벡터 · 후보 영상 벡터
 ```
 
-기본 평가 구간은 원본 마지막 UTC 날짜를 제외한 직전 7일입니다. 평가일 시작을 D라고 하면 날짜별 학습·평가는 다음과 같습니다.
+원본 이력이 5개 이상인 사용자를 선택하고, `timestamp → 원본 event_id` 순서의 최근 13개 상호작용을 보존합니다. 마지막 날짜도 포함하며, 사용자마다 다음과 같이 나눕니다.
 
-| 단계 | 사용 구간 | 역할 |
+| 단계 | 데이터 | 입력 이력·역할 |
 | --- | --- | --- |
-| Selection 학습 | D−1일 이전 | 모델 학습 |
-| Validation | [D−1일, D) | NDCG@10으로 학습 epoch 선택 |
-| Refit | D 이전 | 모델·optimizer를 새로 초기화하고 선택한 epoch 수만큼 학습 |
-| Test | [D, D+1일) | refit 모델의 추천 순위·지표 평가 |
+| Train | 마지막 2개를 제외한 상호작용 | 앞선 이력으로 다음 아이템 전이를 학습 |
+| Validation | 끝에서 두 번째 상호작용 1개 | train 이력으로 NDCG@10을 계산하고 최적 checkpoint 선택 |
+| Test | 마지막 상호작용 1개 | train + validation 이력으로 선택된 checkpoint 평가 |
 
-각 이벤트에서는 timestamp가 엄격히 이전인 이력만 사용합니다. 이전 이력이 없는 이벤트는 평가 대상에서 제외합니다. 후보는 전체 source catalog이며, 정답을 제외한 과거 시청 아이템을 마스킹합니다. 모델 입력 이력은 최대 10개지만 후보 마스킹에는 전체 과거 이력을 사용합니다. test 기간의 앞선 시청도 이후 이벤트의 이력에는 들어갈 수 있으며 모델 파라미터는 test에서 갱신하지 않습니다.
+각 정답 앞의 최대 10개를 모델에 입력합니다. 동일 timestamp는 원본 행 순서로 결정하며, 첫 이벤트는 학습 정답으로 사용하지 않습니다. validation 이후 train+validation 재학습은 하지 않습니다. 후보 catalog는 보존된 사용자 시퀀스 전체의 아이템이며, 각 정답을 제외한 앞선 보존 이력 전체를 마스킹합니다. 반복 정답은 후보에 남기고 점수 동률은 catalog 순서로 결정합니다. validation/test는 학습 정답·학습 빈도에 들어가지 않습니다.
+
+전처리는 [MicroLens 공식 SASRec 코드](https://github.com/microlens2023/microlens-dataset/blob/master/Code/VideoRec/SASRec/utils/load_data.py)의 최소 이력·시퀀스 절단·마지막 2개 보류 흐름을 따릅니다. 모델·손실함수까지 논문을 완전히 재현한 것은 아니며, 사용자별 분할은 전체 사용자 사이의 공통 시간 경계를 보장하지 않습니다.
 
 기본 학습 설정은 AdamW, learning rate `1e-4`, weight decay `0.1`, batch `128`, 최대 `50` epoch, patience `5`, min_delta `0`, seed `42/43/44`, `deterministic: true`입니다. 실제 실행 설정은 [config.yaml](config.yaml)을 확인하세요.
 
@@ -196,11 +197,11 @@ Text의 Graph/Description 비교는 두 종류의 관측을 요약문으로 사�
 | `graph_qwen_meta` − `graph_qwen` | 제목을 함께 사용하는 조건의 차이 |
 | `graph_gemini_meta` − `graph_qwen_meta` | Scene 추출 모델 조건 차이 — 탐색적 비교 |
 
-Text 전체 평가는 기본 설정에서 7일 × 3 seed × 6 Arm입니다. HR·NDCG는 `K=4,8,10,20,30`에서 계산합니다. NDCG@10 비교에는 사용자 단위 paired bootstrap 10,000회를 사용하며, seed 평균 후 날짜별 평균을 동일 가중치로 합칩니다.
+Text 전체 평가는 기본 설정에서 3 seed × 6 Arm, 총 18개 학습 조합입니다. HR·NDCG는 `K=4,8,10,20,30`에서 계산합니다. NDCG@10 비교에는 사용자 단위 paired bootstrap 10,000회를 사용하며, 사용자별 seed 평균을 구한 뒤 사용자에 동일 가중치를 둡니다. 각 seed의 사용자 평균도 보고합니다.
 
 제목 기준선 대비 비교 5개, Graph/Description 비교 2개, 제목 추가 비교 1개를 각각 비교군으로 두고 Bonferroni 보정을 적용합니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 비교 정의는 [통계 정책 코드](src/validation/diagnosis_statistics.py)에 있습니다.
 
-구현 검증은 소형 입력의 수치·gradient·결측·재개·캐시와 작은 rolling 학습·평가·진단을 다룹니다. 이 검증과 전체 데이터의 추천 성능 실험은 구분합니다. 현재 모델·GCN의 검증 기록은 [직접 Graph 학습](docs/graph_training.md), 후속 실험 상태는 [이정표](docs/TODO.md)를 참고하세요. Run별 성능·비용 분석은 `artifacts/runs/<RUN_ID>/reports/`에 보관하며 해당 입력·모델 계약과 함께 해석합니다.
+구현 검증은 소형 입력의 수치·gradient·결측·재개·캐시와 작은 leave-one-out 학습·평가·진단을 다룹니다. 이 검증과 전체 데이터의 추천 성능 실험은 구분합니다. 현재 모델·GCN의 검증 기록은 [직접 Graph 학습](docs/graph_training.md), 후속 실험 상태는 [이정표](docs/TODO.md)를 참고하세요. Run별 성능·비용 분석은 `artifacts/runs/<RUN_ID>/reports/`에 보관하며 해당 입력·모델 계약과 함께 해석합니다.
 
 </details>
 
@@ -236,7 +237,7 @@ Gemini 생성 환경은 `.[gemini,dev]`, 임베딩·추천 환경은 `.[train,em
 | `validation` | cohort·평가 구간, BGE, 학습, 실행 자원, 통계 설정 |
 | `artifacts_root` | 산출물 상위 디렉터리 |
 
-아래 `new_run_id`는 사용할 새 Run 이름으로 바꾸세요. 설정 형식의 `experiment_config_version: v4`, 프롬프트 파일의 v8, 모델 계약의 Text v8·mean v9·GNN v10, Run 이름은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
+아래 `new_run_id`는 사용할 새 Run 이름으로 바꾸세요. 설정 형식의 `experiment_config_version: v5`, 프롬프트 파일의 v8, 모델 계약의 Text v8·mean v9·GNN v10, Run 이름은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
 
 ```bash
 export RUN_ID="new_run_id"
@@ -257,9 +258,9 @@ python -m preparation prepare-cohort --run-id "$RUN_ID"
 python -m preparation prepare-input-data --run-id "$RUN_ID"
 ```
 
-`prepare-cohort`는 전체 interaction과 평가 구간을 준비하고 필요한 영상·제목을 검사합니다. 보완 CSV를 지정하면 원본의 비어 있지 않은 제목을 우선하고, 필요한 빈 제목·누락 행만 보완합니다. 끝내 해결되지 않은 제목은 빈 문자열로 저장합니다. 보완 CSV를 지정하지 않은 경우 누락 행은 오류입니다. 원본 CSV는 수정하지 않습니다.
+`prepare-cohort`는 전체 원본 interaction과 catalog를 준비하고 필요한 영상·제목을 검사합니다. Run별 leave-one-out 분할·평가 catalog는 `embed-representations`에서 준비하며, 전처리 요약은 `reports/leave_one_out_cohort.{json,md}`에 기록합니다. 보완 CSV를 지정하면 원본의 비어 있지 않은 제목을 우선하고, 필요한 빈 제목·누락 행만 보완합니다. 끝내 해결되지 않은 제목은 빈 문자열로 저장합니다. 보완 CSV를 지정하지 않은 경우 누락 행은 오류입니다. 원본 CSV는 수정하지 않습니다.
 
-목록과 평가 구간만 먼저 확인하려면 `prepare-cohort --plan-only`를 사용할 수 있지만, 다음 단계 전에 전체 `prepare-cohort`를 완료해야 합니다. `prepare-input-data`는 정상적인 기존 프레임을 재사용합니다. 입력 준비는 Run 간 공유되므로 데이터셋이나 평가 구성이 다른 실험은 `artifacts_root`를 분리합니다.
+원본 목록만 먼저 확인하려면 `prepare-cohort --plan-only`를 사용할 수 있지만, 다음 단계 전에 전체 `prepare-cohort`를 완료해야 합니다. `prepare-input-data`는 정상적인 기존 프레임을 재사용합니다. 입력 준비는 Run 간 공유되므로 데이터셋이나 평가 구성이 다른 실험은 `artifacts_root`를 분리합니다.
 
 </details>
 
@@ -335,14 +336,14 @@ Graph 추천·진단에는 `--scene-aggregation mean|gnn`이 필요합니다. em
 ```text
 artifacts/
 ├── preparation/                         # 공유 cohort·영상 준비
-│   ├── cohort/
+│   ├── cohort/leave_one_out/
 │   ├── resized_keyframes/<width>_<height>/ # 예: 640_352
 │   └── source_assets/
 ├── runs/<RUN_ID>/
 │   ├── extraction/
 │   │   ├── scenes/<source>/
 │   │   └── summaries/<source>/
-│   ├── validation/
+│   ├── validation/leave_one_out/
 │   │   ├── cohort/
 │   │   ├── representations/{text,graph}/
 │   │   ├── recommendations/text/
@@ -356,12 +357,12 @@ artifacts/
 | --- | --- |
 | 장면 관측 | `extraction/scenes/<source>/<content_id>.jsonl` |
 | 영상 Summary | `extraction/summaries/<source>/<content_id>.json` |
-| Text 고정 특징 | `validation/representations/text/<arm>_embeddings.npz` |
-| Graph 고정 특징·역할 연결 | `validation/representations/graph/<arm>_embeddings/`의 배열·manifest·statistics |
-| 추천 학습·test | `validation/recommendations/text/<date>/seed_<seed>/<arm>/` 또는 `validation/recommendations/graph/<mean 또는 gnn>/<date>/seed_<seed>/<arm>/` |
-| 진단 | `validation/diagnosis/text_diagnosis.json`, `graph_mean_diagnosis.json`, `graph_gnn_diagnosis.json` |
+| Text 고정 특징 | `validation/leave_one_out/representations/text/<arm>_embeddings.npz` |
+| Graph 고정 특징·역할 연결 | `validation/leave_one_out/representations/graph/<arm>_embeddings/`의 배열·manifest·statistics |
+| 추천 학습·test | `validation/leave_one_out/recommendations/text/seed_<seed>/<arm>/` 또는 `validation/leave_one_out/recommendations/graph/<mean 또는 gnn>/seed_<seed>/<arm>/` |
+| 진단 | `validation/leave_one_out/diagnosis/text_diagnosis.json`, `graph_mean_diagnosis.json`, `graph_gnn_diagnosis.json` |
 
-추천 결과는 날짜 × seed × Arm 단위로 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`을 저장하며, 직접 Graph는 `catalog_vectors.npy`도 저장합니다. `training.json`의 selection validation 지표와 최종 test 지표는 구분합니다. 과거 `graph_attention_diagnosis.json`과 기존 Run 산출물은 보존합니다.
+추천 결과는 seed × Arm 단위로 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`을 저장하며, 직접 Graph는 `catalog_vectors.npy`도 저장합니다. `training.json`의 train epoch별 validation 지표와 최종 test 지표는 구분합니다. 과거 `graph_attention_diagnosis.json`과 기존 Run 산출물은 보존합니다.
 
 </details>
 

@@ -100,13 +100,7 @@ def _success_scene_row_issues(arm: str, row: dict[str, Any], content_id: str) ->
     if row.get("keyframes") != [] and (not _nonempty_timestamp_list(row.get("keyframes"))):
         invalid.append("invalid_success_keyframes")
     if arm.startswith("graph_"):
-        from extraction.raw_output import is_raw_graph, valid_raw_graph
-
-        if is_raw_graph(row):
-            if not valid_raw_graph(row):
-                invalid.append("invalid_raw_graph_scene")
-            return invalid
-        if set(row) - {"provenance", "generation", "tokens"} != {
+        if set(row) - {"provenance", "tokens"} != {
             "scene_idx",
             "keyframes",
             "graph",
@@ -126,9 +120,7 @@ def _success_scene_row_issues(arm: str, row: dict[str, Any], content_id: str) ->
         if not isinstance(row.get("semantic_warnings"), list):
             invalid.append("invalid_semantic_warnings")
     else:
-        if row.get("status", "raw_fallback") != "raw_fallback":
-            invalid.append("invalid_description_status")
-        if set(row) - {"provenance", "generation", "status", "tokens"} != {
+        if set(row) - {"provenance", "tokens"} != {
             "schema_version",
             "content_id",
             "scene_idx",
@@ -267,7 +259,7 @@ def _scene_arm_contract(
                             }
                         )
                         continue
-                if outcome == "success" and row.get("status") == "raw_fallback":
+                if outcome == "success" and row.get("parse_mode") == "text":
                     raw_scenes.add(key)
                     continue
                 destination.add(key)

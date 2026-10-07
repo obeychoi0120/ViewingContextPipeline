@@ -1,4 +1,4 @@
-"""Spawn isolated workers for independent rolling combinations on assigned GPUs."""
+"""Spawn isolated workers for independent leave-one-out combinations on assigned GPUs."""
 
 from __future__ import annotations
 
@@ -50,9 +50,9 @@ def _consume_combinations(
     identity = None
     try:
         from validation.model import torch
-        from validation.rolling_data import EventTable
+        from validation.leave_one_out_data import EventTable
         from validation.selection import load_validation_cohort, training_signature
-        from validation.rolling_recommendation import prepare_split, run_combination
+        from validation.leave_one_out_recommendation import prepare_split, run_combination
         from validation.steps import validation_config
 
         torch.set_num_threads(1)
@@ -63,14 +63,14 @@ def _consume_combinations(
         cohort = load_validation_cohort(context, verify_current=False)
         table = EventTable(cohort["events"])
         expected_training_hash = training_signature(context, cohort, config)
-        previous_date, prepared = None, None
+        previous_split, prepared = None, None
         while (job := jobs.get()) is not None:
             split, identity, branch = job
             if identity["training_input_hash"] != expected_training_hash:
                 raise ValueError("validation selection changed during worker startup")
-            if split["evaluation_date"] != previous_date:
+            if split["split_hash"] != previous_split:
                 prepared = prepare_split(table, split)
-                previous_date = split["evaluation_date"]
+                previous_split = split["split_hash"]
             run_combination(
                 context,
                 config,
@@ -119,10 +119,10 @@ def run_parallel(
                 status, payload = results.get(timeout=1)
             except Empty:
                 if all(process.exitcode is not None for process in processes):
-                    raise RuntimeError("rolling workers exited before reporting all combinations")
+                    raise RuntimeError("leave-one-out workers exited before reporting all combinations")
             else:
                 if status == "error":
-                    raise RuntimeError(f"rolling worker failed: {payload}")
+                    raise RuntimeError(f"leave-one-out worker failed: {payload}")
                 if status == "log":
                     progress.write(payload, file=progress.fp)
                     last_refresh = time.monotonic()
@@ -138,7 +138,7 @@ def run_parallel(
             for process in processes:
                 if process.exitcode not in (None, 0):
                     raise RuntimeError(
-                        f"rolling worker pid={process.pid} exited with code {process.exitcode}"
+                        f"leave-one-out worker pid={process.pid} exited with code {process.exitcode}"
                     )
         return completed
     finally:

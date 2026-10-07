@@ -12,6 +12,7 @@ from extraction.qwen_config import penalty_schedule
 from extraction.failures import FailureLog
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
+from extraction.semantic_graph import GRAPH_SCHEMA_VERSION
 from extraction.scene_executor import run_gemini_scenes, run_qwen_scenes
 from extraction.step_support import (
     minimal_description_records,
@@ -23,7 +24,6 @@ from extraction.step_support import (
 )
 from extraction.summary_executor import run_summary_stage, qwen_generator
 from extraction.scene_storage import read_scene_records
-from extraction.raw_output import is_raw_graph
 from pipeline_logging import log_step_start
 from pipeline_runtime import RunContext
 
@@ -81,7 +81,7 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         **({"summary_model": source} if summary else {}),
         "schema_contract": "summary/v5"
         if summary
-        else ("graph/v5" if "[Actions]" in path.read_text(encoding="utf-8") else "graph/v3")
+        else GRAPH_SCHEMA_VERSION
         if arm.representation == "graph"
         else "description/v2",
     }
@@ -118,13 +118,6 @@ def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *
         for row in rows:
             saved = by_index.get(row["scene_idx"])
             reusable = saved is not None
-            if reusable and is_raw_graph(saved) and (not failures.contains(cid, row["scene_idx"])):
-                failures.record(
-                    cid,
-                    row["scene_idx"],
-                    "graph validation failed; raw response retained",
-                    saved["raw_response"],
-                )
             if failures.contains(cid, row["scene_idx"]):
                 missing.append(row)
             elif reusable:

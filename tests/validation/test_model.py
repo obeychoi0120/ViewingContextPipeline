@@ -6,7 +6,9 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from validation.model import SASRec, in_batch_loss, pad_sequences  # noqa: E402
+from validation.model import SASRec, pad_sequences  # noqa: E402
+from validation.leave_one_out_recommendation import transition_loss  # noqa: E402
+from validation.leave_one_out_data import EventTable  # noqa: E402
 
 pytestmark = pytest.mark.torch
 
@@ -69,11 +71,10 @@ def test_popularity_corrected_duplicate_mask_matches_numpy_reference() -> None:
         max_length = 2
         item_count = 4
 
-        def encode(self, _sequences):
+        def user_vectors(self, _sequences):
             return torch.tensor(
                 [
-                    [[1.0, 0.0], [0.0, 1.0]],
-                    [[0.5, 0.5], [1.0, 1.0]],
+                    [1.0, 0.0], [0.0, 1.0], [0.5, 0.5], [1.0, 1.0],
                 ],
                 requires_grad=True,
             )
@@ -90,17 +91,12 @@ def test_popularity_corrected_duplicate_mask_matches_numpy_reference() -> None:
             )
             return table[item_ids]
 
-        @staticmethod
-        def user_mlp(values):
-            return values
-
     probabilities = np.asarray([1.0, 0.1, 0.2, 0.3, 0.4], dtype=np.float32)
-    loss = in_batch_loss(
-        FixedModel(),
-        [[1, 2, 3], [4, 2, 3]],
-        torch.device("cpu"),
-        probabilities,
-    )
+    table = EventTable([
+        {"event_id": i, "user_id": str(i // 3), "item_id": str(item), "timestamp": i % 3}
+        for i, item in enumerate([1, 2, 3, 4, 2, 3])
+    ])
+    loss = transition_loss(FixedModel(), table, np.asarray([1, 2, 4, 5]), probabilities, torch.device("cpu"))
     users = np.asarray(
         [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5], [1.0, 1.0]],
         dtype=np.float64,

@@ -1,4 +1,4 @@
-"""Streaming event validation and paired user-cluster, equal-day statistics."""
+"""Streaming leave-one-out validation and paired user-mean statistics."""
 
 from __future__ import annotations
 import numpy as np
@@ -13,58 +13,50 @@ from validation.recommendation_contracts import (
 )
 from arm_registry import registry
 from validation.representation_checks import verify_representations
-from validation.rolling_data import EventTable
+from validation.leave_one_out_data import EventTable, PROTOCOL
 from preparation.cohort import iter_jsonl
-from validation.selection import load_validation_cohort, recount_splits, training_signature
-from validation.rolling_recommendation import combination_complete, combination_dir, phase_ids
+from validation.selection import load_validation_cohort, training_signature
+from validation.leave_one_out_recommendation import combination_complete, combination_dir, phase_ids
 
 MEMORY_LIMIT = 128 * 1024**2
 
 
-def weighted_day_mean(sums, counts, weights):
-    denominators = weights @ counts
-    if np.any(denominators <= 0):
-        raise ValueError("bootstrap has an empty evaluation date denominator")
-    numerators = weights @ sums.reshape(len(counts), -1)
-    return (numerators.reshape(-1, *sums.shape[1:]) / denominators[:, :, None]).mean(axis=1)
+def weighted_user_mean(sums, counts, weights):
+    if np.any(counts != 1):
+        raise ValueError("leave-one-out requires one test event per user")
+    return weights @ sums / weights.sum(axis=1, keepdims=True)
 
 
 def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIMIT):
-    """sums[user,date,arm] contains seed-averaged event sums, counts[user,date]."""
+    """sums[user,arm] contains each user's seed-averaged test metric."""
     sums = np.asarray(sums, dtype=np.float64)
     counts = np.asarray(counts, dtype=np.float64)
-    users, days, arms = sums.shape
-    if counts.shape != (users, days) or not users or (not np.isfinite(sums).all()):
-        raise ValueError("invalid user/date aggregates")
-    if not np.isfinite(counts).all() or np.any(counts < 0):
-        raise ValueError("invalid event counts")
+    if sums.ndim != 2 or not len(sums) or not np.isfinite(sums).all():
+        raise ValueError("invalid user aggregates")
+    users, arms = sums.shape
+    if counts.shape != (users,) or np.any(counts != 1) or samples < 1:
+        raise ValueError("leave-one-out requires one test event per user and positive samples")
     fixed = sums.nbytes + counts.nbytes + samples * arms * 8 + users * 8 + 8 * 1024**2
-    per_draw = users * 16 + days * (arms * 3 + 2) * 8
+    per_draw = users * 16 + arms * 24
     batch = min(64, (memory_limit - fixed) // per_draw)
     if batch < 1:
         raise ValueError("bootstrap input and one draw exceed the working memory limit")
-    observed = weighted_day_mean(sums, counts, np.ones((1, users)))[0]
+    observed = sums.mean(axis=0)
     rng = np.random.default_rng(seed)
     probabilities = np.full(users, 1 / users)
     draws = np.empty((samples, arms))
     for start in range(0, samples, batch):
         size = min(batch, samples - start)
         weights = rng.multinomial(users, probabilities, size=size).astype(np.float64)
-        draws[start : start + size] = weighted_day_mean(sums, counts, weights)
+        draws[start:start + size] = weighted_user_mean(sums, counts, weights)
         del weights
-    return (
-        observed,
-        draws,
-        {
-            "unit": "user",
-            "seed": seed,
-            "samples": samples,
-            "batch_size": int(batch),
-            "working_bytes_upper_bound": int(fixed + batch * per_draw),
-            "memory_limit_bytes": memory_limit,
-            "aggregation": "seed mean then equal date mean",
-        },
-    )
+    return observed, draws, {
+        "unit": "user", "seed": seed, "samples": samples,
+        "batch_size": int(batch),
+        "working_bytes_upper_bound": int(fixed + batch * per_draw),
+        "memory_limit_bytes": memory_limit,
+        "aggregation": "seed mean then equal user mean",
+    }
 
 
 def comparisons(observed, draws, settings, *, arms=None, config=None):
@@ -143,28 +135,29 @@ def collect_metrics(context, config, cohort, *, arms=None):
         cohort["plan"]["user_count"],
         cohort["plan"]["interaction_count"],
         cohort["plan"]["item_count"],
-    ) or splits != recount_splits(table, splits):
-        raise ValueError("validation cohort cardinality or rolling split manifest mismatch")
+    ) or splits != table.splits():
+        raise ValueError("validation cohort cardinality or leave-one-out split manifest mismatch")
     arms = list(selected)
     verify_representations(context, cohort, arms=selected)
-    sums = np.zeros((len(users), len(splits), len(arms)))
-    counts = np.zeros((len(users), len(splits)))
+    sums = np.zeros((len(users), len(arms)))
+    counts = np.zeros(len(users))
     metrics = list(metrics_from_rank(1, config.evaluation.cutoffs))
-    daily = []
+    per_seed = []
     total = 0
     architecture_version = None
-    for day, split in enumerate(splits):
+    for split in splits:
         ids = phase_ids(table, split, "test")
         expected = set(ids.tolist())
         for event in ids:
-            counts[users[table.rows[event]["user_id"]], day] += 1
-        raw_refit = table.select(end=split["phases"]["refit"]["end_ms"], eligible=False)
-        frequencies = np.bincount(table.targets[raw_refit], minlength=len(table.items) + 1)
+            counts[users[table.rows[event]["user_id"]]] += 1
+        raw_train = np.asarray(split["phases"]["train"]["event_ids"], dtype=np.int64)
+        frequencies = np.bincount(table.targets[raw_train], minlength=len(table.items) + 1)
         for seed in config.model.seeds:
             for index, arm in enumerate(arms):
                 identity = {
                     "run_id": context.run_id,
-                    "evaluation_date": split["evaluation_date"],
+                    "protocol": PROTOCOL,
+                    "split_hash": split["split_hash"],
                     "seed": seed,
                     "arm": arm,
                     "training_input_hash": training_input_hash,
@@ -173,23 +166,22 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 from validation.representation_provenance import recommendation_identity
 
                 identity.update(recommendation_identity(context, selected[arm]))
-                directory = combination_dir(context, split["evaluation_date"], seed, arm)
+                directory = combination_dir(context, seed, arm)
                 training = diagnosis_training(
                     directory, identity, len(ids), architecture_version=architecture_version
                 )
                 architecture_version = training["architecture_version"]
                 best = training["best_epoch"]
-                if training["split"] != split or len(training["refit"]) != best:
-                    raise ValueError("training split/refit epoch mismatch")
-                for phase in ("selection", "refit"):
-                    count = split["phases"][phase]["eligible_count"]
-                    for row in training[phase]:
-                        if (
-                            row["positive_count"] != count
-                            or row["optimizer_updates"]
-                            != (count + config.model.batch_size - 1) // config.model.batch_size
-                        ):
-                            raise ValueError("training transition/update count mismatch")
+                if training["split"] != split or best not in [row["epoch"] for row in training["train"]]:
+                    raise ValueError("training split/checkpoint epoch mismatch")
+                count = split["phases"]["train"]["eligible_count"]
+                for row in training["train"]:
+                    if (
+                        row["positive_count"] != count
+                        or row["optimizer_updates"]
+                        != (count + config.model.batch_size - 1) // config.model.batch_size
+                    ):
+                        raise ValueError("training transition/update count mismatch")
                 seen = set()
                 totals = dict.fromkeys(metrics, 0.0)
                 for row in iter_jsonl(directory / "per_event_metrics.jsonl"):
@@ -205,8 +197,8 @@ def collect_metrics(context, config, cohort, *, arms=None):
                         raise ValueError("invalid event rank")
                     if row["candidate_count"] != len(table.items):
                         raise ValueError("candidate catalog mismatch")
-                    if row["refit_item_frequency"] != int(frequencies[table.targets[event]]):
-                        raise ValueError("refit target frequency mismatch")
+                    if row["train_item_frequency"] != int(frequencies[table.targets[event]]):
+                        raise ValueError("train target frequency mismatch")
                     calculated = metrics_from_rank(rank, config.evaluation.cutoffs)
                     if any(
                         (
@@ -217,15 +209,16 @@ def collect_metrics(context, config, cohort, *, arms=None):
                         raise ValueError("event metric/rank mismatch")
                     for metric in metrics:
                         totals[metric] += row[metric]
-                    sums[users[source["user_id"]], day, index] += row["NDCG@10"] / len(
+                    sums[users[source["user_id"]], index] += row["NDCG@10"] / len(
                         config.model.seeds
                     )
                     total += 1
                 if seen != expected:
                     raise ValueError("missing eligible test events")
-                daily.append(
+                per_seed.append(
                     {
-                        "evaluation_date": split["evaluation_date"],
+                        "protocol": PROTOCOL,
+                        "split_hash": split["split_hash"],
                         "seed": seed,
                         "arm": arm,
                         "event_count": len(ids),
@@ -236,7 +229,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
     if total != expected_total:
         raise ValueError("event grid cardinality mismatch")
     means = {
-        arm: {m: float(np.mean([r[m] for r in daily if r["arm"] == arm])) for m in metrics}
+        arm: {m: float(np.mean([r[m] for r in per_seed if r["arm"] == arm])) for m in metrics}
         for arm in arms
     }
     return (
@@ -246,22 +239,11 @@ def collect_metrics(context, config, cohort, *, arms=None):
             "architecture_version": architecture_version,
             "expected_event_count": expected_total,
             "actual_event_count": total,
-            "combination_count": len(daily),
-            "daily": daily,
+            "combination_count": len(per_seed),
+            "per_seed": per_seed,
             "means": means,
         },
     )
-
-
-def paper_reference(recommendations, arms):
-    reference = {
-        "metadata_hr10": 0.046,
-        "interpretation": "Reference only: full data/rolling does not establish every unspecified paper setting.",
-    }
-    baseline = "meta" if "meta" in arms else "metadata"
-    if recommendations is not None and baseline in arms:
-        reference["hr10_difference"] = recommendations["means"][baseline]["HR@10"] - 0.046
-    return reference
 
 
 def diagnose(context, *, target=None, compare_run_id=None):
@@ -272,7 +254,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
     config = validation_config(context)
     errors = []
     document = {
-        "schema_version": "rolling-diagnosis/v3",
+        "schema_version": "leave-one-out-diagnosis/v1",
         "run_id": context.run_id,
         **target_scope(arms, config=context.config),
         "statistics": {"status": "not_computed"},
@@ -283,7 +265,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
         document["selection"] = {
             key: value for key, value in cohort["manifest"].items() if key != "included_item_ids"
         }
-        document["selection"]["manifest_path"] = "validation/cohort/manifest.json"
+        document["selection"]["manifest_path"] = "validation/leave_one_out/cohort/manifest.json"
         from validation.metadata import verify_missing_metadata
 
         if any((name in arms for name in ("meta", "metadata"))):
@@ -300,7 +282,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
             config=context.config,
             excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
             source_assets_dir=context.source_assets_dir,
-            informational=cohort["manifest"]["policy"] == "full-catalog-zero-vector/v2",
+            informational=True,
         )
         document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
@@ -343,10 +325,9 @@ def diagnose(context, *, target=None, compare_run_id=None):
                     context, compare_run_id, target=arms
                 )
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
-        errors.append({"code": "invalid_rolling_evidence", "message": str(exc)})
+        errors.append({"code": "invalid_leave_one_out_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
-    document["paper_reference"] = paper_reference(document.get("recommendations"), arms)
     write_json(context.diagnosis_path, document)
     if errors or document["statistics"]["status"] != "computed":
-        raise RuntimeError(f"rolling diagnosis failed; see {context.diagnosis_path}")
+        raise RuntimeError(f"leave-one-out diagnosis failed; see {context.diagnosis_path}")
     return {"stage": "run-diagnosis", "status": "pass"}

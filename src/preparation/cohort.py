@@ -15,9 +15,9 @@ from preparation.catalog import (
     normalize_item_id,
 )
 from preparation.titles import missing_metadata_report
-from validation.rolling_data import EventTable
+from validation.leave_one_out_data import EventTable
 
-SCHEMA = "microlens-full-rolling/v1"
+SCHEMA = "microlens-full-source/v2"
 
 
 def iter_jsonl(path):
@@ -79,7 +79,7 @@ def prepare_full_cohort(context, *, plan_only=False):
             raise ValueError("CSV/TSV user interaction multisets differ")
     directory = context.cohort_dir
     directory.mkdir(parents=True, exist_ok=True)
-    print("[COHORT] Building rolling splits and saving the cohort plan...", flush=True)
+    print("[COHORT] Saving the complete source cohort...", flush=True)
     plan = {
         "schema_version": SCHEMA,
         "metadata_missing_policy": settings["metadata_missing_policy"],
@@ -87,17 +87,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         **observed,
         "duplicate_rows_preserved": duplicates,
         "no_history_count": int(np.count_nonzero(table.history_ends == 0)),
-        "splits": table.splits(settings["evaluation_days"]),
     }
-    start = plan["splits"][0]["phases"]["test"]["start_ms"]
-    end = plan["splits"][-1]["phases"]["test"]["end_ms"]
-    plan["outside_evaluation"] = {
-        "before_window": len(table.select(end=start, eligible=False)),
-        "final_observed_day": len(table.select(start=end, eligible=False)),
-    }
-    plan["eligible_test_count"] = sum(s["phases"]["test"]["eligible_count"] for s in plan["splits"])
-    if any(p["eligible_count"] == 0 for s in plan["splits"] for p in s["phases"].values()):
-        raise ValueError("rolling partition has no eligible events")
     # Invalidate the shared ready marker before replacing any cohort files.
     write_json(directory / "eligibility.json", {"schema_version": SCHEMA, "status": "blocked"})
     write_jsonl(directory / "events.jsonl", table.rows)
@@ -114,8 +104,7 @@ def prepare_full_cohort(context, *, plan_only=False):
     }
     print(
         f"[Full cohort] users={len(table.users)} events={len(table.rows)} items={len(table.items)} "
-        f"dates={plan['splits'][0]['evaluation_date']}..{plan['splits'][-1]['evaluation_date']} "
-        f"eligible_test_events={plan['eligible_test_count']}",
+        "validation partitions are prepared per Run",
         flush=True,
     )
     if plan_only:
@@ -216,7 +205,7 @@ def load_cohort(directory):
         eligibility.get("schema_version"),
         eligibility.get("status"),
     ) != (SCHEMA, "ready"):
-        raise RuntimeError("full rolling cohort is not ready")
+        raise RuntimeError("full source cohort is not ready")
     cohort = {
         "eligibility": eligibility,
         "plan": read_json(directory / "cohort_plan.json"),

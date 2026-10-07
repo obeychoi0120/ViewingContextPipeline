@@ -1,4 +1,4 @@
-"""Compare graph results from two runs with matched users, events, dates and seeds."""
+"""Compare graph results from two runs with matched users, events, partitions and seeds."""
 
 from __future__ import annotations
 import numpy as np
@@ -9,7 +9,7 @@ from validation.representation_provenance import read_state
 
 
 def compare_graph_runs(context, reference_run_id, *, target=None):
-    from validation.rolling_diagnosis import cluster_bootstrap, collect_metrics
+    from validation.leave_one_out_diagnosis import cluster_bootstrap, collect_metrics
     from validation.steps import validation_config
 
     if reference_run_id == context.run_id:
@@ -30,11 +30,14 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         raise ValueError("run comparison requires at least one Graph target")
     arms = {name: name for name in names}
     cohorts = [load_validation_cohort(ctx) for ctx in (context, reference)]
+    for key in ("protocol", "preprocessing", "source_data_hash"):
+        if cohorts[0]["plan"][key] != cohorts[1]["plan"][key]:
+            raise ValueError(f"run comparison requires identical {key}")
     for filename in ("events", "catalog"):
         if fingerprint(cohorts[0][filename]) != fingerprint(cohorts[1][filename]):
             raise ValueError(f"run comparison requires identical {filename}")
     if cohorts[0]["plan"]["splits"] != cohorts[1]["plan"]["splits"]:
-        raise ValueError("run comparison requires identical evaluation dates")
+        raise ValueError("run comparison requires identical evaluation partitions")
     configs = [validation_config(ctx) for ctx in (context, reference)]
     aggregates = [
         collect_metrics(ctx, config, cohort, arms=arms)
@@ -43,7 +46,7 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     left, counts, left_report = aggregates[0]
     right, other_counts, right_report = aggregates[1]
     grids = [
-        [(r["evaluation_date"], r["seed"], r["arm"]) for r in report["daily"]]
+        [(r["split_hash"], r["seed"], r["arm"]) for r in report["per_seed"]]
         for report in (left_report, right_report)
     ]
     if grids[0] != grids[1] or not np.array_equal(counts, other_counts):

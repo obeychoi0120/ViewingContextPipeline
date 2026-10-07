@@ -51,18 +51,6 @@ def matrix_hash(path):
     return digest.hexdigest()
 
 
-def input_hash(documents, catalog, encoder):
-    return fingerprint(
-        {
-            "catalog": [str(row["item_id"]) for row in catalog],
-            "encoder": encoder,
-            "documents": [
-                {key: row.get(key) for key in ("content_id", "text")} for row in documents
-            ],
-        }
-    )
-
-
 def pending_write(context, branch):
     return state_path(context, branch).with_suffix(".pending")
 

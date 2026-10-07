@@ -27,8 +27,6 @@ l1: kitchen
     ('p-1 - cross-cutting - c1; k1; l1', 'l1'),
     ('p-1 -> cross-cutting -> c1; k1; unknown', 'unknown'),
     ('p-1 - handing - c1; none; none', None),
-    ('p-1 - handing - c1; none', 'unknown'),
-    ('p-1 - handing - c1; none; undeclared receiver; l1', 'l1'),
 ])
 def test_roles_storage_and_summary(tmp_path, line, location):
     record, failure = graph_scene_result({'scene_idx': 0, 'keyframes': []}, PREFIX + line)
@@ -74,3 +72,14 @@ def test_prompt_examples_and_truncation():
     record, failure = graph_scene_result({'scene_idx': 0, 'keyframes': []}, examples[0],
                                          error='graph: output truncated at token limit')
     assert record is None and failure['raw_response'] == examples[0]
+
+
+@pytest.mark.parametrize("line", ["p-1 - handing - c1; none", "p-1 - handing - c1; none; p-1; l1"])
+def test_unsupported_generated_roles_preserve_raw_response(tmp_path, line):
+    text = PREFIX + line
+    record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, text)
+    assert failure is None and record["graph"] == text
+    assert record["semantic_warnings"] == ["INVALID_ACTION_SYNTAX"]
+    path = tmp_path / "video.jsonl"
+    write_scene_records(path, [record])
+    assert read_scene_records(path)[0]["graph"] == text

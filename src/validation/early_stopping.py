@@ -15,7 +15,7 @@ class EarlyStopping:
     def update(self, epoch: int, score: float) -> bool:
         if not math.isfinite(score):
             raise ValueError('validation score must be finite')
-        # Refit still uses the actual maximum, including small improvements.
+        # Checkpoint selection uses the actual maximum, including small improvements.
         if score > self.best_score:
             self.best_epoch, self.best_score = epoch, score
         # Small gains can accumulate relative to the last meaningful improvement.

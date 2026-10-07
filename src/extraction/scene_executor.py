@@ -6,7 +6,6 @@ from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
-from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
     write_progress,
@@ -14,7 +13,7 @@ from extraction.step_support import (
 )
 
 
-def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
+def graph_scene_result(row, text, *, error=None, diagnostics=None):
     """Convert one response without changing artifacts or the raw graph."""
     if error is None and not text.strip():
         error = "model produced an empty graph"
@@ -22,12 +21,6 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None, strict=True):
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
     parse_warning = parsed.error if parsed is not None else None
     warnings = list(parsed.warning) if parsed is not None else []
-    if strict and parsed is not None and parsed.graph is not None:
-        try:
-            validate_graph_structure(parsed.graph)
-        except OutputValidationError as exc:
-            parse_warning = str(exc)
-            warnings = exc.tags
     if error is None and parsed is not None:
         structured = parsed.graph is not None and parse_warning is None
         return {
@@ -167,7 +160,7 @@ class SceneResults:
             task_id=task_id,
             failed=failure is not None,
             raw=record is not None
-            and (record.get("status") == "raw_fallback" or record.get("parse_mode") == "text"),
+            and record.get("parse_mode") == "text",
         )
         return failure is not None
 

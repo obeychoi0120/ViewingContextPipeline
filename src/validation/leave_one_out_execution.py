@@ -6,10 +6,10 @@ import numpy as np
 
 from validation.model import torch
 
-EXECUTION_VERSION = "rolling-vectorized/v1"
+EXECUTION_VERSION = "leave-one-out-vectorized/v1"
 
 
-class RollingExecution:
+class LeaveOneOutExecution:
     def __init__(self, table):
         self.table = table
         self.sequences = {}
@@ -34,7 +34,7 @@ class RollingExecution:
             valid = (torch.isfinite(values) & values.gt(0)).cpu().numpy()
             # Retain the source array so its Python identity cannot be recycled.
             self.popularity[key] = (probabilities, values.log(), valid)
-            # Only selection/refit for the current date need to stay resident.
+            # Only train probabilities for the current split need to stay resident.
             while len(self.popularity) > 2:
                 self.popularity.popitem(last=False)
         self.popularity.move_to_end(key)
@@ -45,9 +45,9 @@ class RollingExecution:
 
 
 def execution_for(table):
-    if not hasattr(table, "_rolling_execution"):
-        table._rolling_execution = RollingExecution(table)
-    return table._rolling_execution
+    if not hasattr(table, "_leave_one_out_execution"):
+        table._leave_one_out_execution = LeaveOneOutExecution(table)
+    return table._leave_one_out_execution
 
 
 def negative_mask(inputs, targets):
@@ -58,7 +58,7 @@ def negative_mask(inputs, targets):
 
 
 def masked_ranks(scores, table, batch):
-    """Full strictly-earlier history, with ascending item-index tie breaking."""
+    """Full preceding sequence history, with ascending item-index tie breaking."""
     if not torch.isfinite(scores).all():
         raise RuntimeError("nonfinite catalog scores")
     target_rows = table.targets[batch] - 1

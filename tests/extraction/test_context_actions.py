@@ -1,4 +1,4 @@
-"""New contract round trips, conservative repairs, and legacy read compatibility."""
+"""New contract round trips, conservative repairs, and unsupported format rejection."""
 import copy
 import json
 
@@ -20,7 +20,7 @@ person-1: person; left-handed
 food-1: sea urchin
 knife-1: knife
 [Actions]
-person-1 - cross-cutting - food-1; knife-1
+person-1 - cross-cutting - food-1; knife-1; unknown
 [End]"""
 
 
@@ -54,12 +54,9 @@ def test_schema_and_reference_integrity(mutation):
     assert failure is None and record["parse_mode"] == "text"
 
 
-def test_storage_and_summary_preserve_structured_raw_and_legacy(tmp_path):
-    legacy = {"entities": [], "relations": [{"subject_id": "old", "predicate": "killed by",
-                                             "object_id": "other"}], "context": ["gameplay"]}
-    validate_graph_structure(legacy)  # No invented Actions or new restrictions on historical data.
+def test_storage_and_summary_preserve_current_structured_and_raw(tmp_path):
     path = tmp_path / "video.jsonl"
-    values = [parsed().graph, legacy, "unstructured observation"]
+    values = [parsed().graph, "unstructured observation"]
     write_scene_records(path, [{"scene_idx": i, "graph": value} for i, value in enumerate(values)])
     records = minimal_graph_records(read_scene_records(path), path)
     observations = json.loads(graph_summary_prompt("{scenes}", records))

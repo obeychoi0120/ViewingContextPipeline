@@ -14,8 +14,8 @@ from validation.config import GraphExecutionConfig  # noqa: E402
 from validation.graph_model import GraphSASRec  # noqa: E402
 from validation.model import SASRec, seed_everything  # noqa: E402
 from validation.profiling import RunProfiler, is_profiling  # noqa: E402
-from validation.rolling_data import EventTable, DAY  # noqa: E402
-from validation.rolling_recommendation import train_epoch, rank_batches  # noqa: E402
+from validation.leave_one_out_data import EventTable, DAY  # noqa: E402
+from validation.leave_one_out_recommendation import train_epoch, rank_batches  # noqa: E402
 
 
 @pytest.fixture(
@@ -29,7 +29,7 @@ def device(request):
 def profiler(path, device="cpu", every=4, *, operators=False):
     path.mkdir(exist_ok=True)
     return RunProfiler(
-        path, {"evaluation_date": "test", "seed": 42, "arm": "graph_qwen"}, device, every,
+        path, {"protocol": "leave_one_out", "split_hash": "test", "seed": 42, "arm": "graph_qwen"}, device, every,
         operators=operators,
     )
 
@@ -94,7 +94,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
             config,
             device,
             profiler=p,
-            phase="selection",
+            phase="train",
             epoch=1,
         )
         results.append(result)
@@ -114,7 +114,7 @@ def test_profile_preserves_training_weights_ranks_and_records_work(
         torch.testing.assert_close(states[0][key], states[2][key], rtol=0, atol=0)
     assert results[0] == results[2] and ranked[0] == ranked[2]
     rows = [r for r in records(tmp_path) if r["session_id"] == p.session]
-    training = [r for r in rows if r.get("phase") == "selection"]
+    training = [r for r in rows if r.get("phase") == "train"]
     assert [r["batch"] for r in training] == [1, 2, 3, 4]
     for row in training:
         assert all(

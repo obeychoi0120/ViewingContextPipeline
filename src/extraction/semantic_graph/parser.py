@@ -5,20 +5,19 @@ from __future__ import annotations
 import re
 
 from extraction.graph_warnings import MISSING_REQUIRED, INVALID_ACTION_SYNTAX, PARSE_ERROR
+from extraction.structured_output import OutputValidationError, validate_graph_structure
 
 from extraction.semantic_graph.json_repair import (
     GraphParseResult,
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v9"
-_REQUIRED_SECTIONS = ("Entities", "Relations", "End")
-# Recognize both relational legacy graphs and Context + Actions graphs.
-_SECTIONS = (*_REQUIRED_SECTIONS, "Context", "Actions")
+GRAPH_PARSER_VERSION = "graph-text/v10"
+_SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
 _DELIMITER = re.compile(r"-+>|=+>|→|⇒|－＞|(?<=\s)[-–—](?=\s)")
-_RELATION_MARK = re.compile(r"[<>=→⇒←↔⇐⟵⟷⟺－＞]|(?<=\s)[-–—](?=\s)")
+_ACTION_MARK = re.compile(r"[<>=→⇒←↔⇐⟵⟷⟺－＞]|(?<=\s)[-–—](?=\s)")
 
 
 class GraphTextError(ValueError):
@@ -31,9 +30,9 @@ def _header(line, *, repair):
     if not repair:
         return next((name for name in _SECTIONS if line == f"[{name}]"), None)
     match = re.fullmatch(
-        r"(?:\[\s*(entities|relations|context|actions|end)\s*\]"
-        r"|(entities|relations|context|actions|end)\s*[:：]"
-        r"|#{1,6}\s+(entities|relations|context|actions|end)\s*[:：]?)",
+        r"(?:\[\s*(entities|context|actions|end)\s*\]"
+        r"|(entities|context|actions|end)\s*[:：]"
+        r"|#{1,6}\s+(entities|context|actions|end)\s*[:：]?)",
         line,
         re.IGNORECASE,
     )
@@ -66,12 +65,10 @@ def _entity(line, *, repair):
     return {"id": parts[0].strip(), "name": values[0], "attributes": values[1:]}
 
 
-def _relation(line, *, repair):
+def _action_endpoints(line):
     delimiters = list(_DELIMITER.finditer(line))
     if len(delimiters) != 2:
-        raise GraphTextError("expected exactly two unambiguous relation delimiters")
-    if not repair and any(delimiter.group() != "->" for delimiter in delimiters):
-        raise GraphTextError("nonstandard relation delimiter")
+        raise GraphTextError("expected exactly two unambiguous action delimiters")
     left, right = delimiters
     subject = line[: left.start()].strip()
     predicate = line[left.end() : right.start()].strip()
@@ -80,87 +77,12 @@ def _relation(line, *, repair):
         not _ID.fullmatch(subject)
         or not _ID.fullmatch(target)
         or not predicate
-        or _RELATION_MARK.search(predicate)
+        or _ACTION_MARK.search(predicate)
     ):
         raise GraphTextError(
-            "incomplete or ambiguous relation; expected subject -> relation -> object"
+            "incomplete or ambiguous action; expected actor - action - target"
         )
-    return {"subject_id": subject, "predicate": predicate, "object_id": target}
-
-
-def _parse_lines(text, *, repair):
-    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    if _header(first, repair=repair) == "Context" or any(
-        _header(line.strip(), repair=repair) == "Actions" for line in text.splitlines()
-    ):
-        return _parse_context_actions(text, repair=repair)
-    sections = {}
-    current = None
-    seen = 0
-    for number, source in enumerate(text.splitlines(), 1):
-        line = source.strip()
-        if not line:
-            continue
-        if current == "End":
-            raise GraphTextError(f"line {number}: content after [End]")
-        if _BULLET.match(line):
-            if not repair:
-                raise GraphTextError(f"line {number}: unexpected list marker")
-            line = _BULLET.sub("", line, count=1)
-        header = _header(line, repair=repair)
-        if header:
-            legacy_context = header == "Context" and current == "Relations"
-            if not legacy_context and (
-                seen >= len(_REQUIRED_SECTIONS) or header != _REQUIRED_SECTIONS[seen]
-            ):
-                raise GraphTextError(f"line {number}: duplicate or out-of-order section {header}")
-            current = header
-            if header != "End":
-                sections[header] = []
-            if not legacy_context:
-                seen += 1
-            continue
-        if (
-            _header(line, repair=True)
-            or (re.fullmatch(r"\[.*\]", line) and line != "[]")
-            or line.startswith(("```", "#"))
-        ):
-            raise GraphTextError(f"line {number}: unexpected section or formatting")
-        if current is None:
-            raise GraphTextError(f"line {number}: expected [Entities]")
-        sections[current].append((number, line))
-    # EOF after Relations (or legacy Context) is a valid terminator. Token-limit
-    # truncation is detected from backend finish reasons by the scene executor.
-    if seen < len(_REQUIRED_SECTIONS) - 1:
-        raise GraphTextError(
-            f"missing [{_REQUIRED_SECTIONS[seen]}] section or terminator", MISSING_REQUIRED
-        )
-
-    graph = {}
-    for section, rows in sections.items():
-        if not rows:
-            raise GraphTextError(f"empty [{section}]; write none explicitly")
-        empty = [line == "none" or repair and line.casefold() in {"none", "[]"} for _, line in rows]
-        if any(empty):
-            if len(rows) != 1:
-                raise GraphTextError(f"[{section}]: none mixed with other items")
-            graph[section.lower()] = []
-            continue
-        values = []
-        for number, line in rows:
-            try:
-                if section == "Entities":
-                    values.append(_entity(line, repair=repair))
-                elif section == "Relations":
-                    values.append(_relation(line, repair=repair))
-                else:
-                    if not repair and line.casefold() in {"none", "[]"}:
-                        raise GraphTextError("nonstandard empty section marker")
-                    values.append(line)
-            except GraphTextError as exc:
-                raise GraphTextError(f"line {number}: {exc}", exc.tag) from exc
-        graph[section.lower()] = values
-    return graph
+    return subject, predicate, target
 
 
 def _action(line, *, repair):
@@ -172,24 +94,17 @@ def _action(line, *, repair):
 
 def _action_fields(line, *, repair):
     parts = re.split(r"[;；]" if repair else ";", line)
-    if not 2 <= len(parts) <= 4:
+    if len(parts) != 3:
         raise GraphTextError("expected actor - action - target; tool; location")
-    body, tool = (part.strip() for part in parts[:2])
-    optional = [part.strip() for part in parts[2:]]
-    if not repair and (len(optional) != 1 or not optional[0]):
-        raise GraphTextError("location slot required")
-    # v8 has one trailing location slot. Complete v7 lines have two trailing
-    # slots: ignore receiver and retain location. Do not infer roles from kinds.
-    location = optional[-1] if optional and optional[-1] else "unknown"
+    body, tool, location = (part.strip() for part in parts)
     if repair:
-        relation = _relation(body, repair=True)
-        actor, action, target = (relation[key] for key in ("subject_id", "predicate", "object_id"))
+        actor, action, target = _action_endpoints(body)
     else:
         fields = body.split(" - ")
         if len(fields) != 3:
             raise GraphTextError("expected exactly two ' - ' action delimiters")
         actor, action, target = (part.strip() for part in fields)
-        if not action or _RELATION_MARK.search(action):
+        if not action or _ACTION_MARK.search(action):
             raise GraphTextError("empty or ambiguous action")
     if any(not _ID.fullmatch(value) for value in (actor, target, tool, location)):
         raise GraphTextError("expected endpoint IDs, none, or unknown")
@@ -281,25 +196,8 @@ def _parse_context_actions(text, *, repair):
     return graph
 
 
-def _restore_action_defaults(graph):
-    """Drop deprecated receiver and default location; validate other values later."""
-    actions = graph.get("actions")
-    changed = False
-    if isinstance(actions, list):
-        for action in actions:
-            if isinstance(action, dict):
-                if "receiver" in action:
-                    action.pop("receiver")
-                    changed = True
-                for key, default in (("location", "unknown"),):
-                    if key not in action:
-                        action[key] = default
-                        changed = True
-    return changed
-
-
 def parse_or_repair_graph(text: str) -> GraphParseResult:
-    """Consume the whole response; retain JSON compatibility for complete old outputs."""
+    """Consume complete current Actions graphs without inventing or removing fields."""
     raw = str(text or "")
     if not raw.strip():
         return GraphParseResult(None, error="empty VLM output", warning=(MISSING_REQUIRED,))
@@ -308,15 +206,22 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
         if unwrapped.startswith("{"):
             parsed = parse_json_graph(unwrapped)
             if parsed.graph is not None:
-                defaulted = _restore_action_defaults(parsed.graph)
-                if defaulted or unwrapped != raw.strip():
+                try:
+                    validate_graph_structure(parsed.graph)
+                except OutputValidationError as exc:
+                    return GraphParseResult(None, error=str(exc), warning=tuple(exc.tags))
+                if unwrapped != raw.strip():
                     return GraphParseResult(parsed.graph, parse_mode="repaired")
             return parsed
         try:
-            graph = _parse_lines(raw, repair=False)
+            graph = _parse_context_actions(raw, repair=False)
+            mode = "native"
         except GraphTextError:
-            graph = _parse_lines(unwrapped, repair=True)
-            return GraphParseResult(graph, parse_mode="repaired")
-        return GraphParseResult(graph, parse_mode="native")
+            graph = _parse_context_actions(unwrapped, repair=True)
+            mode = "repaired"
+        validate_graph_structure(graph)
+        return GraphParseResult(graph, parse_mode=mode)
+    except OutputValidationError as exc:
+        return GraphParseResult(None, error=str(exc), warning=tuple(exc.tags))
     except GraphTextError as exc:
         return GraphParseResult(None, error=f"graph text repair failed: {exc}", warning=(exc.tag,))

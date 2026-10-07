@@ -4,27 +4,6 @@ from validation.config import ValidationConfig
 from validation.model import SASRec, torch
 
 
-def popularity_probabilities(
-    sequences: list[list[int]],
-    item_count: int,
-    power: float,
-) -> np.ndarray:
-    counts = np.zeros(item_count + 1, dtype=np.float64)
-    for sequence in sequences:
-        for item_id in sequence:
-            if not 1 <= item_id <= item_count:
-                raise ValueError(f"item id outside catalog: {item_id}")
-            counts[item_id] += 1
-    powered = np.power(counts[1:], power)
-    denominator = float(powered.sum())
-    if not np.isfinite(denominator) or denominator <= 0:
-        raise RuntimeError("cannot build popularity probabilities from empty training data")
-    probabilities = np.zeros(item_count + 1, dtype=np.float32)
-    probabilities[0] = 1.0
-    probabilities[1:] = (powered / denominator).astype(np.float32)
-    return probabilities
-
-
 def _arm_kind(branch: str) -> str:
     if branch in {"meta", "metadata"}:
         return "metadata"

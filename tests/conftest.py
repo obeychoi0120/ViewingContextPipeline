@@ -11,30 +11,31 @@ import pytest
 import yaml
 
 from pipeline_runtime import RunContext
-from validation.rolling_data import DAY
+from validation.leave_one_out_data import DAY
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH = {
+    "medium": "live_action", "format": "narrative", "topics": [],
     "entities": [
         {"id": "person1", "name": "person", "attributes": ["red jacket"]},
         {"id": "person2", "name": "person", "attributes": ["blue shirt"]},
     ],
-    "relations": [
-        {"subject_id": "person1", "predicate": "looking at", "object_id": "person2"},
-        {"subject_id": "person2", "predicate": "waving to", "object_id": "person1"},
+    "actions": [
+        {"actor": "person1", "action": "looking at", "target": "person2", "tool": None, "location": None},
+        {"actor": "person2", "action": "waving to", "target": "person1", "tool": None, "location": None},
     ],
-    "context": ["possibly a casual greeting"],
 }
 PROSE = "A person in a red jacket looks at a person in a blue shirt, who waves back. The interaction appears to be a casual greeting."
-GRAPH_TEXT = """[Entities]
+GRAPH_TEXT = """[Context]
+medium: live_action
+format: narrative
+topics: none
+[Entities]
 person1: person; red jacket
 person2: person; blue shirt
-[Relations]
-person1 -> looking at -> person2
-person2 -> waving to -> person1
-[Context]
-possibly a casual greeting
-[End]"""
+[Actions]
+person1 - looking at - person2; none; none
+person2 - waving to - person1; none; none"""
 
 
 @pytest.fixture
@@ -145,13 +146,13 @@ def generate_all():
                 context,
                 arm=name,
                 model=source.model,
-                schema=f"prompts/scene_{kind}_v{4 if kind == 'graph' else 2}.md",
+                schema=f"prompts/scene_{kind}_v{8 if kind == 'graph' else 2}.md",
             )
             steps.summarize(
                 context,
                 arm=name,
                 model=summary_model,
-                schema=f"prompts/summary_{kind}_v5.md",
+                schema=f"prompts/summary_{kind}_v{8 if kind == 'graph' else 5}.md",
             )
 
     return generate

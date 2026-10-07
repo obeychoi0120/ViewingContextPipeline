@@ -18,10 +18,6 @@ from validation.representation_provenance import (
 )
 
 
-class ValidationStepError(RuntimeError):
-    pass
-
-
 def validation_config(context):
     return build_validation_config(
         run_id=context.run_id,
@@ -97,7 +93,7 @@ def embed_representations(context, *, force=False, target=None, representation_m
     for name, arm in arms.items():
         docs = documents_for_arm(context, cohort, arm)
         signature = representation_signature(
-            context, catalog, arm, docs, selection_hash=cohort["manifest"]["selection_hash"]
+            context, catalog, arm, docs
         )
         inputs[name] = (docs, signature)
         state = read_state(context, name)
@@ -230,7 +226,7 @@ def run_recommendation(
         context = graph_context(context, scene_aggregation)
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
-    from validation.rolling_recommendation import run_rolling
+    from validation.leave_one_out_recommendation import run_leave_one_out
 
     log_step_start(
         context,
@@ -242,7 +238,7 @@ def run_recommendation(
         profile_operators=profile_operators,
     )
     context.initialize()
-    return run_rolling(
+    return run_leave_one_out(
         context,
         force=force,
         workers_per_gpu=workers_per_gpu,
@@ -274,7 +270,7 @@ def run_diagnosis(
         )
     if target is None:
         raise ValueError("--target is required; select arms explicitly")
-    from validation.rolling_diagnosis import diagnose
+    from validation.leave_one_out_diagnosis import diagnose
 
     log_step_start(context, "run-diagnosis", force=force, target=target)
     return diagnose(context, target=target, compare_run_id=compare_run_id)

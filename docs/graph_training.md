@@ -4,9 +4,9 @@
 
 ## 실행
 
-로컬 BGE 가중치와 torch·transformers 환경을 사용합니다. `pip install -e ".[train,embedding]"`로 의존성을 설치할 수 있습니다. BGE는 GPU별 고유 문자열 분할, 추천은 GPU별 독립 날짜·seed·Arm 조합으로 실행하며 단일 모델 DDP는 사용하지 않습니다.
+로컬 BGE 가중치와 torch·transformers 환경을 사용합니다. `pip install -e ".[train,embedding]"`로 의존성을 설치할 수 있습니다. BGE는 GPU별 고유 문자열 분할, 추천은 GPU별 독립 seed·Arm 조합으로 실행하며 단일 모델 DDP는 사용하지 않습니다.
 
-기존 Run의 추천 산출물을 보존하려면 새 Run ID와 config snapshot을 사용하십시오. 아래 명령은 전체 학습을 실행하므로 이 구현 검증에서는 실행하지 않았습니다.
+기존 rolling 결과는 새 `validation/leave_one_out/` 경로와 분리되어 보존됩니다. 같은 leave-one-out 결과를 보존하며 조건을 바꿀 때는 새 Run ID와 config snapshot을 사용하십시오. 아래 명령은 전체 학습을 실행하므로 이 구현 검증에서는 실행하지 않았습니다.
 
 ```bash
 RUN_ID="새_Run_ID"
@@ -29,13 +29,13 @@ Text는 `--representation-mode text`를 사용하며 Description Arm은 text에�
 | Text Graph·Desc | 제목 BGE 1024 → Linear 128; Summary BGE 1024 → Linear 384 → concat 512 → R |
 | Graph | 네 성분의 독립 Linear 1024→128 → Action 역할 결합 → Scene concat 512 → R_scene → 유효 Scene Mean |
 
-Graph의 네 Projection은 Title·Entities·Actions·Context마다 독립적이고 모든 Scene에서 공유됩니다. 제목은 영상당 한 번 projection합니다. 각 Action은 `[action, actor, target, tool, location]`의 640차원 concat에서 `a + ReLU(Linear(640,128)(concat))`으로 보정합니다. 역할 연결의 Entity projection을 사용하고 `none`과 `unknown`은 역할별 별도 학습 가능한 상태 벡터를 사용합니다. receiver는 무시하며 Entity→Action 한 번만 전달합니다. 역방향 갱신·node-type embedding·다층 message passing은 없습니다.
+Graph의 네 Projection은 Title·Entities·Actions·Context마다 독립적이고 모든 Scene에서 공유됩니다. 제목은 영상당 한 번 projection합니다. 각 Action은 `[action, actor, target, tool, location]`의 640차원 concat에서 `a + ReLU(Linear(640,128)(concat))`으로 보정합니다. 역할 연결의 Entity projection을 사용하고 `none`과 `unknown`은 역할별 별도 학습 가능한 상태 벡터를 사용합니다. 현재 입력에는 receiver가 없으며 Entity→Action 한 번만 전달합니다. 역방향 갱신·node-type embedding·다층 message passing은 없습니다.
 
 Scene은 `[title; Entity mean; 보정된 Action mean; Context]` 순서로 concat하고 Scene MLP를 적용한 **뒤** 평균냅니다. Entity나 Action이 없으면 해당 슬롯은 0입니다. Scene이 없고 제목만 있으면 `[title; 0; 0; 0]`을 Scene MLP에 넣습니다. 제목과 유효 Scene 모두 없거나 padding이면 최종 Item은 정확히 0입니다. Graph에는 pooling 뒤 Item MLP가 없습니다.
 
 Text의 누락 성분은 projection 이후 0으로 마스킹하며, 전체 누락과 padding은 Item MLP 이후 다시 0으로 마스킹합니다. 부분 누락 슬롯은 MLP를 거친 후에도 0이어야 하는 것은 아닙니다.
 
-BGE Large 1024차원 float32 특징은 동결됩니다. 기존 Scene 스키마, Entity·Action 인덱스, edge·결측 배열은 유지하며 입력 계약은 `role-graph-inputs/v3`입니다. receiver 슬롯도 저장 형식 호환성을 위해 유지합니다. raw·warning·구조 오류 Scene은 제외하고 정상적인 Action 없는 Scene·고립 Entity는 유지합니다. location 누락은 unknown이며 Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
+BGE Large 1024차원 float32 특징은 동결됩니다. 현재 compact Scene·Context/Entities/Actions를 읽으며 Entity·Action 인덱스, edge·결측 배열의 shape는 유지합니다. 입력 계약은 `role-graph-inputs/v4`입니다. receiver 예약 슬롯은 모델/checkpoint shape를 위해 유지하고 항상 absent 상태입니다. Relations·receiver가 있는 기존 Scene은 오류로 거부하고 원본은 보존합니다. raw·warning·구조 오류 Scene은 제외하고 정상적인 Action 없는 Scene·고립 Entity는 유지합니다. location은 명시해야 하며 `unknown`과 `none`을 구분합니다. Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
 
 Entity·Action·Context는 각각 별도로 BGE에 입력합니다. Entity는 `Name` 다음 `Attributes`, Context는 `Format`·`Medium`·`Topics` 순서로 줄바꿈하며, Action은 동작 텍스트만 사용합니다. Attributes와 Topics 원소는 기존처럼 정렬하고 `, `로 연결합니다. 빈 목록은 필드명과 콜론만 남깁니다. 예시 입력은 다음과 같습니다.
 
@@ -56,11 +56,11 @@ Topics: cooking, food preparation
 
 Context는 위 세 필드를 합친 문자열 하나를 Scene별로 임베딩합니다. `v2`의 JSON 문자열 입력 캐시는 새 입력으로 재사용하지 않으며, 입력 hash 변경으로 해당 추천 결과와 체크포인트도 구분됩니다. 새 Run에서 Graph embedding → 추천 학습 → 진단을 다시 실행하십시오. 기존 추출 Scene과 Text Summary 입력은 그대로 사용할 수 있습니다. 기존 Run 산출물은 이 코드 변경으로 수정하지 않습니다.
 
-학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss·후보 마스킹·이력 길이 10·rolling selection/refit/test는 유지합니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
+학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss와 이력 길이 10을 유지하며 사용자별 leave-one-out 분할과 validation 최고 checkpoint를 사용합니다. 원본 이력 5개 이상, 최근 13개 보존, 마지막 2개 보류로 구성합니다. test 입력에는 validation이 포함되며 refit은 수행하지 않습니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
 
 ## 캐시 및 packed 실행
 
-Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph gnn은 `sasrec-role-graph/v10`, 학습 구현은 `shared-scenes-training-evaluation/v6`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더가 동일한 BGE 입력 캐시는 재사용합니다.
+Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph gnn은 `sasrec-role-graph/v10`, 학습 구현은 `shared-scenes-leave-one-out-training/v1`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더·현재 입력 계약이 동일한 BGE 입력 캐시는 재사용합니다. 이전 Graph 입력 계약 캐시는 새 경로에서 재생성합니다.
 
 배치 준비에서 Action별 actor·target·tool·location의 Entity 인덱스와 결측 상태를 계산합니다. 학습 중 가중치나 상태 벡터는 준비 단계에서 계산하지 않습니다. GPU 고정 특징 캐시, 영상 chunk, checkpoint, 평가 catalog 캐시는 유지하며 optimizer step마다 Item cache를 폐기합니다. checkpoint 재계산은 이미 준비한 정적 입력의 신경망 연산만 반복합니다.
 
@@ -70,12 +70,12 @@ Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph 
 
 | Run 아래 위치 | 내용 |
 |---|---|
-| `validation/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
-| `validation/recommendations/graph/mean/<date>/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
-| `validation/diagnosis/graph_mean_diagnosis.json` | rolling-diagnosis/v3 지표·paired 통계·실행 판정 |
-| `validation/diagnosis/text_diagnosis.json` | Text 진단 |
+| `validation/leave_one_out/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
+| `validation/leave_one_out/recommendations/graph/mean/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
+| `validation/leave_one_out/diagnosis/graph_mean_diagnosis.json` | leave-one-out-diagnosis/v1 지표·paired 통계·실행 판정 |
+| `validation/leave_one_out/diagnosis/text_diagnosis.json` | Text 진단 |
 
-기존 Attention 산출물과 과거 Run은 수정·이동하지 않습니다. 같은 Run의 기존 결과 경로에서 재학습하면 해당 조합을 대체하므로 보존 실험에는 새 Run을 사용하십시오. `--compare-run-id`는 선택한 경로·aggregation의 결과만 읽습니다.
+기존 Attention 산출물과 과거 Run은 수정·이동하지 않습니다. 같은 Run의 기존 결과 경로에서 재학습하면 해당 조합을 대체하므로 보존 실험에는 새 Run을 사용하십시오. `--compare-run-id`는 선택한 경로·aggregation의 결과만 읽고 프로토콜·전처리·원본·분할·catalog·seed가 다른 Run을 거절합니다.
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation
@@ -107,12 +107,12 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 
 Profiler는 `graph_encoder/scene_similarity`, `graph_encoder/scene_gcn`과 `workload.scene_pairs`를 기록합니다. Checkpoint 재계산이 수집되면 해당 연산·장면 쌍도 누적됩니다.
 
-GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 MLP를 1층으로 변경한 현재 계약은 Text v8·mean v9·gnn v10이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v3`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
+GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 MLP를 1층으로 변경한 현재 계약은 Text v8·mean v9·gnn v10이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v4`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
 
 | 경로 | 신규 산출물 |
 |---|---|
-| 추천 | `validation/recommendations/graph/gnn/<date>/seed_<seed>/<arm>/` |
-| 진단 | `validation/diagnosis/graph_gnn_diagnosis.json` |
+| 추천 | `validation/leave_one_out/recommendations/graph/gnn/seed_<seed>/<arm>/` |
+| 진단 | `validation/leave_one_out/diagnosis/graph_gnn_diagnosis.json` |
 
 유효한 현재 Graph 입력이 있다면 재임베딩 없이 추천부터 실행합니다. GNN은 selection부터 새 학습이며 기존 mean·과거 attention 산출물은 보존합니다.
 
@@ -263,8 +263,8 @@ Attention 점수 MLP는 384→128→1이며, 장면 순서 정보나 장면 간 
 
 ## 추천 학습 병목 프로파일링
 
-`run-recommendation`은 기본 로그에 selection epoch의 학습·validation 시간과 학습 events/s,
-refit epoch별 시간·events/s, 최종 test 시간을 표시합니다. 더 자세한 측정은
+`run-recommendation`은 기본 로그에 train epoch의 학습·validation 시간과 학습 events/s,
+최적 checkpoint 복원 후 test 시간을 표시합니다. 더 자세한 측정은
 **`--profile-every N`**으로 켭니다. text/graph 모두 지원하며 다른 step에서는 거부합니다.
 
 ```bash
@@ -273,7 +273,7 @@ python -m validation run-recommendation \
   --target graph_qwen --workers-per-gpu 1 --profile-every 100
 ```
 
-각 selection/refit epoch와 validation/test에서 **첫 3개 배치 및 N의 배수 배치**를 측정합니다.
+각 train epoch와 validation/test에서 **첫 3개 배치 및 N의 배수 배치**를 측정합니다.
 `--profile-every 1`은 모든 배치를 측정합니다. 모델 초기화·학습 입력 사전 준비·평가 catalog 생성·
 최종 catalog/checkpoint 저장은 프로파일링이 켜져 있으면 매번 측정합니다.
 각 평가의 catalog 생성은 배치별 추천 점수 계산과 별도 레코드입니다.
@@ -343,7 +343,7 @@ artifacts/runs/<RUN_ID>/validation/recommendations/
 ### Projection 역전파 operator 측정
 
 `--profile-every`에 **`--profile-operators`**를 함께 지정하면 각 조합/session에서
-첫 번째 측정 가능한 selection/refit 학습 batch 3 이상을 한 번만 PyTorch profiler로
+첫 번째 측정 가능한 train batch 3 이상을 한 번만 PyTorch profiler로
 기록합니다. 일반적인 배치 수에서는 selection epoch 1 batch 3입니다. epoch당 배치 수가
 3 미만이면 operator trace는 생성되지 않습니다. 일반 표본 로그는 기존 간격대로 유지합니다.
 
@@ -612,3 +612,19 @@ python -m validation run-diagnosis --run-id 260928_v7 --representation-mode grap
 ```
 
 Graph 입력 계약은 그대로입니다. 입력 파일·제목·BGE가 바뀌지 않았다면 재임베딩하지 않습니다. 이전 Gemini 프로파일에서 catalog 전체 Graph가 비어 있었으므로, 전체 실험 전에 해당 입력의 `statistics.json`에서 유효 장면 및 제외 사유를 확인해야 합니다. v4 모델 변경이 그 입력 문제를 해결하지는 않습니다.
+
+## Leave-one-out 전환 (2026-10-07)
+
+현재 평가 조건은 위 leave-one-out 계약입니다. 문서에 남은 과거 rolling·selection/refit 검증 기록은 당시 결과이며 새 평가 방식의 전체 데이터 성능을 입증하지 않습니다. 같은 Run의 기존 extraction 파일을 사용하고 새 validation 경로에서 특징 준비·학습·진단을 실행할 수 있습니다. 날짜가 없는 3 seed별 학습 결과를 사용자 평균으로 집계하며, 기존 paired bootstrap·Bonferroni 비교군을 유지합니다.
+
+Graph 최적 checkpoint를 복원한 직후 Item/catalog 캐시를 폐기하고 test catalog를 다시 계산합니다. `training.json`에는 `execution.graph_training`과 train/validation/checkpoint_restore/test 시간을 기록합니다. profiler는 train·validation·test의 첫 3개 배치와 N의 배수 배치를 측정하며, operator trace는 train batch 3 이상에서 수집합니다. 기존 rolling checkpoint는 새 프로토콜·분할·학습 구현 identity와 schema 검증을 통과할 수 없습니다.
+
+2026-10-07 구현 검증: 현재 VM의 `vc_cloud`에서 CPU·단일 스레드 전체 pytest **284개**가 통과했습니다. 이력 4/5/13/14개, 비정렬 원본·동일 timestamp·중복 보존·원본 매핑, holdout 전용 아이템과 train 빈도 분리, 중간 최적 epoch·동점의 Text/mean/GNN checkpoint 및 catalog 복원, 3 seed × 6 Arm 집계·직렬/병렬·중단 복구·캐시 불일치·기존 rolling 파일 보존을 검사했습니다. Ruff와 `git diff --check`도 통과했습니다.
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' python -m pytest -q
+python -m ruff check src tests
+git diff --check
+```
+
+현재 VM에는 설정된 원본 CSV가 없으므로 실제 사용자·아이템 감소 수와 전체 GPU 실험 성능은 미검증입니다. 원본 환경에서 `prepare-cohort`와 `embed-representations`를 실행하면 해당 Run의 `reports/leave_one_out_cohort.{json,md}`에 전처리 수치와 fingerprint를 저장합니다. 이번 전환은 전처리·분할·checkpoint 평가 정책을 정렬한 것이며 논문 성능의 완전 재현을 의미하지 않습니다.

@@ -40,5 +40,5 @@ def target_scope(arms, *, config=None):
     }
 
 
-# Bump for changes to selection/refit, loss, masking, ranking, or metric semantics.
-TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-training-evaluation/v6"
+# Bump for changes to partition/checkpoint selection, loss, masking, ranking, or metric semantics.
+TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-leave-one-out-training/v1"

@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "tests" / "validation"))
 from graph_fixture import synthetic_store  # noqa: E402
 from validation.graph_model import GraphSASRec  # noqa: E402
 from validation.model import torch, seed_everything  # noqa: E402
-from validation.rolling_execution import negative_mask  # noqa: E402
+from validation.leave_one_out_execution import negative_mask  # noqa: E402
 
 
 def model(store, aggregation):

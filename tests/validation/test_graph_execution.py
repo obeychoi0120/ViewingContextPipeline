@@ -12,7 +12,7 @@ from graph_fixture import synthetic_store  # noqa: E402
 from validation.graph_batching import PackedGraphStore  # noqa: E402
 from validation.graph_model import GraphSASRec, SceneRoleEncoder, graph_batch  # noqa: E402
 from validation.config import GraphExecutionConfig  # noqa: E402
-from validation.rolling_execution import negative_mask  # noqa: E402
+from validation.leave_one_out_execution import negative_mask  # noqa: E402
 
 
 @pytest.fixture(

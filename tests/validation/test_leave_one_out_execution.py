@@ -8,11 +8,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import rolling_reference as reference  # noqa: E402
-from validation import rolling_recommendation as optimized  # noqa: E402
+import leave_one_out_reference as reference  # noqa: E402
+from validation import leave_one_out_recommendation as optimized  # noqa: E402
 from validation.model import SASRec, seed_everything  # noqa: E402
-from validation.rolling_data import DAY, EventTable  # noqa: E402
-from validation.rolling_execution import masked_ranks  # noqa: E402
+from validation.leave_one_out_data import DAY, EventTable  # noqa: E402
+from validation.leave_one_out_execution import masked_ranks  # noqa: E402
 from validation.scoring import mask_history, rank_of_target  # noqa: E402
 
 pytestmark = pytest.mark.torch

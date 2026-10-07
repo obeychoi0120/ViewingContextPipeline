@@ -15,13 +15,13 @@ def scene():
     return {'medium': 'live_action', 'format': 'demonstration', 'topics': ['cooking'],
             'entities': [{'id': 'p', 'name': 'cook', 'attributes': ['red apron']},
                          {'id': 'c', 'name': 'carrot', 'attributes': []}],
-            'actions': [{'actor': 'p', 'action': 'cutting', 'target': 'c', 'tool': None}]}
+            'actions': [{'actor': 'p', 'action': 'cutting', 'target': 'c', 'tool': None, 'location': 'unknown'}]}
 
 
 def write_scenes(context, cid, graphs):
     path = context.scene_arm_dir('graph_qwen') / f'{cid}.jsonl'
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(''.join(json.dumps({'content_id': cid, 'scene_idx': i, 'scene_graph': graph}) + '\n'
+    path.write_text(''.join(json.dumps({'content_id': cid, 'scene_idx': i, 'tokens': None, 'warning': [], 'scene_graph': graph}) + '\n'
                             for i, graph in enumerate(graphs)))
     return path
 
@@ -128,7 +128,7 @@ def test_invalid_warning_variable_size_and_cache_invalidation(graph_data):
     invalid['actions'][0]['target'] = 'missing'
     p = write_scenes(context, cid, [large, invalid, scene()])
     rows = [json.loads(line) for line in p.read_text().splitlines()]
-    rows[2]['warning'] = 'bad output'
+    rows[2]['warning'] = ['INVALID_REFERENCE']
     p.write_text('\n'.join(map(json.dumps, rows)))
     _, arrays, stats = build_input(context, cohort, arm)
     assert arrays['scene_offsets'][1] == 40
@@ -191,11 +191,11 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
 
 
 @pytest.mark.parametrize('pool', ['mean', 'gnn'])
-def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
+def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     torch = pytest.importorskip('torch')
     from validation.steps import validation_config, run_diagnosis
-    from validation.rolling_data import EventTable
-    from validation.rolling_recommendation import (run_combination, prepare_split, combination_dir,
+    from validation.leave_one_out_data import EventTable
+    from validation.leave_one_out_recommendation import (run_combination, prepare_split, combination_dir,
                                                    combination_complete)
     from validation.representation_provenance import recommendation_identity
     from validation.selection import load_validation_cohort, training_signature
@@ -207,14 +207,14 @@ def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     cohort = load_validation_cohort(context)
     table = EventTable(cohort['events'])
     split = cohort['plan']['splits'][0]
-    identity = {'run_id': context.run_id, 'evaluation_date': split['evaluation_date'],
+    identity = {'run_id': context.run_id, 'protocol': 'leave_one_out', 'split_hash': split['split_hash'],
                 'seed': config.model.seeds[0], 'arm': 'graph_qwen_meta',
                 'deterministic': config.model.deterministic,
                 'training_input_hash': training_signature(context, cohort, config),
                 **recommendation_identity(context, 'graph_qwen_meta')}
     prepared = prepare_split(table, split)
     run_combination(context, config, table, split, identity, 'graph_qwen_meta', prepared, torch.device('cpu'))
-    directory = combination_dir(context, split['evaluation_date'], identity['seed'], identity['arm'])
+    directory = combination_dir(context, identity['seed'], identity['arm'])
     assert combination_complete(directory, identity, len(prepared[0]['test']))
     assert recommendation_cache.valid_bundle(directory, identity, table, split)
     legacy = {**identity, 'graph_architecture':
@@ -237,27 +237,27 @@ def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     with torch.no_grad():
         np.testing.assert_allclose(model.catalog_vectors().numpy(), np.load(directory / 'catalog_vectors.npy'),
                                    atol=1e-6)
-    # Diagnose a complete one-day/one-seed miniature grid with existing validation logic.
+    # Diagnose a complete one-seed miniature grid with the shared validation logic.
     config.model.seeds = [identity['seed']]
     mini = copy.deepcopy(cohort)
     mini['plan']['splits'] = [split]
     mini['plan']['eligible_test_count'] = len(prepared[0]['test'])
     monkeypatch.setattr('validation.selection.load_validation_cohort', lambda *a, **k: mini)
-    monkeypatch.setattr('validation.rolling_diagnosis.load_validation_cohort', lambda *a, **k: mini)
+    monkeypatch.setattr('validation.leave_one_out_diagnosis.load_validation_cohort', lambda *a, **k: mini)
     monkeypatch.setattr('validation.steps.validation_config', lambda ctx: config)
-    monkeypatch.setattr('validation.rolling_diagnosis.training_signature', lambda *a: identity['training_input_hash'])
+    monkeypatch.setattr('validation.leave_one_out_diagnosis.training_signature', lambda *a: identity['training_input_hash'])
     reuse = {'run_id': context.run_id, 'local': 0, 'shared': 0, 'generated': 1}
     (context.recommendations_dir / 'reuse.json').write_text(json.dumps(reuse))
     assert run_diagnosis(context, target=['graph_qwen_meta'], representation_mode='graph',
                          scene_aggregation=pool)['status'] == 'pass'
     diagnosis = json.loads(context.diagnosis_path.read_text())
-    assert diagnosis['schema_version'] == 'rolling-diagnosis/v3'
+    assert diagnosis['schema_version'] == 'leave-one-out-diagnosis/v1'
     assert 'graph_inputs' not in diagnosis
     assert diagnosis['recommendations']['combination_count'] == 1
     assert diagnosis['recommendations']['reuse'] == reuse
     assert diagnosis['statistics']['status'] == 'computed'
     assert diagnosis['runtime_decision'] == {'status': 'pass', 'errors': []}
-    assert diagnosis['paper_reference']['metadata_hr10'] == 0.046
+    assert 'paper_reference' not in diagnosis
 
 
 def test_title_order_and_missing_inputs(graph_data):
@@ -299,9 +299,9 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     from validation.steps import validation_config
     from validation.selection import load_validation_cohort, training_signature
     from validation.representation_provenance import recommendation_identity
-    from validation.rolling_workers import run_parallel
-    from validation.rolling_recommendation import combination_complete, combination_dir, phase_ids
-    from validation.rolling_data import EventTable
+    from validation.leave_one_out_workers import run_parallel
+    from validation.leave_one_out_recommendation import combination_complete, combination_dir, phase_ids
+    from validation.leave_one_out_data import EventTable
     pytest.importorskip('torch')
     context, _ = graph_data
     cohort = load_validation_cohort(context)
@@ -309,7 +309,7 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     config = validation_config(context)
     jobs = []
     for seed in config.model.seeds[:2]:
-        identity = {'run_id': context.run_id, 'evaluation_date': split['evaluation_date'],
+        identity = {'run_id': context.run_id, 'protocol': 'leave_one_out', 'split_hash': split['split_hash'],
                     'seed': seed, 'arm': 'graph_qwen',
                     'deterministic': config.model.deterministic,
                     'training_input_hash': training_signature(context, cohort, config),
@@ -318,7 +318,7 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     with tqdm(total=2, file=io.StringIO()) as progress:
         assert run_parallel(context, jobs, ['cpu', 'cpu'], progress) == 2
     for split, identity, branch in jobs:
-        directory = combination_dir(context, split['evaluation_date'], identity['seed'], branch)
+        directory = combination_dir(context, identity['seed'], branch)
         assert combination_complete(directory, identity, len(phase_ids(EventTable(cohort['events']), split, 'test')))
 
 
@@ -379,3 +379,32 @@ def test_gnn_contract_reuses_features_but_separates_recommendation_cache(graph_d
     assert recommendation_identity(gnn, 'meta')['graph_model']['gcn_applied'] is False
     assert gnn.recommendations_dir.name == 'gnn'
     assert gnn.diagnosis_path.name == 'graph_gnn_diagnosis.json'
+
+
+def test_previous_graph_input_contract_is_not_reused(graph_data):
+    from validation.graph_inputs import bundle_valid
+
+    context, _ = graph_data
+    directory = context.representations_dir / 'graph_qwen_embeddings'
+    path = directory / 'manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest['version'] = 'role-graph-inputs/v3'
+    path.write_text(json.dumps(manifest))
+    assert not bundle_valid(directory, manifest['input_hash'], 1024)
+
+
+def test_unsupported_scene_blocks_existing_graph_cache_without_mutation(graph_data):
+    from extraction.errors import UnsupportedArtifactError
+
+    context, cohort = graph_data
+    cid = cohort['catalog'][0]['content_id']
+    path = context.scene_arm_dir('graph_qwen') / f'{cid}.jsonl'
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[0]['scene_graph']['actions'][0]['receiver'] = None
+    path.write_text('\n'.join(map(json.dumps, rows)))
+    cache = context.representations_dir / 'graph_qwen_embeddings' / 'manifest.json'
+    original, manifest = path.read_bytes(), cache.read_bytes()
+    with pytest.raises(UnsupportedArtifactError) as error:
+        prepare(context, target=['graph_qwen'])
+    assert str(path) in str(error.value)
+    assert path.read_bytes() == original and cache.read_bytes() == manifest

@@ -47,7 +47,6 @@ def verify_recorded_representations(context, cohort, *, arms=None):
             cohort["catalog"],
             arm,
             docs,
-            selection_hash=cohort["manifest"]["selection_hash"],
         ):
             raise RuntimeError(f"stale representation inputs: {name}; rerun embedding")
 

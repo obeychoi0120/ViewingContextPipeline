@@ -9,19 +9,19 @@ from tqdm import tqdm
 
 from artifact_io import read_json, write_json
 from arm_registry import registry
-from validation.rolling_data import EventTable
+from validation.leave_one_out_data import EventTable
 from validation.selection import (
     load_validation_cohort,
     prepare_validation_cohort,
     training_signature,
 )
-from validation.rolling_recommendation import (
+from validation.leave_one_out_recommendation import (
     combination_dir,
     prepare_split,
     run_combination,
-    run_rolling,
+    run_leave_one_out,
 )
-from validation.rolling_workers import run_parallel
+from validation.leave_one_out_workers import run_parallel
 from validation.steps import validation_config
 
 
@@ -69,7 +69,8 @@ def two_jobs(context):
             split,
             {
                 "run_id": context.run_id,
-                "evaluation_date": split["evaluation_date"],
+                "protocol": "leave_one_out",
+                "split_hash": split["split_hash"],
                 "seed": seed,
                 "arm": "meta",
                 "training_input_hash": training_hash,
@@ -99,7 +100,7 @@ def test_spawned_training_matches_serial_parameters_and_metrics(
     jobs = two_jobs(context)
     stream = io.StringIO()
     children_before = {child.pid for child in mp.active_children()}
-    with tqdm(total=2, desc="Rolling recommendation", file=stream) as progress:
+    with tqdm(total=2, desc="Leave-one-out recommendation", file=stream) as progress:
         assert run_parallel(
             context, jobs, ["cpu", "cpu"], progress,
             profile_every=profile_every, profile_operators=profile_operators,
@@ -127,10 +128,10 @@ def test_spawned_training_matches_serial_parameters_and_metrics(
                 torch.device("cpu"),
             )
             parallel_dir = combination_dir(
-                context, split["evaluation_date"], identity["seed"], identity["arm"]
+                context, identity["seed"], identity["arm"]
             )
             serial_dir = combination_dir(
-                serial, split["evaluation_date"], identity["seed"], identity["arm"]
+                serial, identity["seed"], identity["arm"]
             )
             for filename in ("per_event_metrics.jsonl",):
                 assert (parallel_dir / filename).read_bytes() == (
@@ -155,7 +156,7 @@ def test_spawned_training_matches_serial_parameters_and_metrics(
                 profile_path = parallel_dir / "profile.jsonl"
                 import json
                 rows = [json.loads(line) for line in profile_path.read_text().splitlines()]
-                assert {row.get("phase") for row in rows} >= {"selection", "refit", "validation", "test", "export"}
+                assert {row.get("phase") for row in rows} >= {"train", "validation", "test", "export"}
                 assert "[Profile]" in stream.getvalue()
                 assert rows[0]["operator_profiling"] == profile_operators
                 assert rows[0]["deterministic"] is deterministic
@@ -192,7 +193,7 @@ def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, mon
     }
     assert protected
     monkeypatch.setattr(
-        "validation.rolling_recommendation.worker_devices", lambda *_: ["cpu", "cpu"]
+        "validation.leave_one_out_recommendation.worker_devices", lambda *_: ["cpu", "cpu"]
     )
     pending = []
 
@@ -200,19 +201,19 @@ def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, mon
         pending.extend(jobs)
         return len(jobs)
 
-    monkeypatch.setattr("validation.rolling_workers.run_parallel", capture)
+    monkeypatch.setattr("validation.leave_one_out_workers.run_parallel", capture)
     monkeypatch.setattr(
-        "validation.rolling_recommendation.verify_representations", lambda *a, **k: None
+        "validation.leave_one_out_recommendation.verify_representations", lambda *a, **k: None
     )
     monkeypatch.setattr(
         "validation.representation_provenance.recommendation_identity", lambda *a: {}
     )
-    result = run_rolling(context, target=list(registry(context.config)))
+    result = run_leave_one_out(context, target=list(registry(context.config)))
     assert result["skipped"] == len(protected)
-    assert len(pending) == 126 - len(protected)
+    assert len(pending) == 18 - len(protected)
     assert all(path.read_bytes() == original for path, original in protected.items())
     assert all(
-        combination_dir(context, split["evaluation_date"], identity["seed"], identity["arm"])
+        combination_dir(context, identity["seed"], identity["arm"])
         / "complete.json"
         not in protected
         for split, identity, _ in pending
@@ -226,7 +227,7 @@ def abrupt_worker(*args):
 
 
 def test_abrupt_worker_exit_does_not_hang(full_context, monkeypatch):
-    monkeypatch.setattr("validation.rolling_workers.combination_worker", abrupt_worker)
+    monkeypatch.setattr("validation.leave_one_out_workers.combination_worker", abrupt_worker)
     children_before = {child.pid for child in mp.active_children()}
     with pytest.raises(RuntimeError, match="workers? .*exit"):
         run_parallel(full_context, two_jobs(full_context), ["cpu", "cpu"], Progress())

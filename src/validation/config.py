@@ -16,7 +16,7 @@ class DatasetConfig(StrictModel):
     titles_supplement_csv: Path | None = None
 
 
-class RollingDatasetConfig(DatasetConfig):
+class LeaveOneOutDatasetConfig(DatasetConfig):
     pairs_csv: Path
 
 
@@ -68,14 +68,14 @@ class EvaluationConfig(StrictModel):
 
 
 class FullCohortConfig(StrictModel):
-    mode: Literal["full_rolling"]
+    mode: Literal["leave_one_out"]
     metadata_missing_policy: Literal["zero_vector"]
     user_count: int = Field(gt=0)
     interaction_count: int = Field(gt=0)
     item_count: int = Field(gt=0)
     timezone: Literal["UTC"]
-    evaluation_days: Literal[7]
-    exclude_final_day: Literal[True]
+    min_user_interactions: Literal[5]
+    retained_sequence_length: Literal[13]
 
 
 class GraphExecutionConfig(StrictModel):
@@ -88,9 +88,9 @@ class GraphExecutionConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v6"]
+    schema_version: Literal["validation-config/v7"]
     run_id: str
-    dataset: RollingDatasetConfig
+    dataset: LeaveOneOutDatasetConfig
     cohort: FullCohortConfig
     encoder: EncoderConfig
     model: ModelConfig
@@ -105,7 +105,7 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v6",
+            "schema_version": "validation-config/v7",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),

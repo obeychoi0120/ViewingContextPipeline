@@ -1,10 +1,10 @@
-experiment_config_version: v4
+experiment_config_version: v5
 protocol:
   dataset: microlens_100k
   modality: visual_only
   sampling: fixed_windows
-  cohort_sampling: full_rolling
-  catalog_scope: full_source_catalog
+  cohort_sampling: leave_one_out
+  catalog_scope: retained_sequence_catalog
   graph_extractors:
   - qwen
   - gemini
@@ -83,14 +83,14 @@ extraction:
       summary_max_new_tokens: 1024
 validation:
   cohort:
-    mode: full_rolling
+    mode: leave_one_out
     metadata_missing_policy: zero_vector
     user_count: 100000
     interaction_count: 719405
     item_count: 19738
     timezone: UTC
-    evaluation_days: 7
-    exclude_final_day: true
+    min_user_interactions: 5
+    retained_sequence_length: 13
   encoder:
     embedding_dim: 1024
     max_length: 512

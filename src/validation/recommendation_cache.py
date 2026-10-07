@@ -16,11 +16,8 @@ from validation.recommendation_contracts import (
 from validation.representation_provenance import read_state
 from validation.shared_cache import SharedCache, checksum
 
-FILES = ["sasrec.pt", "training.json", "per_event_metrics.jsonl", "complete.json"]
-
-
 def bundle_files(identity):
-    from validation.rolling_recommendation import result_files
+    from validation.leave_one_out_recommendation import result_files
 
     return result_files(identity) + ["complete.json"]
 
@@ -41,7 +38,7 @@ def eligible(context, branch):
 
 
 def valid_bundle(directory, identity, table, split):
-    from validation.rolling_recommendation import combination_complete, phase_ids
+    from validation.leave_one_out_recommendation import combination_complete, phase_ids
 
     ids = phase_ids(table, split, "test")
     if not combination_complete(directory, identity, len(ids)):

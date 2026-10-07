@@ -8,10 +8,6 @@ import tempfile
 from typing import Any, Iterable
 
 
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
 def atomic_write_json(
     path: str | Path,
     value: Any,

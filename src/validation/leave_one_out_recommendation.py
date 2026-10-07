@@ -1,4 +1,4 @@
-"""Independent day/seed/arm selection, refit and atomic combination resume."""
+"""Independent seed/arm best-checkpoint evaluation and atomic resume."""
 
 from __future__ import annotations
 
@@ -19,22 +19,22 @@ from validation.model import require_torch, save_checkpoint, seed_everything, to
 from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
 from validation.recommendation_contracts import ARCHITECTURE_VERSION, resolve_target_arms
-from validation.rolling_data import EventTable
+from validation.leave_one_out_data import EventTable, PROTOCOL
 from preparation.cohort import iter_jsonl
 from validation.selection import load_validation_cohort, training_signature
-from validation.rolling_execution import (
+from validation.leave_one_out_execution import (
     EXECUTION_VERSION,
     execution_for,
     masked_ranks,
     negative_mask,
 )
 
-SCHEMA = "sasrec-rolling-combination/v3"
+SCHEMA = "sasrec-leave-one-out-combination/v1"
 
 
 def phase_ids(table, split, phase):
-    bounds = split["phases"][phase]
-    return table.select(bounds["start_ms"], bounds["end_ms"])
+    ids = np.asarray(split["phases"][phase]["event_ids"], dtype=np.int64)
+    return ids[table.history_ends[ids] > 0]
 
 
 def transition_loss(model, table, ids, probabilities, device):
@@ -145,7 +145,7 @@ def validation_ndcg10(model, table, ids, config, device, *, profiler=None, epoch
 
 
 def evaluate(model, table, ids, config, device, *, profiler=None):
-    """Frozen parameters, cached catalog vectors, strictly earlier full seen mask."""
+    """Frozen parameters, cached catalog vectors, full preceding sequence mask."""
     for batch, ranks in rank_batches(
         model, table, ids, config, device, profiler=profiler, phase="test"
     ):
@@ -158,8 +158,8 @@ def evaluate(model, table, ids, config, device, *, profiler=None):
             }
 
 
-def combination_dir(context, date, seed, arm):
-    return context.recommendations_dir / date / f"seed_{seed}" / arm.lower()
+def combination_dir(context, seed, arm):
+    return context.recommendations_dir / f"seed_{seed}" / arm.lower()
 
 
 def result_files(identity):
@@ -170,6 +170,8 @@ def result_files(identity):
 
 
 def combination_complete(directory, identity, expected_count, *, architecture_version=None):
+    if identity.get("protocol") != PROTOCOL or not identity.get("split_hash"):
+        return False
     if architecture_version is None:
         architecture_version = identity.get("graph_architecture", ARCHITECTURE_VERSION)
     try:
@@ -199,15 +201,21 @@ def combination_complete(directory, identity, expected_count, *, architecture_ve
             training.get(key) != value for key, value in identity.items()
         ):
             return False
-        if not training.get("selection") or len(training.get("refit", [])) != training.get(
-            "best_epoch"
-        ):
+        epochs = training.get("train", [])
+        if not epochs or training.get("checkpoint_policy") != "best_validation":
+            return False
+        if training.get("split", {}).get("split_hash") != identity["split_hash"]:
+            return False
+        if not all(math.isfinite(row["validation_ndcg10"]) for row in epochs):
+            return False
+        best = max(epochs, key=lambda r: r["validation_ndcg10"])
+        if training.get("best_epoch") != best["epoch"]:
             return False
         seen = set()
         for row in iter_jsonl(directory / "per_event_metrics.jsonl"):
             event = row["event_id"]
             if (
-                row.get("schema_version") != "sasrec-per-event-metrics/v1"
+                row.get("schema_version") != "sasrec-leave-one-out-per-event/v1"
                 or type(event) is not int
                 or event < 0
                 or event in seen
@@ -230,11 +238,11 @@ def run_combination(
     if profile_operators and profile_every is None:
         raise ValueError("profile_operators requires profile_every")
     ids, probabilities, frequencies = prepared
-    date, seed, arm = (identity[key] for key in ("evaluation_date", "seed", "arm"))
-    directory = combination_dir(context, date, seed, arm)
+    seed, arm = (identity[key] for key in ("seed", "arm"))
+    directory = combination_dir(context, seed, arm)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "complete.json").unlink(missing_ok=True)
-    print(f"[Rolling] {date} seed={seed} {arm}: selection device={device}", flush=True)
+    print(f"[Leave-one-out] seed={seed} {arm}: train device={device}", flush=True)
     profiler = (
         RunProfiler(
             directory, {**identity, "deterministic": config.model.deterministic}, device,
@@ -245,16 +253,15 @@ def run_combination(
     )
     started = time.monotonic()
     timings = dict.fromkeys(
-        ("preparation", "selection_training", "validation", "refit", "test"), 0.0
+        ("preparation", "train", "validation", "checkpoint_restore", "test"), 0.0
     )
     with sampled(profiler, "preparation", kind="stage"):
         with span("history_and_probabilities"):
             execution = execution_for(table)
             execution.padded(config.model.max_sequence_length)
-            for phase in ("selection", "refit"):
-                execution.log_probabilities(
-                    probabilities[phase], table.targets[ids[phase]], device, torch.float32
-                )
+            execution.log_probabilities(
+                probabilities["train"], table.targets[ids["train"]], device, torch.float32
+            )
     timings["preparation"] = time.monotonic() - started
     from validation.graph_context import is_graph
 
@@ -276,11 +283,11 @@ def run_combination(
 
     seed_everything(seed, deterministic=config.model.deterministic)
     rng = np.random.default_rng(seed)
-    with sampled(profiler, "selection_init", kind="stage"):
+    with sampled(profiler, "train_init", kind="stage"):
         with span("model_and_optimizer"):
             model = create_model()
             optimizer = _optimizer(model, config)
-    selection = []
+    train = []
     stopping = EarlyStopping(config.model.patience, getattr(config.model, "min_delta", 0.0))
     for epoch in range(1, config.model.max_epochs + 1):
         phase_started = time.monotonic()
@@ -288,19 +295,19 @@ def run_combination(
             model,
             optimizer,
             table,
-            ids["selection"],
-            probabilities["selection"],
+            ids["train"],
+            probabilities["train"],
             rng,
             config,
             device,
             profiler=profiler,
-            phase="selection",
+            phase="train",
             epoch=epoch,
         )
         train_seconds = time.monotonic() - phase_started
-        timings["selection_training"] += train_seconds
+        timings["train"] += train_seconds
         if profiler:
-            profiler.phase("selection", epoch, train_seconds, len(ids["selection"]))
+            profiler.phase("train", epoch, train_seconds, len(ids["train"]))
         phase_started = time.monotonic()
         score = validation_ndcg10(
             model, table, ids["validation"], config, device, profiler=profiler, epoch=epoch
@@ -309,70 +316,41 @@ def run_combination(
         timings["validation"] += valid_seconds
         if profiler:
             profiler.phase("validation", epoch, valid_seconds, len(ids["validation"]))
-        selection.append({"epoch": epoch, **record, "validation_ndcg10": score})
+        train.append({"epoch": epoch, **record, "validation_ndcg10": score})
         print(
-            f"[Rolling] {date} {arm} seed={seed} epoch={epoch} valid={score:.6f} "
+            f"[Leave-one-out] {arm} seed={seed} epoch={epoch} valid={score:.6f} "
             f"train={train_seconds:.2f}s valid_time={valid_seconds:.2f}s "
-            f"train_events/s={len(ids['selection']) / max(train_seconds, 1e-9):.1f}",
+            f"train_events/s={len(ids['train']) / max(train_seconds, 1e-9):.1f}",
             flush=True,
         )
-        if stopping.update(epoch, score):
+        previous_best = stopping.best_epoch
+        stopped = stopping.update(epoch, score)
+        if stopping.best_epoch != previous_best:
+            save_checkpoint(
+                directory / "sasrec.pt", model,
+                {**identity, "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
+                 "best_epoch": epoch, "catalog_size": len(table.items),
+                 "checkpoint_policy": "best_validation"},
+            )
+        if stopped:
             break
     best_epoch = stopping.best_epoch
-    graph_selection_execution = (
-        model.execution_report() if hasattr(model, "execution_report") else None
-    )
-    del model, optimizer
-    seed_everything(seed, deterministic=config.model.deterministic)
-    rng = np.random.default_rng(seed)
-    with sampled(profiler, "refit_init", kind="stage"):
-        with span("model_and_optimizer"):
-            model = create_model()
-            optimizer = _optimizer(model, config)
-    print(
-        f"[Rolling] {date} {arm} seed={seed} refit epochs={best_epoch} device={device}", flush=True
-    )
-    refit = []
     phase_started = time.monotonic()
-    for epoch in range(1, best_epoch + 1):
-        epoch_started = time.monotonic()
-        refit.append(
-            {
-                "epoch": epoch,
-                **train_epoch(
-                    model,
-                    optimizer,
-                    table,
-                    ids["refit"],
-                    probabilities["refit"],
-                    rng,
-                    config,
-                    device,
-                    profiler=profiler,
-                    phase="refit",
-                    epoch=epoch,
-                ),
-            }
-        )
-        epoch_seconds = time.monotonic() - epoch_started
-        if profiler:
-            profiler.phase("refit", epoch, epoch_seconds, len(ids["refit"]))
-        print(
-            f"[Rolling] {date} {arm} seed={seed} refit epoch={epoch}/{best_epoch} "
-            f"train={epoch_seconds:.2f}s "
-            f"train_events/s={len(ids['refit']) / max(epoch_seconds, 1e-9):.1f}",
-            flush=True,
-        )
-    timings["refit"] = time.monotonic() - phase_started
+    checkpoint = torch.load(directory / "sasrec.pt", map_location=device, weights_only=True)
+    model.load_state_dict(checkpoint["state_dict"])
+    del checkpoint
+    if hasattr(model, "clear_item_cache"):
+        model.clear_item_cache()
+    timings["checkpoint_restore"] = time.monotonic() - phase_started
     phase_started = time.monotonic()
-    print(f"[Rolling] {date} {arm} seed={seed} test device={device}", flush=True)
+    print(f"[Leave-one-out] {arm} seed={seed} test device={device}", flush=True)
     temporary = directory / "per_event_metrics.jsonl.tmp"
     count = 0
     with temporary.open("w", encoding="utf-8", newline="\n") as handle:
         for row in evaluate(model, table, ids["test"], config, device, profiler=profiler):
             row.update(identity)
-            row["schema_version"] = "sasrec-per-event-metrics/v1"
-            row["refit_item_frequency"] = int(frequencies[table.targets[row["event_id"]]])
+            row["schema_version"] = "sasrec-leave-one-out-per-event/v1"
+            row["train_item_frequency"] = int(frequencies[table.targets[row["event_id"]]])
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             count += 1
         handle.flush()
@@ -383,11 +361,12 @@ def run_combination(
     timings["test"] = time.monotonic() - phase_started
     if profiler:
         profiler.phase("test", 0, timings["test"], len(ids["test"]))
-    print(f"[Rolling] {date} {arm} seed={seed} test={timings['test']:.2f}s", flush=True)
+    print(f"[Leave-one-out] {arm} seed={seed} test={timings['test']:.2f}s", flush=True)
     metadata = {
         **identity,
         "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
         "best_epoch": best_epoch,
+        "checkpoint_policy": "best_validation",
         "catalog_size": len(table.items),
         "training_settings": {
             "deterministic": config.model.deterministic,
@@ -412,8 +391,7 @@ def run_combination(
             "schema_version": SCHEMA,
             **metadata,
             "split": split,
-            "selection": selection,
-            "refit": refit,
+            "train": train,
             "untrained_test_target_fraction": float(
                 np.mean(frequencies[table.targets[ids["test"]]] == 0)
             ),
@@ -435,10 +413,9 @@ def run_combination(
                 ),
                 **(
                     {
-                        "graph_selection": graph_selection_execution,
-                        "graph_refit": model.execution_report(),
+                        "graph_training": model.execution_report(),
                     }
-                    if graph_selection_execution
+                    if hasattr(model, "execution_report")
                     else {}
                 ),
             },
@@ -472,12 +449,10 @@ def run_combination(
 
 def prepare_split(table, split):
     ids = {phase: phase_ids(table, split, phase) for phase in split["phases"]}
-    probabilities = {}
-    for phase in ("selection", "refit"):
-        counts = np.bincount(table.targets[ids[phase]], minlength=len(table.items) + 1)
-        probabilities[phase] = counts / counts.sum()
-    raw_refit = table.select(end=split["phases"]["refit"]["end_ms"], eligible=False)
-    frequencies = np.bincount(table.targets[raw_refit], minlength=len(table.items) + 1)
+    counts = np.bincount(table.targets[ids["train"]], minlength=len(table.items) + 1)
+    probabilities = {"train": counts / counts.sum()}
+    raw_train = np.asarray(split["phases"]["train"]["event_ids"], dtype=np.int64)
+    frequencies = np.bincount(table.targets[raw_train], minlength=len(table.items) + 1)
     return ids, probabilities, frequencies
 
 
@@ -494,7 +469,7 @@ def worker_devices(workers_per_gpu):
     return [f"cuda:{i}" for _ in range(workers_per_gpu) for i in range(available)]
 
 
-def run_rolling(
+def run_leave_one_out(
     context, *, force=False, workers_per_gpu=1, target=None, profile_every=None,
     profile_operators=False,
 ):
@@ -525,14 +500,15 @@ def run_rolling(
             for arm, branch in arms.items():
                 identity = {
                     "run_id": context.run_id,
-                    "evaluation_date": split["evaluation_date"],
+                    "protocol": PROTOCOL,
+                    "split_hash": split["split_hash"],
                     "seed": seed,
                     "arm": arm,
                     "training_input_hash": training_input_hash,
                     "deterministic": config.model.deterministic,
                     **recommendation_identity(context, branch),
                 }
-                directory = combination_dir(context, split["evaluation_date"], seed, arm)
+                directory = combination_dir(context, seed, arm)
                 combinations.append((directory, identity, branch, split))
                 if not force and combination_complete(directory, identity, expected_count):
                     skipped += 1
@@ -551,27 +527,27 @@ def run_rolling(
         devices = worker_devices(workers_per_gpu)
     total = skipped + len(jobs)
     print(
-        f"[Rolling] pending={len(jobs)} reused={skipped} "
+        f"[Leave-one-out] pending={len(jobs)} reused={skipped} "
         f"workers={min(len(devices), len(jobs))} devices={','.join(dict.fromkeys(devices))}",
         flush=True,
     )
     with tqdm(
-        total=total, initial=skipped, desc="Rolling recommendation", unit="run", file=sys.stdout
+        total=total, initial=skipped, desc="Leave-one-out recommendation", unit="run", file=sys.stdout
     ) as progress:
         progress.set_postfix(reused=skipped)
         if jobs and len(devices) > 1:
-            from validation.rolling_workers import run_parallel
+            from validation.leave_one_out_workers import run_parallel
 
             completed = run_parallel(context, jobs, devices, progress, **profile_options)
         elif jobs:
-            previous_date, prepared = None, None
+            previous_split, prepared = None, None
             device = torch.device(devices[0])
             for split, identity, branch in jobs:
-                if split["evaluation_date"] != previous_date:
+                if split["split_hash"] != previous_split:
                     prepared = prepare_split(table, split)
-                    previous_date = split["evaluation_date"]
+                    previous_split = split["split_hash"]
                 progress.set_postfix(
-                    date=previous_date, seed=identity["seed"], arm=identity["arm"], reused=skipped
+                    seed=identity["seed"], arm=identity["arm"], reused=skipped
                 )
                 run_combination(
                     context,
@@ -598,5 +574,5 @@ def run_rolling(
             "generated": completed,
         },
     )
-    print(f"[Rolling] completed={completed} skipped={skipped}", flush=True)
+    print(f"[Leave-one-out] completed={completed} skipped={skipped}", flush=True)
     return {"stage": "run-recommendation", "completed": completed, "skipped": skipped}

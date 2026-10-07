@@ -1,15 +1,15 @@
-"""Content context and actions, with read compatibility for relational graphs."""
+"""Current content context and receiver-free Actions graphs."""
 
 from __future__ import annotations
 import json
 from extraction.summary_storage import render_summary_prompt
-from extraction.structured_output import OutputValidationError, validate_graph_structure, without_receiver
+from extraction.structured_output import OutputValidationError, validate_graph_structure
 from extraction.summary_storage import (
     SUMMARY_SCHEMA_VERSION as SUMMARY_SCHEMA_VERSION,
     validate_summary as validate_summary,
 )
 
-GRAPH_SCHEMA_VERSION = "scene-graph/v6"
+GRAPH_SCHEMA_VERSION = "scene-graph/v7"
 
 
 class SemanticGraphError(ValueError):
@@ -29,10 +29,12 @@ def graph_summary_prompt(template, records, *, english_title=None):
         raise SemanticGraphError("graph summary requires scene records")
     observations = []
     for record in records:
-        graph = record.get("graph", record.get("raw_response"))
+        graph = record.get("graph")
         if graph is None:
             raise SemanticGraphError("missing graph observation")
-        observations.append({"scene": record["scene_idx"], "observation": without_receiver(graph)})
+        if isinstance(graph, dict):
+            validate_graph_structure(graph)
+        observations.append({"scene": record["scene_idx"], "observation": graph})
     return render_summary_prompt(
         template, json.dumps(observations, ensure_ascii=False), english_title=english_title
     )

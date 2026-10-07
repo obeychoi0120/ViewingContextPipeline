@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from artifact_io import read_json, read_jsonl
-from extraction.errors import ExtractionStepError
+from extraction.errors import ExtractionStepError, UnsupportedArtifactError
 from extraction.token_usage import validate_tokens
 
 SUMMARY_SCHEMA_VERSION = "video-summary/v5"
@@ -41,20 +41,24 @@ def validate_summary_template(template, uses_title):
         raise ValueError("Summary schema {english_title} must match the Arm title policy")
 
 
-def reuse_summary_document(
-    output_path, *, schema_version=SUMMARY_SCHEMA_VERSION, content_id, arm, scene_count=None
-):
+def reuse_summary_document(output_path, *, content_id, arm):
     try:
         doc = read_json(output_path)
+        if (
+            doc.get("schema_version") != SUMMARY_SCHEMA_VERSION
+            or doc.get("status") not in {"complete", "failed"}
+        ):
+            raise UnsupportedArtifactError(
+                f"unsupported Summary schema/status: {output_path}; "
+                f"expected {SUMMARY_SCHEMA_VERSION} complete/failed"
+            )
+        summary_model_from_document(doc, path=output_path)
         validate_tokens(doc.get("tokens"))
         if (
-            doc.get("schema_version") not in {schema_version, "video-summary/v4"}
-            or doc.get("content_id") != content_id
+            doc.get("content_id") != content_id
             or doc.get("arm") != arm
             or (type(doc.get("scene_count")) is not int)
             or (doc["scene_count"] < 0)
-            or (scene_count is not None and doc["scene_count"] != scene_count)
-            or (doc.get("status") not in {"complete", "raw_fallback", "failed"})
             or (not isinstance(doc.get("provenance"), dict))
         ):
             raise ValueError("summary identity, provenance, status, or scene count mismatch")
@@ -69,30 +73,18 @@ def reuse_summary_document(
             raise ValueError("empty summary or incorrect word count")
         if doc["status"] == "complete" and (violations or doc.get("violations") != []):
             raise ValueError("normal summary violates the summary contract")
-        if doc["status"] == "raw_fallback" and (not isinstance(doc.get("violations"), list)):
-            raise ValueError("raw summary requires recorded violations")
         return doc
     except (ValueError, KeyError, TypeError) as exc:
         raise ExtractionStepError(f"invalid summary {output_path}: {exc}") from exc
 
 
-def summary_model_from_document(doc):
-    """Recognize older Qwen/Gemini provenance without a summary_model field."""
-    provenance = doc.get("provenance", {})
-    if not isinstance(provenance, dict):
-        return "qwen"
-    explicit = provenance.get("summary_model")
-    if explicit is not None:
-        return explicit
-    model = provenance.get("model", {})
-    settings = provenance.get("settings")
-    if (
-        isinstance(settings, dict)
-        and settings.get("backend") == "gemini"
-        or (isinstance(model, dict) and "model_id" in model)
-    ):
-        return "gemini"
-    return "qwen"
+def summary_model_from_document(doc, *, path):
+    """Read the explicit model field; never infer missing generation provenance."""
+    provenance = doc.get("provenance")
+    model = provenance.get("summary_model") if isinstance(provenance, dict) else None
+    if model not in {"qwen", "gemini"}:
+        raise UnsupportedArtifactError(f"missing/unsupported Summary summary_model: {path}")
+    return model
 
 
 def summary_failure_rows(directory):
@@ -102,7 +94,7 @@ def summary_failure_rows(directory):
     for path in paths:
         if path.is_file():
             for row in read_jsonl(path):
-                rows[str(row.get("content_id", path.stem))] = row
+                rows[str(row["content_id"])] = row
     return rows
 
 
@@ -112,12 +104,20 @@ def check_summary_model(directory, model):
             doc = read_json(path)
         except ValueError:
             continue
-        if not isinstance(doc, dict) or "provenance" not in doc:
-            continue
-        if summary_model_from_document(doc) != model:
+        if (
+            doc.get("schema_version") != SUMMARY_SCHEMA_VERSION
+            or doc.get("status") not in {"complete", "failed"}
+        ):
+            raise UnsupportedArtifactError(
+                f"unsupported Summary schema/status: {path}; "
+                f"expected {SUMMARY_SCHEMA_VERSION} complete/failed"
+            )
+        if summary_model_from_document(doc, path=path) != model:
             raise ExtractionStepError(f"summary model mismatch in {path}; use --force or a new run")
     for row in summary_failure_rows(directory).values():
-        if row.get("summary_model", "qwen") != model:
+        if row.get("summary_model") not in {"qwen", "gemini"}:
+            raise UnsupportedArtifactError(f"missing/unsupported summary_model in {directory / 'failures.jsonl'}")
+        if row["summary_model"] != model:
             raise ExtractionStepError(
                 f"summary failure model mismatch in {directory}; use --force or a new run"
             )

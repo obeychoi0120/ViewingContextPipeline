@@ -25,7 +25,7 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
             for task in tasks:
                 calls.append(task.repetition_penalty)
                 kwargs["runtime"].current_result = {"finish_reason": "stop"}
-                text = ('[Entities]\nnone\n[Relations]\nnone' if recover and
+                text = ('[Context]\nmedium: live_action\nformat: other\ntopics: none\n[Entities]\nnone\n[Actions]\nnone' if recover and
                         task.repetition_penalty == 1.05 else ' \n\t ')
                 callback(task.task_id, text)
                 if task.repetition_penalty == 1.0:
@@ -37,7 +37,7 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     result = steps.extract_graph_scenes(context, model="qwen", arm="graph_qwen",
-                                       schema="prompts/scene_graph_v4.md")
+                                       schema="prompts/scene_graph_v8.md")
     assert calls == [1.0, 1.05]
     assert result["failure_count"] == (0 if recover else 1)
     path = directory / f"{cid}.jsonl"
@@ -118,14 +118,17 @@ def test_graph_text_repair_and_cutoff_share_storage_and_failure_policy(
     visual = steps.visual_rows(context)[0]
     cid = visual["content_id"]
     monkeypatch.setattr(steps, "visual_rows", lambda _: [visual])
-    text = """[Entities]
+    text = """[Context]
+medium: live_action
+format: demonstration
+topics: none
+[Entities]
 person1: person; long-haired
 cup1: cup; blue-green
-[Relations]
-person1 -> holding -> cup1
-[Context]
-An indoor gathering.
+[Actions]
+person1 -> holding -> cup1; none; unknown
 [End]"""
+    empty = {"medium": "live_action", "format": "other", "topics": [], "entities": [], "actions": []}
     responses = [
         text,
         text.replace("[Entities]", "Entities:").replace(" -> ", " - "),
@@ -133,7 +136,7 @@ An indoor gathering.
         text.replace("person1 ->", "person1 <-"),
         text,  # Even a complete-looking response fails when the backend reports truncation.
         text.removesuffix("[End]"),  # Missing End does not hide a backend token cutoff.
-        json.dumps({"entities": [], "relations": [], "context": []}),
+        json.dumps(empty),
     ]
 
     def rows(visual, **kwargs):
@@ -212,7 +215,7 @@ An indoor gathering.
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
-    options = {"model": model, "schema": "prompts/scene_graph_v4.md"}
+    options = {"model": model, "schema": "prompts/scene_graph_v8.md"}
     assert (
         steps.extract_graph_scenes(context, arm=f"graph_{options['model']}", **options)[
             "failure_count"
@@ -233,7 +236,7 @@ An indoor gathering.
     assert all(list(row) == ["content_id", "scene_idx", "tokens", "warning", "scene_graph"]
                for row in read_jsonl(directory / f"{cid}.jsonl"))
     assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
-    assert by_scene[6]["graph"] == {"entities": [], "relations": [], "context": []}
+    assert by_scene[6]["graph"] == empty
     failures = read_jsonl(directory / "failures" / f"{cid}.jsonl")
     assert {row["scene_idx"] for row in failures} == {4, 5}
     for failure in failures:

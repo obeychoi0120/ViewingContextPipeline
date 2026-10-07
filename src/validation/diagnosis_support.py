@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -79,23 +77,3 @@ def _read_json(
 
 def _bounded_examples(values: list[Any]) -> list[Any]:
     return values[:MAX_ERROR_EXAMPLES]
-
-
-def _finite_number(value: Any) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(float(value))
-    )
-
-
-def _row_issue(
-    counts: Counter[str],
-    examples: list[dict[str, Any]],
-    code: str,
-    row_index: int,
-    **details: Any,
-) -> None:
-    counts[code] += 1
-    if len(examples) < MAX_ERROR_EXAMPLES:
-        examples.append({"row_index": row_index, "reason": code, **details})

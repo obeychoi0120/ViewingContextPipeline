@@ -13,11 +13,11 @@ from extraction.graph_warnings import (
 )
 
 
-def _object(properties, *, optional=()):
+def _object(properties):
     return {
         "type": "object",
         "properties": properties,
-        "required": [key for key in properties if key not in optional],
+        "required": list(properties),
         "additionalProperties": False,
     }
 
@@ -27,29 +27,6 @@ def _array(items):
 
 
 STRING = {"type": "string", "minLength": 1}
-RELATION_GRAPH_JSON_SCHEMA = _object(
-    {
-        "entities": _array(_object({"id": STRING, "name": STRING, "attributes": _array(STRING)})),
-        "relations": _array(
-            _object({"subject_id": STRING, "predicate": STRING, "object_id": STRING})
-        ),
-    }
-)
-_LEGACY_GRAPH_JSON_SCHEMA = _object(
-    {**RELATION_GRAPH_JSON_SCHEMA["properties"], "context": _array(STRING)}
-)
-MEDIA = ("live_action", "animation", "gameplay", "screen_recording", "mixed", "unknown")
-FORMATS = (
-    "demonstration",
-    "explanation",
-    "review",
-    "narrative",
-    "highlights",
-    "performance",
-    "interview",
-    "other",
-    "unknown",
-)
 REFERENCE = {"type": ["string", "null"], "minLength": 1}
 GRAPH_JSON_SCHEMA = _object(
     {
@@ -74,7 +51,6 @@ GRAPH_JSON_SCHEMA = _object(
                     "tool": REFERENCE,
                     "location": REFERENCE,
                 },
-                optional=("location",),
             )
         ),
     }
@@ -87,36 +63,10 @@ class OutputValidationError(ValueError):
         self.tags = list(dict.fromkeys(tags))
 
 
-def without_receiver(graph):
-    """Ignore deprecated v7 receiver data without mutating historical records."""
-    if not isinstance(graph, dict) or not isinstance(graph.get("actions"), list):
-        return graph
-    return {
-        **graph,
-        "actions": [
-            {key: value for key, value in action.items() if key != "receiver"}
-            if isinstance(action, dict) else action
-            for action in graph["actions"]
-        ],
-    }
-
-
-def validate_graph_structure(value, schema=None, path="graph"):
-    """Enforce structural integrity; selection budgets and enums are prompt guidance."""
-    if schema is None:
-        if isinstance(value, dict) and set(value) & {"actions", "medium", "format", "topics"}:
-            schema = GRAPH_JSON_SCHEMA
-        else:
-            schema = (
-                _LEGACY_GRAPH_JSON_SCHEMA
-                if isinstance(value, dict) and "context" in value
-                else RELATION_GRAPH_JSON_SCHEMA
-            )
-    if schema is GRAPH_JSON_SCHEMA:
-        value = without_receiver(value)
-    _validate_shape(value, schema, path)
-    if schema is GRAPH_JSON_SCHEMA:
-        _validate_actions(value, path)
+def validate_graph_structure(value, path="graph"):
+    """Enforce current structural integrity; budgets and enums are prompt guidance."""
+    _validate_shape(value, GRAPH_JSON_SCHEMA, path)
+    _validate_actions(value, path)
 
 
 def _validate_shape(value, schema, path):

@@ -18,7 +18,7 @@ def paired_runs(tmp_path, monkeypatch):
         contexts.append(
             SimpleNamespace(
                 config={
-                    "experiment_config_version": "v4",
+                    "experiment_config_version": "v5",
                     "protocol": {
                         "arms": ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"]
                     },
@@ -26,7 +26,7 @@ def paired_runs(tmp_path, monkeypatch):
                 root=tmp_path,
                 run_id=name,
                 cohort_dir=directory,
-                require_ready_cohort=lambda: {"plan": {"splits": ["2026-09-01"]}},
+                require_ready_cohort=lambda: {"plan": {"protocol": "leave_one_out", "preprocessing": {"min_user_interactions": 5}, "source_data_hash": "source", "splits": ["test"]}},
             )
         )
     monkeypatch.setattr("validation.run_comparison.RunContext.load", lambda *a, **k: contexts[1])
@@ -50,8 +50,8 @@ def paired_runs(tmp_path, monkeypatch):
     reports = {}
     for ctx in contexts:
         reports[ctx.run_id] = {
-            "daily": [
-                {"evaluation_date": "2026-09-01", "seed": 42, "arm": arm}
+            "per_seed": [
+                {"split_hash": "test", "seed": 42, "arm": arm}
                 for arm in ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen")
             ]
         }
@@ -62,12 +62,12 @@ def paired_runs(tmp_path, monkeypatch):
             ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen").index(name) for name in arms
         ]
         return (
-            np.tile(np.array(values)[indices], (2, 1, 1)),
-            np.ones((2, 1)),
-            {"daily": [r for r in reports[ctx.run_id]["daily"] if r["arm"] in arms]},
+            np.tile(np.array(values)[indices], (2, 1)),
+            np.ones(2),
+            {"per_seed": [r for r in reports[ctx.run_id]["per_seed"] if r["arm"] in arms]},
         )
 
-    monkeypatch.setattr("validation.rolling_diagnosis.collect_metrics", collect)
+    monkeypatch.setattr("validation.leave_one_out_diagnosis.collect_metrics", collect)
     return contexts, reports
 
 
@@ -84,14 +84,16 @@ def test_paired_run_effect_direction_and_partial_family(paired_runs):
     assert partial["family_size"] == 3 and partial["model_interaction"] is None
 
 
-@pytest.mark.parametrize("mismatch", ["events.jsonl", "catalog.jsonl", "seed", "dates"])
+@pytest.mark.parametrize("mismatch", ["events.jsonl", "catalog.jsonl", "seed", "splits", "protocol", "preprocessing"])
 def test_cross_run_mismatch_rejected(paired_runs, mismatch):
     contexts, reports = paired_runs
     if mismatch.endswith("jsonl"):
         write_jsonl(contexts[1].cohort_dir / mismatch, [{"id": 99}])
-    elif mismatch == "dates":
-        contexts[1].require_ready_cohort = lambda: {"plan": {"splits": ["other"]}}
+    elif mismatch in ("splits", "protocol", "preprocessing"):
+        plan = contexts[1].require_ready_cohort()["plan"]
+        plan[mismatch] = "rolling" if mismatch == "protocol" else ["other"]
+        contexts[1].require_ready_cohort = lambda: {"plan": plan}
     else:
-        reports["reference"]["daily"][0]["seed"] = 43
+        reports["reference"]["per_seed"][0]["seed"] = 43
     with pytest.raises(ValueError, match="identical"):
         compare_graph_runs(contexts[0], "reference")

@@ -2,7 +2,7 @@
 
 from artifact_io import read_json, write_json
 from validation.recommendation_contracts import resolve_target_arms, target_scope
-from validation.rolling_diagnosis import collect_metrics, cluster_bootstrap, comparisons, paper_reference
+from validation.leave_one_out_diagnosis import collect_metrics, cluster_bootstrap, comparisons
 from validation.diagnosis_statistics import multiple_comparison_policy
 
 
@@ -13,7 +13,7 @@ def diagnose_graph(context, *, target, compare_run_id=None):
     config = validation_config(context)
     arms = resolve_target_arms(target, config=context.config)
     document = {
-        "schema_version": "rolling-diagnosis/v3",
+        "schema_version": "leave-one-out-diagnosis/v1",
         "run_id": context.run_id,
         "representation_mode": "graph",
         "scene_aggregation": context.scene_aggregation,
@@ -49,7 +49,6 @@ def diagnose_graph(context, *, target, compare_run_id=None):
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_graph_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
-    document["paper_reference"] = paper_reference(document.get("recommendations"), arms)
     write_json(context.diagnosis_path, document)
     if errors:
         raise RuntimeError(f"graph diagnosis failed; see {context.diagnosis_path}")

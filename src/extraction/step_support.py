@@ -11,7 +11,6 @@ from extraction.errors import ExtractionStepError
 from extraction.evidence import build_scene_evidence
 from extraction.monitoring import video_names
 from extraction.progress import InferenceProgress
-from extraction.raw_output import is_raw_graph, valid_raw_graph
 from extraction.scene_storage import write_scene_records
 from pipeline_runtime import RunContext
 from artifact_io import read_jsonl
@@ -106,9 +105,7 @@ def minimal_graph_records(
         index
         for index, row in enumerate(records)
         if (
-            not valid_raw_graph(row)
-            if is_raw_graph(row)
-            else set(row) - {"provenance", "generation", "tokens"} != required
+            set(row) - {"provenance", "tokens"} != required
         )
     ]
     if invalid:
@@ -119,7 +116,7 @@ def minimal_graph_records(
     from extraction.structured_output import validate_graph_structure, OutputValidationError
 
     for row in records:
-        if not is_raw_graph(row) and not (
+        if not (
             row.get("parse_mode") == "text" and isinstance(row.get("graph"), str)
         ):
             try:
@@ -143,8 +140,7 @@ def minimal_description_records(
     invalid = [
         index
         for index, row in enumerate(records)
-        if set(row) - {"provenance", "generation", "status", "tokens"} != required
-        or row.get("status", "raw_fallback") != "raw_fallback"
+        if set(row) - {"provenance", "tokens"} != required
     ]
     if invalid:
         raise ExtractionStepError(
@@ -162,27 +158,6 @@ def minimal_description_records(
     ):
         raise ExtractionStepError(f"invalid description scene: {path}")
     return records
-
-
-def minimal_graph_failures(
-    failures: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    minimal = [
-        {
-            key: row[key]
-            for key in (
-                "scene_idx",
-                "keyframes",
-                "failure_kind",
-                "error",
-                "raw_response",
-                "response_diagnostics",
-            )
-            if key in row
-        }
-        for row in failures
-    ]
-    return minimal
 
 
 def visual_rows(context: RunContext) -> list[dict[str, Any]]:

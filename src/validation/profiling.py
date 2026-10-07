@@ -16,7 +16,7 @@ import uuid
 
 from validation.model import torch
 
-PROFILE_VERSION = "recommendation-profile/v2"
+PROFILE_VERSION = "recommendation-profile/v3"
 _active = ContextVar("recommendation_profile_sample", default=None)
 
 
@@ -160,7 +160,7 @@ class RunProfiler:
         self.operator_captured = False
         self.session = uuid.uuid4().hex
         self.label = (
-            f"{identity['evaluation_date']} {identity['arm']} seed={identity['seed']} "
+            f"{identity['arm']} seed={identity['seed']} "
             f"device={self.device} pid={os.getpid()}"
         )
         self.emit({"kind": "start", "profile_every": every, "first_batches": 3,
@@ -197,7 +197,7 @@ class RunProfiler:
     def _sample(self, phase, epoch, batch, examples, kind):
         # One warmed training batch per combination/session, never every sample.
         capture = (self.operators and not self.operator_captured and kind == "batch"
-                   and phase in {"selection", "refit"} and batch is not None and batch >= 3)
+                   and phase == "train" and batch is not None and batch >= 3)
         operator_profile = None
         if capture:
             activities = [torch.profiler.ProfilerActivity.CPU]

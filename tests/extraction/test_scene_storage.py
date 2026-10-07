@@ -3,6 +3,7 @@ import pytest
 from extraction.scene_storage import read_scene_records
 from extraction.step_support import write_scene_results
 from artifact_io import read_jsonl
+GRAPH = {"medium": "live_action", "format": "other", "topics": [], "entities": [], "actions": []}
 
 
 def scene(kind, index=0):
@@ -20,15 +21,15 @@ def scene(kind, index=0):
         )
     elif kind == "graph":
         row.update(
-            graph={"entities": [], "relations": [], "context": []},
+            graph=GRAPH,
             parse_mode="native",
             semantic_warnings=[],
         )
     else:
         row.update(
-            schema_version="graph-scene-raw/v1",
-            status="raw_fallback",
-            raw_response='{"entities": [',
+            graph='{"entities": [',
+            parse_mode="text",
+            semantic_warnings=["PARSE_ERROR"],
         )
     return row
 
@@ -48,7 +49,7 @@ def test_scenes_have_explicit_indices_without_metadata(tmp_path, kind):
     assert not (path.parent / ".metadata").exists()
     restored = read_scene_records(path)
     assert [row["scene_idx"] for row in restored] == [0, 3]
-    body = "raw_response" if kind == "raw" else kind
+    body = "graph" if kind == "raw" else kind
     assert restored[0][body] == records[0][body]
     assert all("provenance" not in row
                and "generation" not in row for row in restored)

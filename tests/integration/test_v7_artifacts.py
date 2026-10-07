@@ -6,6 +6,7 @@ import shutil
 import pytest
 
 from artifact_io import read_json, write_jsonl
+from extraction.errors import ExtractionStepError
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures/v7"
 
@@ -31,6 +32,16 @@ def test_v7_success_reuse_and_force(current_context, monkeypatch, fake_models, s
     assert destination.read_bytes() == before
     # The copied Description provenance may name another run; it must remain intact.
     assert read_json(destination)["provenance"] == doc["provenance"]
+    scene_path = context.scene_arm_dir(source) / f"{cid}.jsonl"
+    if source.startswith("graph"):
+        original = scene_path.read_bytes()
+        from extraction.scene_storage import read_scene_records
+        with pytest.raises(ExtractionStepError, match="receiver-free|unsupported"):
+            read_scene_records(scene_path)
+        assert scene_path.read_bytes() == original
+        assert destination.read_bytes() == before
+        assert fake_models == []
+        return
     steps.summarize(context, arm=source, model="gemini", schema=schema, force=True)
     assert len(fake_models) == 1
     assert read_json(destination)["status"] == "complete"

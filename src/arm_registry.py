@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 CONCAT_ARM_CONTRACT = "title-summary-six-arms/v2"
 CONCAT_POLICY = "title-summary-double-newline/v1"
-EXPERIMENT_CONFIG_VERSION = "v4"
+EXPERIMENT_CONFIG_VERSION = "v5"
 
 
 @dataclass(frozen=True)

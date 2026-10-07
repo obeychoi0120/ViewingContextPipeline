@@ -28,7 +28,7 @@ def metadata_documents(context, cohort):
             "text": t["title"],
             "source_path": str(
                 (
-                    context.run_root / "validation" / "cohort"
+                    context.validation_dir / "cohort"
                     if "manifest" in cohort
                     else context.cohort_dir
                 )
@@ -42,14 +42,10 @@ def metadata_documents(context, cohort):
 def _check_model_source(provenance, expected, path):
     backend = provenance.get("settings", {}).get("backend", "")
     model = provenance.get("model", {})
-    inferred = (
-        "gemini"
-        if backend == "gemini" or "model_id" in model
-        else "qwen"
-        if backend.startswith("vllm")
-        else None
-    )
-    if inferred is not None and inferred != expected:
+    if (
+        (backend == "gemini" or "model_id" in model) and expected != "gemini"
+        or backend.startswith("vllm") and expected != "qwen"
+    ):
         raise ValueError(f"generation model provenance mismatch: {path}")
 
 
@@ -65,16 +61,14 @@ def _source_documents_for_arm(context, cohort, arm, *, failure_rows=None):
         if path.exists():
             doc = reuse_summary_document(path, content_id=cid, arm=arm.name)
             prov = doc["provenance"]
-            model = summary_model_from_document(doc)
-            if model not in {"qwen", "gemini"}:
-                raise ValueError(f"summary model provenance mismatch: {path}")
+            model = summary_model_from_document(doc, path=path)
             if prov.get("representation") != arm.representation:
                 raise ValueError(f"summary source provenance mismatch: {path}")
             if prov.get("uses_title") != arm.uses_title or prov.get("scene_arm") != arm.scene_arm:
                 raise ValueError(f"Summary title/Scene policy mismatch: {path}")
             if not arm.uses_title and "english_title" in prov:
                 raise ValueError(f"title present in title-free Summary: {path}")
-            failed = failure is not None or doc["status"] in {"failed", "raw_fallback"}
+            failed = failure is not None or doc["status"] == "failed"
             status = "failed" if failed else "complete"
             text = "" if failed else doc["text"]
             reason = (failure or {}).get("error") or (
@@ -86,7 +80,7 @@ def _source_documents_for_arm(context, cohort, arm, *, failure_rows=None):
             status, text = ("failed" if failure else "missing", "")
             reason = (failure or {}).get("error", "summary not generated")
         if failure:
-            failure_model = failure.get("summary_model", "qwen")
+            failure_model = failure.get("summary_model")
             if failure_model not in {"qwen", "gemini"}:
                 raise ValueError(f"invalid summary failure model: {path}")
             if model and failure_model != model:
@@ -188,7 +182,7 @@ def documents_for_arm(context, cohort, arm, *, failure_rows=None):
     return result
 
 
-def representation_signature(context, catalog, arm, documents, *, selection_hash=None):
+def representation_signature(context, catalog, arm, documents):
     from validation.cache_identity import REPRESENTATION_VERSION, semantic_documents
     from model_provenance import canonical
     from arm_registry import arm_contract

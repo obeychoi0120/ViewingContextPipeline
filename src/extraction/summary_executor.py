@@ -13,7 +13,7 @@ from extraction.token_usage import qwen_output_tokens, gemini_output_tokens, val
 from artifact_io import atomic_write_json
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
-from extraction.errors import ExtractionStepError
+from extraction.errors import ExtractionStepError, UnsupportedArtifactError
 from artifact_io import fingerprint
 from extraction.qwen_config import penalty_schedule
 from model_provenance import canonical, without_provenance_arm
@@ -81,8 +81,7 @@ def summary_scene_input(source, normalize, graph, provenance):
         records = [
             r
             for r in all_records
-            if r.get("status") not in {"failed", "raw_fallback"}
-            and r["scene_idx"] not in failed_indices
+            if r["scene_idx"] not in failed_indices
         ]
     except (ValueError, KeyError, TypeError) as exc:
         raise ExtractionStepError(f"invalid scene input {source}: {exc}") from exc
@@ -139,6 +138,8 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
         if output.is_file() and (not force) and (not failures.contains(cid, None)):
             try:
                 existing = reuse_summary_document(output, content_id=cid, arm=arm.name)
+            except UnsupportedArtifactError:
+                raise
             except ExtractionStepError:
                 pass
             else:

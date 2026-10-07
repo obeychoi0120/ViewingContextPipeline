@@ -12,16 +12,17 @@ import numpy as np
 
 from arm_registry import select_arms
 from artifact_io import fingerprint
-from extraction.structured_output import validate_graph_structure, OutputValidationError, without_receiver
+from extraction.structured_output import validate_graph_structure, OutputValidationError
+from extraction.scene_storage import read_scene_records, validate_scene_payload
 from model_provenance import local_model_identity
 from artifact_io import read_json, write_json
 from validation.graph_context import GRAPH_ARMS
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "role-graph-inputs/v3"
+VERSION = "role-graph-inputs/v4"
 ROLES = ("actor", "target", "tool", "receiver", "location")
-# Keep the receiver tensor slot for model/checkpoint shape compatibility; input
-# normalization disables its edges and always supplies the absent state.
+# Keep the receiver tensor slot for model/checkpoint shape compatibility.
+# Current receiver-free input always supplies the absent state.
 ARRAYS = (
     "features",
     "nodes",
@@ -50,6 +51,8 @@ def source_identity(context, cohort, arm):
         directory = context.scene_arm_dir(arm.scene_arm)
         for item in cohort["catalog"]:
             path = directory / f"{item['content_id']}.jsonl"
+            if path.is_file():
+                read_scene_records(path)
             sources.append([item["content_id"], checksum(path) if path.is_file() else None])
     titles = [r["title"].strip() for r in cohort["metadata_titles"]] if arm.uses_title else []
     return fingerprint(
@@ -132,15 +135,13 @@ def build_input(context, cohort, arm):
                     }
                 )
 
-            g = without_receiver(row.get("scene_graph"))
+            validate_scene_payload(path, row)
+            g = row.get("scene_graph")
             if not isinstance(g, dict):
                 reject("raw")
                 continue
             if row.get("warning"):
                 reject("warning", str(row["warning"]))
-                continue
-            if "actions" not in g:
-                reject("unsupported_format")
                 continue
             try:
                 validate_graph_structure(g)
@@ -166,7 +167,7 @@ def build_input(context, cohort, arm):
                 data["types"].append(1)
                 states = [node]
                 for role, name in enumerate(ROLES):
-                    value = action.get(name, "unknown" if name == "location" else None)
+                    value = None if name == "receiver" else action[name]
                     if value in lookup:
                         data["edges"].extend(
                             [[lookup[value], node, role], [node, lookup[value], role + 5]]

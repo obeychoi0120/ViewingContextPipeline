@@ -126,7 +126,7 @@ def test_cache_invalidation_and_run_rename(ready_context, fake_models, monkeypat
 
 def test_comparisons_and_partial_targets(ready_context):
     from validation.diagnosis_statistics import comparison_families
-    from validation.rolling_diagnosis import comparisons
+    from validation.leave_one_out_diagnosis import comparisons
 
     families = comparison_families(ready_context.config)
     assert {k: len(v) for k, v in families.items()} == {
@@ -167,10 +167,15 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
 ):
     torch = pytest.importorskip("torch")
     from validation.model import SASRec
-    from validation.rolling_recommendation import run_rolling
-    from validation.rolling_diagnosis import diagnose
+    from validation.leave_one_out_recommendation import run_leave_one_out
+    from validation.leave_one_out_diagnosis import diagnose
     from validation.selection import load_validation_cohort
 
+    legacy = ready_context.run_root / "validation" / "recommendations" / "text" / "2022-09-10" / "seed_42" / "meta"
+    legacy.mkdir(parents=True)
+    for name in ("sasrec.pt", "training.json", "per_event_metrics.jsonl", "complete.json"):
+        (legacy / name).write_bytes(b"preserve original rolling result")
+    protected = {p: p.read_bytes() for p in legacy.iterdir()}
     generate_all(ready_context)
     embed_representations(ready_context, target=list(registry(ready_context.config)))
 
@@ -179,8 +184,8 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
                     "video_values": features["video_values"][:, :6]}
         return SASRec(item_count, 10, 8, 1, 2, 0, arm=branch, item_features=features).to(device)
 
-    monkeypatch.setattr("validation.rolling_recommendation._new_model", tiny)
-    monkeypatch.setattr("validation.rolling_recommendation.worker_devices", lambda *args: ["cpu"])
+    monkeypatch.setattr("validation.leave_one_out_recommendation._new_model", tiny)
+    monkeypatch.setattr("validation.leave_one_out_recommendation.worker_devices", lambda *args: ["cpu"])
     # Old local-only artifacts can be published under the new eligibility rule
     # without changing their recommendation identity or repeating training.
     for arm in NAMES[1:]:
@@ -190,13 +195,31 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
     previous = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
-        assert run_rolling(ready_context, target=list(registry(ready_context.config)))["completed"] == 126
+        assert run_leave_one_out(ready_context, target=list(registry(ready_context.config)))["completed"] == 18
         assert embed_representations(ready_context, target=list(registry(ready_context.config)))["reuse"]["local"] == NAMES
-        assert run_rolling(ready_context, target=list(registry(ready_context.config))) == {
-            "stage": "run-recommendation", "completed": 0, "skipped": 126,
+        assert run_leave_one_out(ready_context, target=list(registry(ready_context.config))) == {
+            "stage": "run-recommendation", "completed": 0, "skipped": 18,
         }
         assert diagnose(ready_context, target=list(registry(ready_context.config)))["status"] == "pass"
+        assert protected == {p: p.read_bytes() for p in protected}
         doc = read_json(ready_context.diagnosis_path)
+        assert "daily" not in doc["recommendations"] and "paper_reference" not in doc
+        assert len(doc["recommendations"]["per_seed"]) == 18
+        from validation.leave_one_out_diagnosis import collect_metrics
+        from validation.steps import validation_config
+
+        user_metrics, counts, report = collect_metrics(
+            ready_context, validation_config(ready_context), load_validation_cohort(ready_context),
+            arms={name: name for name in NAMES})
+        manual = np.zeros((3, 6))
+        for seed in (42, 43, 44):
+            for index, arm in enumerate(NAMES):
+                for row in read_jsonl(ready_context.recommendations_dir / f"seed_{seed}" / arm / "per_event_metrics.jsonl"):
+                    manual[int(row["user_id"]) - 1, index] += row["NDCG@10"] / 3
+        np.testing.assert_allclose(user_metrics, manual)
+        np.testing.assert_array_equal(counts, np.ones(3))
+        for index, arm in enumerate(NAMES):
+            assert report["means"][arm]["NDCG@10"] == pytest.approx(manual[:, index].mean())
         assert doc["statistics"]["comparisons"]["graph_qwen_meta-meta"]["primary"]
         from validation.diagnosis_statistics import comparison_families
         expected_pairs = {f"{a}-{b}" for pairs in comparison_families(ready_context.config).values() for a, b in pairs}
@@ -214,15 +237,15 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
 
         assert embed_representations(other, target=list(registry(other.config)))["reuse"]["shared"] == NAMES
         monkeypatch.setattr(
-            "validation.rolling_recommendation.worker_devices",
+            "validation.leave_one_out_recommendation.worker_devices",
             lambda *args: pytest.fail("shared reuse must not initialize training workers"),
         )
-        result = run_rolling(other, target=list(registry(other.config)))
-        assert result["skipped"] == 126
+        result = run_leave_one_out(other, target=list(registry(other.config)))
+        assert result["skipped"] == 18
         assert result["completed"] == 0
-        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 126
+        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 18
         checkpoints = list(ready_context.recommendations_dir.rglob("sasrec.pt"))
-        assert len(checkpoints) == 126
+        assert len(checkpoints) == 18
         shared_checkpoints = 0
         for path in checkpoints:
             copied = other.recommendations_dir / path.relative_to(ready_context.recommendations_dir)
@@ -237,7 +260,7 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
                 torch.equal(value, reused["state_dict"][key])
                 for key, value in original["state_dict"].items()
             )
-        assert shared_checkpoints == 126
+        assert shared_checkpoints == 18
         assert diagnose(other, target=list(registry(other.config)))["status"] == "pass"
     finally:
         torch.set_num_threads(previous)

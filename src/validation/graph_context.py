@@ -56,17 +56,16 @@ class GraphContext(RunContext):
 
     @property
     def representations_dir(self):
-        return self.run_root / "validation" / "representations" / "graph"
+        return self.validation_dir / "representations" / "graph"
 
     @property
     def recommendations_dir(self):
-        return self.run_root / "validation" / "recommendations" / "graph" / self.scene_aggregation
+        return self.validation_dir / "recommendations" / "graph" / self.scene_aggregation
 
     @property
     def diagnosis_path(self):
         return (
-            self.run_root
-            / "validation"
+            self.validation_dir
             / "diagnosis"
             / f"graph_{self.scene_aggregation}_diagnosis.json"
         )
