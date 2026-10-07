@@ -102,7 +102,7 @@ validation:
     checkpoint: auto
     feature_cache_mb: 2048
   model:
-    deterministic: true
+    deterministic: false
     max_sequence_length: 10
     embedding_dim: 512
     num_blocks: 2
