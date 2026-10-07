@@ -28,6 +28,16 @@ ArmKind = Literal["metadata", "graph", "desc"]
 
 if nn is not None:
 
+    class SingleLayerResidualMLP(nn.Module):
+        """Video-side residual block: x + ReLU(Linear(x)), without normalization."""
+
+        def __init__(self, dimension: int) -> None:
+            super().__init__()
+            self.fc1 = nn.Linear(dimension, dimension)
+
+        def forward(self, values: "torch.Tensor") -> "torch.Tensor":
+            return values + nn.functional.relu(self.fc1(values))
+
     class ResidualMLP(nn.Module):
         def __init__(
             self,
@@ -110,7 +120,7 @@ if nn is not None:
             else:
                 self.title_projection = nn.Linear(titles.shape[1], embedding_dim // 4)
                 self.video_projection = nn.Linear(videos.shape[1], embedding_dim * 3 // 4)
-            self.item_mlp = ResidualMLP(embedding_dim, activation="relu", normalize=False)
+            self.item_mlp = SingleLayerResidualMLP(embedding_dim)
             self.position_embedding = nn.Embedding(max_length, embedding_dim)
             layer = nn.TransformerEncoderLayer(
                 d_model=embedding_dim,

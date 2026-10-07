@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from validation.model import SASRec, ResidualMLP, torch, nn
+from validation.model import SASRec, SingleLayerResidualMLP, torch, nn
 from validation.graph_inputs import GraphStore
 from validation.graph_context import GRAPH_MODEL
 from validation.graph_batching import PackedGraphStore, GRAPH_EXECUTION_VERSION
@@ -38,7 +38,7 @@ class SceneRoleEncoder(nn.Module):
         self.role_fusion = nn.Linear(hidden * 5, hidden)
         self.role_states = nn.Parameter(torch.empty(4, 2, hidden))
         nn.init.normal_(self.role_states, std=0.02)
-        self.scene_mlp = ResidualMLP(self.output_dim, activation="relu", normalize=False)
+        self.scene_mlp = SingleLayerResidualMLP(self.output_dim)
         if aggregation == "gnn":
             self.gcn = SceneGCN(self.output_dim)
 

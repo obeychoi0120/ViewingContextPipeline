@@ -112,9 +112,9 @@ Text 경로는 제목과 Summary를 각각 BGE로 인코딩하고, 학습한 pro
 
 | 경로 | 영상 벡터 계산 |
 | --- | --- |
-| 제목 기준선 `meta` | 제목 1024 → Linear 512 → Residual MLP |
-| Text | 제목 1024 → Linear 128; Summary 1024 → Linear 384 → concat 512 → Residual MLP |
-| Graph `mean` | Title·Entities·Actions·Context 각각 1024 → Linear 128 → 역할 결합 → 장면 concat 512 → Scene Residual MLP → 유효 장면 평균 |
+| 제목 기준선 `meta` | 제목 1024 → Linear 512 → 1층 Residual MLP |
+| Text | 제목 1024 → Linear 128; Summary 1024 → Linear 384 → concat 512 → 1층 Residual MLP |
+| Graph `mean` | Title·Entities·Actions·Context 각각 1024 → Linear 128 → 역할 결합 → 장면 concat 512 → 1층 Scene Residual MLP → 유효 장면 평균 |
 | Graph `gnn` | 위 장면 표현 → 영상 내부 장면 GCN → 유효 장면 평균 |
 
 Graph의 Entity 입력은 이름·속성, Action 입력은 동작 텍스트, Context 입력은 Format·Medium·Topics입니다. ID는 역할 연결을 구성하는 데 쓰며 BGE 입력에는 넣지 않습니다. 같은 영상·다른 영상의 Entity ID를 공유 노드로 합치지 않습니다.
@@ -124,16 +124,16 @@ Action은 연결된 actor·target·tool·location의 Entity 벡터로 보정합�
 ```text
 Action 보정 = Action + ReLU(Linear([Action; actor; target; tool; location]))
 Scene = R([Title 128; Entity 평균 128; 보정된 Action 평균 128; Context 128])
-R(x) = x + Linear(ReLU(Linear(x)))
+R(x) = x + ReLU(Linear(x))
 ```
 
 GNN 유사도 입력은 Scene MLP 이전의 `[Entity 평균; 보정된 Action 평균; Context]` 384차원이며 **제목을 제외**합니다. 각 영상의 모든 유효 장면 쌍에 대해 cosine의 음수는 0, self-loop는 1로 두고 대칭 degree 정규화합니다. 1층 residual GCN은 `H′ = H + ReLU(Â H W + b)`이고, 이후 평균하여 영상 벡터를 만듭니다. 유사도는 매 forward 다시 계산하며 gradient를 차단하지 않습니다.
 
-Item·Scene의 LayerNorm은 없고 SASRec·User MLP의 LayerNorm은 유지합니다. `meta`에는 GCN을 적용하지 않습니다. 현재 장면 aggregation은 `mean`·`gnn`을 지원하며 Scene `attention`은 CLI에서 거절합니다. SASRec 내부 attention은 유지합니다.
+Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없습니다. SASRec과 기존 2층 GELU User MLP의 LayerNorm은 유지합니다. `meta`에는 GCN을 적용하지 않습니다. 현재 장면 aggregation은 `mean`·`gnn`을 지원하며 Scene `attention`은 CLI에서 거절합니다. SASRec 내부 attention은 유지합니다.
 
 ![추천 모델 구조 — Baseline, Text, Graph GNN](docs/design/recsys_diagram_gnn.png)
 
-Text·mean은 v7 모델 구조를 유지하고 GNN 계약은 `sasrec-role-graph/v8`입니다. [GNN PPTX](docs/design/recsys_diagram_gnn.pptx) · [GNN 그림 갱신 코드](docs/design/generate_recsys_diagram_gnn.py) · [mean PNG](docs/design/recsys_diagram.png) · [mean PPTX](docs/design/recsys_diagram.pptx)
+영상용 Item·Scene MLP는 1층입니다. 모델 계약은 Text `sasrec-content-v8`, mean `sasrec-role-graph/v9`, GNN `sasrec-role-graph/v10`입니다. [GNN PPTX](docs/design/recsys_diagram_gnn.pptx) · [GNN 그림 갱신 코드](docs/design/generate_recsys_diagram_gnn.py) · [mean PNG](docs/design/recsys_diagram.png) · [mean PPTX](docs/design/recsys_diagram.pptx)
 
 세부 수식·입력 문자열·결측·캐시 계약은 [직접 Graph 학습](docs/graph_training.md#모델-및-데이터-계약), GCN 구현 범위는 [장면 GCN aggregation](docs/graph_training.md#장면-gcn-aggregation-2026-10-06)을 참고하세요.
 
@@ -236,7 +236,7 @@ Gemini 생성 환경은 `.[gemini,dev]`, 임베딩·추천 환경은 `.[train,em
 | `validation` | cohort·평가 구간, BGE, 학습, 실행 자원, 통계 설정 |
 | `artifacts_root` | 산출물 상위 디렉터리 |
 
-아래 `new_run_id`는 사용할 새 Run 이름으로 바꾸세요. 설정 형식의 `experiment_config_version: v4`, 프롬프트 파일의 v8, 모델 계약의 v7/v8, Run 이름은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
+아래 `new_run_id`는 사용할 새 Run 이름으로 바꾸세요. 설정 형식의 `experiment_config_version: v4`, 프롬프트 파일의 v8, 모델 계약의 Text v8·mean v9·GNN v10, Run 이름은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
 
 ```bash
 export RUN_ID="new_run_id"

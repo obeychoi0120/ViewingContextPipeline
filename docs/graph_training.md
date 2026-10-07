@@ -1,6 +1,6 @@
 # 직접 Graph 학습 경로
 
-현재 v7은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean|gnn`**을 필수로 받으며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
+현재 파이프라인은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean|gnn`**을 필수로 받으며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
 
 ## 실행
 
@@ -19,9 +19,9 @@ Text는 `--representation-mode text`를 사용하며 Description Arm은 text에�
 
 ## 모델 및 데이터 계약
 
-현재 GNN 구조: [추천 구조 PNG](design/recsys_diagram_gnn.png) · [편집 가능한 PPTX](design/recsys_diagram_gnn.pptx) · [갱신 코드](design/generate_recsys_diagram_gnn.py). 기존 mean v7 구조는 [PNG](design/recsys_diagram.png) · [PPTX](design/recsys_diagram.pptx)로 보존합니다. 전체 파이프라인은 [main_diagram](design/main_diagram.png)을 참고하십시오.
+현재 GNN 구조: [추천 구조 PNG](design/recsys_diagram_gnn.png) · [편집 가능한 PPTX](design/recsys_diagram_gnn.pptx) · [갱신 코드](design/generate_recsys_diagram_gnn.py). 현재 mean 구조는 [PNG](design/recsys_diagram.png) · [PPTX](design/recsys_diagram.pptx)에서 확인할 수 있습니다. 전체 파이프라인은 [main_diagram](design/main_diagram.png)을 참고하십시오.
 
-공통 Residual MLP는 `R(x) = x + Linear(512,512)(ReLU(Linear(512,512)(x)))`입니다. **Item·Scene 모듈 전체에 LayerNorm이 없으며**, SASRec Transformer와 기존 GELU User MLP의 내부 LayerNorm은 유지합니다.
+영상용 Item·Scene Residual MLP는 `R(x) = x + ReLU(Linear(512,512)(x))`이며 Linear 하나로 구성됩니다. **Item·Scene 모듈 전체에 LayerNorm이 없으며**, SASRec Transformer와 기존 2층 GELU User MLP의 내부 LayerNorm은 유지합니다.
 
 | 경로 | Item 계산 |
 |---|---|
@@ -60,7 +60,7 @@ Context는 위 세 필드를 합친 문자열 하나를 Scene별로 임베딩합
 
 ## 캐시 및 packed 실행
 
-Text 모델은 `sasrec-content-v7`, Graph는 `sasrec-role-graph/v7`, 학습 구현은 `shared-scenes-training-evaluation/v6`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더가 동일한 BGE 입력 캐시는 재사용합니다.
+Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph gnn은 `sasrec-role-graph/v10`, 학습 구현은 `shared-scenes-training-evaluation/v6`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더가 동일한 BGE 입력 캐시는 재사용합니다.
 
 배치 준비에서 Action별 actor·target·tool·location의 Entity 인덱스와 결측 상태를 계산합니다. 학습 중 가중치나 상태 벡터는 준비 단계에서 계산하지 않습니다. GPU 고정 특징 캐시, 영상 chunk, checkpoint, 평가 catalog 캐시는 유지하며 optimizer step마다 Item cache를 폐기합니다. checkpoint 재계산은 이미 준비한 정적 입력의 신경망 연산만 반복합니다.
 
@@ -92,7 +92,7 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 
 ## 장면 GCN aggregation (2026-10-06)
 
-`mean`은 위 v7 구조를 그대로 사용하며, `gnn`은 기존 장면 MLP 출력 뒤에 영상 내부 메시지 전달을 추가합니다. [DCGN §3.1](https://arxiv.org/html/1906.00377#S3.SS1)의 유사도 그래프를 참고한 추천용 변형입니다. 시간 convolution·계층적 pooling·분류 head를 재현한 모델은 아닙니다.
+`mean`은 위 현재 구조를 사용하며, `gnn`은 기존 장면 MLP 출력 뒤에 영상 내부 메시지 전달을 추가합니다. [DCGN §3.1](https://arxiv.org/html/1906.00377#S3.SS1)의 유사도 그래프를 참고한 추천용 변형입니다. 시간 convolution·계층적 pooling·분류 head를 재현한 모델은 아닙니다.
 
 ```text
 [Entity 평균; 역할 보정 Action 평균; Context] 384 → 장면 유사도
@@ -107,7 +107,7 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 
 Profiler는 `graph_encoder/scene_similarity`, `graph_encoder/scene_gcn`과 `workload.scene_pairs`를 기록합니다. Checkpoint 재계산이 수집되면 해당 연산·장면 쌍도 누적됩니다.
 
-기존 Text·mean identity와 모델 버전은 그대로입니다. 신규 `gnn` 실험은 `sasrec-role-graph/v8`이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v3`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
+GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 MLP를 1층으로 변경한 현재 계약은 Text v8·mean v9·gnn v10이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v3`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
 
 | 경로 | 신규 산출물 |
 |---|---|
@@ -129,7 +129,7 @@ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --d
 GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_gcn.py
 ```
 
-이번 변경의 검증은 `vc_cloud`, PyTorch 2.13.0+cu129에서 CPU validation **171개**, CLI/profiling integration **14개**, GCN CPU/CUDA 검사 **16개**, 기존 mean CUDA 회귀 **12개**가 통과했습니다. GCN 수학은 독립 NumPy 계산과 비교했으며 작은 selection→refit→test→diagnosis, 결과 재사용, checkpoint 재로딩, 유사도 gradient, 영상 격리, 순열 및 결측 처리를 검사했습니다. 변경 전 HEAD의 mean 모델과 같은 seed·입력에서 초기 state 전체·catalog 벡터·추천 점수가 정확히 일치했습니다. 관련 Ruff와 `git diff --check`도 통과했습니다.
+다음은 2층 영상 MLP를 사용한 2026-10-06 GCN 구현 당시의 검증입니다. `vc_cloud`, PyTorch 2.13.0+cu129에서 CPU validation **171개**, CLI/profiling integration **14개**, GCN CPU/CUDA 검사 **16개**, 기존 mean CUDA 회귀 **12개**가 통과했습니다. GCN 수학은 독립 NumPy 계산과 비교했으며 작은 selection→refit→test→diagnosis, 결과 재사용, checkpoint 재로딩, 유사도 gradient, 영상 격리, 순열 및 결측 처리를 검사했습니다. 변경 전 HEAD의 mean 모델과 같은 seed·입력에서 초기 state 전체·catalog 벡터·추천 점수가 정확히 일치했습니다. 관련 Ruff와 `git diff --check`도 통과했습니다.
 
 Profiler를 끈 synthetic 측정은 영상 64개, 유효 장면 315개, 장면 쌍 2105개, batch 128, 고정 특징 1024, 추천 차원 512, seed 42, dropout 0을 사용했습니다. 공통 모델 가중치를 맞추고 순전파·loss·backward·gradient clipping·AdamW·캐시 초기화를 포함했습니다. 3회 반복의 각 배치 시간 중앙값을 다시 중앙값으로 집계했습니다. CPU는 warmup 3/측정 5배치, CUDA는 warmup 5/측정 10배치이며 CUDA는 배치 전후 동기화했습니다.
 
@@ -140,9 +140,34 @@ Profiler를 끈 synthetic 측정은 영상 64개, 유효 장면 315개, 장면 �
 
 이 소형 CUDA workload에서 GNN 시간이 약 2.1배였습니다. 장면 수별 연산 묶음과 `S²` 비용은 실제 데이터 분포에 따라 달라집니다. 전체 Run, RTX 6000 Ada 처리량, 추천 품질 개선, 대량 BGE 생성은 검증하지 않았습니다. 기존 입력·mean 결과·과거 attention 산출물과 다이어그램은 변경하지 않았습니다.
 
+## 영상 Residual MLP 1층 전환 (2026-10-07)
+
+모듈 2의 Item·Scene MLP를 `x + ReLU(Linear(x))`로 변경했습니다. Metadata·Text는 영상별 Item MLP, Graph mean/gnn은 장면별 Scene MLP에 적용합니다. 기존 2층 GELU User MLP와 SASRec, 역할 결합·GCN, 학습·평가 조건은 유지합니다.
+
+| 항목 | 이전 | 현재 |
+|---|---|---|
+| 영상 Residual MLP | `x + Linear(ReLU(Linear(x)))` | `x + ReLU(Linear(x))` |
+| Linear 수 / 512차원 파라미터 | 2 / 525,312개 | 1 / 262,656개 |
+| 모델 계약 | Text v7 / mean v7 / gnn v8 | Text v8 / mean v9 / gnn v10 |
+
+영상 MLP에는 LayerNorm을 추가하지 않았습니다. 전체 결측·padding은 MLP 이후 마스킹하므로 bias가 학습되어도 최종 출력은 0입니다. 제목 없는 Arm도 기존 concat 순서와 역할 처리를 유지합니다. GNN의 유사도는 계속 Scene MLP 이전의 제목 제외 384차원 특징으로 계산합니다.
+
+모델 identity·checkpoint·완료 판정·shared cache·진단은 새 계약을 사용하여 2층 모델 결과와 혼용하지 않습니다. 원본·encoder가 일치하는 Text/Graph BGE 입력은 재사용할 수 있습니다. 추천은 모든 선택 Arm에서 **selection부터 재학습**하고 진단을 다시 생성합니다. 기존 결과를 보존하려면 별도 Run을 사용하거나 재실행 전에 보관하십시오. 모델 변경 자체는 기존 산출물을 삭제하지 않습니다.
+
+```bash
+RUN_ID="사용할_Run_ID"
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode text --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta desc_qwen_meta desc_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+```
+
+`vc_cloud`의 CPU validation **105개**, NVIDIA L4 CUDA 검사 **14개**, CLI·README integration **28개**가 통과했습니다. 독립 NumPy 수식·gradient, 결측·padding, projection/encoder/SASRec 학습, Text/Graph Meta 일치, mean/gnn chunk·checkpoint 및 재로딩, 구버전 계약 거부, 프로파일링 회귀를 검사했습니다. 변경 파일 Ruff와 `git diff --check`가 통과했습니다. mean·gnn PPTX/PNG를 함께 갱신하고 편집 가능한 객체·텍스트 렌더링·경계를 확인했습니다.
+
+이는 소형 검증이며 전체 Run 학습·추천 품질·학습 시간 감소 폭은 측정하지 않았습니다. 위 2026-10-06 benchmark는 **이전 2층 영상 MLP**의 측정값입니다. MLP 파라미터가 절반이라는 사실만으로 전체 학습이 두 배 빨라졌다고 해석하지 않습니다.
+
 ## 이전 학습 비용 조정 (2026-09-30)
 
-이 절은 과거 v2 설정 기록입니다. 현재 학습 조건은 위 v7 계약을 따릅니다.
+이 절은 과거 v2 설정 기록입니다. 현재 학습 조건은 위 모델 계약을 따릅니다.
 
 공통 `validation.model` 설정을 학습률 `3e-4`, batch size `512`, patience `3`,
 `min_delta=1e-4`로 변경했습니다. 이 네 설정은 text와 graph 모두에 적용됩니다.
@@ -207,7 +232,7 @@ v3에서는 가중치 구조가 달라졌으므로 당시 v2 비교 스크립트
 
 ## 이전 Graph 모델 v3: 1층 encoder와 128+384 결합 (2026-09-30)
 
-아래는 이전 v3의 변경 이력입니다. 현재 계약은 v7이며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
+아래는 이전 v3의 변경 이력입니다. 현재 계약은 위 모델 및 데이터 계약을 따르며 이 절의 구조·재개 설명은 과거 버전에 해당합니다. 당시 모델 계약은 **`sasrec-role-graph/v3`**였습니다.
 
 | 부분 | 이전 v2 | 현재 v3 |
 |---|---|---|
@@ -362,7 +387,7 @@ device 시간이 수집되지 않았다면 CPU 비율로 GPU projection 비중�
 
 ## 이전 모델 v6: BGE Large 전용 전환
 
-이 절의 구조·결정성 설정은 과거 기록입니다. 현재 모델은 위 v7 계약을 따릅니다.
+이 절의 구조·결정성 설정은 과거 기록입니다. 현재 모델은 위 모델 계약을 따릅니다.
 
 현재 지원 가중치는 `/home_nvme/shared/models/bge-large-en-v1.5`이며 BGE 출력은 1024차원입니다.
 [Large 구조 PNG](design/recsys_diagram_large.png)와 [편집 가능한 PPTX](design/recsys_diagram_large.pptx)를 기준으로 합니다.
@@ -451,7 +476,7 @@ python -m ruff check src/validation tests/validation tests/conftest.py
 
 ## 이전 모델 v5: BGE small 전환과 state lookup 최적화
 
-아래는 과거 small 전환 기록입니다. 현재 실행에는 적용되지 않으며, 위 v7 계약을 따릅니다. 당시 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
+아래는 과거 small 전환 기록입니다. 현재 실행에는 적용되지 않으며, 위 모델 계약을 따릅니다. 당시 실행은 `/home_nvme/shared/models/bge-small-en-v1.5`의 384차원 특징만 지원합니다.
 설정 계약은 `validation-config/v6`, Text 모델은 `sasrec-content-v5`, Graph 모델은
 `sasrec-role-graph/v5`, 학습 구현은 `shared-scenes-training-evaluation/v5`입니다.
 Text의 분리 입력 포맷(v4)과 Graph 입력 포맷(v2)은 유지하지만 BGE 모델 식별과 차원이
@@ -555,7 +580,7 @@ Encoder는 Entity·Action 분기에만 적용하고, Context 분기는 장면 co
 
 ## 이전 모델 v4: Baseline·Text·Graph 최종 구조
 
-아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 v7 계약을 따릅니다.
+아래는 large 특징을 사용한 v4 기록입니다. 현재 실행은 위 모델 계약을 따릅니다.
 
 최종 다이어그램과 일치하는 모델 계약은 Text `sasrec-content-v4`, Graph `sasrec-role-graph/v4`입니다.
 

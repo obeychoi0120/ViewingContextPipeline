@@ -1,10 +1,10 @@
 from __future__ import annotations
 from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms
 
-ARCHITECTURE_VERSION = "sasrec-content-v7"
+ARCHITECTURE_VERSION = "sasrec-content-v8"
 # Current text and direct-graph architectures.
 DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({
-    "sasrec-content-v7", "sasrec-role-graph/v7", "sasrec-role-graph/v8"
+    "sasrec-content-v8", "sasrec-role-graph/v9", "sasrec-role-graph/v10"
 })
 ITEM_MODEL = {
     "baseline_dim": 512,
@@ -14,6 +14,8 @@ ITEM_MODEL = {
     "item_mlp": True,
     "item_mlp_activation": "relu",
     "item_mlp_hidden_dim": 512,
+    "item_mlp_linear_layers": 1,
+    "item_mlp_formula": "x_plus_relu_linear_x",
     "input_dim": 1024,
 }
 DEFAULT_PROTOCOL = {"experiment_config_version": EXPERIMENT_CONFIG_VERSION}

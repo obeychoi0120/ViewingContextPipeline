@@ -78,7 +78,7 @@ def build(presentation):
     d.junction("Content forward fork", 16.55, 7.00, TEAL)
 
     node("Graph Scene Residual MLP", 9.7, 7.81, 5.2, 0.62,
-         ["Scene Residual MLP → H: S × 512", "512 → 512 → 512 · ReLU · no LN"],
+         ["1-layer Scene Residual MLP → H: S × 512", "512 → 512 · ReLU"],
          size=15, fill="DFF3F1")
     d.wire("Concat to Scene MLP", [(12.3, 7.60), (12.3, 7.81)], TEAL)
     d.box("Graph Scene similarity", 15.3, 7.10, 5.3, 1.33, "EFF8F7", TEAL)
@@ -114,7 +114,7 @@ def build(presentation):
             ("Title-only: existing fallback (GCN skipped)  |  Meta: Baseline  |  Fully missing / padding: 0", 13, MUTED, False)],
            align=PP_ALIGN.LEFT)
     slide.notes_slide.notes_text_frame.text = (
-        "Graph experiment: sasrec-role-graph/v8; aggregation=gnn. "
+        "Graph experiment: sasrec-role-graph/v10; aggregation=gnn. "
         "A DCGN-inspired recommendation variant, not a reproduction of hierarchical DCGN. "
         "X concatenates entity means, role-enriched action means and projected Context, "
         "before the Scene MLP and without Title. L2 normalization uses eps=1e-8; "
@@ -122,9 +122,11 @@ def build(presentation):
         "D is the diagonal matrix of row sums of A. Similarity is recomputed each "
         "forward with gradients enabled. GCN messages use the existing 512-dimensional "
         "Scene Residual MLP output. Single scenes receive the self-loop transformation. "
-        "No temporal convolution, hierarchy, gate, attention, GCN dropout or LayerNorm. "
+        "No temporal convolution, hierarchy, gate, attention or GCN dropout. "
         "BGE stays fixed; projections, role fusion, Scene MLP, GCN and SASRec train jointly. "
-        "The Baseline, Text path and SASRec retain the existing v7 model structure."
+        "Item/Scene residual blocks use x + ReLU(Linear(x)), with one Linear layer. "
+        "Text uses sasrec-content-v8; mean uses sasrec-role-graph/v9. "
+        "SASRec and its two-Linear GELU User MLP with LayerNorm remain unchanged."
     )
     return presentation
 

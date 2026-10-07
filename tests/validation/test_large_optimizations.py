@@ -54,7 +54,7 @@ def test_large_production_text_dimensions_and_masks(tmp_path, branch, device):
     loss = torch.nn.functional.cross_entropy(users @ vectors[1:].T, torch.tensor([0, 1], device=device))
     loss.backward()
     projections = [model.item_projection] if branch == "meta" else [model.title_projection, model.video_projection]
-    layers = [*projections, model.item_mlp.fc1, model.item_mlp.fc2, model.encoder.layers[0].linear1]
+    layers = [*projections, model.item_mlp.fc1, model.encoder.layers[0].linear1]
     before = [layer.weight.detach().clone() for layer in layers]
     for layer in layers:
         assert layer.weight.grad is not None and layer.weight.grad.abs().sum() > 0
@@ -92,7 +92,7 @@ def test_large_graph_dimensions_independent_projections_and_empty_items(pool, de
     loss = torch.nn.functional.cross_entropy(users @ vectors.T, torch.tensor([2, 3], device=device))
     loss.backward()
     layers = [*projections, encoder.role_fusion, encoder.scene_mlp.fc1,
-              encoder.scene_mlp.fc2, model.encoder.layers[0].linear1]
+              model.encoder.layers[0].linear1]
     before = [layer.weight.detach().clone() for layer in layers]
     states_before = encoder.role_states.detach().clone()
     for layer in layers:
@@ -116,7 +116,9 @@ def test_encoder_identity_and_video_structure_are_in_result_cache(current_contex
     original = cache_for(current_context, current).key
     current_context.config["models"]["bge"] = str(current_context.root / "bge-small-en-v1.5")
     assert cache_for(current_context, recommendation_identity(current_context, "desc_qwen_meta")).key != original
-    old = {**current, "text_architecture": "sasrec-content-v6"}
+    assert current["text_architecture"] == "sasrec-content-v8"
+    assert current["item_model"]["item_mlp_linear_layers"] == 1
+    old = {**current, "text_architecture": "sasrec-content-v7"}
     assert cache_for(current_context, old).key != original
 
 

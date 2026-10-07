@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pipeline_runtime import RunContext
 
 GRAPH_ARMS = frozenset({"meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"})
-GRAPH_ARCHITECTURE = "sasrec-role-graph/v7"
+GRAPH_ARCHITECTURE = "sasrec-role-graph/v9"
 GRAPH_MODEL = {
     "hidden_dim": 128,
     "scene_dim": 512,
@@ -15,12 +15,13 @@ GRAPH_MODEL = {
     "projections": "separate_title_entity_action_context",
     "roles": ["actor", "target", "tool", "location"],
     "role_fusion": "action_plus_relu_linear_640_to_128",
-    "scene_mlp": {"hidden_dim": 512, "activation": "relu", "normalization": "none"},
+    "scene_mlp": {"hidden_dim": 512, "activation": "relu", "normalization": "none",
+                  "linear_layers": 1, "formula": "x_plus_relu_linear_x"},
     "aggregation": "mean",
     "input_dim": 1024,
     "state_lookup": "embedding",
 }
-GNN_ARCHITECTURE = "sasrec-role-graph/v8"
+GNN_ARCHITECTURE = "sasrec-role-graph/v10"
 GNN_MODEL = {
     **GRAPH_MODEL,
     "fusion": "role_gather_scene_residual_mlp_then_gcn_mean",

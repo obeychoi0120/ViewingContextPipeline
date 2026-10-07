@@ -59,7 +59,7 @@ def test_component_order_masks_and_gradients(arm):
     model = SASRec(4, 10, 8, 2, 2, 0.0, arm=arm, item_features=features)
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
     with torch.no_grad():
-        model.item_mlp.fc2.bias.fill_(0.4)
+        model.item_mlp.fc1.bias.fill_(0.4)
         if arm != "metadata":
             model.title_projection.bias.fill_(1)
     captured = []
@@ -69,6 +69,8 @@ def test_component_order_masks_and_gradients(arm):
     values = model.item_vectors(torch.arange(5))
     hook.remove()
     assert not any(isinstance(m, torch.nn.LayerNorm) for m in model.item_mlp.modules())
+    assert sum(isinstance(m, torch.nn.Linear) for m in model.item_mlp.modules()) == 1
+    assert sum(isinstance(m, torch.nn.Linear) for m in model.user_mlp.modules()) == 2
     assert not model.title_features.requires_grad and not model.video_features.requires_grad
     if arm != "metadata":
         assert not captured[0][3, :2].any() and not captured[0][2, 2:].any()
@@ -101,3 +103,28 @@ def test_component_boundaries_are_in_semantic_identity():
     left = {**shared, 'title_text': 'a', 'video_text': 'b\n\nc'}
     right = {**shared, 'title_text': 'a\n\nb', 'video_text': 'c'}
     assert semantic_document_hash(left) != semantic_document_hash(right)
+
+
+def test_single_layer_residual_formula_gradient_and_legacy_rejection():
+    torch = pytest.importorskip("torch")
+    from validation.model import SingleLayerResidualMLP
+
+    block = SingleLayerResidualMLP(2)
+    weight = np.array([[2.0, -1.0], [-1.0, 0.5]], dtype=np.float32)
+    bias = np.array([0.25, -0.25], dtype=np.float32)
+    inputs = np.array([[1.0, -1.0], [-1.0, 1.0]], dtype=np.float32)
+    with torch.no_grad():
+        block.fc1.weight.copy_(torch.from_numpy(weight))
+        block.fc1.bias.copy_(torch.from_numpy(bias))
+    values = torch.tensor(inputs, requires_grad=True)
+    pre_activation = inputs @ weight.T + bias
+    expected = inputs + np.maximum(pre_activation, 0)
+    output = block(values)
+    np.testing.assert_allclose(output.detach().numpy(), expected)
+    output.sum().backward()
+    active = (pre_activation > 0).astype(np.float32)
+    np.testing.assert_allclose(values.grad.numpy(), 1 + active @ weight)
+    np.testing.assert_allclose(block.fc1.weight.grad.numpy(), active.T @ inputs)
+    legacy = {**block.state_dict(), "fc2.weight": torch.eye(2), "fc2.bias": torch.zeros(2)}
+    with pytest.raises(RuntimeError, match="Unexpected key"):
+        block.load_state_dict(legacy)

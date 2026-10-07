@@ -1,4 +1,4 @@
-"""Update the editable recommendation diagram to the implemented v7 model.
+"""Update the editable recommendation diagram to the current mean model.
 
 Preserves the existing Baseline/Text panels, palette and recommender band.
 Run: python docs/design/generate_recsys_diagram.py
@@ -56,7 +56,7 @@ def build(presentation):
     for name in ("Rounded Rectangle 160", "Rounded Rectangle 170"):
         mlp = shapes[name]
         mlp.top, mlp.height = Inches(8.95), Inches(0.86)
-        text(mlp, ["Item Residual MLP", "512 → 512 → 512", "ReLU · no LayerNorm"], 15)
+        text(mlp, ["1-layer Item Residual MLP", "512 → 512", "ReLU"], 15)
 
     # Remove the old Graph computation (or the previous generated version),
     # keeping its panel and heading. Lower Baseline/Text wires are redrawn too.
@@ -112,7 +112,7 @@ def build(presentation):
                        ("Actions", 16.55, 6.87), ("Context", 19.35, 4.6)):
         d.wire(role + " to Scene concat", [(x, y), (x, 7.2)], TEAL)
     node("Graph Scene Residual MLP", 9.7, 8.12, 10.9, 0.72,
-         ["Scene Residual MLP", "512 → 512 → 512 · ReLU · no LayerNorm"],
+         ["1-layer Scene Residual MLP", "512 → 512 · ReLU"],
          size=17, fill="DFF3F1")
     node("Graph Mean Pooling", 9.7, 9.1, 10.9, 0.62,
          ["Mean Pooling over valid Scenes: S × 512 → Item 512"], size=18, fill="DFF3F1")
@@ -121,6 +121,18 @@ def build(presentation):
                              ("Graph item output", 9.72, 10.37)):
         d.wire(name, [(15.15, start), (15.15, end)], TEAL)
     text(shapes["TextBox 90"], ["Last valid position", "User Residual MLP · GELU + LN"], 16)
+    slide.notes_slide.notes_text_frame.text = (
+        "Text: sasrec-content-v8; Graph mean: sasrec-role-graph/v9. "
+        "Baseline/Text Item and Graph Scene residual blocks use x + ReLU(Linear(x)), "
+        "with one Linear 512-to-512. "
+        "Graph projects Title, Entities, Actions and Context independently to 128. "
+        "Actor, target, tool and location enrich Actions from Entities in one direction. "
+        "Scene concat is [Title; Entity mean; Action mean; Context] at 512 dimensions; "
+        "the Scene MLP precedes valid-scene mean pooling. "
+        "Text encodes Title and Summary separately with frozen BGE Large. "
+        "Missing videos and padding remain zero after the final video encoder. "
+        "SASRec and its two-Linear GELU User MLP with LayerNorm remain unchanged."
+    )
     return presentation
 
 

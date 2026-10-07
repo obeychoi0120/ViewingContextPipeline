@@ -217,6 +217,10 @@ def test_rolling_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     directory = combination_dir(context, split['evaluation_date'], identity['seed'], identity['arm'])
     assert combination_complete(directory, identity, len(prepared[0]['test']))
     assert recommendation_cache.valid_bundle(directory, identity, table, split)
+    legacy = {**identity, 'graph_architecture':
+              'sasrec-role-graph/v7' if pool == 'mean' else 'sasrec-role-graph/v8'}
+    assert not combination_complete(directory, legacy, len(prepared[0]['test']))
+    assert not recommendation_cache.valid_bundle(directory, legacy, table, split)
     assert not combination_complete(directory, {**identity, 'scene_aggregation': 'wrong'}, len(prepared[0]['test']))
     assert np.load(directory / 'catalog_vectors.npy').shape == (4, 512)
     other = directory.parent / 'restore'
@@ -270,7 +274,7 @@ def test_title_order_and_missing_inputs(graph_data):
         # Trainable biases cannot introduce an Item for a completely missing video.
         with torch.no_grad():
             model.title_projection.bias.fill_(0.25)
-            model.graph_encoder.scene_mlp.fc2.bias.fill_(0.75)
+            model.graph_encoder.scene_mlp.fc1.bias.fill_(0.75)
         from validation.graph_model import graph_batch
         batch = graph_batch(model.store, [0, 1, 2, 3], 'cpu')
         with torch.no_grad():
@@ -368,8 +372,9 @@ def test_gnn_contract_reuses_features_but_separates_recommendation_cache(graph_d
     gnn_identity = recommendation_identity(gnn, arm.name)
     assert mean_identity['embedding_hash'] == gnn_identity['embedding_hash']
     assert mean_identity['graph_model'] == GRAPH_MODEL
-    assert mean_identity['graph_architecture'] == 'sasrec-role-graph/v7'
-    assert gnn_identity['graph_architecture'] == 'sasrec-role-graph/v8'
+    assert mean_identity['graph_model']['scene_mlp']['linear_layers'] == 1
+    assert mean_identity['graph_architecture'] == 'sasrec-role-graph/v9'
+    assert gnn_identity['graph_architecture'] == 'sasrec-role-graph/v10'
     assert cache_for(context, mean_identity).key != cache_for(gnn, gnn_identity).key
     assert recommendation_identity(gnn, 'meta')['graph_model']['gcn_applied'] is False
     assert gnn.recommendations_dir.name == 'gnn'
