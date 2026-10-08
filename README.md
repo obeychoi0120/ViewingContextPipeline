@@ -53,7 +53,7 @@ BGE Large, 30초 창·6개 키프레임, 각 성분의 차원 배분은 현재 �
 | 5. 평가·고정 특징 준비 | 원본 이력, 제목·Summary 또는 Graph 요소·역할 연결 | 사용자 필터·최근 13개·마지막 2개 분할·평가 catalog 구성; 동결 BGE 인코딩 → 1024차원 특징, 가용성 마스크; Graph는 노드·edge·장면 경계도 저장 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Text 특징](src/validation/steps.py), [Graph 입력](src/validation/graph_inputs.py) |
 | 6. 영상 표현 학습 | 고정 특징, Graph 구조 | projection·MLP·역할 결합·장면 집계 → 영상당 512차원 벡터 | `run-recommendation` 내부 · [Text 모델](src/validation/model.py), [Graph 모델](src/validation/graph_model.py) |
 | 7. 사용자 표현·추천 평가 | 과거 시청 영상 벡터, 후보 영상 벡터, 평가 계획 | SASRec·내적·순위 평가 → checkpoint, 학습 기록, 이벤트별 지표 | `run-recommendation` · [leave-one-out 학습·평가](src/validation/leave_one_out_recommendation.py) |
-| 8. 진단 | 이벤트별 지표, 추출·표현·학습 기록 | 지표 집계·비교 통계·coverage 확인 → 진단 JSON | `run-diagnosis` · [Text 진단](src/validation/leave_one_out_diagnosis.py), [Graph 진단](src/validation/graph_diagnosis.py) |
+| 8. 진단 | 이벤트별 지표, 추출·표현·학습 기록 | 검증·집계 → 최종 HR/NDCG·수치 비교만 저장한 진단 JSON | `run-diagnosis` · [Text 진단](src/validation/leave_one_out_diagnosis.py), [Graph 진단](src/validation/graph_diagnosis.py) |
 
 **5단계에서 저장하는 것은 고정 입력 특징입니다. 최종 추천용 영상 벡터는 6단계의 학습된 모델이 생성합니다.** 영상의 장면 순서와 사용자의 시청 순서도 다릅니다. 현재 mean/GCN에는 장면 순서 인코딩이 없으며, SASRec은 사용자의 시간순 시청 이력을 처리합니다.
 
@@ -343,7 +343,7 @@ artifacts/
 │   ├── extraction/
 │   │   ├── scenes/<source>/
 │   │   └── summaries/<source>/
-│   ├── validation/leave_one_out/
+│   ├── validation/
 │   │   ├── cohort/
 │   │   ├── representations/{text,graph}/
 │   │   ├── recommendations/text/
@@ -357,10 +357,12 @@ artifacts/
 | --- | --- |
 | 장면 관측 | `extraction/scenes/<source>/<content_id>.jsonl` |
 | 영상 Summary | `extraction/summaries/<source>/<content_id>.json` |
-| Text 고정 특징 | `validation/leave_one_out/representations/text/<arm>_embeddings.npz` |
-| Graph 고정 특징·역할 연결 | `validation/leave_one_out/representations/graph/<arm>_embeddings/`의 배열·manifest·statistics |
-| 추천 학습·test | `validation/leave_one_out/recommendations/text/seed_<seed>/<arm>/` 또는 `validation/leave_one_out/recommendations/graph/<mean 또는 gnn>/seed_<seed>/<arm>/` |
-| 진단 | `validation/leave_one_out/diagnosis/text_diagnosis.json`, `graph_mean_diagnosis.json`, `graph_gnn_diagnosis.json` |
+| Text 고정 특징 | `validation/representations/text/<arm>_embeddings.npz` |
+| Graph 고정 특징·역할 연결 | `validation/representations/graph/<arm>_embeddings/`의 배열·manifest·statistics |
+| 추천 학습·test | `validation/recommendations/text/seed_<seed>/<arm>/` 또는 `validation/recommendations/graph/<mean 또는 gnn>/seed_<seed>/<arm>/` |
+| 진단 | `validation/diagnosis/text_diagnosis.json`, `graph_mean_diagnosis.json`, `graph_gnn_diagnosis.json` |
+
+진단 JSON은 Arm별 최종 점수(`recommendations.means`), NDCG@10 수치 비교·신뢰구간과 성공/실패 판정만 저장합니다. 상세 분할·입력 provenance·seed별 이벤트 지표는 원래 cohort·표현·추천 파일에 보존합니다. 재학습 없이 `run-diagnosis`만 다시 실행하면 기존 진단도 축소 형식으로 저장됩니다.
 
 추천 결과는 seed × Arm 단위로 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`을 저장하며, 직접 Graph는 `catalog_vectors.npy`도 저장합니다. `training.json`의 train epoch별 validation 지표와 최종 test 지표는 구분합니다. 과거 `graph_attention_diagnosis.json`과 기존 Run 산출물은 보존합니다.
 

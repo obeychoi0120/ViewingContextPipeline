@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 import numpy as np
-from artifact_io import read_json, write_json
+from artifact_io import read_json
+from validation.diagnosis_support import write_diagnosis
 from validation.diagnosis_scenes import _scene_coverage
-from validation.diagnosis_statistics import multiple_comparison_policy
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import (
     DIAGNOSIS_ARCHITECTURE_VERSIONS,
     resolve_target_arms,
-    target_scope,
 )
 from arm_registry import registry
 from validation.representation_checks import verify_representations
@@ -254,23 +253,17 @@ def diagnose(context, *, target=None, compare_run_id=None):
     config = validation_config(context)
     errors = []
     document = {
-        "schema_version": "leave-one-out-diagnosis/v1",
         "run_id": context.run_id,
-        **target_scope(arms, config=context.config),
+        "representation_mode": "text",
         "statistics": {"status": "not_computed"},
     }
     try:
         cohort = load_validation_cohort(context)
-        document["cohort"] = cohort["plan"]
-        document["selection"] = {
-            key: value for key, value in cohort["manifest"].items() if key != "included_item_ids"
-        }
-        document["selection"]["manifest_path"] = "validation/leave_one_out/cohort/manifest.json"
         from validation.metadata import verify_missing_metadata
 
         if any((name in arms for name in ("meta", "metadata"))):
-            document["metadata_missing"] = verify_missing_metadata(context, cohort)
-        scene = _scene_coverage(
+            verify_missing_metadata(context, cohort)
+        _scene_coverage(
             context.run_root,
             [r["content_id"] for r in cohort["catalog"]],
             errors,
@@ -284,38 +277,24 @@ def diagnose(context, *, target=None, compare_run_id=None):
             source_assets_dir=context.source_assets_dir,
             informational=True,
         )
-        document["scene_coverage"] = scene[0]
         from extraction.recovery_report import recovery_report
 
-        document["generation_recovery"] = recovery_report(
+        recovery_report(
             context, branches=arms, content_ids=[r["content_id"] for r in cohort["catalog"]]
         )
         from validation.diagnosis_representations import representation_report
 
-        document["representations"], document["gemini_summary_fallbacks"] = representation_report(
-            context, arms
-        )
+        representation_report(context, arms)
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
-        reuse_path = context.recommendations_dir / "reuse.json"
-        if reuse_path.is_file():
-            document["recommendations"]["reuse"] = read_json(reuse_path)
         if not errors:
-            observed, draws, bootstrap = cluster_bootstrap(
+            observed, draws, _ = cluster_bootstrap(
                 sums, counts, samples=config.evaluation.bootstrap_samples
             )
             document["statistics"] = {
                 "status": "computed",
-                "bootstrap": bootstrap,
                 "comparisons": comparisons(
                     observed, draws, config.evaluation, arms=arms, config=context.config
-                ),
-                "policy": multiple_comparison_policy(
-                    config.evaluation.model_dump(),
-                    True,
-                    "NDCG@10",
-                    arms=arms,
-                    config=context.config,
                 ),
             }
             if compare_run_id is not None:
@@ -327,7 +306,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_leave_one_out_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
-    write_json(context.diagnosis_path, document)
+    write_diagnosis(context.diagnosis_path, document)
     if errors or document["statistics"]["status"] != "computed":
         raise RuntimeError(f"leave-one-out diagnosis failed; see {context.diagnosis_path}")
     return {"stage": "run-diagnosis", "status": "pass"}

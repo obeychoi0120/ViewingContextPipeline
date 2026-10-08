@@ -6,7 +6,7 @@
 
 로컬 BGE 가중치와 torch·transformers 환경을 사용합니다. `pip install -e ".[train,embedding]"`로 의존성을 설치할 수 있습니다. BGE는 GPU별 고유 문자열 분할, 추천은 GPU별 독립 seed·Arm 조합으로 실행하며 단일 모델 DDP는 사용하지 않습니다.
 
-기존 rolling 결과는 새 `validation/leave_one_out/` 경로와 분리되어 보존됩니다. 같은 leave-one-out 결과를 보존하며 조건을 바꿀 때는 새 Run ID와 config snapshot을 사용하십시오. 아래 명령은 전체 학습을 실행하므로 이 구현 검증에서는 실행하지 않았습니다.
+Run 평가 산출물은 `validation/`에 직접 저장합니다. 기존 파일은 자동 이동하거나 삭제하지 않습니다. 기존 결과를 보존하며 조건을 바꿀 때는 새 Run ID와 config snapshot을 사용하십시오. 아래 명령은 전체 학습을 실행하므로 이 구현 검증에서는 실행하지 않았습니다.
 
 ```bash
 RUN_ID="새_Run_ID"
@@ -70,10 +70,10 @@ Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph 
 
 | Run 아래 위치 | 내용 |
 |---|---|
-| `validation/leave_one_out/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
-| `validation/leave_one_out/recommendations/graph/mean/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
-| `validation/leave_one_out/diagnosis/graph_mean_diagnosis.json` | leave-one-out-diagnosis/v1 지표·paired 통계·실행 판정 |
-| `validation/leave_one_out/diagnosis/text_diagnosis.json` | Text 진단 |
+| `validation/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
+| `validation/recommendations/graph/mean/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
+| `validation/diagnosis/graph_mean_diagnosis.json` | leave-one-out-diagnosis/v2 최종 HR/NDCG·수치 비교·실행 판정 |
+| `validation/diagnosis/text_diagnosis.json` | Text 진단 |
 
 기존 Attention 산출물과 과거 Run은 수정·이동하지 않습니다. 같은 Run의 기존 결과 경로에서 재학습하면 해당 조합을 대체하므로 보존 실험에는 새 Run을 사용하십시오. `--compare-run-id`는 선택한 경로·aggregation의 결과만 읽고 프로토콜·전처리·원본·분할·catalog·seed가 다른 Run을 거절합니다.
 
@@ -111,8 +111,8 @@ GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 M
 
 | 경로 | 신규 산출물 |
 |---|---|
-| 추천 | `validation/leave_one_out/recommendations/graph/gnn/seed_<seed>/<arm>/` |
-| 진단 | `validation/leave_one_out/diagnosis/graph_gnn_diagnosis.json` |
+| 추천 | `validation/recommendations/graph/gnn/seed_<seed>/<arm>/` |
+| 진단 | `validation/diagnosis/graph_gnn_diagnosis.json` |
 
 유효한 현재 Graph 입력이 있다면 재임베딩 없이 추천부터 실행합니다. GNN은 selection부터 새 학습이며 기존 mean·과거 attention 산출물은 보존합니다.
 

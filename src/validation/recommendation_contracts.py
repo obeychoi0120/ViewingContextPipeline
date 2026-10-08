@@ -30,15 +30,5 @@ def resolve_target_arms(target=None, *, config=None):
     return {name: name for name in select_arms(configured, target)}
 
 
-def target_scope(arms, *, config=None):
-    return {
-        "target_sources": list(arms),
-        "selected_arms": list(arms),
-        "excluded_arms": [
-            name for name in registry(config or DEFAULT_PROTOCOL) if name not in arms
-        ],
-    }
-
-
 # Bump for changes to partition/checkpoint selection, loss, masking, ranking, or metric semantics.
 TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-leave-one-out-training/v1"

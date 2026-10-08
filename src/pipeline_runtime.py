@@ -138,7 +138,7 @@ class RunContext:
 
     @property
     def validation_dir(self) -> Path:
-        return self.run_root / "validation" / "leave_one_out"
+        return self.run_root / "validation"
 
     @property
     def representations_dir(self) -> Path:

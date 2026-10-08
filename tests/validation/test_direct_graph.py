@@ -251,10 +251,12 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     assert run_diagnosis(context, target=['graph_qwen_meta'], representation_mode='graph',
                          scene_aggregation=pool)['status'] == 'pass'
     diagnosis = json.loads(context.diagnosis_path.read_text())
-    assert diagnosis['schema_version'] == 'leave-one-out-diagnosis/v1'
+    assert diagnosis['schema_version'] == 'leave-one-out-diagnosis/v2'
     assert 'graph_inputs' not in diagnosis
-    assert diagnosis['recommendations']['combination_count'] == 1
-    assert diagnosis['recommendations']['reuse'] == reuse
+    assert set(diagnosis['recommendations']) == {'means'}
+    assert set(diagnosis['recommendations']['means']) == {'graph_qwen_meta'}
+    assert set(diagnosis['statistics']) == {'status', 'comparisons', 'metric'}
+    assert 'cohort' not in diagnosis
     assert diagnosis['statistics']['status'] == 'computed'
     assert diagnosis['runtime_decision'] == {'status': 'pass', 'errors': []}
     assert 'paper_reference' not in diagnosis

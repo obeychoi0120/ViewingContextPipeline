@@ -175,7 +175,11 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
     legacy.mkdir(parents=True)
     for name in ("sasrec.pt", "training.json", "per_event_metrics.jsonl", "complete.json"):
         (legacy / name).write_bytes(b"preserve original rolling result")
-    protected = {p: p.read_bytes() for p in legacy.iterdir()}
+    previous_layout = ready_context.run_root / "validation" / "leave_one_out" / "cohort" / "manifest.json"
+    previous_layout.parent.mkdir(parents=True)
+    previous_layout.write_bytes(b"preserve previous leave-one-out layout")
+    protected = {p: p.read_bytes() for p in [*legacy.iterdir(), previous_layout]}
+    assert ready_context.validation_dir == ready_context.run_root / "validation"
     generate_all(ready_context)
     embed_representations(ready_context, target=list(registry(ready_context.config)))
 
@@ -203,14 +207,19 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         assert diagnose(ready_context, target=list(registry(ready_context.config)))["status"] == "pass"
         assert protected == {p: p.read_bytes() for p in protected}
         doc = read_json(ready_context.diagnosis_path)
-        assert "daily" not in doc["recommendations"] and "paper_reference" not in doc
-        assert len(doc["recommendations"]["per_seed"]) == 18
+        assert doc["schema_version"] == "leave-one-out-diagnosis/v2"
+        assert (ready_context.validation_dir / "cohort" / "manifest.json").is_file()
+        assert set(doc) == {"schema_version", "run_id", "representation_mode", "runtime_decision", "recommendations", "statistics"}
+        assert set(doc["recommendations"]) == {"means"}
+        assert set(doc["statistics"]) == {"status", "comparisons", "metric"}
         from validation.leave_one_out_diagnosis import collect_metrics
         from validation.steps import validation_config
 
         user_metrics, counts, report = collect_metrics(
             ready_context, validation_config(ready_context), load_validation_cohort(ready_context),
             arms={name: name for name in NAMES})
+        assert len(report["per_seed"]) == 18
+        assert doc["recommendations"]["means"] == report["means"]
         manual = np.zeros((3, 6))
         for seed in (42, 43, 44):
             for index, arm in enumerate(NAMES):
@@ -244,7 +253,7 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         assert result["skipped"] == 18
         assert result["completed"] == 0
         assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 18
-        checkpoints = list(ready_context.recommendations_dir.rglob("sasrec.pt"))
+        checkpoints = list(ready_context.recommendations_dir.glob("seed_*/*/sasrec.pt"))
         assert len(checkpoints) == 18
         shared_checkpoints = 0
         for path in checkpoints:
