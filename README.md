@@ -159,10 +159,10 @@ Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없�
 | 단계 | 데이터 | 입력 이력·역할 |
 | --- | --- | --- |
 | Train | 마지막 2개를 제외한 상호작용 | 앞선 이력으로 다음 아이템 전이를 학습 |
-| Validation | 끝에서 두 번째 상호작용 1개 | train 이력으로 NDCG@10을 계산하고 최적 checkpoint 선택 |
+| Validation | 끝에서 두 번째 상호작용 1개 | train 이력으로 HR@10을 계산하고 최적 checkpoint 선택 |
 | Test | 마지막 상호작용 1개 | train + validation 이력으로 선택된 checkpoint 평가 |
 
-각 정답 앞의 최대 10개를 모델에 입력합니다. 동일 timestamp는 원본 행 순서로 결정하며, 첫 이벤트는 학습 정답으로 사용하지 않습니다. validation 이후 train+validation 재학습은 하지 않습니다. 후보 catalog는 보존된 사용자 시퀀스 전체의 아이템이며, 각 정답을 제외한 앞선 보존 이력 전체를 마스킹합니다. 반복 정답은 후보에 남기고 점수 동률은 catalog 순서로 결정합니다. validation/test는 학습 정답·학습 빈도에 들어가지 않습니다.
+각 정답 앞의 최대 10개를 모델에 입력합니다. 동일 timestamp는 원본 행 순서로 결정하며, 첫 이벤트는 학습 정답으로 사용하지 않습니다. validation 이후 train+validation 재학습은 하지 않습니다. 후보 catalog는 보존된 사용자 시퀀스 전체의 아이템이며, 앞선 보존 이력 전체를 마스킹합니다. 반복 정답도 마스킹하며, 사용자별 `torch.argsort(scores, descending=True)`로 순위를 계산합니다. 동률 순서는 PyTorch·device 환경에 따라 달라질 수 있습니다. validation/test는 학습 정답·학습 빈도에 들어가지 않습니다. checkpoint 선택은 validation **HR@10**, 최종 보고·paired bootstrap의 주 지표는 **NDCG@10**입니다. 동점이면 최초 epoch를 유지하고, 기존 patience 5로 종료한 뒤 최적 가중치로 test를 한 번 평가합니다.
 
 전처리는 [MicroLens 공식 SASRec 코드](https://github.com/microlens2023/microlens-dataset/blob/master/Code/VideoRec/SASRec/utils/load_data.py)의 최소 이력·시퀀스 절단·마지막 2개 보류 흐름을 따릅니다. 모델·손실함수까지 논문을 완전히 재현한 것은 아니며, 사용자별 분할은 전체 사용자 사이의 공통 시간 경계를 보장하지 않습니다.
 
@@ -362,7 +362,7 @@ artifacts/
 | 추천 학습·test | `validation/recommendations/text/seed_<seed>/<arm>/` 또는 `validation/recommendations/graph/<mean 또는 gnn>/seed_<seed>/<arm>/` |
 | 진단 | `validation/diagnosis/text_diagnosis.json`, `graph_mean_diagnosis.json`, `graph_gnn_diagnosis.json` |
 
-진단 JSON은 Arm별 최종 점수(`recommendations.means`), NDCG@10 수치 비교·신뢰구간과 성공/실패 판정만 저장합니다. 상세 분할·입력 provenance·seed별 이벤트 지표는 원래 cohort·표현·추천 파일에 보존합니다. 재학습 없이 `run-diagnosis`만 다시 실행하면 기존 진단도 축소 형식으로 저장됩니다.
+진단 JSON은 Arm별 최종 점수(`recommendations.means`), NDCG@10 수치 비교·신뢰구간과 성공/실패 판정만 저장합니다. 상세 분할·입력 provenance·seed별 이벤트 지표는 원래 cohort·표현·추천 파일에 보존합니다. 진단은 `leave-one-out-diagnosis/v3`이며 작은 평가 계약도 기록합니다. 이전 NDCG checkpoint·반복 정답 예외·catalog 동률 순서의 추천 결과는 재사용하지 않습니다. 같은 Run에서 `run-recommendation`으로 선택한 Arm을 재학습하면 기존 추천 파일을 교체하며, 이후 `run-diagnosis`를 실행하여 진단을 재생성하십시오. Scene·Summary·프레임·catalog와 일치하는 임베딩은 재사용합니다. 현행 평가 계약으로 학습된 결과는 재학습 없이 재진단할 수 있습니다.
 
 추천 결과는 seed × Arm 단위로 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`을 저장하며, 직접 Graph는 `catalog_vectors.npy`도 저장합니다. `training.json`의 train epoch별 validation 지표와 최종 test 지표는 구분합니다. 과거 `graph_attention_diagnosis.json`과 기존 Run 산출물은 보존합니다.
 

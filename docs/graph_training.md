@@ -56,11 +56,11 @@ Topics: cooking, food preparation
 
 Context는 위 세 필드를 합친 문자열 하나를 Scene별로 임베딩합니다. `v2`의 JSON 문자열 입력 캐시는 새 입력으로 재사용하지 않으며, 입력 hash 변경으로 해당 추천 결과와 체크포인트도 구분됩니다. 새 Run에서 Graph embedding → 추천 학습 → 진단을 다시 실행하십시오. 기존 추출 Scene과 Text Summary 입력은 그대로 사용할 수 있습니다. 기존 Run 산출물은 이 코드 변경으로 수정하지 않습니다.
 
-학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss와 이력 길이 10을 유지하며 사용자별 leave-one-out 분할과 validation 최고 checkpoint를 사용합니다. 원본 이력 5개 이상, 최근 13개 보존, 마지막 2개 보류로 구성합니다. test 입력에는 validation이 포함되며 refit은 수행하지 않습니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
+학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss와 이력 길이 10을 유지하며 사용자별 leave-one-out 분할과 validation HR@10 최고 checkpoint를 사용합니다. 동점이면 최초 epoch를 유지하고, 최종 보고·paired bootstrap의 주 지표는 NDCG@10입니다. 원본 이력 5개 이상, 최근 13개 보존, 마지막 2개 보류로 구성합니다. test 입력에는 validation이 포함되며 refit은 수행하지 않습니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
 
 ## 캐시 및 packed 실행
 
-Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph gnn은 `sasrec-role-graph/v10`, 학습 구현은 `shared-scenes-leave-one-out-training/v1`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더·현재 입력 계약이 동일한 BGE 입력 캐시는 재사용합니다. 이전 Graph 입력 계약 캐시는 새 경로에서 재생성합니다.
+Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph gnn은 `sasrec-role-graph/v10`, 학습 구현은 `shared-scenes-leave-one-out-training/v2`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더·현재 입력 계약이 동일한 BGE 입력 캐시는 재사용합니다. 이전 Graph 입력 계약 캐시는 새 경로에서 재생성합니다.
 
 배치 준비에서 Action별 actor·target·tool·location의 Entity 인덱스와 결측 상태를 계산합니다. 학습 중 가중치나 상태 벡터는 준비 단계에서 계산하지 않습니다. GPU 고정 특징 캐시, 영상 chunk, checkpoint, 평가 catalog 캐시는 유지하며 optimizer step마다 Item cache를 폐기합니다. checkpoint 재계산은 이미 준비한 정적 입력의 신경망 연산만 반복합니다.
 
@@ -72,7 +72,7 @@ Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph 
 |---|---|
 | `validation/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
 | `validation/recommendations/graph/mean/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
-| `validation/diagnosis/graph_mean_diagnosis.json` | leave-one-out-diagnosis/v2 최종 HR/NDCG·수치 비교·실행 판정 |
+| `validation/diagnosis/graph_mean_diagnosis.json` | leave-one-out-diagnosis/v3 최종 HR/NDCG·수치 비교·평가 계약·실행 판정 |
 | `validation/diagnosis/text_diagnosis.json` | Text 진단 |
 
 기존 Attention 산출물과 과거 Run은 수정·이동하지 않습니다. 같은 Run의 기존 결과 경로에서 재학습하면 해당 조합을 대체하므로 보존 실험에는 새 Run을 사용하십시오. `--compare-run-id`는 선택한 경로·aggregation의 결과만 읽고 프로토콜·전처리·원본·분할·catalog·seed가 다른 Run을 거절합니다.
@@ -628,3 +628,9 @@ git diff --check
 ```
 
 현재 VM에는 설정된 원본 CSV가 없으므로 실제 사용자·아이템 감소 수와 전체 GPU 실험 성능은 미검증입니다. 원본 환경에서 `prepare-cohort`와 `embed-representations`를 실행하면 해당 Run의 `reports/leave_one_out_cohort.{json,md}`에 전처리 수치와 fingerprint를 저장합니다. 이번 전환은 전처리·분할·checkpoint 평가 정책을 정렬한 것이며 논문 성능의 완전 재현을 의미하지 않습니다.
+
+## IISAN·DFF 평가 규칙 정렬 (2026-10-08)
+
+Text·Graph mean/GNN 모두 반복 정답을 포함한 앞선 보존 이력 전체를 마스킹하고, 사용자별 PyTorch 기본 내림차순 argsort로 순위를 계산합니다. checkpoint는 validation HR@10 최고 epoch이며 동점이면 최초 epoch를 선택합니다. patience 5·min_delta 0·최적 가중치 복원 후 test 한 번을 유지합니다. Graph Item/catalog 캐시는 복원 직후 초기화하고 선택된 가중치로 다시 계산합니다. 최종 보고와 사용자별 seed 평균 paired bootstrap은 NDCG@10을 유지합니다.
+
+평가 계약이 학습 fingerprint·추천 identity·checkpoint·완료·공유 캐시·Run 비교에 포함됩니다. 이전 leave-one-out 추천은 완료 결과나 공유 캐시로 재사용하지 않습니다. 같은 Run에서 선택 Arm을 재학습하면 기존 추천 파일을 교체하며, 이어서 진단을 재생성하십시오. 현재 계약의 완료 단위는 중단 복구 시 재사용합니다. 모델 구조·손실·popularity·오른쪽 padding은 유지하며, 입력 계약과 provenance가 일치하는 BGE 특징도 재사용합니다. 동률 순서는 환경에 따라 달라질 수 있고, 논문 전체 재현 또는 GPU 성능 개선을 주장하지 않습니다.

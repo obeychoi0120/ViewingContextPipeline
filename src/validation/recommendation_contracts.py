@@ -31,4 +31,12 @@ def resolve_target_arms(target=None, *, config=None):
 
 
 # Bump for changes to partition/checkpoint selection, loss, masking, ranking, or metric semantics.
-TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-leave-one-out-training/v1"
+TRAINING_IMPLEMENTATION_VERSION = "shared-scenes-leave-one-out-training/v2"
+
+EVALUATION_CONTRACT = {
+    "version": "microlens-leave-one-out-evaluation/v2",
+    "checkpoint_metric": "HR@10",
+    "history_mask": "all_preceding_items",
+    "ranking": "torch_argsort_descending",
+    "report_metric": "NDCG@10",
+}

@@ -119,6 +119,7 @@ validation:
     - 43
     - 44
   evaluation:
+    checkpoint_metric: HR@10
     cutoffs:
     - 4
     - 8

@@ -5,6 +5,7 @@ import pytest
 
 from artifact_io import write_jsonl, read_jsonl
 from validation.run_comparison import compare_graph_runs
+from validation.recommendation_contracts import EVALUATION_CONTRACT
 
 
 @pytest.fixture
@@ -50,6 +51,7 @@ def paired_runs(tmp_path, monkeypatch):
     reports = {}
     for ctx in contexts:
         reports[ctx.run_id] = {
+            "evaluation_contract": dict(EVALUATION_CONTRACT),
             "per_seed": [
                 {"split_hash": "test", "seed": 42, "arm": arm}
                 for arm in ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen")
@@ -64,7 +66,8 @@ def paired_runs(tmp_path, monkeypatch):
         return (
             np.tile(np.array(values)[indices], (2, 1)),
             np.ones(2),
-            {"per_seed": [r for r in reports[ctx.run_id]["per_seed"] if r["arm"] in arms]},
+            {"per_seed": [r for r in reports[ctx.run_id]["per_seed"] if r["arm"] in arms],
+             "evaluation_contract": reports[ctx.run_id]["evaluation_contract"]},
         )
 
     monkeypatch.setattr("validation.leave_one_out_diagnosis.collect_metrics", collect)
@@ -84,7 +87,7 @@ def test_paired_run_effect_direction_and_partial_family(paired_runs):
     assert partial["family_size"] == 3 and partial["model_interaction"] is None
 
 
-@pytest.mark.parametrize("mismatch", ["events.jsonl", "catalog.jsonl", "seed", "splits", "protocol", "preprocessing"])
+@pytest.mark.parametrize("mismatch", ["events.jsonl", "catalog.jsonl", "seed", "splits", "protocol", "preprocessing", "evaluation_contract"])
 def test_cross_run_mismatch_rejected(paired_runs, mismatch):
     contexts, reports = paired_runs
     if mismatch.endswith("jsonl"):
@@ -93,6 +96,8 @@ def test_cross_run_mismatch_rejected(paired_runs, mismatch):
         plan = contexts[1].require_ready_cohort()["plan"]
         plan[mismatch] = "rolling" if mismatch == "protocol" else ["other"]
         contexts[1].require_ready_cohort = lambda: {"plan": plan}
+    elif mismatch == "evaluation_contract":
+        reports["reference"]["evaluation_contract"]["checkpoint_metric"] = "NDCG@10"
     else:
         reports["reference"]["per_seed"][0]["seed"] = 43
     with pytest.raises(ValueError, match="identical"):

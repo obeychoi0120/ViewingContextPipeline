@@ -18,7 +18,7 @@ from validation.early_stopping import EarlyStopping
 from validation.model import require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
 from validation.recommendation import _new_model, _optimizer
-from validation.recommendation_contracts import ARCHITECTURE_VERSION, resolve_target_arms
+from validation.recommendation_contracts import ARCHITECTURE_VERSION, EVALUATION_CONTRACT, resolve_target_arms
 from validation.leave_one_out_data import EventTable, PROTOCOL
 from preparation.cohort import iter_jsonl
 from validation.selection import load_validation_cohort, training_signature
@@ -29,7 +29,7 @@ from validation.leave_one_out_execution import (
     negative_mask,
 )
 
-SCHEMA = "sasrec-leave-one-out-combination/v1"
+SCHEMA = "sasrec-leave-one-out-combination/v2"
 
 
 def phase_ids(table, split, phase):
@@ -133,10 +133,9 @@ def rank_batches(model, table, ids, config, device, *, profiler=None, phase="eva
             yield batch, ranks
 
 
-def validation_ndcg10(model, table, ids, config, device, *, profiler=None, epoch=0):
-    # Python float/math.log2 and source order match the previous metric reduction.
+def validation_hr10(model, table, ids, config, device, *, profiler=None, epoch=0):
     return sum(
-        1.0 / math.log2(rank + 1) if rank <= 10 else 0.0
+        float(rank <= 10)
         for _, ranks in rank_batches(
             model, table, ids, config, device, profiler=profiler, phase="validation", epoch=epoch
         )
@@ -170,7 +169,8 @@ def result_files(identity):
 
 
 def combination_complete(directory, identity, expected_count, *, architecture_version=None):
-    if identity.get("protocol") != PROTOCOL or not identity.get("split_hash"):
+    if (identity.get("protocol") != PROTOCOL or not identity.get("split_hash")
+            or identity.get("evaluation_contract") != EVALUATION_CONTRACT):
         return False
     if architecture_version is None:
         architecture_version = identity.get("graph_architecture", ARCHITECTURE_VERSION)
@@ -202,20 +202,20 @@ def combination_complete(directory, identity, expected_count, *, architecture_ve
         ):
             return False
         epochs = training.get("train", [])
-        if not epochs or training.get("checkpoint_policy") != "best_validation":
+        if not epochs or training.get("checkpoint_policy") != "best_validation_hr10":
             return False
         if training.get("split", {}).get("split_hash") != identity["split_hash"]:
             return False
-        if not all(math.isfinite(row["validation_ndcg10"]) for row in epochs):
+        if not all(math.isfinite(row["validation_hr10"]) and 0 <= row["validation_hr10"] <= 1 for row in epochs):
             return False
-        best = max(epochs, key=lambda r: r["validation_ndcg10"])
+        best = max(epochs, key=lambda r: r["validation_hr10"])
         if training.get("best_epoch") != best["epoch"]:
             return False
         seen = set()
         for row in iter_jsonl(directory / "per_event_metrics.jsonl"):
             event = row["event_id"]
             if (
-                row.get("schema_version") != "sasrec-leave-one-out-per-event/v1"
+                row.get("schema_version") != "sasrec-leave-one-out-per-event/v2"
                 or type(event) is not int
                 or event < 0
                 or event in seen
@@ -237,6 +237,8 @@ def run_combination(
 ):
     if profile_operators and profile_every is None:
         raise ValueError("profile_operators requires profile_every")
+    if identity.get("evaluation_contract") != EVALUATION_CONTRACT:
+        raise ValueError("unsupported recommendation evaluation contract")
     ids, probabilities, frequencies = prepared
     seed, arm = (identity[key] for key in ("seed", "arm"))
     directory = combination_dir(context, seed, arm)
@@ -309,14 +311,14 @@ def run_combination(
         if profiler:
             profiler.phase("train", epoch, train_seconds, len(ids["train"]))
         phase_started = time.monotonic()
-        score = validation_ndcg10(
+        score = validation_hr10(
             model, table, ids["validation"], config, device, profiler=profiler, epoch=epoch
         )
         valid_seconds = time.monotonic() - phase_started
         timings["validation"] += valid_seconds
         if profiler:
             profiler.phase("validation", epoch, valid_seconds, len(ids["validation"]))
-        train.append({"epoch": epoch, **record, "validation_ndcg10": score})
+        train.append({"epoch": epoch, **record, "validation_hr10": score})
         print(
             f"[Leave-one-out] {arm} seed={seed} epoch={epoch} valid={score:.6f} "
             f"train={train_seconds:.2f}s valid_time={valid_seconds:.2f}s "
@@ -330,7 +332,7 @@ def run_combination(
                 directory / "sasrec.pt", model,
                 {**identity, "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
                  "best_epoch": epoch, "catalog_size": len(table.items),
-                 "checkpoint_policy": "best_validation"},
+                 "checkpoint_policy": "best_validation_hr10"},
             )
         if stopped:
             break
@@ -349,7 +351,7 @@ def run_combination(
     with temporary.open("w", encoding="utf-8", newline="\n") as handle:
         for row in evaluate(model, table, ids["test"], config, device, profiler=profiler):
             row.update(identity)
-            row["schema_version"] = "sasrec-leave-one-out-per-event/v1"
+            row["schema_version"] = "sasrec-leave-one-out-per-event/v2"
             row["train_item_frequency"] = int(frequencies[table.targets[row["event_id"]]])
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             count += 1
@@ -366,7 +368,7 @@ def run_combination(
         **identity,
         "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
         "best_epoch": best_epoch,
-        "checkpoint_policy": "best_validation",
+        "checkpoint_policy": "best_validation_hr10",
         "catalog_size": len(table.items),
         "training_settings": {
             "deterministic": config.model.deterministic,
@@ -501,6 +503,7 @@ def run_leave_one_out(
                 identity = {
                     "run_id": context.run_id,
                     "protocol": PROTOCOL,
+                    "evaluation_contract": dict(EVALUATION_CONTRACT),
                     "split_hash": split["split_hash"],
                     "seed": seed,
                     "arm": arm,

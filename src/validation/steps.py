@@ -260,19 +260,29 @@ def run_diagnosis(
     from validation.graph_context import graph_context, validate_mode
 
     validate_mode(representation_mode, scene_aggregation, "run-diagnosis", target)
+    if target is None:
+        raise ValueError("--target is required; select arms explicitly")
+    if representation_mode == "graph":
+        if not target:
+            raise ValueError("--target is required")
+        context = graph_context(context, scene_aggregation)
+    log_step_start(
+        context,
+        "run-diagnosis",
+        force=force,
+        target=target,
+        representation_mode=representation_mode,
+        scene_aggregation=scene_aggregation,
+        compare_run_id=compare_run_id,
+    )
     if representation_mode == "graph":
         from validation.graph_diagnosis import diagnose_graph
 
-        if not target:
-            raise ValueError("--target is required")
         return diagnose_graph(
-            graph_context(context, scene_aggregation), target=target, compare_run_id=compare_run_id
+            context, target=target, compare_run_id=compare_run_id
         )
-    if target is None:
-        raise ValueError("--target is required; select arms explicitly")
     from validation.leave_one_out_diagnosis import diagnose
 
-    log_step_start(context, "run-diagnosis", force=force, target=target)
     return diagnose(context, target=target, compare_run_id=compare_run_id)
 
 

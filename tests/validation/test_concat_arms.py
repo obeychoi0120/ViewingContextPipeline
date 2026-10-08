@@ -207,9 +207,9 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         assert diagnose(ready_context, target=list(registry(ready_context.config)))["status"] == "pass"
         assert protected == {p: p.read_bytes() for p in protected}
         doc = read_json(ready_context.diagnosis_path)
-        assert doc["schema_version"] == "leave-one-out-diagnosis/v2"
+        assert doc["schema_version"] == "leave-one-out-diagnosis/v3"
         assert (ready_context.validation_dir / "cohort" / "manifest.json").is_file()
-        assert set(doc) == {"schema_version", "run_id", "representation_mode", "runtime_decision", "recommendations", "statistics"}
+        assert set(doc) == {"schema_version", "evaluation_contract", "run_id", "representation_mode", "runtime_decision", "recommendations", "statistics"}
         assert set(doc["recommendations"]) == {"means"}
         assert set(doc["statistics"]) == {"status", "comparisons", "metric"}
         from validation.leave_one_out_diagnosis import collect_metrics
@@ -298,3 +298,72 @@ def test_embedding_never_sends_combined_title_summary(ready_context, fake_models
     assert set(calls) == expected
     assert len(calls) == len(expected)
     assert read_state(ready_context, 'graph_qwen_meta')['truncation']['title']['text_count'] > 0
+
+
+@pytest.mark.torch
+def test_previous_evaluation_retrains_same_run(ready_context, fake_models, generate_all, monkeypatch):
+    from validation import leave_one_out_recommendation as runner, recommendation_cache
+    from validation.leave_one_out_diagnosis import diagnose
+    from validation.shared_cache import checksum
+
+    pytest.importorskip('torch')
+    generate_all(ready_context)
+    embed_representations(ready_context, target=['meta'])
+
+    def tiny(config, *, item_count, branch, features, device):
+        from validation.model import SASRec
+
+        values = features['title_values'][:, :6]
+        return SASRec(item_count, 10, 8, 1, 2, 0, arm=branch,
+                      item_features={**features, 'title_values': values,
+                                     'video_values': np.zeros_like(values)}).to(device)
+
+    monkeypatch.setattr(runner, '_new_model', tiny)
+    monkeypatch.setattr(runner, 'worker_devices', lambda *_: ['cpu'])
+    monkeypatch.setattr(recommendation_cache, 'publish', lambda *a, **k: None)
+    assert runner.run_leave_one_out(ready_context, target=['meta'])['completed'] == 3
+    assert diagnose(ready_context, target=['meta'])['status'] == 'pass'
+    directory = runner.combination_dir(ready_context, 42, 'meta')
+    complete = read_json(directory / 'complete.json')
+    current_identity = complete['identity']
+    legacy_identity = {**current_identity, 'training_input_hash': 'old-training',
+                       'evaluation_contract': {**current_identity['evaluation_contract'],
+                                               'checkpoint_metric': 'NDCG@10'}}
+    training = read_json(directory / 'training.json')
+    training.update(legacy_identity, schema_version='sasrec-leave-one-out-combination/v1',
+                    checkpoint_policy='best_validation')
+    for epoch in training['train']:
+        epoch['validation_ndcg10'] = epoch.pop('validation_hr10')
+    write_json(directory / 'training.json', training)
+    complete.update(identity=legacy_identity, schema_version='sasrec-leave-one-out-combination/v1')
+    complete['checksums']['training.json'] = checksum(directory / 'training.json')
+    write_json(directory / 'complete.json', complete)
+    legacy_cache = recommendation_cache.cache_for(ready_context, legacy_identity)
+    legacy_cache.publish(directory, recommendation_cache.bundle_files(legacy_identity),
+                         origin={'run_id': ready_context.run_id})
+    assert legacy_cache.path != recommendation_cache.cache_for(ready_context, current_identity).path
+    assert legacy_cache.valid()
+    protected = {
+        path: path.read_bytes()
+        for root in (ready_context.run_root / 'extraction', ready_context.representations_dir,
+                     ready_context.validation_dir / 'cohort', legacy_cache.path)
+        for path in root.rglob('*') if path.is_file()
+    }
+    with pytest.raises(RuntimeError, match='diagnosis failed'):
+        diagnose(ready_context, target=['meta'])
+    assert 'unsupported evaluation contract' in read_json(ready_context.diagnosis_path)['runtime_decision']['errors'][0]['message']
+    updates = []
+    original_epoch = runner.train_epoch
+
+    def train(*args, **kwargs):
+        updates.append(kwargs['epoch'])
+        return original_epoch(*args, **kwargs)
+
+    monkeypatch.setattr(runner, 'train_epoch', train)
+    result = runner.run_leave_one_out(ready_context, target=['meta'])
+    assert result == {'stage': 'run-recommendation', 'completed': 1, 'skipped': 2}
+    assert updates == [1]
+    assert runner.combination_complete(directory, current_identity, 3)
+    assert protected == {path: path.read_bytes() for path in protected}
+    assert diagnose(ready_context, target=['meta'])['status'] == 'pass'
+    assert read_json(ready_context.diagnosis_path)['evaluation_contract'] == current_identity['evaluation_contract']

@@ -194,11 +194,12 @@ def load_validation_cohort(context, *, verify_current=True):
 
 
 def training_signature(context, cohort, config):
-    from validation.recommendation_contracts import TRAINING_IMPLEMENTATION_VERSION
+    from validation.recommendation_contracts import TRAINING_IMPLEMENTATION_VERSION, EVALUATION_CONTRACT
 
     return fingerprint(
         {
             "implementation": TRAINING_IMPLEMENTATION_VERSION,
+            "evaluation_contract": EVALUATION_CONTRACT,
             "events": cohort["events"],
             "selection_hash": cohort["manifest"]["selection_hash"],
             "model": {

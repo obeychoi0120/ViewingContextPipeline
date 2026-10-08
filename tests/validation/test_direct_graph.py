@@ -217,6 +217,11 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     directory = combination_dir(context, identity['seed'], identity['arm'])
     assert combination_complete(directory, identity, len(prepared[0]['test']))
     assert recommendation_cache.valid_bundle(directory, identity, table, split)
+    old_evaluation = {**identity, 'evaluation_contract': {
+        **identity['evaluation_contract'], 'checkpoint_metric': 'NDCG@10'}}
+    assert not recommendation_cache.valid_bundle(directory, old_evaluation, table, split)
+    assert recommendation_cache.cache_for(context, identity).key != recommendation_cache.cache_for(context, old_evaluation).key
+    assert not recommendation_cache.restore(context, directory.parent / 'old-policy', old_evaluation, table, split)
     legacy = {**identity, 'graph_architecture':
               'sasrec-role-graph/v7' if pool == 'mean' else 'sasrec-role-graph/v8'}
     assert not combination_complete(directory, legacy, len(prepared[0]['test']))
@@ -251,7 +256,7 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     assert run_diagnosis(context, target=['graph_qwen_meta'], representation_mode='graph',
                          scene_aggregation=pool)['status'] == 'pass'
     diagnosis = json.loads(context.diagnosis_path.read_text())
-    assert diagnosis['schema_version'] == 'leave-one-out-diagnosis/v2'
+    assert diagnosis['schema_version'] == 'leave-one-out-diagnosis/v3'
     assert 'graph_inputs' not in diagnosis
     assert set(diagnosis['recommendations']) == {'means'}
     assert set(diagnosis['recommendations']['means']) == {'graph_qwen_meta'}

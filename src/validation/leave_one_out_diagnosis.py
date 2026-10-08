@@ -8,6 +8,7 @@ from validation.diagnosis_scenes import _scene_coverage
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import (
     DIAGNOSIS_ARCHITECTURE_VERSIONS,
+    EVALUATION_CONTRACT,
     resolve_target_arms,
 )
 from arm_registry import registry
@@ -118,6 +119,8 @@ def diagnosis_training(directory, identity, expected_count, *, architecture_vers
         raise ValueError(
             f"mixed recommendation architectures: expected {architecture_version}, found {recorded}: {directory}"
         )
+    if training.get("evaluation_contract") != EVALUATION_CONTRACT:
+        raise ValueError(f"unsupported evaluation contract; rerun run-recommendation: {directory}")
     if not combination_complete(directory, identity, expected_count, architecture_version=recorded):
         raise ValueError(f"incomplete/corrupt combination: {directory}")
     return training
@@ -156,6 +159,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 identity = {
                     "run_id": context.run_id,
                     "protocol": PROTOCOL,
+                    "evaluation_contract": dict(EVALUATION_CONTRACT),
                     "split_hash": split["split_hash"],
                     "seed": seed,
                     "arm": arm,
@@ -235,6 +239,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
         sums,
         counts,
         {
+            "evaluation_contract": dict(EVALUATION_CONTRACT),
             "architecture_version": architecture_version,
             "expected_event_count": expected_total,
             "actual_event_count": total,

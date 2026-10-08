@@ -1,4 +1,4 @@
-"""Semantic parity with the frozen pre-optimization implementation."""
+"""Loss and evaluation parity with an independent scalar implementation."""
 from copy import deepcopy
 import os
 from types import SimpleNamespace
@@ -13,7 +13,7 @@ from validation import leave_one_out_recommendation as optimized  # noqa: E402
 from validation.model import SASRec, seed_everything  # noqa: E402
 from validation.leave_one_out_data import DAY, EventTable  # noqa: E402
 from validation.leave_one_out_execution import masked_ranks  # noqa: E402
-from validation.scoring import mask_history, rank_of_target  # noqa: E402
+from validation.metrics import metrics_from_rank  # noqa: E402
 
 pytestmark = pytest.mark.torch
 
@@ -44,9 +44,13 @@ def test_rank_parity_full_history_ties_repeated_targets(device):
     ids = table.select()
     scores = np.random.default_rng(31).integers(-2, 3, (len(ids), len(table.items))).astype(np.float32)
     scores[::3] = 0
-    expected = [rank_of_target(mask_history(s, [x - 1 for x in table.history(int(i))],
-                                          table.targets[i] - 1), table.targets[i] - 1)
-                for i, s in zip(ids, scores, strict=True)]
+    expected = []
+    for event, values in zip(ids, scores, strict=True):
+        masked = torch.tensor(values, device=device)
+        history = torch.tensor(table.history(int(event)), dtype=torch.long, device=device) - 1
+        masked[history] = -torch.inf
+        order = torch.argsort(masked, descending=True)
+        expected.append(int((order == int(table.targets[event]) - 1).long().argmax()) + 1)
     actual = masked_ranks(torch.tensor(scores, device=device), table, ids)
     assert actual.cpu().tolist() == expected
     for bad in (np.nan, np.inf, -np.inf):
@@ -54,6 +58,40 @@ def test_rank_parity_full_history_ties_repeated_targets(device):
         broken[0, 0] = bad
         with pytest.raises(RuntimeError, match="nonfinite catalog"):
             masked_ranks(broken, table, ids)
+
+
+@pytest.mark.parametrize("catalog_size,history,target,tied", [
+    (25, list(range(1, 13)), 1, False),  # Repeat outside the last 10 inputs.
+    (25, list(range(2, 14)), 1, False),
+    (25, list(range(2, 14)), 1, True),
+    (4, [1, 2, 3, 4], 1, True),  # All masked, including the target, inside top 10.
+])
+def test_reference_topk_with_masked_targets_and_small_catalog(
+    device, catalog_size, history, target, tied,
+):
+    rows = [dict(event_id=i, user_id="eval", item_id=str(item), timestamp=i)
+            for i, item in enumerate([*history, target])]
+    event = len(rows) - 1
+    for item in range(1, catalog_size + 1):
+        rows.append(dict(event_id=len(rows), user_id="catalog", item_id=str(item), timestamp=item))
+    table = EventTable(rows)
+    values = (torch.ones(catalog_size, device=device) if tied else
+              torch.arange(catalog_size, 0, -1, device=device).float())
+    reference_scores = values.clone()
+    reference_scores[torch.tensor(history, dtype=torch.long, device=device) - 1] = -torch.inf
+    # IISAN/DFF metrics_topK: argsort -> reorder one-hot label -> weighted rank.
+    order = torch.argsort(reference_scores, descending=True)
+    labels = torch.zeros(catalog_size, device=device)
+    labels[target - 1] = 1
+    item_rank = torch.arange(1, catalog_size + 1, device=device)
+    expected = int((torch.take(labels, order) * item_rank).sum())
+    actual = int(masked_ranks(values[None, :].clone(), table, [event])[0])
+    assert actual == expected
+    assert metrics_from_rank(actual) == metrics_from_rank(expected)
+    if catalog_size == 4:
+        assert metrics_from_rank(actual)["HR@10"] == 1
+    if not tied and target in history:
+        assert actual > 10 and metrics_from_rank(actual)["HR@10"] == 0
 
 
 def test_loss_gradient_and_multiple_updates(device):
@@ -95,8 +133,8 @@ def test_training_epoch_and_validation_parity(device):
     old_rows = list(reference.evaluate(models[0], table, ids, config, device))
     new_rows = list(optimized.evaluate(models[1], table, ids, config, device))
     assert old_rows == new_rows
-    assert optimized.validation_ndcg10(models[1], table, ids, config, device) == (
-        sum(r["NDCG@10"] for r in new_rows) / len(ids)
+    assert optimized.validation_hr10(models[1], table, ids, config, device) == (
+        sum(r["HR@10"] for r in new_rows) / len(ids)
     )
 
 

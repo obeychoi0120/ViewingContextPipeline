@@ -5,6 +5,7 @@ import pytest
 
 from artifact_io import read_json
 from validation.diagnosis_support import write_diagnosis
+from validation.recommendation_contracts import EVALUATION_CONTRACT
 
 
 @pytest.mark.parametrize('mode,aggregation', [('text', None), ('graph', 'mean'), ('graph', 'gnn')])
@@ -27,6 +28,8 @@ def test_output_size_is_independent_of_cohort_and_provenance(tmp_path, mode, agg
     path = tmp_path / 'diagnosis.json'
     write_diagnosis(path, document)
     result = read_json(path)
+    assert result['schema_version'] == 'leave-one-out-diagnosis/v3'
+    assert result['evaluation_contract'] == EVALUATION_CONTRACT
     assert result['recommendations'] == {'means': scores}
     assert result['statistics']['comparisons'] == comparisons
     assert result['statistics']['metric'] == 'NDCG@10'
@@ -43,7 +46,9 @@ def test_output_size_is_independent_of_cohort_and_provenance(tmp_path, mode, agg
 
 
 @pytest.mark.parametrize('mode,aggregation', [('text', None), ('graph', 'mean'), ('graph', 'gnn')])
-def test_invalid_evidence_still_fails_and_records_reason(current_context, monkeypatch, mode, aggregation):
+def test_invalid_evidence_still_fails_and_records_reason(
+    current_context, monkeypatch, capsys, mode, aggregation,
+):
     from validation.steps import run_diagnosis
     from validation.graph_context import graph_context
 
@@ -56,6 +61,12 @@ def test_invalid_evidence_still_fails_and_records_reason(current_context, monkey
     with pytest.raises(RuntimeError, match='diagnosis failed'):
         run_diagnosis(current_context, target=['meta'], representation_mode=mode,
                       scene_aggregation=aggregation)
+    output = capsys.readouterr().out
+    assert output.count('[STEP] run-diagnosis') == 1
+    assert f'  output_dir: {context.diagnosis_path.parent}' in output
+    assert '  selected_arms: ["meta"]' in output
+    assert f'  representation_mode: {mode}' in output
+    assert f'  scene_aggregation: {aggregation or "null"}' in output
     result = read_json(context.diagnosis_path)
     assert result['runtime_decision']['status'] == 'fail'
     assert 'invalid cohort fingerprint' in result['runtime_decision']['errors'][0]['message']

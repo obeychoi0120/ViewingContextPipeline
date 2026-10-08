@@ -45,6 +45,11 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     ]
     left, counts, left_report = aggregates[0]
     right, other_counts, right_report = aggregates[1]
+    from validation.recommendation_contracts import EVALUATION_CONTRACT
+
+    if any(report.get("evaluation_contract") != EVALUATION_CONTRACT
+           for report in (left_report, right_report)):
+        raise ValueError("run comparison requires identical current evaluation contracts")
     grids = [
         [(r["split_hash"], r["seed"], r["arm"]) for r in report["per_seed"]]
         for report in (left_report, right_report)

@@ -61,7 +61,7 @@ Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 �
 
 ## 유지하는 계약과 지원 경계
 
-설정은 `experiment_config_version: v5`, validation은 `validation-config/v7`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v1`, 진단은 `leave-one-out-diagnosis/v2`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v1`이며 프로토콜·분할 fingerprint로 과거 rolling 결과의 재사용을 차단합니다. 모델·Arm·Text 표현 계약은 유지합니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
+설정은 `experiment_config_version: v5`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v3`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm·Text 표현 계약은 유지합니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
 
 주 CLI는 preparation의 두 단계, extraction의 두 Scene 추출 단계와 `summarize`, validation의 임베딩·추천·진단입니다. 과거 요약 별칭, Arm·Scene 일괄 변환 명령, 독립 제목 보완 CLI는 제거했습니다. 제목 보완은 `prepare-cohort`에서 수행합니다. 기존 Run·분석 보고서·프롬프트를 자동 이동하거나 삭제하지 않습니다.
 
@@ -69,9 +69,9 @@ Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 �
 
 공유 원본은 `<artifacts_root>/preparation/cohort/leave_one_out/`, Run별 평가 파일은 `runs/<RUN_ID>/validation/` 아래에 직접 저장합니다. 이전 `validation/leave_one_out/` 파일은 자동 이동·삭제하거나 읽지 않습니다. 기존 rolling cohort·Run·캐시는 보존하며 rolling 실행·재진단은 지원하지 않습니다. Scene·Summary·프레임 경로는 그대로이며 새 catalog와 provenance에 맞는 고정 특징만 재사용합니다.
 
-기존 명령 `prepare-cohort → embed-representations → run-recommendation → run-diagnosis`를 사용합니다. 원본 CSV가 있는 환경에서 새 공유 preparation을 먼저 완료하십시오. 날짜 대신 `seed × Arm` 조합을 실행하고 validation 최고 checkpoint를 복원하여 test를 평가합니다. Graph는 복원 후 Item/catalog 캐시를 비웁니다. `training.json`은 `train`, `best_epoch`, `checkpoint_policy`를, test 행은 `source_event_id`와 `train_item_frequency`를 기록합니다.
+기존 명령 `prepare-cohort → embed-representations → run-recommendation → run-diagnosis`를 사용합니다. 원본 CSV가 있는 환경에서 새 공유 preparation을 먼저 완료하십시오. 날짜 대신 `seed × Arm` 조합을 실행하고 validation HR@10 최고 checkpoint를 복원하여 test를 한 번 평가합니다. 동점이면 최초 epoch를 유지하며 patience 5는 그대로입니다. Graph는 복원 후 Item/catalog 캐시를 비웁니다. `training.json`은 epoch별 `validation_hr10`, `best_epoch`, `checkpoint_policy: best_validation_hr10`과 평가 계약을, test 행은 `source_event_id`와 `train_item_frequency`를 기록합니다.
 
-진단 JSON은 Arm별 최종 HR/NDCG(`recommendations.means`), NDCG@10 수치 비교·신뢰구간(`statistics.comparisons`), Run·모드 식별자와 성공/실패 판정만 저장합니다. 전체 사용자 분할·이벤트 ID·provenance·복구/재사용 내역·seed별 상세 행·통계 설정은 중복 저장하지 않습니다. 계산은 기존처럼 사용자별 seed 평균으로 paired bootstrap을 수행하며 Bonferroni 비교군도 유지합니다. Run 비교는 같은 프로토콜·전처리·원본·분할·catalog·seed를 요구합니다. DWYS의 rolling HR@10=0.046 대비 차이 계산은 제공하지 않습니다. 전처리 수치·fingerprint·제외 이유는 Run의 `reports/leave_one_out_cohort.{json,md}`와 validation manifest에서 확인합니다.
+진단 JSON은 Arm별 최종 HR/NDCG(`recommendations.means`), NDCG@10 수치 비교·신뢰구간(`statistics.comparisons`), Run·모드 식별자, 작은 평가 계약과 성공/실패 판정만 저장합니다. 전체 사용자 분할·이벤트 ID·provenance·복구/재사용 내역·seed별 상세 행·통계 설정은 중복 저장하지 않습니다. 계산은 기존처럼 사용자별 seed 평균으로 paired bootstrap을 수행하며 Bonferroni 비교군도 유지합니다. Run 비교는 같은 프로토콜·전처리·원본·분할·catalog·seed·평가 계약을 요구합니다. DWYS의 rolling HR@10=0.046 대비 차이 계산은 제공하지 않습니다. 전처리 수치·fingerprint·제외 이유는 Run의 `reports/leave_one_out_cohort.{json,md}`와 validation manifest에서 확인합니다.
 
 ## 현재 형식 지원 정리 (2026-10-07)
 
@@ -86,3 +86,11 @@ Run 산출물·과거 보고서·프롬프트·v7 fixture는 보존합니다. �
 Text·Graph mean/GNN에 동일한 `leave-one-out-diagnosis/v2` 저장 정책을 적용합니다. `--compare-run-id`의 비교 결과도 참조 Run·방향·지표·수치 비교만 저장하며 sources를 복사하지 않습니다. 최종 점수와 통계 계산, 원본 증거 검증·실패 처리는 유지합니다. 상세 분할은 `validation/cohort/`, 입력 provenance는 표현 manifest·`.inputs/`, seed별 이벤트 지표·학습 기록은 추천 디렉터리에서 확인합니다. 진단 JSON만 생성하는 방식이 바뀌므로 재학습 없이 기존 `run-diagnosis` 명령을 다시 실행하면 축소 형식으로 저장됩니다. 현재 VM에는 실제 Run 데이터가 없어 기존 대형 진단 파일 자체의 축소량은 미검증입니다.
 
 검증: `vc_cloud` CPU·단일 스레드 전체 pytest **302개 통과(71.54초)**, Ruff(`src tests benchmarks`), `git diff --check` 통과. 최종 점수 일치, 상세 목록 크기와 무관한 출력, Text·mean·GNN 및 비정상 증거의 오류 보존을 확인했습니다.
+
+## IISAN·DFF 공통 평가 규칙 (2026-10-08)
+
+validation/test에서는 입력의 최대 10개 제한과 별개로 앞선 보존 이력 전체를 마스킹하며, 반복 정답도 예외를 두지 않습니다. 각 사용자의 전체 catalog 점수를 `torch.argsort(scores, descending=True)`로 정렬합니다. 마스킹된 정답의 순위도 그대로 계산하므로 작은 catalog에서는 top-k 안에 들어갈 수 있습니다. 동률 순서는 환경 간 동일성을 보장하지 않습니다.
+
+`validation.evaluation.checkpoint_metric: HR@10`은 고정이며, 최종 보고·paired bootstrap은 NDCG@10을 유지합니다. 평가 계약 `microlens-leave-one-out-evaluation/v2`는 마스킹·랭킹·checkpoint·보고 지표를 학습 fingerprint, 추천 identity, checkpoint, 완료 manifest, 공유 캐시에 연결합니다. 모델·손실·popularity·오른쪽 padding·학습률은 유지하고 참조 코드의 주기적 test나 조기 종료 조건은 도입하지 않습니다. 논문 전체 재현은 아닙니다.
+
+이전 평가 결과의 일반 재진단은 거부합니다. 같은 Run에서 기존 `run-recommendation`을 실행하면 선택한 seed × Arm의 구형 추천 파일을 교체하고, 새 계약에서 완료된 단위는 재사용합니다. 이어서 `run-diagnosis`를 실행해 진단을 재생성하십시오. 추출·분할·임베딩은 provenance가 일치하면 재사용하며 다른 Run·과거 보고서·구형 공유 캐시는 삭제하지 않습니다. 위 진단 축소 절의 재학습 없는 재진단은 당시 계약 또는 현재 계약 안에서만 해당합니다.

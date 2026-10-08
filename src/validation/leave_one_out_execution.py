@@ -6,7 +6,7 @@ import numpy as np
 
 from validation.model import torch
 
-EXECUTION_VERSION = "leave-one-out-vectorized/v1"
+EXECUTION_VERSION = "leave-one-out-vectorized/v2"
 
 
 class LeaveOneOutExecution:
@@ -58,17 +58,13 @@ def negative_mask(inputs, targets):
 
 
 def masked_ranks(scores, table, batch):
-    """Full preceding sequence history, with ascending item-index tie breaking."""
+    """IISAN/DFF ranking: mask all history, then sort each user's full catalog."""
     if not torch.isfinite(scores).all():
         raise RuntimeError("nonfinite catalog scores")
     target_rows = table.targets[batch] - 1
-    targets = torch.as_tensor(target_rows, dtype=torch.long, device=scores.device)
-    row_ids = torch.arange(len(batch), device=scores.device)
-    target_scores = scores[row_ids, targets].clone()
     rows, columns = [], []
     for row, event in enumerate(batch):
         seen = np.unique(table.history(int(event))) - 1
-        seen = seen[seen != target_rows[row]]
         rows.extend([row] * len(seen))
         columns.extend(seen)
     if rows:
@@ -78,9 +74,9 @@ def masked_ranks(scores, table, batch):
         )
         # Coordinates are unique, including under deterministic CUDA execution.
         scores[coordinates[0], coordinates[1]] = -torch.inf
-    item_rows = torch.arange(scores.shape[1], device=scores.device)
-    return (
-        1
-        + (scores > target_scores[:, None]).sum(dim=1)
-        + ((scores == target_scores[:, None]) & (item_rows < targets[:, None])).sum(dim=1)
-    )
+    # Use the same one-dimensional default argsort as both reference evaluators.
+    # Masked targets stay at -inf; their position still depends on catalog size/ties.
+    return torch.stack([
+        (torch.argsort(values, descending=True) == int(target)).long().argmax() + 1
+        for values, target in zip(scores, target_rows, strict=True)
+    ])

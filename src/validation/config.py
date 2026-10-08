@@ -52,6 +52,7 @@ class ModelConfig(StrictModel):
 
 
 class EvaluationConfig(StrictModel):
+    checkpoint_metric: Literal["HR@10"]
     cutoffs: list[int]
     primary_cutoff: Literal[10]
     bootstrap_samples: int = Field(gt=0)
@@ -88,7 +89,7 @@ class GraphExecutionConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v7"]
+    schema_version: Literal["validation-config/v8"]
     run_id: str
     dataset: LeaveOneOutDatasetConfig
     cohort: FullCohortConfig
@@ -105,7 +106,7 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v7",
+            "schema_version": "validation-config/v8",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),

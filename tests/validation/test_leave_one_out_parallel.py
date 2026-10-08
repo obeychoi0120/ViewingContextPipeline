@@ -23,6 +23,7 @@ from validation.leave_one_out_recommendation import (
 )
 from validation.leave_one_out_workers import run_parallel
 from validation.steps import validation_config
+from validation.recommendation_contracts import EVALUATION_CONTRACT
 
 
 @pytest.fixture
@@ -70,6 +71,7 @@ def two_jobs(context):
             {
                 "run_id": context.run_id,
                 "protocol": "leave_one_out",
+                "evaluation_contract": dict(EVALUATION_CONTRACT),
                 "split_hash": split["split_hash"],
                 "seed": seed,
                 "arm": "meta",

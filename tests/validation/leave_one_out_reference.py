@@ -1,9 +1,7 @@
 """Scalar loss/ranking oracle for the current event-sequence semantics."""
 
-import numpy as np
 from validation.metrics import metrics_from_rank
 from validation.model import pad_sequences, torch
-from validation.scoring import mask_history, rank_of_target
 
 def transition_loss(model, table, ids, probabilities, device):
     histories = [table.history(int(i), model.max_length) for i in ids]
@@ -56,14 +54,17 @@ def evaluate(model, table, ids, config, device):
             batch = ids[start : start + config.model.batch_size]
             histories = [table.history(int(i), model.max_length) for i in batch]
             inputs = pad_sequences(histories, model.max_length, device)
-            scores = (model.user_vectors(inputs) @ catalog.T).cpu().numpy()
-            if not np.isfinite(scores).all():
+            scores = model.user_vectors(inputs) @ catalog.T
+            if not torch.isfinite(scores).all():
                 raise RuntimeError("nonfinite catalog scores")
             for event, values in zip(batch, scores, strict=True):
                 event = int(event)
                 target = int(table.targets[event]) - 1
-                masked = mask_history(values, [i - 1 for i in table.history(event)], target)
-                rank = rank_of_target(masked, target)
+                masked = values.clone()
+                history = torch.tensor([i - 1 for i in table.history(event)], device=device, dtype=torch.long)
+                masked[history] = -torch.inf
+                order = torch.argsort(masked, descending=True)
+                rank = int((order == target).long().argmax()) + 1
                 yield {
                     **table.rows[event],
                     "rank": rank,

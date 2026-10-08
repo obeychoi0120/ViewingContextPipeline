@@ -8,6 +8,7 @@ from validation.leave_one_out_data import EventTable
 from validation.leave_one_out_diagnosis import cluster_bootstrap, weighted_user_mean
 from validation.leave_one_out_recommendation import phase_ids, prepare_split
 from validation.selection import build_selection
+from validation.recommendation_contracts import EVALUATION_CONTRACT
 
 
 def replace_source(context, rows):
@@ -105,8 +106,11 @@ def test_equal_user_mean_and_paired_seed_averages():
 
 @pytest.mark.torch
 @pytest.mark.parametrize("mode", ["text", "mean", "gnn"])
-@pytest.mark.parametrize("scores,expected_epoch", [([0.1, 0.9, 0.2], 2), ([0.9, 0.9, 0.2], 1)])
-def test_test_uses_best_checkpoint_without_refit(ready_context, monkeypatch, scores, expected_epoch, mode):
+@pytest.mark.parametrize("ranks,expected_epoch", [
+    ([[1, 100, 100], [10, 10, 100], [100, 100, 100]], 2),
+    ([[1, 100, 100], [2, 100, 100], [100, 100, 100]], 1),
+])
+def test_test_uses_best_checkpoint_without_refit(ready_context, monkeypatch, ranks, expected_epoch, mode):
     import torch
     from validation import leave_one_out_recommendation as runner
     from validation.selection import prepare_validation_cohort
@@ -153,7 +157,8 @@ def test_test_uses_best_checkpoint_without_refit(ready_context, monkeypatch, sco
         return {"loss": 0, "positive_count": len(ids), "optimizer_updates": 1}
 
     monkeypatch.setattr(runner, "train_epoch", epoch)
-    monkeypatch.setattr(runner, "validation_ndcg10", lambda *a, **k: scores[k["epoch"] - 1])
+    monkeypatch.setattr(runner, "rank_batches", lambda model, table, ids, *a, **k:
+                        iter([(ids, ranks[k["epoch"] - 1])]))
 
     def evaluate(model, table, ids, *args, **kwargs):
         assert model.weight.item() == expected_epoch
@@ -164,6 +169,7 @@ def test_test_uses_best_checkpoint_without_refit(ready_context, monkeypatch, sco
 
     monkeypatch.setattr(runner, "evaluate", evaluate)
     identity = {"run_id": ready_context.run_id, "protocol": "leave_one_out",
+                "evaluation_contract": dict(EVALUATION_CONTRACT),
                 "split_hash": split["split_hash"], "seed": 42, "arm": "meta"}
     if mode != "text":
         identity["representation_mode"] = "graph"
@@ -172,6 +178,16 @@ def test_test_uses_best_checkpoint_without_refit(ready_context, monkeypatch, sco
     assert trained == [1, 2, 3]
     directory = runner.combination_dir(context, 42, "meta")
     assert read_json(directory / "training.json")["best_epoch"] == expected_epoch
+    training = read_json(directory / "training.json")
+    assert training["checkpoint_policy"] == "best_validation_hr10"
+    assert [row["validation_hr10"] for row in training["train"]] == [
+        sum(rank <= 10 for rank in epoch) / len(epoch) for epoch in ranks
+    ]
+    assert runner.combination_complete(directory, identity, len(table.users))
+    assert not runner.combination_complete(
+        directory, {**identity, "evaluation_contract": {**EVALUATION_CONTRACT,
+                    "checkpoint_metric": "NDCG@10"}}, len(table.users)
+    )
     assert torch.load(directory / "sasrec.pt", weights_only=True)["state_dict"]["weight"].item() == expected_epoch
     assert runner.combination_complete(directory, identity, len(table.users))
     assert not runner.combination_complete(directory, {**identity, "protocol": "rolling"}, len(table.users))

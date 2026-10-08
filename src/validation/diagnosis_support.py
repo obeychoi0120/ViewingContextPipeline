@@ -81,8 +81,11 @@ def _bounded_examples(values: list[Any]) -> list[Any]:
 
 def write_diagnosis(path, document):
     """Publish final scores and numerical comparisons without per-item evidence."""
+    from validation.recommendation_contracts import EVALUATION_CONTRACT
+
     result = {
-        "schema_version": "leave-one-out-diagnosis/v2",
+        "schema_version": "leave-one-out-diagnosis/v3",
+        "evaluation_contract": dict(EVALUATION_CONTRACT),
         "run_id": document["run_id"],
         "representation_mode": document["representation_mode"],
         **({"scene_aggregation": document["scene_aggregation"]}

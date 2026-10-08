@@ -62,6 +62,7 @@ def valid_bundle(directory, identity, table, split):
             == identity.get("graph_architecture", ARCHITECTURE_VERSION)
             and metadata.get("catalog_size") == len(table.items)
             and metadata.get("best_epoch") == training.get("best_epoch")
+            and metadata.get("checkpoint_policy") == "best_validation_hr10"
             and all(metadata.get(k) == v for k, v in identity.items())
         )
     except (
