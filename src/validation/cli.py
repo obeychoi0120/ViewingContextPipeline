@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from validation.steps import STEP_HANDLERS
+from validation.graph_context import SCENE_AGGREGATIONS
 from pipeline_runtime import RunContext
 
 
@@ -34,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         "--compare-run-id", help="Reference run for paired Graph comparison (run-diagnosis only)."
     )
     parser.add_argument("--representation-mode", choices=("text", "graph"), required=True)
-    parser.add_argument("--scene-aggregation", choices=("mean", "gnn"))
+    parser.add_argument("--scene-aggregation", choices=SCENE_AGGREGATIONS)
     parser.add_argument(
         "--profile-every",
         type=_positive_int,

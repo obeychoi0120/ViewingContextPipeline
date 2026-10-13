@@ -190,7 +190,8 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
         torch.testing.assert_close(restored.catalog_vectors(), expected)
 
 
-@pytest.mark.parametrize('pool', ['mean', 'gnn'])
+@pytest.mark.parametrize('pool', ['mean', 'gnn', 'transformer', 'transformer_pos', 'transformer_local',
+                                  'attn_pool', 'gnn_attn'])
 def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
     torch = pytest.importorskip('torch')
     from validation.steps import validation_config, run_diagnosis
@@ -228,6 +229,10 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     assert not recommendation_cache.valid_bundle(directory, legacy, table, split)
     assert not combination_complete(directory, {**identity, 'scene_aggregation': 'wrong'}, len(prepared[0]['test']))
     assert np.load(directory / 'catalog_vectors.npy').shape == (4, 512)
+    execution = json.loads((directory / 'training.json').read_text())['execution']
+    graph_training = execution['graph_training']
+    assert ('scene_attention_summary' in graph_training) == (pool in ('attn_pool', 'gnn_attn'))
+    assert ('scene_transformer_residual_scales' in graph_training) == pool.startswith('transformer')
     other = directory.parent / 'restore'
     assert recommendation_cache.restore(context, other, identity, table, split)
     assert recommendation_cache.valid_bundle(other, identity, table, split)
@@ -329,7 +334,8 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
         assert combination_complete(directory, identity, len(phase_ids(EventTable(cohort['events']), split, 'test')))
 
 
-@pytest.mark.parametrize("pool", ["mean", "gnn"])
+@pytest.mark.parametrize("pool", ["mean", "gnn", "transformer", "transformer_local", "attn_pool",
+                                  "gnn_attn"])
 def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data, pool):
     torch = pytest.importorskip('torch')
     from validation.graph_model import new_graph_model
@@ -343,6 +349,12 @@ def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data,
     write_scenes(context, cid, [first, second])
     prepare(context, target=['graph_qwen_meta'])
     original = new_graph_model(context, validation_config(context), 'graph_qwen_meta', 'cpu').eval()
+    if pool.startswith('transformer'):  # Open the zero-initialized residual scales.
+        with torch.no_grad():
+            original.graph_encoder.scene_transformer.layers[0].residual_scale.fill_(0.5)
+    if pool == 'attn_pool':  # Open the zero-initialized score output.
+        with torch.no_grad():
+            original.graph_encoder.attention_pool.score.weight.normal_()
     with torch.no_grad():
         expected = original.catalog_vectors().clone()
     renamed = []
@@ -386,6 +398,105 @@ def test_gnn_contract_reuses_features_but_separates_recommendation_cache(graph_d
     assert recommendation_identity(gnn, 'meta')['graph_model']['gcn_applied'] is False
     assert gnn.recommendations_dir.name == 'gnn'
     assert gnn.diagnosis_path.name == 'graph_gnn_diagnosis.json'
+
+
+def test_scene_order_changes_only_the_positional_transformer(graph_data):
+    torch = pytest.importorskip('torch')
+    from validation.graph_model import new_graph_model
+    from validation.steps import validation_config
+    context, cohort = graph_data
+    cid = cohort['catalog'][0]['content_id']
+    first, second = scene(), scene()
+    second['topics'] = ['food preparation']
+    vectors = {}
+    for order in ((first, second), (second, first)):
+        write_scenes(context, cid, list(order))
+        for pool in ('transformer', 'transformer_pos'):
+            pooled = graph_context(context, pool)
+            prepare(pooled, target=['graph_qwen_meta'])
+            torch.manual_seed(0)
+            model = new_graph_model(pooled, validation_config(pooled), 'graph_qwen_meta', 'cpu')
+            with torch.no_grad():  # Open the zero-initialized residual scales.
+                model.graph_encoder.scene_transformer.layers[0].residual_scale.fill_(0.5)
+                vectors.setdefault(pool, []).append(model.eval().catalog_vectors()[0].clone())
+    torch.testing.assert_close(*vectors['transformer'], atol=3e-6, rtol=1e-5)
+    assert not torch.allclose(*vectors['transformer_pos'], atol=1e-5)
+
+
+def test_transformer_contracts_share_features_but_separate_results(graph_data):
+    from validation.representation_provenance import recommendation_identity
+    from validation.recommendation_cache import cache_for
+    from validation.graph_context import (GNN_MODEL, GRAPH_MODEL, SCENE_AGGREGATIONS,
+                                          TRANSFORMER_VARIANTS, validate_mode)
+    from validation.cli import main
+    context, cohort = graph_data
+    arm = registry(context.config)['graph_qwen_meta']
+    contexts = {pool: graph_context(context, pool) for pool in SCENE_AGGREGATIONS}
+    identities = {pool: recommendation_identity(pooled, arm.name) for pool, pooled in contexts.items()}
+    assert {i['embedding_hash'] for i in identities.values()} == {identities['mean']['embedding_hash']}
+    assert len({cache_for(contexts[p], i).key for p, i in identities.items()}) == len(SCENE_AGGREGATIONS)
+    assert identities['mean']['graph_model'] == GRAPH_MODEL
+    assert identities['gnn']['graph_model'] == {**GNN_MODEL, 'gcn_applied': True}
+    for pool, spec in TRANSFORMER_VARIANTS.items():
+        pooled = contexts[pool]
+        assert source_identity(context, cohort, arm) == source_identity(pooled, cohort, arm)
+        identity = identities[pool]
+        assert identity['graph_architecture'] == 'sasrec-role-graph/v11'
+        model = identity['graph_model']
+        assert model['aggregation'] == pool and model['transformer_applied'] is True
+        assert {k: model['transformer'][k] for k in spec} == spec
+        assert model['transformer']['ffn_dim'] == 2048 and model['transformer']['final_norm'] is False
+        assert recommendation_identity(pooled, 'meta')['graph_model']['transformer_applied'] is False
+        assert pooled.recommendations_dir.name == pool
+        assert pooled.diagnosis_path.name == f'graph_{pool}_diagnosis.json'
+        validate_mode('graph', pool, 'run-recommendation', [arm.name])
+    with pytest.raises(ValueError):
+        validate_mode('graph', 'attention', 'run-recommendation', [arm.name])
+    with pytest.raises(SystemExit):
+        main(['run-recommendation', '--run-id', context.run_id, '--target', arm.name,
+              '--representation-mode', 'graph', '--scene-aggregation', 'attention'])
+
+
+def test_attention_contracts_share_features_but_separate_results(graph_data):
+    from validation.representation_provenance import recommendation_identity
+    from validation.recommendation_cache import cache_for
+    from validation.graph_context import (ATTENTION_AGGREGATIONS, GNN_MODEL,
+                                          TRANSFORMER_VARIANTS, validate_mode)
+    from validation.recommendation_contracts import DIAGNOSIS_ARCHITECTURE_VERSIONS
+    context, cohort = graph_data
+    arm = registry(context.config)['graph_qwen_meta']
+    contexts = {pool: graph_context(context, pool)
+                for pool in ('mean', 'gnn', *TRANSFORMER_VARIANTS, *ATTENTION_AGGREGATIONS)}
+    identities = {pool: recommendation_identity(pooled, arm.name) for pool, pooled in contexts.items()}
+    keys = {pool: cache_for(contexts[pool], identity).key for pool, identity in identities.items()}
+    assert len(set(keys.values())) == len(keys)
+    for pool in ATTENTION_AGGREGATIONS:
+        pooled = contexts[pool]
+        identity = identities[pool]
+        assert source_identity(context, cohort, arm) == source_identity(pooled, cohort, arm)
+        assert identity['embedding_hash'] == identities['mean']['embedding_hash']
+        assert identity['graph_architecture'] == 'sasrec-role-graph/v12'
+        assert identity['graph_architecture'] in DIAGNOSIS_ARCHITECTURE_VERSIONS
+        assert identity['graph_model']['aggregation'] == pool
+        assert pooled.recommendations_dir.name == pool
+        assert pooled.diagnosis_path.name == f'graph_{pool}_diagnosis.json'
+        validate_mode('graph', pool, 'run-recommendation', [arm.name])
+    pool_model = identities['attn_pool']['graph_model']
+    assert pool_model['attention_pool_applied'] is True and 'gcn' not in pool_model
+    assert pool_model['attention_pool']['scene_exchange'] == 'none'
+    assert pool_model['attention_pool']['score_init'] == 'zero_output_uniform_weights'
+    meta = recommendation_identity(contexts['attn_pool'], 'meta')['graph_model']
+    assert meta['attention_pool_applied'] is False
+    gcn, reference = identities['gnn_attn']['graph_model']['gcn'], GNN_MODEL['gcn']
+    # Everything except the neighbour-weight function matches gnn.
+    shared = ('layers', 'hidden_dim', 'similarity_input', 'similarity_dim', 'similarity_eps',
+              'residual', 'activation', 'bias', 'detach_similarity', 'connectivity')
+    assert {k: gcn[k] for k in shared} == {k: reference[k] for k in shared}
+    assert gcn['similarity'] == 'scaled_dot_product' and gcn['normalization'] == 'row_softmax'
+    assert gcn['query_key_dim'] == 128 and gcn['query_key_input'] == 'unit_l2_times_sqrt_dim'
+    assert pool_model['attention_pool']['score_input'] == 'unit_l2_times_sqrt_dim'
+    assert identities['gnn_attn']['graph_model']['gcn_applied'] is True
+    assert recommendation_identity(contexts['gnn_attn'], 'meta')['graph_model']['gcn_applied'] is False
 
 
 def test_previous_graph_input_contract_is_not_reused(graph_data):

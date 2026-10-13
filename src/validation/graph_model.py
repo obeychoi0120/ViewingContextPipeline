@@ -4,10 +4,15 @@ import numpy as np
 
 from validation.model import SASRec, SingleLayerResidualMLP, torch, nn
 from validation.graph_inputs import GraphStore
-from validation.graph_context import GRAPH_MODEL
+from validation.graph_context import (
+    ATTENTION_AGGREGATIONS, GRAPH_MODEL, SCENE_AGGREGATIONS, SCENE_EXCHANGES, SCENE_TRANSFORMER,
+    TRANSFORMER_VARIANTS,
+)
 from validation.graph_batching import PackedGraphStore, GRAPH_EXECUTION_VERSION
 from validation.config import GraphExecutionConfig
+from validation.scene_attention import SceneAttentionGCN, SceneAttentionPool, recorded_weights
 from validation.scene_gcn import SceneGCN, scene_groups
+from validation.scene_transformer import SceneTransformer
 from validation.profiling import span, timed, workload, is_profiling, checkpoint_contexts
 
 
@@ -20,14 +25,20 @@ def segment_mean(values, indices, count):
 
 
 class SceneRoleEncoder(nn.Module):
-    """Entity→Action role gather, scene MLP, optional scene GCN, and mean pooling."""
+    """Entity→Action role gather, scene MLP, optional scene exchange, and video pooling.
+
+    Exchange: cosine GCN, attention GCN or Transformer; pooling: mean or attention.
+    """
 
     ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, location; receiver is ignored.
 
-    def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean"):
+    def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean",
+                 dropout=0.0):
         super().__init__()
-        if aggregation not in ("mean", "gnn"):
-            raise ValueError("Scene role encoder supports mean or gnn pooling")
+        if aggregation not in SCENE_AGGREGATIONS:
+            raise ValueError(
+                "Scene role encoder supports " + ", ".join(SCENE_AGGREGATIONS) + " pooling"
+            )
         self.aggregation = aggregation
         self.hidden_dim = hidden
         self.output_dim = hidden * 4
@@ -41,6 +52,16 @@ class SceneRoleEncoder(nn.Module):
         self.scene_mlp = SingleLayerResidualMLP(self.output_dim)
         if aggregation == "gnn":
             self.gcn = SceneGCN(self.output_dim)
+        elif aggregation in TRANSFORMER_VARIANTS:
+            self.scene_transformer = SceneTransformer(
+                self.output_dim, dropout=dropout,
+                **SCENE_TRANSFORMER, **TRANSFORMER_VARIANTS[aggregation],
+            )
+        elif aggregation == "gnn_attn":
+            # Same attribute as gnn: the checkpoints differ only by gcn.query/gcn.key.
+            self.gcn = SceneAttentionGCN(self.output_dim, hidden * 3, hidden)
+        elif aggregation == "attn_pool":
+            self.attention_pool = SceneAttentionPool(self.output_dim, hidden)
 
     def _role_inputs(self, batch, action_ids):
         if "role_entities" in batch:
@@ -100,18 +121,24 @@ class SceneRoleEncoder(nn.Module):
                 with span("context_projection", cuda=True):
                     context = self.context_projection(batch["contexts"])
                 scenes = torch.cat([title[batch["scene_videos"]], entity_mean, action_mean, context], dim=-1)
-                if self.aggregation == "gnn":
+                if self.aggregation in ("gnn", "gnn_attn"):
                     similarity_features = torch.cat([entity_mean, action_mean, context], dim=-1)
             with span("scene_mlp", cuda=True):
                 scenes = self.scene_mlp(scenes)
-            if self.aggregation == "gnn":
+            if self.aggregation in SCENE_EXCHANGES:
                 groups = [value for key, value in batch.items() if key.startswith("scene_group_")]
                 if not groups:
                     groups = [torch.as_tensor(value, device=scenes.device)
                               for value in scene_groups(batch["offsets"]).values()]
-                scenes = self.gcn(scenes, similarity_features, groups)
+                if self.aggregation in TRANSFORMER_VARIANTS:
+                    scenes = self.scene_transformer(scenes, groups)
+                else:
+                    scenes = self.gcn(scenes, similarity_features, groups)
         with span("video_pooling", cuda=True):
-            output = segment_mean(scenes, batch["scene_videos"], video_count)
+            if self.aggregation == "attn_pool" and scene_count:
+                output = self.attention_pool(scenes, batch["scene_videos"], video_count)
+            else:
+                output = segment_mean(scenes, batch["scene_videos"], video_count)
         # Only videos with no valid scenes use the title-only scene path.
         missing = [i for i in range(video_count) if batch["offsets"][i] == batch["offsets"][i + 1]]
         if missing:
@@ -161,9 +188,17 @@ class GraphSASRec(SASRec):
         self.store = store
         self.title_dim = embedding_dim // 4
         self.graph_encoder = SceneRoleEncoder(
-            store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation
+            store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation,
+            dropout=dropout,
         )
         self.graph_encoder.apply(self._reset_parameters)
+        self._reset_attention(self.graph_encoder)
+        # Undo the shared Linear reset where attention needs its own start.
+        if aggregation == "attn_pool":
+            # Uniform scene weights start exactly as mean pooling.
+            self.graph_encoder.attention_pool.start_uniform()
+        elif aggregation == "gnn_attn":
+            self.graph_encoder.gcn.reset_query_key()
         self._vectors = self._indices = None
         self.embedding_dim = embedding_dim
         self.aggregation = aggregation
@@ -209,9 +244,22 @@ class GraphSASRec(SASRec):
             + edges * hidden * 4
             + scenes * (feature + self.embedding_dim * 12)
         )
-        if self.aggregation == "gnn":
+        if self.aggregation in SCENE_EXCHANGES:
             pairs = int(np.square(self.packed.scene_counts[indices]).sum())
+        if self.aggregation == "gnn":
             estimate += 4 * (pairs * 8 + scenes * self.embedding_dim * 8)
+        elif self.aggregation == "gnn_attn":
+            # gnn activations plus query/key projections; scores reuse the adjacency budget.
+            estimate += 4 * (pairs * 8 + scenes * (self.embedding_dim * 8 + hidden * 4))
+        elif self.aggregation == "attn_pool":
+            # Score hidden layer and tanh, weighted scene copies; no pairwise term.
+            estimate += 4 * scenes * (hidden * 3 + self.embedding_dim * 2)
+        elif self.aggregation in TRANSFORMER_VARIANTS:
+            # Per layer: score/softmax/dropout per head; LN, QKV, residual and FFN activations.
+            layers, heads, ratio = (SCENE_TRANSFORMER[k] for k in ("layers", "heads", "ffn_ratio"))
+            estimate += 4 * layers * (
+                pairs * heads * 4 + scenes * self.embedding_dim * (12 + 3 * ratio)
+            )
         free, _ = torch.cuda.mem_get_info(device)
         return estimate > min(8 * 1024**3, int(free * 0.35))
 
@@ -226,7 +274,7 @@ class GraphSASRec(SASRec):
             if chunk and (
                 len(chunk) >= self.execution.chunk_items
                 or nodes + count > self.execution.chunk_nodes
-                or (self.aggregation == "gnn"
+                or (self.aggregation in SCENE_EXCHANGES
                     and scene_pairs + pairs > self.execution.chunk_scene_pairs)
             ):
                 chunks.append(chunk)
@@ -252,7 +300,7 @@ class GraphSASRec(SASRec):
         device = self.title_projection.weight.device
         for items in chunks:
             batch = self.packed.batch(np.asarray(items) - 1, device,
-                                      group_scenes=self.aggregation == "gnn")
+                                      group_scenes=self.aggregation in SCENE_EXCHANGES)
             self.execution_counts["chunks"] += 1
             if use_checkpoint:
                 options = {"context_fn": checkpoint_contexts} if is_profiling() else {}
@@ -304,7 +352,7 @@ class GraphSASRec(SASRec):
         return self._vectors[1:]
 
     def execution_report(self):
-        return {
+        report = {
             "version": GRAPH_EXECUTION_VERSION,
             **self.execution.model_dump(),
             **self.execution_counts,
@@ -312,6 +360,31 @@ class GraphSASRec(SASRec):
                 self.store["features"].nbytes if self.packed.feature_cache is not None else 0
             ),
         }
+        if self.aggregation in TRANSFORMER_VARIANTS:
+            # Learned [attention, FFN] scales per layer; 0 means that sublayer stayed unused.
+            report["scene_transformer_residual_scales"] = (
+                self.graph_encoder.scene_transformer.residual_scales()
+            )
+        if self.aggregation in ATTENTION_AGGREGATIONS:
+            report["scene_attention_summary"] = self.scene_attention_summary()
+        return report
+
+    @torch.no_grad()
+    def scene_attention_summary(self):
+        """Learned scene weights over the whole catalog; all statistics are 1 for uniform weights.
+
+        A separate no-grad pass (no dropout in these encoders) that leaves the item
+        cache and execution counters untouched.
+        """
+        encoder = self.graph_encoder
+        module = encoder.attention_pool if self.aggregation == "attn_pool" else encoder.gcn
+        device = self.title_projection.weight.device
+        items, size = np.arange(self.item_count), self.execution.chunk_items
+        with recorded_weights(module) as summary:
+            for start in range(0, len(items), size):
+                encoder(self.packed.batch(items[start:start + size], device,
+                                          group_scenes=self.aggregation in SCENE_EXCHANGES))
+        return summary
 
 
 def new_graph_model(context, config, branch, device):

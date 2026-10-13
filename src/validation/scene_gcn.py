@@ -28,15 +28,20 @@ def normalized_similarity(features):
 
 
 class SceneGCN(nn.Module):
+    adjacency_span = "scene_similarity"
+
     def __init__(self, dimension):
         super().__init__()
         self.projection = nn.Linear(dimension, dimension)
 
+    def adjacency(self, features):
+        return normalized_similarity(features)
+
     def forward(self, scenes, similarity_features, groups):
         output = torch.zeros_like(scenes)
         for indices in groups:
-            with span("scene_similarity", cuda=True):
-                adjacency = normalized_similarity(similarity_features[indices])
+            with span(self.adjacency_span, cuda=True):
+                adjacency = self.adjacency(similarity_features[indices])
             with span("scene_gcn", cuda=True):
                 values = scenes[indices]
                 updated = values + nn.functional.relu(self.projection(adjacency @ values))

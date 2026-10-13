@@ -143,11 +143,7 @@ if nn is not None:
                 activation="gelu",
             )
             self.apply(self._reset_parameters)
-            for module in self.modules():
-                if isinstance(module, nn.MultiheadAttention):
-                    nn.init.xavier_normal_(module.in_proj_weight)
-                    if module.in_proj_bias is not None:
-                        nn.init.zeros_(module.in_proj_bias)
+            self._reset_attention(self)
 
         @staticmethod
         def _reset_parameters(module: "nn.Module") -> None:
@@ -155,6 +151,14 @@ if nn is not None:
                 nn.init.xavier_normal_(module.weight)
                 if isinstance(module, nn.Linear) and module.bias is not None:
                     nn.init.zeros_(module.bias)
+
+        @staticmethod
+        def _reset_attention(root: "nn.Module") -> None:
+            for module in root.modules():
+                if isinstance(module, nn.MultiheadAttention):
+                    nn.init.xavier_normal_(module.in_proj_weight)
+                    if module.in_proj_bias is not None:
+                        nn.init.zeros_(module.in_proj_bias)
 
         @property
         def item_count(self) -> int:

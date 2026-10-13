@@ -9,14 +9,14 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, **영문 제목에 �
 영상에서 정보를 만드는 경로는 두 가지이며, 제목은 별도로 준비합니다.
 
 - **Text 경로:** 키프레임 → Scene Graph 또는 Description → 영상 Summary → 고정 BGE 특징 → 학습한 영상 벡터
-- **직접 Graph 경로:** 키프레임 → Scene Graph → 고정 BGE 특징·역할 연결 → 장면 표현 → mean 또는 GNN → 학습한 영상 벡터
+- **직접 Graph 경로:** 키프레임 → Scene Graph → 고정 BGE 특징·역할 연결 → 장면 표현 → mean·GNN·장면 Transformer → 학습한 영상 벡터
 - **공통 추천:** 과거 시청 영상 벡터 → SASRec 사용자 벡터 → 후보 영상 벡터와 내적 → 추천 순위·평가 지표
 
 **Graph를 요약문으로 사용하는 Text 경로와, 역할 연결을 사용하는 직접 Graph 경로는 구분합니다.** 직접 Graph 경로에는 Summary가 필요하지 않습니다. 제목은 Scene 추출·Summary 생성에 넣지 않고, 제목을 사용하는 실험 조건에서 영상 정보와 결합합니다.
 
 ![ViewingContextPipeline 전체 흐름 — 직접 Graph 부분은 mean 경로](docs/design/main_diagram.png)
 
-위 그림의 직접 Graph 부분은 `mean` 경로를 보여줍니다. `gnn`은 Scene MLP와 Mean Pooling 사이에 장면 GCN을 추가합니다. [편집 가능한 PPTX](docs/design/main_diagram.pptx) · [그림 생성 코드](docs/design/generate_main_diagram.py)
+위 그림의 직접 Graph 부분은 `mean` 경로를 보여줍니다. `gnn`은 Scene MLP와 Mean Pooling 사이에 장면 GCN을, `transformer` 계열은 같은 자리에 장면 Transformer를 추가합니다. [편집 가능한 PPTX](docs/design/main_diagram.pptx) · [그림 생성 코드](docs/design/generate_main_diagram.py)
 
 ## 설계 근거와 피드백 반영 범위
 
@@ -105,6 +105,10 @@ Text 경로는 제목과 Summary를 각각 BGE로 인코딩하고, 학습한 pro
 
 [모듈 2 피드백](docs/feedback_260923.md#모듈-2-관련-representation-generation-from-scene-graph)에서는 각 Scene Graph를 하나의 장면 표현으로 보고, 표현 간 유사도에 기반한 GCN으로 정보를 전달하는 방법을 제안했습니다. 현재 **장면을 바로 평균하는 `mean`** 경로에 더해, 이 제안을 참고한 **영상 내부 장면 간 전달 후 평균하는 `gnn`** 경로를 구현했습니다. Entity→Action 역할 결합과 장면 간 GCN은 서로 다른 연산입니다.
 
+장면 간 상호작용과 장면 순서의 효과를 나누어 보기 위해, 같은 자리에 1층 Transformer를 넣는 `transformer`(위치 없음), `transformer_pos`(유효 장면 순번 위치), `transformer_local`(파라미터가 같고 장면 간 attention만 막은 대조군)도 구현했습니다. 추천 품질 비교는 아직 실행하지 않았습니다. 설계 근거는 [Graph 학습 문서](docs/graph_training.md#장면-transformer-aggregation-2026-10-12)를 참고하세요.
+
+자문의 A–D 비교표를 채우기 위해 학습 attention 경로 두 개도 추가했습니다. `attn_pool`은 장면 간 교환 없이 영상 readout 가중치만 학습합니다. `gnn_attn`은 `gnn`과 같은 조건에서 cosine 가중치를 학습된 attention으로만 바꿉니다. 이 두 경로도 추천 품질 비교는 아직 실행하지 않았습니다. 설계 근거는 [Graph 학습 문서](docs/graph_training.md#장면-attention-aggregation-2026-10-12)를 참고하세요.
+
 <details>
 <summary>영상 encoder의 차원·수식과 mean/GNN 구조</summary>
 
@@ -129,7 +133,7 @@ R(x) = x + ReLU(Linear(x))
 
 GNN 유사도 입력은 Scene MLP 이전의 `[Entity 평균; 보정된 Action 평균; Context]` 384차원이며 **제목을 제외**합니다. 각 영상의 모든 유효 장면 쌍에 대해 cosine의 음수는 0, self-loop는 1로 두고 대칭 degree 정규화합니다. 1층 residual GCN은 `H′ = H + ReLU(Â H W + b)`이고, 이후 평균하여 영상 벡터를 만듭니다. 유사도는 매 forward 다시 계산하며 gradient를 차단하지 않습니다.
 
-Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없습니다. SASRec과 기존 2층 GELU User MLP의 LayerNorm은 유지합니다. `meta`에는 GCN을 적용하지 않습니다. 현재 장면 aggregation은 `mean`·`gnn`을 지원하며 Scene `attention`은 CLI에서 거절합니다. SASRec 내부 attention은 유지합니다.
+Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없습니다. SASRec과 기존 2층 GELU User MLP의 LayerNorm은 유지합니다. `meta`에는 GCN을 적용하지 않습니다. 현재 장면 aggregation은 `mean`·`gnn`·`transformer`·`transformer_pos`·`transformer_local`·`attn_pool`·`gnn_attn`을 지원합니다. 과거 산출물 이름인 Scene `attention`은 CLI에서 거절합니다. SASRec 내부 attention은 유지합니다.
 
 ![추천 모델 구조 — Baseline, Text, Graph GNN](docs/design/recsys_diagram_gnn.png)
 

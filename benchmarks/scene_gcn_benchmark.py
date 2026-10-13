@@ -1,4 +1,4 @@
-"""Synthetic mean/GCN training cost; no BGE, Run, profiler or shared-cache access."""
+"""Synthetic scene-aggregation training cost; no BGE, Run, profiler or shared-cache access."""
 
 import argparse
 import gc
@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests" / "validation"))
 
 from graph_fixture import synthetic_store  # noqa: E402
+from validation.graph_context import SCENE_AGGREGATIONS  # noqa: E402
 from validation.graph_model import GraphSASRec  # noqa: E402
 from validation.model import torch, seed_everything  # noqa: E402
 from validation.leave_one_out_execution import negative_mask  # noqa: E402
@@ -35,7 +36,10 @@ def measure(store, aggregation, common, sequences, targets, args, device):
     seed_everything(42)
     net = model(store, aggregation)
     missing, extra = net.load_state_dict(common, strict=False)
-    assert not extra and all(name.startswith("graph_encoder.gcn.") for name in missing)
+    # Only the inter-scene module differs; every shared weight comes from the common state.
+    added = ("graph_encoder.gcn.", "graph_encoder.scene_transformer.",
+             "graph_encoder.attention_pool.")
+    assert not extra and all(name.startswith(added) for name in missing)
     net.to(device)
     optimizer = torch.optim.AdamW(net.parameters(), lr=1e-4, weight_decay=0.1)
     ids = torch.cat([sequences.flatten(), targets])
@@ -80,6 +84,8 @@ def main():
     parser.add_argument("--steps", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--aggregations", nargs="+", choices=SCENE_AGGREGATIONS,
+                        default=["mean", "gnn"])
     args = parser.parse_args()
     if min(args.videos, args.batch_size, args.steps, args.repeats) < 1 or args.warmup < 0:
         parser.error("counts must be positive; warmup must be nonnegative")
@@ -91,9 +97,10 @@ def main():
     rng = np.random.default_rng(42)
     sequences = torch.tensor(rng.integers(1, args.videos + 1, size=(args.batch_size, 10)), device=device)
     targets = torch.tensor(rng.integers(1, args.videos + 1, size=args.batch_size), device=device)
-    measurements = {"mean": [], "gnn": []}
+    aggregations = list(dict.fromkeys(args.aggregations))
+    measurements = {aggregation: [] for aggregation in aggregations}
     for repeat in range(args.repeats):
-        for aggregation in (("mean", "gnn") if repeat % 2 == 0 else ("gnn", "mean")):
+        for aggregation in (aggregations if repeat % 2 == 0 else aggregations[::-1]):
             measurements[aggregation].append(measure(
                 store, aggregation, common, sequences, targets, args, device))
     result = {

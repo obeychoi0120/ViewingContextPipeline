@@ -1,6 +1,6 @@
 # 직접 Graph 학습 경로
 
-현재 파이프라인은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean|gnn`**을 필수로 받으며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
+현재 파이프라인은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean|gnn|transformer|transformer_pos|transformer_local|attn_pool|gnn_attn`**을 필수로 받으며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
 
 ## 실행
 
@@ -89,6 +89,218 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 2026-10-06 검증: `vc_cloud`, PyTorch 2.13.0+cu129, NVIDIA L4에서 CPU validation **156개**, CUDA 모델 **12개**, CUDA profiler **4개**를 통과했습니다. 참조 구현의 출력·gradient, chunk·checkpoint·특징/catalog cache, 결정적 반복 학습, topology·순서 불변성·결측 상태, optimizer 갱신, 두 Metadata adapter의 동일 입력 일치를 검사했습니다. 소형 rolling 학습→평가→진단과 결과 캐시 검증도 포함됩니다.
 
 별도 integration은 **68개 통과, 11개 실패**입니다. 실패는 기존 root 실행 스크립트·그림 링크 누락 및 과거 v7 hash fixture 불일치이며, 변경 전 HEAD를 별도 디렉터리에서 실행해 같은 11개 실패를 확인했습니다. 변경 파일 Ruff 검사와 shell 문법 검사도 통과했습니다. 전체 Run 학습 및 실제 성능 평가는 실행하지 않았습니다.
+
+## 장면 attention aggregation (2026-10-12)
+
+자문 메모의 A–D 비교표에서 비어 있던 두 칸을 채우는 실험 경로입니다. B는 장면 간 교환 없이 attention pooling만 하는 경로이고, D는 GCN과 조건을 맞춘 attention 전달입니다. Transformer 3종과는 이름·계약(`sasrec-role-graph/v12`, leave-one-out 병합 전 `v10`)이 따로이며, `mean`·`gnn`·Transformer의 계약·초기 가중치·출력은 바뀌지 않았습니다. 구현과 단위 검증까지만 했으며 **추천 학습·평가는 실행하지 않았습니다.**
+
+| `--scene-aggregation` | 자문 표 | 장면 간 연산 | 영상 readout | 비교 대상 → 확인하려는 효과 |
+|---|---|---|---|---|
+| `mean` | A | 없음 | 평균 | 기준 |
+| `attn_pool` | B | 없음 | **학습 attention 가중합** | `mean` → 중요한 장면을 고르는 효과 |
+| `gnn` | C | cosine GCN 1층 | 평균 | `mean` → 장면 간 정보 교환 |
+| `gnn_attn` | D | **학습 attention GCN 1층** | 평균 | `gnn` → 이웃 가중치를 학습하는 효과 |
+
+`gnn_attn` 추천 구조 전체(Baseline·Text·Graph): [PNG](design/gnn_attn/recsys_diagram_gnn_attn.png) · [편집 가능한 PPTX](design/gnn_attn/recsys_diagram_gnn_attn.pptx) · [갱신 코드](design/generate_recsys_diagram_gnn_attn.py). `gnn_attn` 상세 구조: [PNG](design/gnn_attn/gnn_attn_detail_diagram.png) · [갱신 코드](design/generate_gnn_attn_detail_diagram.py). attention 계산 단계별 예시: [PNG](design/gnn_attn/gnn_attn_walkthrough_diagram.png) · [갱신 코드](design/generate_gnn_attn_walkthrough_diagram.py). 두 그림의 장면·가중치 값은 설명용 가상 예시입니다.
+
+`gnn` → `gnn_attn` → `transformer` 순서로 비교하면 효과를 나눠 볼 수 있습니다. `gnn_attn`은 가중치를 정하는 방식만 바꾸고, `transformer`는 여기에 LN·FFN·2 heads·ReZero 용량을 더합니다. 아래 Transformer 절의 C0/C/D는 이 표의 A–D와 다른 라벨입니다.
+
+```text
+공통: [Title; Entity 평균; Action 평균; Context] 512 → Scene MLP → H (S × 512)
+unit_rms(x) = √dim · x / max(‖x‖, 1e-8)      점수 입력에만 사용, 값 경로는 그대로
+
+attn_pool:  β = 영상 내부 softmax_s( wᵀ tanh(W₁ unit_rms(h_s) + b₁) )
+            W₁ 512→128, w 128→1 (bias 없음, 0 초기화);  영상 = Σ_s β_s h_s
+gnn_attn:   f = [Entity 평균; Action 평균; Context] 384 (제목 제외, gnn과 동일)
+            A = 행 softmax_j( (W_q unit_rms(f_i))ᵀ (W_k unit_rms(f_j)) / √128 ),  W_q·W_k 384→128, bias 없음
+            H′ = H + ReLU(A H W + b) → 유효 장면 평균        (gnn: A = D^-½ max(cos, 0) D^-½)
+```
+
+### 설계 근거
+
+- **`attn_pool`의 시작점.** 점수 출력 `w`를 0으로 초기화합니다. 따라서 모든 영상이 균등 가중치, 즉 `mean`과 같은 함수에서 출발합니다(Transformer의 α = 0과 같은 원칙). `GraphSASRec`의 공통 Linear 초기화 뒤에 다시 0으로 둡니다.
+  - 출력은 장면 벡터의 볼록 결합이라 영상 벡터 크기가 `mean`과 같은 범위에 머뭅니다. 합성 fixture의 초기 노름은 0.710으로 `mean` 0.708과 비슷했습니다.
+  - softmax는 영상 안의 공통 이동을 무시하므로 `w`의 bias는 gradient가 항상 0입니다. 그래서 bias를 두지 않았습니다.
+  - 과거 v3–v6 attention pooling(384→128→1)과 같은 형태의 점수 MLP를 512 입력으로 옮겼습니다. 과거 산출물 경로를 보호하려고 이름은 `attention`이 아니라 `attn_pool`입니다.
+- **`gnn_attn`과 `gnn`의 정렬.** 다음 조건을 `gnn`과 같게 두었습니다: 제목을 뺀 384차원 입력, self-loop 포함, 1층, `W` 512→512 residual ReLU, 영상 내부 전체 장면 쌍, gradient 비차단.
+  - 모듈 이름도 `gcn`으로 같아서 checkpoint 차이는 `gcn.query`·`gcn.key` 두 행렬(98,304개)뿐입니다.
+  - 정규화가 대칭 degree에서 행 softmax로 바뀌는 점은 가중치 결정 방식의 일부로 봅니다.
+  - key 폭 128은 기존 hidden 128을 재사용했습니다. 새 하이퍼파라미터를 들이지 않으려는 선택입니다.
+- **점수 입력 정규화(`unit_rms`).** Scene 특징의 노름이 약 1이어서, 크기를 그대로 두고 점수를 계산하면 점수가 0 근처에 머뭅니다.
+  - 합성 fixture에서 정규화 없이 300 step 학습하면 정규화 엔트로피가 `gnn_attn` 0.99999, `attn_pool` 0.9995로 사실상 균등했습니다. 이대로라면 실험이 다시 `mean`이나 균등 GCN을 시험하게 됩니다.
+  - Transformer가 pre-LN으로 sublayer 입력을 안정시킨 것과 같은 이유로, **점수 계산 입력만** 정규화했습니다. `gnn` cosine과 같은 L2 방향(eps 1e-8)에 `√dim`을 곱해 단위 RMS로 맞춥니다.
+  - 파라미터가 없고, 가중치가 입력 크기에 불변입니다(cosine과 같은 성질). 값·residual 경로와 영상 벡터 크기는 바꾸지 않습니다.
+  - 같은 조건에서 300 step 후 엔트로피는 `attn_pool` 0.990, `gnn_attn` 0.886이었습니다.
+- **`gnn_attn` 초기화.** `W_q`·`W_k`는 `N(0, 1/(2·fan_in))`로 초기화합니다.
+  - 단위 RMS 입력에서 초기 attention logit의 표준편차가 0.5가 됩니다. 이 저장소 Transformer의 xavier `in_proj` + pre-LN 초기값(측정 0.49)과 같습니다.
+  - 공통 xavier를 그대로 쓰면 1.5(측정 1.50)였고, 초기 attention이 이미 뾰족했습니다. 합성 초기 엔트로피는 약 0.70이었고, 변경 후에는 약 0.95입니다.
+- **비용.** `attn_pool`은 O(S·d)이고 장면 쌍 연산이 없습니다. 그래서 scene group과 `chunk_scene_pairs` 분할 없이 `mean`과 같은 실행 경로를 씁니다. `gnn_attn`은 `gnn`과 같은 S² 경로입니다. 추가 파라미터는 `attn_pool` 65,792개이고, `gnn_attn`은 `gnn`의 262,656개에 98,304개를 더합니다.
+
+### 학습 후 확인할 기록
+
+두 aggregation은 `training.json`의 `execution.graph_training.scene_attention_summary`에 기록합니다. 병합 전 rolling에서는 `execution.graph_selection`·`execution.graph_refit`에 기록했습니다.
+
+- 전체 catalog를 no-grad로 한 번 더 인코딩해 계산합니다. item cache와 chunk 집계는 바꾸지 않습니다.
+- 장면이 2개 이상인 영상만 집계합니다.
+- 비율은 `S × 가중치`입니다. 1이면 균등(mean), S면 한 장면만 선택한 것입니다.
+- 정규화 엔트로피는 `엔트로피 / log S`입니다. 1이면 균등, 0이면 한 장면입니다.
+
+| aggregation | 항목 |
+|---|---|
+| `attn_pool` | `videos`, `normalized_entropy_mean`, `max_weight_ratio_mean`, `first_scene_weight_ratio_mean`·`last_scene_weight_ratio_mean`(첫·끝 장면 편향), `score_weight_norm`(0이면 mean과 동일) |
+| `gnn_attn` | `rows`(장면 행 수), `normalized_entropy_mean`, `max_weight_ratio_mean`, `self_weight_ratio_mean`, `query_weight_norm`, `key_weight_norm` |
+
+높은 가중치를 사람이 판단하는 장면 중요도나 사용자 선호의 원인으로 해석하지 않습니다.
+
+### 예외·계약·캐시
+
+- 장면이 1개인 영상은 두 경로 모두 가중치 1입니다.
+- 장면 없이 제목만 있으면 기존 fallback을 쓰고 attention을 건너뜁니다. 전체 결측·padding은 최종 0입니다.
+- `meta`는 attention을 적용하지 않는 동일 제목 모델입니다. 계약에는 `attention_pool_applied: false`(`attn_pool`) 또는 `gcn_applied: false`(`gnn_attn`)로 기록됩니다.
+- 두 경로 모두 장면 순서를 바꿔도 영상 벡터가 같습니다.
+
+모델 계약은 `sasrec-role-graph/v12`입니다. leave-one-out 병합 때 origin의 mean `v9`·gnn `v10`과 겹치지 않도록 기존 `v10`에서 바꿨습니다. 점수 입력·초기화·정규화는 `graph_model.attention_pool` 또는 `graph_model.gcn`에 기록합니다. 현재 입력 계약 `role-graph-inputs/v4`와 BGE 특징 캐시를 `mean`/`gnn`과 공유하므로 aggregation별 **재임베딩이 필요 없습니다.**
+
+추천 결과·checkpoint·shared cache·진단은 aggregation별 경로로 분리됩니다(`recommendations/graph/<attn_pool|gnn_attn>/`, `diagnosis/graph_<aggregation>_diagnosis.json`). Profiler는 `attn_pool`을 `graph_encoder/video_pooling`에, `gnn_attn`을 `graph_encoder/scene_attention`·`scene_gcn`에 기록합니다. auto checkpoint 추정에는 두 경로의 활성값을 추가했습니다.
+
+```bash
+RUN_ID="사용할_Run_ID"
+for AGG in attn_pool gnn_attn; do
+  python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+  python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+done
+# 합성 입력의 학습 비용 비교(선택)
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --device cuda:0 --aggregations mean attn_pool gnn gnn_attn
+GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_attention.py tests/validation/test_direct_graph.py
+```
+
+### 이번 변경의 검증
+
+로컬 PC(NVIDIA RTX 4090, PyTorch 2.13.0+cu130)에서 확인한 결과입니다.
+
+| 항목 | 결과 |
+|---|---|
+| 전체 `tests` (CPU+CUDA) | **380개 통과** (변경 전 340개 + 신규 40개). CUDA profiler 4개는 변경 전과 마찬가지로 함께 실행하면 실패하고 별도 프로세스에서 통과 |
+| 기존 5개 aggregation | `mean`·`gnn`·`transformer`·`transformer_pos`·`transformer_local`의 계약·초기 state·catalog 벡터·1 step gradient·execution report가 변경 전 작업 트리와 CPU·CUDA에서 비트 단위로 일치 |
+| Ruff·`git diff --check` | 변경 파일 통과 |
+
+신규 테스트는 다음을 확인합니다.
+
+- NumPy·수식으로 직접 계산한 segment softmax(큰 점수에서의 안정성), attention pooling, attention GCN과의 일치. 점수 입력 크기에 대한 불변성
+- `attn_pool`이 0 초기화에서 mean과 일치하고, 첫 step에는 점수 가중치만 gradient를 받으며 다음 step에 hidden으로 전달됨
+- 장면 순열 불변·등변성, 영상 격리, 묶음 계산과 영상별 단독 계산의 일치, 제목이 `gnn_attn` 가중치 입력에 들어가지 않음
+- `gnn`과 `gnn_attn`의 checkpoint 차이가 `query`·`key`뿐임, 파라미터 수, `gnn_attn` 초기 logit 표준편차 0.5
+- 요약 통계가 직접 계산과 일치하고, 균등 가중치에서 모두 1이며, 학습 후 변함. 요약 계산이 chunk 집계를 바꾸지 않음
+- fallback·빈 영상 우회, chunk·checkpoint 출력과 gradient 일치, 저장·재로딩, 다른 aggregation checkpoint 거부
+- `attn_pool`이 장면 쌍 분할·scene group을 쓰지 않음
+- 소형 selection→refit→test→diagnosis, `training.json` 요약 기록, 계약·cache key 분리, Entity ID·장면 순서 불변
+
+합성 fixture(영상 64, 장면 315, batch 128, lr 1e-4, dropout 0.1)에서 GPU로 300 step 학습한 결과입니다.
+
+| aggregation | 장면 있는 영상 노름 (초기 → 300 step) | 300 step 후 가중치 |
+|---|---|---|
+| `mean` | 0.708 → 0.948 | — |
+| `attn_pool` | 0.710 → 0.968 | 엔트로피 0.990, 최대 비율 1.18, 첫 장면 비율 0.79 |
+| `gnn` | 0.903 → 1.243 | — |
+| `gnn_attn` | 0.891 → 1.261 | 엔트로피 0.886, 최대 비율 2.06, 자기 비율 1.11 |
+
+합성 목표이므로 추천 품질과는 무관합니다. 같은 fixture로 benchmark를 돌린 학습 batch 시간(RTX 4090, warmup 5·10 step·3회 중앙값)은 `mean` 6.87ms, `attn_pool` 7.38ms, `gnn` 14.60ms, `gnn_attn` 14.31ms, Transformer 3종 16.6–17.5ms였습니다. 소형 측정이라 실제 데이터 처리량으로 일반화하지 않습니다.
+
+추천 품질, 실제 데이터에서의 가중치 변화와 처리량은 검증하지 않았습니다. 전체 추천 구조 그림(`recsys_diagram*`, `main_diagram`)은 갱신하지 않았습니다.
+
+후속 후보(미구현): 교환과 attention pooling의 조합(예: `gnn` + `attn_pool`), UniMP gated residual, CSA 보조 학습, Scene 내부 Entity·Action attention, 교환 전후 장면 다양성(oversmoothing) 진단을 `gnn`·Transformer에도 적용.
+
+## 장면 Transformer aggregation (2026-10-12)
+
+장면 간 상호작용과 장면 순서가 추천 영상 벡터에 각각 기여하는지 분리해 검증하기 위한 실험 경로입니다. `gnn`의 GCN 자리, 즉 **Scene MLP 출력 `H`와 Mean Pooling 사이**에 Transformer encoder를 넣고 나머지는 `mean`/`gnn`과 동일하게 둡니다. 구현과 단위 검증까지만 했으며 **추천 학습·평가는 실행하지 않았습니다.**
+
+| `--scene-aggregation` | 실험 표기 | 장면 간 연산 | 확인하려는 효과 |
+|---|---|---|---|
+| `mean` | A | 없음 | 기준 |
+| `gnn` | 참고 | cosine 유사도 GCN 1층 | 기존 제안 |
+| `transformer_local` | C0 | C와 같은 블록, attention을 자기 장면으로 제한 | 파라미터만 늘린 대조군 |
+| `transformer` | C | 영상 내부 모든 장면 attention, 위치 없음 | **C − C0 = 장면 간 상호작용** |
+| `transformer_pos` | D | C + 유효 장면 순번의 위치 인코딩 | **D − C = 장면 순서** |
+
+```text
+[Title; Entity 평균; Action 평균; Context] 512 → Scene MLP → H (S × 512)
+블록 1층(pre-LN, 512 · 2 heads · FFN 2048 · ReLU · dropout):
+  X  = H + α₁ · Attn(LN₁(H + P))     C0는 attention을 자기 장면으로 제한
+  H′ = X + α₂ · FFN(LN₂(X + P))      α₁, α₂: 학습 스칼라, 초기값 0
+  C/C0: P = 0      D: P = 단위 노름 sinusoid(유효 장면 순번)
+→ 유효 장면 평균 → 영상 512 → SASRec (변경 없음)
+```
+
+### 설계 근거
+
+- **삽입 위치.** GCN과 같은 위치에 두어 `mean`·`gnn`·Transformer가 장면 간 연산 하나만 다르도록 했습니다. 입력은 제목이 포함된 Scene MLP 출력입니다. 제목은 영상 내 모든 장면에 같은 값으로 들어가므로 장면 간 attention 비교에 장면별 차이를 만들지 않습니다.
+- **블록 크기.** 1층·2 heads·FFN 4배(2048)·ReLU·`validation.model.dropout`은 이 저장소의 SASRec 블록과 같습니다. 새 하이퍼파라미터를 들이지 않으려는 선택이며, 층수는 GCN 1층에 맞췄습니다. dropout 위치와 초기화(Linear xavier normal·bias 0, attention `in_proj` xavier normal)도 SASRec과 같습니다. `nn.TransformerEncoderLayer`에는 sublayer 출력에 스칼라를 곱할 지점이 없습니다. 추론 시 fused 경로가 sublayer 함수를 우회하기도 하므로 같은 구조의 블록을 직접 구현했습니다.
+- **LayerNorm: 블록 내부 pre-LN 유지, 최종 LN 없음, 0 초기화 residual scale.** 합성 fixture의 초기화 직후 측정에서 Scene MLP 출력 `‖H‖`는 약 0.97이었습니다. LayerNorm은 이를 약 `√512 ≈ 22.6` 크기로 바꿉니다. 그래서 일반 pre-LN 블록의 attention·FFN 출력은 약 11.5·12.6으로 residual 입력을 압도합니다. 영상 벡터 노름도 16.95가 되어 `mean` 0.73, `gnn` 0.93, 제목만 있는 영상 0.58과 크게 달랐습니다. 이 상태로는 mean/gnn 비교에 크기 차이가 섞이고, 같은 모델 안에서도 장면 있는 영상이 내적 점수에서 구조적으로 유리해질 수 있습니다.
+  - 최종 LN을 추가하면 22.49가 되어 해결되지 않습니다.
+  - 블록 내부 LN을 제거하면 1.03이 되지만, attention 점수가 `‖H‖` 변화에 직접 노출됩니다.
+  - 그래서 pre-LN으로 sublayer 입력 크기를 안정시키고, 출력은 학습 스칼라 `α`(초기값 0, [ReZero](https://arxiv.org/abs/2003.04887) 방식)로 조절합니다. 초기에는 세 변형이 모두 **`mean`과 정확히 같은 함수**이고, 이후 차이는 추천 loss로 학습한 장면 상호작용·순서 사용량입니다.
+  - 최종 LN을 두지 않는 이유는 두 가지입니다. v7부터 유지한 Item·Scene LayerNorm 없음 계약을 따르고(v7에서 제거한 이유는 기록되어 있지 않음), 최종 LN이 있으면 `α = 0`에서도 mean과 같아지지 않기 때문입니다.
+  - AdamW의 step당 갱신 폭은 대략 학습률(1e-4) 수준이라 `α`는 천천히 커집니다. 합성 300 step에서 `|α|`는 약 0.01이었습니다. early stopping 전에 Transformer가 충분히 쓰이지 않을 가능성이 있으므로 학습 후 `α`를 확인합니다(아래 `training.json` 항목).
+- **C0 대조군.** 파라미터는 세 변형 모두 **3,152,386개**(블록 3,152,384 + `α` 2)로 GCN 층(262,656개)의 약 12배입니다. C가 좋아져도 용량 증가 때문일 수 있으므로, 파라미터가 같고 장면 간 정보 교환만 막은 C0를 둡니다. 대각선 mask에서는 attention 가중치가 자기 장면에 1이 되어 장면별 변환만 남습니다.
+- **위치 인코딩.** 고정 sinusoid는 학습 파라미터가 없어 C와 D의 파라미터 수가 정확히 같고 장면 수 상한도 필요 없습니다. 원래 sinusoid의 노름은 `√(512/2) = 16`이라 `‖H‖ ≈ 0.97`인 장면 벡터에 그대로 더하면 LayerNorm 입력을 위치가 지배합니다. 초기 attention이 장면 내용을 거의 보지 못하게 되므로 **위치 벡터를 단위 노름으로 스케일**했습니다. 실제 BGE 분포에서 학습 중 `‖H‖`가 어떻게 변하는지는 측정하지 않았습니다.
+- **위치는 sublayer 입력에만 주입.** `mean(P₀…P_{S−1})`은 유효 장면 수 `S`만의 함수입니다. 위치가 residual 경로에 남아 평균에 들어가면 D − C가 순서 효과가 아닌 길이 효과를 포함할 수 있습니다. 그래서 위치는 LN₁·LN₂ 입력에만 더합니다. 1층에서는 `Enc(H+P) − P`와 수식상 같고, `α = 0`이면 D도 부동소수점 상쇄 오차 없이 mean과 정확히 같습니다. sublayer를 통한 간접적인 위치·길이 정보까지 막지는 않습니다.
+- **위치 기준은 유효 장면 순번.** 장면은 30초 고정 구간(`scene_duration: 30`)이라 원래 `scene_idx`가 시간에 가깝습니다. 하지만 현재 Graph 입력(`role-graph-inputs/v3`)에는 이 값이 저장되지 않아, 원래 위치를 쓰려면 입력 계약 변경과 재임베딩이 필요합니다. 제외된 장면(raw·warning·구조 오류)이 있는 영상에서만 두 기준이 달라집니다.
+- **영상 내부 연결과 묶음 실행.** `gnn`과 같은 `scene_groups`로 장면 수가 같은 영상끼리 `(영상 수, S, 512)` 배치를 만듭니다. padding이나 key mask 없이 영상별 독립 계산과 같은 결과를 내며, 영상 간 attention은 없습니다. 장면 수 종류가 많으면 묶음별 kernel 호출이 늘어나는데, 실제 처리량은 측정하지 않았습니다.
+
+### 예외·계약·캐시
+
+장면 1개 영상도 Transformer를 거칩니다(자기 자신만 attention). 장면 없이 제목만 있으면 기존 `[title; 0; 0; 0]` fallback을 쓰고 Transformer를 건너뜁니다. 전체 결측·padding은 최종 0이며, `meta`는 Transformer를 적용하지 않는 동일 제목 모델입니다. C와 C0는 장면 순서를 바꿔도 영상 벡터가 같고 D만 달라집니다.
+
+세 변형의 모델 계약은 `sasrec-role-graph/v11`입니다. leave-one-out 병합 때 origin의 mean `v9`와 겹치지 않도록 기존 `v9`에서 바꿨습니다. `graph_model.transformer`에 층·head·FFN·위치·attention 범위·정규화·residual scale·위치 스케일·위치 주입 방식을 기록하며, `meta`는 `transformer_applied: false`입니다. 현재 입력 계약 `role-graph-inputs/v4`와 BGE 특징 캐시는 `mean`/`gnn`과 공유하므로 aggregation별 **재임베딩이 필요 없습니다.** 추천 결과·checkpoint·shared cache는 aggregation별로 분리됩니다. `mean`/`gnn`의 identity·모델 버전·초기 가중치는 바뀌지 않았습니다. Chunk는 `gnn`과 같은 `chunk_scene_pairs`(S² 합) 기준을 따르고, auto checkpoint 추정에는 attention 점수와 FFN 활성값을 추가했습니다. Profiler는 `graph_encoder/scene_transformer`와 `workload.scene_pairs`를 기록합니다. 학습된 `[α₁, α₂]`는 `training.json`의 `execution.graph_training.scene_transformer_residual_scales`에 기록되며 checkpoint에도 포함됩니다. leave-one-out에는 refit이 없으므로 이전 rolling의 `graph_selection`·`graph_refit` 구분은 없습니다. 0에 가까우면 해당 sublayer를 거의 쓰지 않은 것입니다.
+
+| 경로 | 신규 산출물 |
+|---|---|
+| 추천 | `validation/recommendations/graph/<transformer\|transformer_pos\|transformer_local>/<date>/seed_<seed>/<arm>/` |
+| 진단 | `validation/diagnosis/graph_<aggregation>_diagnosis.json` |
+
+```bash
+RUN_ID="사용할_Run_ID"
+for AGG in transformer_local transformer transformer_pos; do
+  python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+  python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+done
+# 합성 입력의 학습 비용 비교(선택)
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --device cuda:0 --aggregations mean gnn transformer_local transformer transformer_pos
+GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_transformer.py tests/validation/test_direct_graph.py
+```
+
+진단은 aggregation 하나 안에서 arm끼리 비교합니다. C0·C·D 사이의 날짜×seed 짝 비교는 아직 자동화하지 않았으며, Run별 분석 코드와 보고서는 `artifacts/runs/<RUN_ID>/reports/`에 둡니다.
+
+### 이번 변경의 검증
+
+로컬 PC(NVIDIA RTX 4090, PyTorch 2.13.0+cu130)에서 다음이 통과했습니다.
+
+| 항목 | 결과 |
+|---|---|
+| CPU validation | **134개** (변경 전 HEAD 104개 + 신규 30개) |
+| integration | 41개 (HEAD와 동일) |
+| Transformer·GCN 테스트 (CPU+CUDA) | 55개 |
+| 기존 CUDA 회귀 (`graph_execution`, `large_optimizations`, `-k cuda`) | 9개 (HEAD에서도 같은 명령이 9개 선택) |
+| CUDA profiler (별도 프로세스) | 4개 |
+
+신규 테스트는 다음을 확인합니다.
+
+- 원시 가중치와 residual scale로 작성한 pre-LN attention·FFN 계산과의 일치(학습·추론 경로), 단위 노름 sinusoid
+- 묶음 계산과 영상별 단독 계산의 일치, 영상 격리
+- C/C0의 장면 순열 등변성과 D의 순서 의존성, C0에서 다른 장면이 결과에 섞이지 않음
+- `α = 0`이면 블록이 정확한 항등. 세 변형의 초기 catalog 벡터가 같은 가중치의 `mean`과 비트 단위로 일치
+- `α = 0`에서 gradient가 `α`로만 흐르고 한 step 뒤 sublayer 가중치로 전달됨, execution report 기록
+- 세 변형의 동일 파라미터 수, fallback·빈 영상 우회
+- chunk·checkpoint 출력과 gradient 일치, dropout 학습과 checkpoint 재계산의 일치, 저장·재로딩
+- 소형 selection→refit→test→diagnosis와 결과 캐시, identity·cache key 분리, CLI 선택지
+
+`mean`·`gnn`·Text Metadata·Text Desc 모델은 같은 seed에서 변경 전 HEAD와 초기 state 전체·catalog 벡터가 비트 단위로 일치했습니다.
+
+합성 fixture(영상 64, 장면 315, batch 128, lr 1e-4, dropout 0.1)에서 GPU로 300 step 학습해 동작을 확인했습니다. 장면 있는 영상 노름은 세 변형 모두 초기 0.728(`mean`과 동일)에서 1.06–1.08로 변했고(`mean` 0.97), `|α|`는 약 0.01이었습니다. 합성 목표이므로 추천 품질과는 무관합니다. benchmark는 CUDA 소형 실행으로 동작만 확인했습니다.
+
+추천 품질, 실제 처리량, 실제 데이터에서의 `α` 성장, 학습 중 `‖H‖` 대비 위치 크기는 검증하지 않았습니다. 추천 구조 그림(`docs/design/`)은 갱신하지 않았습니다.
+
+후속 후보(미구현): 독립 점수 attention pooling(B), 작은 GRU(E), 원래 `scene_idx` 위치, 2층 변형, 장면 단위 Description 입력에 같은 aggregation 적용.
 
 ## 장면 GCN aggregation (2026-10-06)
 
