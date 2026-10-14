@@ -146,6 +146,7 @@ def test_generation_changes_block_resume_graph_and_summary(ready_context, fake_m
     from extraction.minicpm_provenance import contract_identity
 
     context = ready_context
+    context.config['extraction']['minicpm']['vision_downsample'] = 16
     arm = registry(context.config)['graph_minicpm']
     options = dict(model='minicpm', arm=arm.name, schema='prompts/scene_graph_v8.md')
     steps.extract_graph_scenes(context, **options)
@@ -183,6 +184,7 @@ def test_force_interruption_cannot_reuse_old_mode(ready_context, fake_models, mo
     from extraction.scene_storage import read_scene_records
 
     context = ready_context
+    context.config['extraction']['minicpm']['vision_downsample'] = 16
     options = dict(model='minicpm', arm='graph_minicpm', schema='prompts/scene_graph_v8.md')
     steps.extract_graph_scenes(context, **options)
     directory = context.scene_arm_dir('graph_minicpm')

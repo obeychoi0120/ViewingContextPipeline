@@ -39,6 +39,7 @@ def test_graph_only_extraction_training_diagnosis(ready_context, fake_models, mo
     from validation import leave_one_out_recommendation as runner
 
     context = ready_context
+    context.config['extraction']['minicpm']['vision_downsample'] = 16
     monkeypatch.setattr(runner, 'worker_devices', lambda *a: ['cpu'])
     monkeypatch.setattr('validation.graph_inputs.encode_texts',
                         lambda settings, texts: np.ones((len(texts), settings.embedding_dim), dtype=np.float32))

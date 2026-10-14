@@ -108,6 +108,7 @@ class VLLMBackend:
                 "generation_config": "vllm",
                 "logits_processors": arguments["logits_processors"],
                 "structured_outputs_config": arguments["structured_outputs_config"],
+                "use_v2_model_runner": getattr(engine.vllm_config, "use_v2_model_runner", False),
             }
             for key, section in {
                 "max_num_seqs": "scheduler_config",
