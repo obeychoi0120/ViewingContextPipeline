@@ -61,7 +61,7 @@ def current_context(tmp_path):
     config["validation"]["model"].update(max_epochs=1, patience=1)
     config["validation"]["evaluation"]["bootstrap_samples"] = 100
     config["extraction"]["visual_evidence"]["image_resolution"] = [16, 8]
-    for model in ("qwen", "bge"):
+    for model in ("qwen", "bge", "minicpm"):
         config["models"][model] = str(tmp_path / model)
         Path(config["models"][model]).mkdir()
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(config))
@@ -135,7 +135,7 @@ def fake_models(monkeypatch):
 
 @pytest.fixture
 def generate_all():
-    """Generate the three scene/summary sources shared by the six current arms."""
+    """Generate the five scene/summary sources shared by the eight current arms."""
     from arm_registry import generation_registry
     from extraction import steps
 

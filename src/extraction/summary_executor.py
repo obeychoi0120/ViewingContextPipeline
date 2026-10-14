@@ -108,6 +108,10 @@ def summary_scene_input(source, normalize, graph, provenance):
 def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generation, model, force):
     output_dir = context.summary_arm_dir(arm.name)
     scene_dir = context.scene_arm_dir(arm.scene_arm)
+    if arm.model == "minicpm":
+        from extraction.minicpm_provenance import current_contract
+
+        current_contract(context, arm)
     if not force:
         check_summary_model(output_dir, model)
     failures = FailureLog(output_dir)
@@ -152,6 +156,10 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
                     raise ExtractionStepError(
                         f"Summary source/title policy mismatch: {output}; use --force or a new run"
                     )
+                if arm.model == "minicpm":
+                    from extraction.minicpm_provenance import check_summary_input
+
+                    check_summary_input(context, arm, cid, prov)
                 if existing["status"] == "complete":
                     documents[cid] = existing
                     continue
@@ -371,7 +379,8 @@ def run_summary_stage(
 
 @contextmanager
 def qwen_generator(
-    *, model_path: Path, settings=None, image_limit=6, runtime=None, log=None, on_progress=None
+    *, model_path: Path, settings=None, image_limit=6, runtime=None, log=None,
+    on_progress=None, model="qwen"
 ) -> Iterator[GenerationFunction]:
 
     def ready(event):
@@ -379,7 +388,7 @@ def qwen_generator(
             runtime.engine_ready(event)
         if log:
             log(
-                f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | settings={event['settings']}"
+                f"[{model}] GPU {event['gpu_id']} ready | {event['gpu_name']} | settings={event['settings']}"
             )
 
     with ExitStack() as resources:
@@ -389,10 +398,11 @@ def qwen_generator(
             nonlocal pool
             if pool is None:
                 if log:
-                    log("[Qwen] starting vLLM GPU workers")
+                    log(f"[{model}] starting vLLM GPU workers")
                 pool = resources.enter_context(
                     QwenWorkerPool(
                         str(model_path),
+                        **({"model": model} if model != "qwen" else {}),
                         settings=settings,
                         image_limit=image_limit,
                         on_runtime=ready,

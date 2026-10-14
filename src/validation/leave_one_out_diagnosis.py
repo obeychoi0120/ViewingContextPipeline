@@ -69,7 +69,9 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
     if len(observed) != len(names) or draws.shape[1] != len(names):
         raise ValueError("arm/metric dimension mismatch")
     result = {}
-    for family, pairs in comparison_families(config).items():
+    for family, pairs in comparison_families(config, names).items():
+        if not pairs:
+            continue
         alpha = settings.familywise_alpha / len(pairs)
         for left, right in pairs:
             if left not in indices or right not in indices:
@@ -91,21 +93,6 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
                 if observed[b] > 0
                 else None,
             }
-    primary = result.get("graph_qwen_meta-meta")
-    if primary is not None:
-        primary["primary"] = True
-    left, right = ("graph_gemini_meta", "graph_qwen_meta")
-    if {left, right} <= indices.keys():
-        a, b = (indices[left], indices[right])
-        lo, hi = np.quantile(draws[:, a] - draws[:, b], [0.025, 0.975])
-        result[f"{left}-{right}"] = {
-            "family": "teacher_reference",
-            "role": "exploratory",
-            "difference": float(observed[a] - observed[b]),
-            "ci_low": float(lo),
-            "ci_high": float(hi),
-            "confidence_level": 0.95,
-        }
     return result
 
 
@@ -257,10 +244,13 @@ def diagnose(context, *, target=None, compare_run_id=None):
     context.initialize()
     config = validation_config(context)
     errors = []
+    from validation.diagnosis_statistics import comparison_contract
+
+    contract = comparison_contract(context.config, arms)
     document = {
         "run_id": context.run_id,
         "representation_mode": "text",
-        "statistics": {"status": "not_computed"},
+        "statistics": {"status": "not_computed", **contract},
     }
     try:
         cohort = load_validation_cohort(context)
@@ -298,6 +288,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
             )
             document["statistics"] = {
                 "status": "computed",
+                **contract,
                 "comparisons": comparisons(
                     observed, draws, config.evaluation, arms=arms, config=context.config
                 ),

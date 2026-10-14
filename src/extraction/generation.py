@@ -25,7 +25,7 @@ def generate_once(generate, tasks, complete):
         receive(task_id, returned[task_id])
 
 
-def generate_penalty_passes(generate, tasks, penalties, complete, log=None, on_pass=None):
+def generate_penalty_passes(generate, tasks, penalties, complete, log=None, on_pass=None, model="Qwen"):
     """Finish each pass before retrying failures; keep only pending tasks in memory.
 
     complete(task_id, text, final=...) publishes the outcome and returns failure.
@@ -40,7 +40,7 @@ def generate_penalty_passes(generate, tasks, penalties, complete, log=None, on_p
         if on_pass:
             on_pass(index + 1, len(schedule), None if index == 0 else len(tasks))
         if log:
-            log(f"[Qwen] repetition_penalty={penalty:.2f} pass={index + 1}/{len(schedule)}")
+            log(f"[{model}] repetition_penalty={penalty:.2f} pass={index + 1}/{len(schedule)}")
 
         def requests():
             for task in tasks:

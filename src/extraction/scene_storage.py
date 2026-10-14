@@ -91,6 +91,15 @@ def read_scene_records(path):
                 "semantic_warnings": row["warning"],
             }
         records.append(record)
+    if path.parent.name == "graph_minicpm":
+        from artifact_io import read_json
+
+        marker = path.parent / "generation.json"
+        if not marker.is_file():
+            raise ValueError(f"missing MiniCPM generation provenance: {marker}")
+        provenance = read_json(marker)
+        for record in records:
+            record["provenance"] = provenance
     return records
 
 

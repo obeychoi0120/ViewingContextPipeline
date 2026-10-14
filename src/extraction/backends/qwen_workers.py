@@ -11,7 +11,7 @@ import time
 import traceback
 from typing import Callable, Iterable
 
-from extraction.qwen_config import qwen_settings
+from extraction.minicpm_config import local_vlm_settings
 from extraction.progress import RecentThroughput
 
 
@@ -30,24 +30,28 @@ class QwenGenerationTask:
     structured_output: dict | None = None
 
 
-def _start_worker(context, worker_index, gpu_id, model_path, result_queue, settings, image_limit):
+def _start_worker(
+    context, worker_index, gpu_id, model_path, result_queue, settings, image_limit, model="qwen"
+):
     task_queue = context.Queue(maxsize=2 * settings["max_num_seqs"] + 1)
     process = context.Process(
         target=_worker_main,
-        args=(worker_index, gpu_id, model_path, task_queue, result_queue, settings, image_limit),
+        args=(worker_index, gpu_id, model_path, task_queue, result_queue, settings, image_limit, model),
         daemon=False,
     )
     process.start()
     return task_queue, process
 
 
-class QwenWorkerPool:
+class VLLMWorkerPool:
     """One vLLM engine per GPU, with bounded completion-driven admission."""
 
     def __init__(
-        self, model_path, *, settings=None, image_limit=6, on_runtime=None, on_progress=None
+        self, model_path, *, settings=None, image_limit=6, on_runtime=None,
+        on_progress=None, model="qwen"
     ):
-        self.settings = qwen_settings(settings)
+        self.model = model
+        self.settings = local_vlm_settings(model, settings)
         self.gpu_ids = _visible_gpu_ids()
         self.gpu_count = len(self.gpu_ids)
         self.capacity = 2 * self.settings["max_num_seqs"]
@@ -71,6 +75,7 @@ class QwenWorkerPool:
                     self._result_queue,
                     self.settings,
                     image_limit,
+                    **({"model": model} if model != "qwen" else {}),
                 )
                 self._task_queues.append(tasks)
                 self._processes.append(process)
@@ -86,7 +91,7 @@ class QwenWorkerPool:
                     event = self._result_queue.get(timeout=0.5)
                 except queue.Empty:
                     if any(not process.is_alive() for process in self._processes):
-                        raise RuntimeError("Qwen worker exited during engine startup")
+                        raise RuntimeError(f"{self.model} worker exited during engine startup")
                     continue
                 if not self._startup_event(event):
                     raise RuntimeError("wait_ready must be called before submitting requests")
@@ -101,7 +106,7 @@ class QwenWorkerPool:
                 self._group_leaders.add(event["process_group"])
         elif not event.get("ok", False):
             raise RuntimeError(
-                f"Qwen worker {index} on GPU {event.get('gpu_id')} failed: {event.get('error')}"
+                f"{self.model} worker {index} on GPU {event.get('gpu_id')} failed: {event.get('error')}"
             )
         elif event.get("kind") == "ready":
             self._ready_workers.add(index)
@@ -117,7 +122,7 @@ class QwenWorkerPool:
         on_task_complete: Callable[[str, str], None] | None = None,
     ) -> dict[str, str]:
         if self._closed:
-            raise RuntimeError("Qwen worker pool is closed")
+            raise RuntimeError(f"{self.model} worker pool is closed")
         iterator = iter(tasks)
         pending = {}
         seen = set()
@@ -141,7 +146,7 @@ class QwenWorkerPool:
                 exhausted = True
                 return
             if task.task_id in seen:
-                raise ValueError("Qwen generation task ids must be unique")
+                raise ValueError("VLM generation task ids must be unique")
             seen.add(task.task_id)
             pending[task.task_id] = index
             loads[index] += 1
@@ -179,7 +184,7 @@ class QwenWorkerPool:
                     ]
                     if dead:
                         raise RuntimeError(
-                            f"Qwen GPU worker(s) exited before finishing tasks: {dead}"
+                            f"{self.model} GPU worker(s) exited before finishing tasks: {dead}"
                         )
                 else:
                     index = event["worker_index"]
@@ -197,7 +202,7 @@ class QwenWorkerPool:
                     else:
                         task_id = event["task_id"]
                         if task_id not in pending or pending[task_id] != index:
-                            raise RuntimeError(f"Unexpected Qwen completion: {task_id}")
+                            raise RuntimeError(f"Unexpected {self.model} completion: {task_id}")
                         del pending[task_id]
                         loads[index] -= 1
                         completed += 1
@@ -368,7 +373,8 @@ async def _serve_worker(backend, task_queue, result_queue, worker_index, gpu_id,
 
 
 def _worker_main(
-    worker_index, gpu_id, model_path, task_queue, result_queue, settings=None, image_limit=6
+    worker_index, gpu_id, model_path, task_queue, result_queue, settings=None,
+    image_limit=6, model="qwen"
 ):
     process_group = None
     if mp.parent_process() is not None:
@@ -386,7 +392,13 @@ def _worker_main(
     async def run():
         from extraction.backends.qwen import QwenBackend
 
-        backend = QwenBackend.from_pretrained(
+        if model == "minicpm":
+            from extraction.backends.minicpm import MiniCPMBackend
+
+            backend_type = MiniCPMBackend
+        else:
+            backend_type = QwenBackend
+        backend = backend_type.from_pretrained(
             model_path, settings=settings, image_limit=image_limit
         )
         try:
@@ -406,7 +418,7 @@ def _worker_main(
                 result_queue,
                 worker_index,
                 gpu_id,
-                2 * qwen_settings(settings)["max_num_seqs"],
+                2 * local_vlm_settings(model, settings)["max_num_seqs"],
             )
         finally:
             backend.close()
@@ -422,3 +434,7 @@ def _worker_main(
                 "error": traceback.format_exc(),
             }
         )
+
+
+# Preserve existing Qwen callers while both models share admission and shutdown.
+QwenWorkerPool = VLLMWorkerPool

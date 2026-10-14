@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from pipeline_runtime import RunContext
 
-GRAPH_ARMS = frozenset({"meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"})
+GRAPH_ARMS = frozenset({
+    "meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta",
+    "graph_minicpm", "graph_minicpm_meta",
+})
 GRAPH_ARCHITECTURE = "sasrec-role-graph/v9"
 GRAPH_MODEL = {
     "hidden_dim": 128,

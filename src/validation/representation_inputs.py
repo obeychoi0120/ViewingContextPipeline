@@ -44,12 +44,17 @@ def _check_model_source(provenance, expected, path):
     model = provenance.get("model", {})
     if (
         (backend == "gemini" or "model_id" in model) and expected != "gemini"
-        or backend.startswith("vllm") and expected != "qwen"
+        or backend.startswith("vllm")
+        and expected != provenance.get("settings", {}).get("model_source", "qwen")
     ):
         raise ValueError(f"generation model provenance mismatch: {path}")
 
 
 def _source_documents_for_arm(context, cohort, arm, *, failure_rows=None):
+    if arm.model == "minicpm":
+        from extraction.minicpm_provenance import current_contract
+
+        current_contract(context, arm)
     directory = context.summary_arm_dir(arm.name)
     failures = summary_failure_rows(directory) if failure_rows is None else failure_rows
     documents = []
@@ -61,6 +66,10 @@ def _source_documents_for_arm(context, cohort, arm, *, failure_rows=None):
         if path.exists():
             doc = reuse_summary_document(path, content_id=cid, arm=arm.name)
             prov = doc["provenance"]
+            if arm.model == "minicpm":
+                from extraction.minicpm_provenance import check_summary_input
+
+                check_summary_input(context, arm, cid, prov)
             model = summary_model_from_document(doc, path=path)
             if prov.get("representation") != arm.representation:
                 raise ValueError(f"summary source provenance mismatch: {path}")

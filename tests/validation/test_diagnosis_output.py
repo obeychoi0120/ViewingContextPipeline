@@ -28,7 +28,7 @@ def test_output_size_is_independent_of_cohort_and_provenance(tmp_path, mode, agg
     path = tmp_path / 'diagnosis.json'
     write_diagnosis(path, document)
     result = read_json(path)
-    assert result['schema_version'] == 'leave-one-out-diagnosis/v3'
+    assert result['schema_version'] == 'leave-one-out-diagnosis/v4'
     assert result['evaluation_contract'] == EVALUATION_CONTRACT
     assert result['recommendations'] == {'means': scores}
     assert result['statistics']['comparisons'] == comparisons
@@ -70,5 +70,5 @@ def test_invalid_evidence_still_fails_and_records_reason(
     result = read_json(context.diagnosis_path)
     assert result['runtime_decision']['status'] == 'fail'
     assert 'invalid cohort fingerprint' in result['runtime_decision']['errors'][0]['message']
-    assert result['statistics'] == {'status': 'not_computed'}
+    assert result['statistics'] == {'status': 'not_computed', 'comparison_policy': 'selected-target-all-pairs/v1', 'targets': ['meta'], 'comparison_count': 0, 'correction': 'bonferroni'}
     assert 'recommendations' not in result

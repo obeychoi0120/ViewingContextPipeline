@@ -53,7 +53,7 @@ def test_description_changes_invalidate_only_description_arms(
     write_json(path, doc)
     result = embed_representations(other, target=list(registry(other.config)))
     assert result["generated_arms"] == ["desc_qwen_meta"]
-    assert result["reuse"]["shared"] == ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta", "desc_gemini_meta"]
+    assert result["reuse"]["shared"] == ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta", "desc_gemini_meta", "graph_minicpm", "graph_minicpm_meta"]
 
 
 @pytest.mark.parametrize("arm", ["meta", "graph_qwen_meta"])

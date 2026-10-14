@@ -14,13 +14,16 @@ def result_hash(value):
 class QwenRuntime:
     """In-memory engine metadata attached to recovery checkpoints."""
 
-    def __init__(self):
+    def __init__(self, on_ready=None):
+        self.on_ready = on_ready
         self.execution_id = str(uuid4())
         self.engines = {}
         self.current_result = None
 
     def engine_ready(self, event):
         self.engines[event["worker_index"]] = event
+        if self.on_ready:
+            self.on_ready({"execution_id": self.execution_id, "engines": self.engines})
 
     def checkpoint_origin(self):
         if self.current_result is None:

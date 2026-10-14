@@ -11,11 +11,14 @@ def diagnose_graph(context, *, target, compare_run_id=None):
 
     config = validation_config(context)
     arms = resolve_target_arms(target, config=context.config)
+    from validation.diagnosis_statistics import comparison_contract
+
+    contract = comparison_contract(context.config, arms)
     document = {
         "run_id": context.run_id,
         "representation_mode": "graph",
         "scene_aggregation": context.scene_aggregation,
-        "statistics": {"status": "not_computed"},
+        "statistics": {"status": "not_computed", **contract},
     }
     errors = []
     try:
@@ -27,6 +30,7 @@ def diagnose_graph(context, *, target, compare_run_id=None):
         )
         document["statistics"] = {
             "status": "computed",
+            **contract,
             "comparisons": comparisons(
                 observed, draws, config.evaluation, arms=arms, config=context.config
             ),

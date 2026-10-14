@@ -1,6 +1,6 @@
 # ViewingContextPipeline
 
-MicroLens-100K 영상에서 시청 맥락을 추출하고, **영문 제목에 영상 관측 정보를 더했을 때 추천 성능이 어떻게 달라지는지** 비교하는 실험 파이프라인입니다. Qwen·Gemini로 장면별 Graph와 Description을 생성하고, 동일한 사용자·후보 영상 목록(catalog)·평가 구간에서 SASRec을 학습합니다.
+MicroLens-100K 영상에서 시청 맥락을 추출하고, **영문 제목에 영상 관측 정보를 더했을 때 추천 성능이 어떻게 달라지는지** 비교하는 실험 파이프라인입니다. Qwen·Gemini로 장면별 Graph와 Description을, MiniCPM으로 Graph를 생성하고, 동일한 사용자·후보 영상 목록(catalog)·평가 구간에서 SASRec을 학습합니다.
 
 [연구실 자문 기록](docs/feedback_260923.md)의 장면 추출·영상 표현·사용자 표현에 관한 제안을 참고하여 설계를 정리했습니다. 특히 장면 표현의 유사도를 이용한 aggregation 제안을 반영해 **영상 내부 장면 사이에 정보를 전달하는 GCN 경로**를 구현했습니다. 아래에서는 피드백과 현재 구현의 대응 관계, 각 단계의 입력·출력, 세부 구현을 확인할 수 있습니다.
 
@@ -48,7 +48,7 @@ BGE Large, 30초 창·6개 키프레임, 각 성분의 차원 배분은 현재 �
 | --- | --- | --- | --- |
 | 1. 데이터 준비 | 사용자–영상–시간 기록, 제목, 영상 목록 | 원본 검증·제목 보완 → 전체 원본 catalog, interaction, 제목 매핑 | `prepare-cohort` · [preparation](src/preparation/cohort.py) |
 | 2. 영상 관측 준비 | 영상 파일, sampling 설정 | 시간 창별 프레임 추출 → 키프레임 이미지·timestamp | `prepare-input-data` · [입력 준비](src/preparation/input_data.py), [sampling](src/visual_sampling.py) |
-| 3. 장면 정보 추출 | 키프레임, Graph/Description 프롬프트 | Qwen/Gemini 추론·파싱 → 장면별 Graph 또는 Description JSONL | `extract-graph-scenes` / `extract-description-scenes` · [extraction](src/extraction/steps.py) |
+| 3. 장면 정보 추출 | 키프레임, Graph/Description 프롬프트 | Qwen/Gemini/MiniCPM 추론·파싱 → 장면별 Graph 또는 Description JSONL | `extract-graph-scenes` / `extract-description-scenes` · [extraction](src/extraction/steps.py) |
 | 4. 영상 요약 — Text 경로 | 장면별 관측, Summary 프롬프트 | 영상 단위 영문 요약 → Summary JSON | `summarize` · [Summary 실행](src/extraction/summary_executor.py) |
 | 5. 평가·고정 특징 준비 | 원본 이력, 제목·Summary 또는 Graph 요소·역할 연결 | 사용자 필터·최근 13개·마지막 2개 분할·평가 catalog 구성; 동결 BGE 인코딩 → 1024차원 특징, 가용성 마스크; Graph는 노드·edge·장면 경계도 저장 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Text 특징](src/validation/steps.py), [Graph 입력](src/validation/graph_inputs.py) |
 | 6. 영상 표현 학습 | 고정 특징, Graph 구조 | projection·MLP·역할 결합·장면 집계 → 영상당 512차원 벡터 | `run-recommendation` 내부 · [Text 모델](src/validation/model.py), [Graph 모델](src/validation/graph_model.py) |
@@ -91,7 +91,7 @@ p1 - cutting - f1; t1; l1
 - 저장: `extraction/scenes/<source>/<content_id>.jsonl`. Graph 행에는 `scene_graph`·`warning`, Description 행에는 `description`이 들어갑니다. 공통으로 콘텐츠·장면 식별자와 토큰 사용량을 기록합니다.
 - 구조화하지 못한 Graph 출력은 원문으로 보존합니다. 원문 관측은 Text Summary에 사용할 수 있지만, 직접 Graph 학습에는 구조·warning 검사를 통과한 장면만 사용합니다.
 
-구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; location`입니다. Relations·receiver·location 누락을 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 현재 형식의 파일은 Run 이름이나 생성 당시 프롬프트 버전과 무관하게 재사용합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
+구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; location`입니다. Relations·receiver·location 누락을 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 기존 Qwen/Gemini의 현재 형식 파일은 Run 이름이나 생성 당시 프롬프트 버전과 무관하게 재사용합니다. MiniCPM은 별도 생성 계약 검증을 적용합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
 
 Text 경로의 Summary는 장면 관측을 영상 단위 자연어로 모읍니다. [Graph Summary](prompts/summary_graph_v8.md)와 [Description Summary](prompts/summary_description_v5.md)의 입력에는 제목이 없으며, `{scenes}`가 필요하고 `{english_title}`은 허용하지 않습니다. 출력은 `extraction/summaries/<source>/<content_id>.json`에 텍스트·상태·장면 수·단어 수·토큰 수·생성 출처(provenance)와 함께 저장합니다.
 
@@ -176,7 +176,7 @@ Item·Scene은 Linear 512→512 하나와 ReLU로 구성하며 LayerNorm은 없�
 
 ## 실험 조건과 결과 해석
 
-Arm은 **비교하는 실험 조건**입니다. 같은 Arm 이름이라도 `text`는 Summary를, `graph`는 Scene Graph 구조를 사용하므로 결과에는 표현 모드를 함께 명시합니다. 기존 주 비교는 **`graph_qwen_meta − meta`**, 주 지표는 **NDCG@10**입니다.
+Arm은 **비교하는 실험 조건**입니다. 같은 Arm 이름이라도 `text`는 Summary를, `graph`는 Scene Graph 구조를 사용하므로 결과에는 표현 모드를 함께 명시합니다. 주 지표는 **NDCG@10**이며, 선택한 target의 모든 쌍을 같은 비교군으로 평가합니다.
 
 | 평가 Arm (`--target`) | Text 입력 | 직접 Graph 입력 |
 | --- | --- | --- |
@@ -186,8 +186,10 @@ Arm은 **비교하는 실험 조건**입니다. 같은 Arm 이름이라도 `text
 | `graph_gemini_meta` | 제목 + Gemini Graph의 Summary | 제목 + Gemini Scene Graph |
 | `desc_qwen_meta` | 제목 + Qwen Description의 Summary | 미지원 |
 | `desc_gemini_meta` | 제목 + Gemini Description의 Summary | 미지원 |
+| `graph_minicpm` | MiniCPM Graph의 Summary | MiniCPM Scene Graph |
+| `graph_minicpm_meta` | 제목 + MiniCPM Graph의 Summary | 제목 + MiniCPM Scene Graph |
 
-접미사 `qwen`·`gemini`는 **Scene 추출 모델**을 뜻합니다. Summary 모델은 별도로 선택합니다. `graph_gemini`는 생성 소스이며, 평가 Arm으로는 `graph_gemini_meta`를 사용합니다.
+접미사 `qwen`·`gemini`·`minicpm`은 **Scene 추출 모델**을 뜻합니다. Summary 모델은 별도로 선택합니다. `graph_gemini`는 생성 소스이며, 평가 Arm으로는 `graph_gemini_meta`를 사용합니다.
 
 Text의 Graph/Description 비교는 두 종류의 관측을 요약문으로 사용한 결과입니다. 직접 Graph의 구조 활용 효과나 mean/gnn의 효과는 해당 경로와 조건을 맞춘 비교로 확인해야 합니다. 현재 진단은 선택한 표현 모드·aggregation 안에서 수행하며, Text/Graph·mean/gnn 사이의 자동 paired 비교는 후속 항목입니다.
 
@@ -199,11 +201,11 @@ Text의 Graph/Description 비교는 두 종류의 관측을 요약문으로 사�
 | 각 Arm − `meta` | 제목 기준선 대비 영상 관측을 사용하는 조건의 차이 |
 | `graph_qwen_meta` − `desc_qwen_meta`, Gemini의 동일 비교 | 같은 추출 모델의 Graph/Description Summary 조건 차이 — Text 경로 |
 | `graph_qwen_meta` − `graph_qwen` | 제목을 함께 사용하는 조건의 차이 |
-| `graph_gemini_meta` − `graph_qwen_meta` | Scene 추출 모델 조건 차이 — 탐색적 비교 |
+| `graph_gemini_meta` − `graph_qwen_meta` | Scene 추출 모델 조건 차이 |
 
-Text 전체 평가는 기본 설정에서 3 seed × 6 Arm, 총 18개 학습 조합입니다. HR·NDCG는 `K=4,8,10,20,30`에서 계산합니다. NDCG@10 비교에는 사용자 단위 paired bootstrap 10,000회를 사용하며, 사용자별 seed 평균을 구한 뒤 사용자에 동일 가중치를 둡니다. 각 seed의 사용자 평균도 보고합니다.
+Text 전체 평가는 기본 설정에서 3 seed × 8 Arm, 총 24개 학습 조합입니다. HR·NDCG는 `K=4,8,10,20,30`에서 계산합니다. NDCG@10 비교에는 사용자 단위 paired bootstrap 10,000회를 사용하며, 사용자별 seed 평균을 구한 뒤 사용자에 동일 가중치를 둡니다. 각 seed의 사용자 평균도 보고합니다.
 
-제목 기준선 대비 비교 5개, Graph/Description 비교 2개, 제목 추가 비교 1개를 각각 비교군으로 두고 Bonferroni 보정을 적용합니다. 부분 target에서도 전체 비교군의 보정 분모를 유지합니다. `graph_gemini_meta − graph_qwen_meta`는 별도의 탐색적 95% 구간입니다. 비교 정의는 [통계 정책 코드](src/validation/diagnosis_statistics.py)에 있습니다.
+각 aggregation에서 선택한 target의 모든 쌍을 하나의 Bonferroni 비교군으로 두며, 보정 분모는 `n × (n−1) / 2`입니다(3 target: 3쌍, 전체 8 target: 28쌍). 비교 방향은 registry에서 뒤에 있는 Arm에서 앞의 Arm을 뺀 값이며 CLI 순서와 무관합니다. 주 비교·teacher reference 예외는 없습니다. `leave-one-out-diagnosis/v4`는 target·비교 수·보정 정책을 기록합니다. Run 간 비교는 선택된 동일 Graph Arm의 개수로 보정하며 서로 다른 aggregation을 섞지 않습니다. 비교 정의는 [통계 정책 코드](src/validation/diagnosis_statistics.py)에 있습니다.
 
 구현 검증은 소형 입력의 수치·gradient·결측·재개·캐시와 작은 leave-one-out 학습·평가·진단을 다룹니다. 이 검증과 전체 데이터의 추천 성능 실험은 구분합니다. 현재 모델·GCN의 검증 기록은 [직접 Graph 학습](docs/graph_training.md), 후속 실험 상태는 [이정표](docs/TODO.md)를 참고하세요. Run별 성능·비용 분석은 `artifacts/runs/<RUN_ID>/reports/`에 보관하며 해당 입력·모델 계약과 함께 해석합니다.
 
@@ -219,11 +221,28 @@ Text 전체 평가는 기본 설정에서 3 seed × 6 Arm, 총 18개 학습 조�
 Ubuntu/Bash와 Python 3.11 이상을 기준으로 합니다. 영상 준비에는 `ffmpeg`·`ffprobe`가 필요하며, 데이터와 모델 가중치는 미리 준비해야 합니다.
 
 ```bash
-python -m pip install -e ".[qwen,gemini,train,embedding,dev]"
+python -m pip install -e ".[qwen,minicpm,gemini,train,embedding,dev]"
 python -m pip check
 ```
 
 Gemini 생성 환경은 `.[gemini,dev]`, 임베딩·추천 환경은 `.[train,embedding,dev]`로 설치할 수 있습니다. Gemini는 Vertex ADC와 해당 프로젝트·모델의 호출 권한이 필요합니다. Qwen은 로컬 checkpoint와 vLLM을 사용합니다.
+
+MiniCPM은 사용자께서 업데이트한 SSH `vc_cloud` 환경에서 실행합니다. `transformers>=5.18.0`과 [지원 PR #58674](https://github.com/vllm-project/vllm/pull/58674)가 포함된 native vLLM 빌드가 필요합니다. 단순한 `vllm>=0.28.0` 설치만으로 지원이 보장되지 않으며, 시작 시 native architecture 등록을 검사합니다. Qwen도 같은 공통 비동기 엔진·GPU당 worker·재시도·종료 처리를 사용합니다.
+
+`extraction.minicpm`은 Qwen 설정을 상속하지 않습니다. 기본값은 메모리 사용률 0.9, context·batch 토큰 8192, 동시 요청 32, renderer worker 4, `vision_downsample: 16`, `max_slice_nums: 9`입니다. 메모리·context·batch 예산은 [공식 배포 예시](https://github.com/OpenSQZ/MiniCPM-V-CookBook/blob/main/deployment/vllm/minicpm-v4_7_vllm.md)를 따릅니다. 동시 요청 수와 worker 수는 초기 운영값입니다. `enable_chunked_prefill`, `enable_prefix_caching`, `enforce_eager`, `async_scheduling`도 MiniCPM section에서 독립적으로 지정할 수 있으며, 생략하면 vLLM 기본값을 사용합니다.
+
+`vision_downsample`에는 정수 `4` 또는 `16`만 허용하고 생략 시 `16`입니다. 어댑터는 이를 `mm_processor_kwargs.downsample_mode="4x"` 또는 `"16x"`로 변환하고 `max_slice_nums`를 함께 전달합니다. [native 구현](https://github.com/vllm-project/vllm/blob/c85616efc6f0eaa50ca1f1a09c32368aedffd3d8/vllm/model_executor/models/minicpmv4_6.py)이 placeholder와 vision encoder의 mode를 연결합니다. Thinking은 명시적으로 끄고 checkpoint의 EOS를 사용합니다. 입력 토큰과 출력 예산 합이 context를 넘으면 실패하며 프레임·출력 예산을 자동 축소하지 않습니다.
+
+MiniCPM의 compact Scene payload는 기존 형식을 유지합니다. 소스 디렉터리의 `generation.json`에는 모델·processor·chat template 지문, native mode, Thinking·정규화·설정 계약을 기록하고, `runtime.json`에는 실제 worker 엔진 설정과 패키지 버전·확인 가능한 vLLM 커밋을 기록하고, 재개 실행의 이력도 보존합니다. `vision_downsample` 등 생성 조건을 바꾸면 Scene 추출을 `--force`로 실행해야 합니다. 새 생성 계약을 쓰기 전에 이전 Scene을 제거하므로 중단 후 재개에서도 mode가 섞이지 않습니다. 이후 Graph 입력을 다시 준비하고 학습을 실행합니다. Text 경로에서는 Summary도 `--force`로 재생성해야 하며, 오래된 Summary 재사용은 거부합니다.
+
+기본 [run_script.sh](run_script.sh)는 Summary 없이 MiniCPM 추출 → Graph 입력 준비 1회 → Metadata 포함 `gnn`·`gnn_attn` 학습·진단을 수행합니다. 중단 후 같은 명령으로 재개합니다. Qwen도 모델 선택만 바꾸어 실행합니다.
+
+```bash
+RUN_ID=new_run_id GPU=0 MODEL=minicpm bash run_script.sh
+RUN_ID=another_run_id GPU=0 MODEL=qwen bash run_script.sh
+```
+
+Text 실행 예시는 스크립트에 주석으로 보존했습니다. MiniCPM Scene의 Summary 생성 모델은 기존 `qwen` 또는 `gemini`를 선택합니다.
 
 [config.yaml](config.yaml)을 실행 환경에 맞게 수정합니다.
 
@@ -234,14 +253,14 @@ Gemini 생성 환경은 `.[gemini,dev]`, 임베딩·추천 환경은 `.[train,em
 | `data.videos_dir` | `{item_id}.mp4` 영상 디렉터리 |
 | `data.titles_csv` | 영문 제목 원본 CSV |
 | `data.titles_supplement_csv` | 필요한 아이템의 빈 제목·누락 행을 보완할 CSV. 선택 사항 |
-| `models.qwen`, `models.bge` | 로컬 모델 디렉터리 |
+| `models.qwen`, `models.minicpm`, `models.bge` | 로컬 모델 디렉터리 |
 | `models.gemini` | Vertex 프로젝트·위치·모델·생성 설정 |
 | `extraction.visual_evidence` | 시간 창·키프레임 수·해상도 |
 | `extraction.{graph,description}.{qwen,gemini}` | 모델별 Scene·Summary 생성 토큰 한도 |
 | `validation` | cohort·평가 구간, BGE, 학습, 실행 자원, 통계 설정 |
 | `artifacts_root` | 산출물 상위 디렉터리 |
 
-아래 `new_run_id`는 사용할 새 Run 이름으로 바꾸세요. 설정 형식의 `experiment_config_version: v5`, 프롬프트 파일의 v8, 모델 계약의 Text v8·mean v9·GNN v10, Run 이름은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
+아래 `new_run_id`는 사용할 새 Run 이름으로 바꾸세요. 설정 형식의 `experiment_config_version: v6`, 프롬프트 파일의 v8, 모델 계약의 Text v8·mean v9·GNN v10, Run 이름은 서로 다른 식별자입니다. Run 이름을 바꿀 때 설정 버전은 변경하지 않습니다.
 
 ```bash
 export RUN_ID="new_run_id"
@@ -271,7 +290,7 @@ python -m preparation prepare-input-data --run-id "$RUN_ID"
 <details>
 <summary>3–4단계: Scene 추출·영상 Summary 생성</summary>
 
-`--schema`에는 실제 존재하는 Markdown 프롬프트 하나를 지정합니다. 상대 경로는 저장소 루트 기준입니다. 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `desc_qwen`, `desc_gemini`이며 결합 평가 Arm을 생성에 지정하지 않습니다.
+`--schema`에는 실제 존재하는 Markdown 프롬프트 하나를 지정합니다. 상대 경로는 저장소 루트 기준입니다. 생성 소스(`--arm`)는 `graph_qwen`, `graph_gemini`, `graph_minicpm`, `desc_qwen`, `desc_gemini`이며 결합 평가 Arm을 생성에 지정하지 않습니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model qwen --arm graph_qwen

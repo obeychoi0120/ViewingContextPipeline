@@ -59,9 +59,7 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     observed, draws, bootstrap = cluster_bootstrap(
         left - right, counts, samples=configs[0].evaluation.bootstrap_samples
     )
-    alpha = configs[0].evaluation.familywise_alpha / len(
-        [a for a in registry(context.config).values() if a.representation == "graph"]
-    )
+    alpha = configs[0].evaluation.familywise_alpha / len(names)
     intervals = np.quantile(draws, [alpha / 2, 1 - alpha / 2], axis=0)
     results = {
         name: {
@@ -81,9 +79,8 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         "metric": "NDCG@10",
         "bootstrap": bootstrap,
         "correction": "bonferroni",
-        "family_size": len(
-            [a for a in registry(context.config).values() if a.representation == "graph"]
-        ),
+        "family_size": len(names),
+        "targets": names,
         "comparisons": results,
         "model_interaction": interaction,
         **{"model_interactions": interactions},

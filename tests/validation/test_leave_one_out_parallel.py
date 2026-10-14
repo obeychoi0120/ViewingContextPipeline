@@ -212,7 +212,7 @@ def test_parent_interrupt_keeps_completed_artifacts_for_resume(full_context, mon
     )
     result = run_leave_one_out(context, target=list(registry(context.config)))
     assert result["skipped"] == len(protected)
-    assert len(pending) == 18 - len(protected)
+    assert len(pending) == 3 * len(registry(context.config)) - len(protected)
     assert all(path.read_bytes() == original for path, original in protected.items())
     assert all(
         combination_dir(context, identity["seed"], identity["arm"])

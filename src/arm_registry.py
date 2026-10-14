@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 CONCAT_ARM_CONTRACT = "title-summary-six-arms/v2"
 CONCAT_POLICY = "title-summary-double-newline/v1"
-EXPERIMENT_CONFIG_VERSION = "v5"
+EXPERIMENT_CONFIG_VERSION = "v6"
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,8 @@ ARMS = (
     Arm("graph_gemini_meta", "graph", "gemini", True, "graph_gemini"),
     Arm("desc_qwen_meta", "description", "qwen", True, "desc_qwen"),
     Arm("desc_gemini_meta", "description", "gemini", True, "desc_gemini"),
+    Arm("graph_minicpm", "graph", "minicpm", False, "graph_minicpm"),
+    Arm("graph_minicpm_meta", "graph", "minicpm", True, "graph_minicpm"),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)
@@ -31,6 +33,7 @@ SOURCES = tuple(
         ("desc_qwen", "description", "qwen"),
         ("graph_gemini", "graph", "gemini"),
         ("desc_gemini", "description", "gemini"),
+        ("graph_minicpm", "graph", "minicpm"),
     )
 )
 
@@ -62,8 +65,8 @@ def generation_registry(config):
 
 
 def generated_arm(config, representation, model):
-    if model not in {"gemini", "qwen"}:
-        raise ValueError("model/source must be qwen or gemini")
+    if model not in {"gemini", "qwen", "minicpm"}:
+        raise ValueError("model/source must be qwen, gemini or minicpm")
     source = next(
         (arm for arm in SOURCES if arm.representation == representation and arm.model == model),
         None,

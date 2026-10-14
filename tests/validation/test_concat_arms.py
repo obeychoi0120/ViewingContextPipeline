@@ -1,4 +1,4 @@
-"""Current six-arm contracts with fake generation and a small CPU training model."""
+"""Current eight-arm contracts with fake generation and a small CPU training model."""
 
 from dataclasses import replace
 from types import SimpleNamespace
@@ -18,14 +18,14 @@ from validation.steps import embed_representations
 
 NAMES = [
     "meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta",
-    "desc_qwen_meta", "desc_gemini_meta",
+    "desc_qwen_meta", "desc_gemini_meta", "graph_minicpm", "graph_minicpm_meta",
 ]
 
 
 @pytest.mark.parametrize("model", ["qwen", "gemini"])
 def test_shared_title_free_generation(ready_context, fake_models, model, generate_all):
     generate_all(ready_context, model)
-    assert len(fake_models) == 8
+    assert len(fake_models) == 10
     assert {p.name for p in (ready_context.run_root / "extraction/summaries").iterdir()} == set(
         generation_registry(ready_context.config)
     )
@@ -114,6 +114,7 @@ def test_cache_invalidation_and_run_rename(ready_context, fake_models, monkeypat
         "graph_gemini_meta",
         "desc_qwen_meta",
         "desc_gemini_meta",
+        "graph_minicpm_meta",
     ]
     path = next(other.summary_arm_dir("graph_qwen").glob("*.json"))
     doc = read_json(path)
@@ -130,20 +131,19 @@ def test_comparisons_and_partial_targets(ready_context):
 
     families = comparison_families(ready_context.config)
     assert {k: len(v) for k, v in families.items()} == {
-        "metadata_baseline": 5,
-        "representation": 2,
-        "title_input": 1,
+        "selected_targets": 28,
     }
     settings = SimpleNamespace(familywise_alpha=0.05)
     result = comparisons(
-        np.arange(6.0),
-        np.tile(np.arange(6.0), (100, 1)),
+        np.arange(float(len(NAMES))),
+        np.tile(np.arange(float(len(NAMES))), (100, 1)),
         settings,
         arms=NAMES,
         config=ready_context.config,
     )
-    assert result["graph_qwen_meta-meta"]["primary"]
-    assert result["graph_gemini_meta-graph_qwen_meta"]["family"] == "teacher_reference"
+    assert len(result) == 28
+    assert all("primary" not in row for row in result.values())
+    assert result["graph_gemini_meta-graph_qwen_meta"]["family"] == "selected_targets"
     assert not any("interaction" in key for key in result)
     partial = comparisons(
         np.array([0.0, 1.0]),
@@ -153,16 +153,16 @@ def test_comparisons_and_partial_targets(ready_context):
         config=ready_context.config,
     )
     assert list(partial) == ["graph_qwen_meta-meta"]
-    assert partial["graph_qwen_meta-meta"]["family_size"] == 5
+    assert partial["graph_qwen_meta-meta"]["family_size"] == 1
     row = partial["graph_qwen_meta-meta"]
     assert row["difference"] == pytest.approx(1.0)
     assert row["relative_difference"] is None
     assert row["superior"] is True
-    assert row["confidence_level"] == pytest.approx(1 - 0.05 / 5)
+    assert row["confidence_level"] == pytest.approx(1 - 0.05)
 
 
 @pytest.mark.torch
-def test_six_arm_training_diagnosis_and_shared_recommendations(
+def test_eight_arm_training_diagnosis_and_shared_recommendations(
     ready_context, fake_models, monkeypatch, generate_all
 ):
     torch = pytest.importorskip("torch")
@@ -199,28 +199,28 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
     previous = torch.get_num_threads()
     torch.set_num_threads(1)
     try:
-        assert run_leave_one_out(ready_context, target=list(registry(ready_context.config)))["completed"] == 18
+        assert run_leave_one_out(ready_context, target=list(registry(ready_context.config)))["completed"] == 24
         assert embed_representations(ready_context, target=list(registry(ready_context.config)))["reuse"]["local"] == NAMES
         assert run_leave_one_out(ready_context, target=list(registry(ready_context.config))) == {
-            "stage": "run-recommendation", "completed": 0, "skipped": 18,
+            "stage": "run-recommendation", "completed": 0, "skipped": 24,
         }
         assert diagnose(ready_context, target=list(registry(ready_context.config)))["status"] == "pass"
         assert protected == {p: p.read_bytes() for p in protected}
         doc = read_json(ready_context.diagnosis_path)
-        assert doc["schema_version"] == "leave-one-out-diagnosis/v3"
+        assert doc["schema_version"] == "leave-one-out-diagnosis/v4"
         assert (ready_context.validation_dir / "cohort" / "manifest.json").is_file()
         assert set(doc) == {"schema_version", "evaluation_contract", "run_id", "representation_mode", "runtime_decision", "recommendations", "statistics"}
         assert set(doc["recommendations"]) == {"means"}
-        assert set(doc["statistics"]) == {"status", "comparisons", "metric"}
+        assert set(doc["statistics"]) == {"status", "comparisons", "metric", "comparison_policy", "targets", "comparison_count", "correction"}
         from validation.leave_one_out_diagnosis import collect_metrics
         from validation.steps import validation_config
 
         user_metrics, counts, report = collect_metrics(
             ready_context, validation_config(ready_context), load_validation_cohort(ready_context),
             arms={name: name for name in NAMES})
-        assert len(report["per_seed"]) == 18
+        assert len(report["per_seed"]) == 24
         assert doc["recommendations"]["means"] == report["means"]
-        manual = np.zeros((3, 6))
+        manual = np.zeros((3, len(NAMES)))
         for seed in (42, 43, 44):
             for index, arm in enumerate(NAMES):
                 for row in read_jsonl(ready_context.recommendations_dir / f"seed_{seed}" / arm / "per_event_metrics.jsonl"):
@@ -229,12 +229,12 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
         np.testing.assert_array_equal(counts, np.ones(3))
         for index, arm in enumerate(NAMES):
             assert report["means"][arm]["NDCG@10"] == pytest.approx(manual[:, index].mean())
-        assert doc["statistics"]["comparisons"]["graph_qwen_meta-meta"]["primary"]
+        assert doc["statistics"]["comparison_count"] == 28
         from validation.diagnosis_statistics import comparison_families
         expected_pairs = {f"{a}-{b}" for pairs in comparison_families(ready_context.config).values() for a, b in pairs}
         expected_pairs.add("graph_gemini_meta-graph_qwen_meta")
         assert set(doc["statistics"]["comparisons"]) == expected_pairs
-        assert {k: len(v) for k, v in comparison_families(ready_context.config).items()} == {"metadata_baseline": 5, "representation": 2, "title_input": 1}
+        assert {k: len(v) for k, v in comparison_families(ready_context.config).items()} == {"selected_targets": 28}
         assert len(load_validation_cohort(ready_context)["catalog"]) == 4
         assert diagnose(ready_context, target=["meta", "graph_qwen_meta"])["status"] == "pass"
         other = replace(
@@ -250,11 +250,11 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
             lambda *args: pytest.fail("shared reuse must not initialize training workers"),
         )
         result = run_leave_one_out(other, target=list(registry(other.config)))
-        assert result["skipped"] == 18
+        assert result["skipped"] == 24
         assert result["completed"] == 0
-        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 18
+        assert read_json(other.recommendations_dir / "reuse.json")["shared"] == 24
         checkpoints = list(ready_context.recommendations_dir.glob("seed_*/*/sasrec.pt"))
-        assert len(checkpoints) == 18
+        assert len(checkpoints) == 24
         shared_checkpoints = 0
         for path in checkpoints:
             copied = other.recommendations_dir / path.relative_to(ready_context.recommendations_dir)
@@ -269,7 +269,7 @@ def test_six_arm_training_diagnosis_and_shared_recommendations(
                 torch.equal(value, reused["state_dict"][key])
                 for key, value in original["state_dict"].items()
             )
-        assert shared_checkpoints == 18
+        assert shared_checkpoints == 24
         assert diagnose(other, target=list(registry(other.config)))["status"] == "pass"
     finally:
         torch.set_num_threads(previous)

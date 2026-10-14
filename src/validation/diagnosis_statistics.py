@@ -1,16 +1,23 @@
-"""Prespecified families keep their multiplicity even for partial target runs."""
+"""One Bonferroni family containing all pairs of the selected targets."""
 
-from arm_registry import registry
+from itertools import combinations
+
+from arm_registry import select_arms
 from validation.recommendation_contracts import DEFAULT_PROTOCOL
 
+COMPARISON_POLICY = "selected-target-all-pairs/v1"
 
-def comparison_families(config=None):
-    arms = registry(config or DEFAULT_PROTOCOL)
+
+def comparison_families(config=None, target=None):
+    names = list(select_arms(config or DEFAULT_PROTOCOL, target))
+    return {"selected_targets": [(later, earlier) for earlier, later in combinations(names, 2)]}
+
+
+def comparison_contract(config, target):
+    names = list(select_arms(config, target))
     return {
-        "metadata_baseline": [(name, "meta") for name in arms if name != "meta"],
-        "representation": [
-            ("graph_qwen_meta", "desc_qwen_meta"),
-            ("graph_gemini_meta", "desc_gemini_meta"),
-        ],
-        "title_input": [("graph_qwen_meta", "graph_qwen")],
+        "comparison_policy": COMPARISON_POLICY,
+        "targets": names,
+        "comparison_count": len(names) * (len(names) - 1) // 2,
+        "correction": "bonferroni",
     }

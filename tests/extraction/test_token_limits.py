@@ -19,6 +19,7 @@ def test_distinct_model_limits_reach_requests_provenance_and_logs(
             'qwen': {'scene_max_new_tokens': 301 + index, 'summary_max_new_tokens': 701 + index},
             'gemini': {'scene_max_new_tokens': 401 + index, 'summary_max_new_tokens': 901 + index},
         }
+    context.config["extraction"]["graph"]["minicpm"] = {"scene_max_new_tokens": 384}
     _validate_config(context.config)
     arm = f"{'desc' if representation == 'description' else 'graph'}_{source}"
     scene_schema = f"prompts/scene_{representation}_v{'2' if representation == 'description' else '5'}.md"

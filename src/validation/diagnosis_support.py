@@ -84,7 +84,7 @@ def write_diagnosis(path, document):
     from validation.recommendation_contracts import EVALUATION_CONTRACT
 
     result = {
-        "schema_version": "leave-one-out-diagnosis/v3",
+        "schema_version": "leave-one-out-diagnosis/v4",
         "evaluation_contract": dict(EVALUATION_CONTRACT),
         "run_id": document["run_id"],
         "representation_mode": document["representation_mode"],
@@ -92,7 +92,7 @@ def write_diagnosis(path, document):
            if "scene_aggregation" in document else {}),
         "runtime_decision": document["runtime_decision"],
         "statistics": {key: document["statistics"][key]
-                       for key in ("status", "comparisons") if key in document["statistics"]},
+                       for key in ("status", "comparisons", "comparison_policy", "targets", "comparison_count", "correction") if key in document["statistics"]},
     }
     if "comparisons" in result["statistics"]:
         result["statistics"]["metric"] = "NDCG@10"
@@ -102,6 +102,7 @@ def write_diagnosis(path, document):
         comparison = document["run_comparison"]
         result["run_comparison"] = {
             key: comparison[key]
-            for key in ("reference_run_id", "direction", "metric", "comparisons")
+            for key in ("reference_run_id", "direction", "metric", "comparisons", "targets", "correction", "family_size")
+            if key in comparison
         }
     write_json(path, result)

@@ -99,7 +99,7 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen", "gemini"} or phase not in {"scenes", "summaries"}:
+        if model not in {"qwen", "gemini", "minicpm"} or phase not in {"scenes", "summaries"}:
             raise ValueError("invalid extraction model or phase")
         from arm_registry import generated_arm
 
@@ -187,7 +187,7 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "sampling": "fixed_windows",
         "cohort_sampling": "leave_one_out",
         "catalog_scope": "retained_sequence_catalog",
-        "graph_extractors": ["qwen", "gemini"],
+        "graph_extractors": ["qwen", "gemini", "minicpm"],
         "description_extractors": ["qwen", "gemini"],
     }
     if set(protocol) != set(expected):
@@ -209,7 +209,13 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         qwen_settings(extraction.get("qwen"))
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-    if set(extraction) - {"qwen"} != {
+    from extraction.minicpm_config import minicpm_settings
+
+    try:
+        minicpm_settings(_require_mapping(extraction, "minicpm"))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    if set(extraction) - {"qwen", "minicpm"} != {
         "greedy_decoding",
         "visual_evidence",
         "graph_repetition_penalty",
@@ -283,15 +289,17 @@ def _validate_extraction(value: dict[str, Any]) -> None:
     generation_keys = {"scene_max_new_tokens", "summary_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
-        if set(models) != {"qwen", "gemini"}:
-            raise ConfigError(f"extraction.{arm} must contain exactly qwen and gemini")
-        for model in ("qwen", "gemini"):
+        expected_models = {"qwen", "gemini", "minicpm"} if arm == "graph" else {"qwen", "gemini"}
+        if set(models) != expected_models:
+            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
+        for model in expected_models:
             settings = _require_mapping(models, model)
-            if set(settings) != generation_keys:
+            required = {"scene_max_new_tokens"} if model == "minicpm" else generation_keys
+            if set(settings) != required:
                 raise ConfigError(
-                    f"extraction.{arm}.{model} must contain exactly {sorted(generation_keys)}"
+                    f"extraction.{arm}.{model} must contain exactly {sorted(required)}"
                 )
-            for key in generation_keys:
+            for key in required:
                 setting = settings.get(key)
                 if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
                     raise ConfigError(f"extraction.{arm}.{model}.{key} must be a positive integer")
@@ -317,8 +325,9 @@ def _validate_models(value: dict[str, Any]) -> None:
         or not data["titles_supplement_csv"].strip()
     ):
         raise ConfigError("data.titles_supplement_csv must be a non-empty path")
-    if set(models) != {"qwen", "bge", "gemini"}:
-        raise ConfigError("models must contain exactly qwen, bge, and gemini")
+    if set(models) != {"qwen", "bge", "gemini", "minicpm"}:
+        raise ConfigError("models must contain exactly qwen, bge, gemini and minicpm")
+    _resolve(Path.cwd(), models.get("minicpm"), "models.minicpm")
     gemini = _require_mapping(models, "gemini")
     gemini_keys = {
         "project_id",

@@ -6,9 +6,11 @@
 
 `preparation`은 원본 CSV·제목·영상 검증, 공유 cohort 입출력, duration·keyframe 준비를 담당합니다. `validation.leave_one_out_data`는 사용자별 순서와 마지막 2개 보류 정책을 담당합니다. 전체 원본은 공유 preparation에 보존하고, 최소 이력 5개·최근 13개 절단과 catalog 구성은 Run별 validation에서 수행합니다. 준비 결과는 `<artifacts_root>/preparation/`에 공유되므로 다른 원본 데이터셋은 별도 `artifacts_root`를 사용합니다.
 
-Qwen은 로컬 checkpoint와 vLLM 0.28.0을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 Qwen은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
+Qwen과 MiniCPM은 로컬 checkpoint와 공통 비동기 vLLM 엔진을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 로컬 VLM 추론은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
 
-Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. Qwen Scene은 greedy 생성이며 Summary의 샘플링은 `greedy_decoding`과 `summary_sampling` 설정을 따릅니다. Gemini는 설정된 생성 옵션을 사용합니다.
+Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. Qwen·MiniCPM Scene은 greedy 생성이며 Summary의 샘플링은 `greedy_decoding`과 `summary_sampling` 설정을 따릅니다. Gemini는 설정된 생성 옵션을 사용합니다.
+
+MiniCPM의 Scene 토큰 한도는 `extraction.graph.minicpm.scene_max_new_tokens`, 엔진·시각 processor 설정은 독립적인 `extraction.minicpm`에 있습니다. Thinking을 명시적으로 끄고 정수 `vision_downsample: 4` 또는 `16`을 native `downsample_mode="4x"` 또는 `"16x"`로 변환합니다. 기본값은 16입니다. `transformers>=5.18.0`과 native MiniCPM-V 4.7 지원 vLLM 빌드가 필요하며 설치·설정 세부 사항은 [README](../README.md)를 따릅니다.
 
 ## Scene·Summary 저장
 
@@ -23,6 +25,7 @@ Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen,gemini}`�
 - Description 행: `content_id`, `scene_idx`, `tokens`, `description`.
 - Graph 행: `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph`. `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다.
 - Summary: `runs/<RUN_ID>/extraction/summaries/<source>/<content_id>.json`. `video-summary/v5`이며 `complete`·`failed` 상태와 명시적인 `provenance.summary_model`(`qwen` 또는 `gemini`)을 요구합니다. 텍스트·장면 수·단어 수·토큰 수·생성 provenance를 저장합니다.
+- MiniCPM 생성 계약: Scene 소스 디렉터리의 `generation.json`. 모델·processor·chat template 지문, downsample·Thinking·정규화 버전을 저장합니다. `runtime.json`은 같은 생성 계약의 실행별 실제 엔진 설정·패키지 버전·확인 가능한 커밋을 보존합니다.
 - Scene 실패: 해당 Scene 디렉터리의 `failures/<content_id>.jsonl`. Summary 실패: 해당 Summary 디렉터리의 `failures.jsonl`.
 
 Graph 출력은 JSON Schema로 강제하지 않습니다. 완전한 구조화 출력과 명확한 형식 변형은 파싱하고, 구조화되지 않는 출력은 원문으로 보존합니다. 토큰 한도 종료는 실제 backend 종료 사유로 판단합니다. 원문 Graph는 text Summary에 사용할 수 있지만 직접 graph 학습에서는 구조·warning 검사를 통과한 장면만 사용합니다. Parser `graph-text/v10`은 현재 Context·Entities·Actions 형식과 이에 대응하는 JSON만 구조화합니다. 보수적인 구두점 복구는 유지하지만 Relations·receiver·location 누락·구형 필드를 변환하지 않습니다.
@@ -35,7 +38,9 @@ Summary에는 성공 장면만 넣습니다. 성공 장면이 없거나 최종 �
 
 Scene은 위 compact 필드만 읽으며 저장된 `graph`·`raw_response` 별칭이나 과거 메타데이터·상태를 추론하지 않습니다. Summary v4·`raw_fallback`·모델 필드 누락도 지원하지 않습니다. 지원 밖 기존 입력은 경로와 원인을 명시하여 거부하고 일반 재실행에서 원본을 변환하거나 덮어쓰지 않습니다. Run 이름이나 생성 당시 프롬프트 버전만으로 현재 형식의 입력을 차단하지 않습니다.
 
-일반 생성은 같은 Run의 성공 결과를 보존합니다. 프롬프트·모델 설정·Scene 입력을 변경해도 이미 성공한 Summary는 자동으로 갱신하지 않습니다. 생성 당시 provenance를 현재 설정으로 바꾸지 않습니다. 성공 결과 갱신은 `--force`를 사용합니다.
+MiniCPM의 생성 조건이 바뀌면 기존 Scene 재사용을 거부하며 `--force`가 필요합니다. 새 계약을 쓰기 전에 이전 Scene·실패 로그를 제거해 중단 후 재개에서도 조건이 섞이지 않습니다. Graph 입력을 다시 준비하면 생성 계약이 캐시 식별자에 반영되어 해당 표현·학습 결과를 갱신합니다. Text에서는 Scene 입력 해시가 바뀐 기존 Summary 재사용도 거부합니다.
+
+Qwen/Gemini의 일반 생성은 같은 Run의 성공 결과를 보존합니다. 프롬프트·모델 설정·Scene 입력을 변경해도 이미 성공한 Summary는 자동으로 갱신하지 않습니다. 생성 당시 provenance를 현재 설정으로 바꾸지 않습니다. 성공 결과 갱신은 `--force`를 사용합니다.
 
 Qwen Scene은 설정된 penalty마다 전체 pass를 마친 뒤 실패 항목만 다음 pass로 넘깁니다. 재실행은 첫 penalty부터 시작합니다. Qwen Summary는 신규 콘텐츠를 첫 penalty로 처리하고, 기존 실패는 마지막 기록보다 큰 다음 penalty부터 처리합니다. 마지막 penalty까지 완료한 실패와 penalty 기록이 없는 과거 실패는 빈 Summary를 유지합니다. 실패 당시 Scene 입력 해시가 현재 입력과 달라지면 재시도합니다.
 
@@ -61,7 +66,7 @@ Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 �
 
 ## 유지하는 계약과 지원 경계
 
-설정은 `experiment_config_version: v5`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v3`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm·Text 표현 계약은 유지합니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
+설정은 `experiment_config_version: v6`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v4`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm·Text 표현 계약은 유지합니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
 
 주 CLI는 preparation의 두 단계, extraction의 두 Scene 추출 단계와 `summarize`, validation의 임베딩·추천·진단입니다. 과거 요약 별칭, Arm·Scene 일괄 변환 명령, 독립 제목 보완 CLI는 제거했습니다. 제목 보완은 `prepare-cohort`에서 수행합니다. 기존 Run·분석 보고서·프롬프트를 자동 이동하거나 삭제하지 않습니다.
 
@@ -71,7 +76,7 @@ Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 �
 
 기존 명령 `prepare-cohort → embed-representations → run-recommendation → run-diagnosis`를 사용합니다. 원본 CSV가 있는 환경에서 새 공유 preparation을 먼저 완료하십시오. 날짜 대신 `seed × Arm` 조합을 실행하고 validation HR@10 최고 checkpoint를 복원하여 test를 한 번 평가합니다. 동점이면 최초 epoch를 유지하며 patience 5는 그대로입니다. Graph는 복원 후 Item/catalog 캐시를 비웁니다. `training.json`은 epoch별 `validation_hr10`, `best_epoch`, `checkpoint_policy: best_validation_hr10`과 평가 계약을, test 행은 `source_event_id`와 `train_item_frequency`를 기록합니다.
 
-진단 JSON은 Arm별 최종 HR/NDCG(`recommendations.means`), NDCG@10 수치 비교·신뢰구간(`statistics.comparisons`), Run·모드 식별자, 작은 평가 계약과 성공/실패 판정만 저장합니다. 전체 사용자 분할·이벤트 ID·provenance·복구/재사용 내역·seed별 상세 행·통계 설정은 중복 저장하지 않습니다. 계산은 기존처럼 사용자별 seed 평균으로 paired bootstrap을 수행하며 Bonferroni 비교군도 유지합니다. Run 비교는 같은 프로토콜·전처리·원본·분할·catalog·seed·평가 계약을 요구합니다. DWYS의 rolling HR@10=0.046 대비 차이 계산은 제공하지 않습니다. 전처리 수치·fingerprint·제외 이유는 Run의 `reports/leave_one_out_cohort.{json,md}`와 validation manifest에서 확인합니다.
+진단 JSON은 Arm별 최종 HR/NDCG(`recommendations.means`), NDCG@10 수치 비교·신뢰구간(`statistics.comparisons`), Run·모드 식별자, 작은 평가 계약과 성공/실패 판정만 저장합니다. 선택 target·비교 수·보정 정책도 기록합니다. 전체 사용자 분할·이벤트 ID·provenance·복구/재사용 내역·seed별 상세 행은 중복 저장하지 않습니다. 계산은 기존처럼 사용자별 seed 평균으로 paired bootstrap을 수행하며, 각 aggregation의 선택 target 모든 쌍을 하나의 Bonferroni 비교군으로 보정합니다. 주 비교·teacher reference 예외는 없고 부분 target의 분모는 선택된 쌍의 수입니다. Run 간 동일 Graph Arm 비교의 분모는 선택된 Graph Arm 수입니다. Run 비교는 같은 프로토콜·전처리·원본·분할·catalog·seed·평가 계약을 요구합니다. DWYS의 rolling HR@10=0.046 대비 차이 계산은 제공하지 않습니다. 전처리 수치·fingerprint·제외 이유는 Run의 `reports/leave_one_out_cohort.{json,md}`와 validation manifest에서 확인합니다.
 
 ## 현재 형식 지원 정리 (2026-10-07)
 
