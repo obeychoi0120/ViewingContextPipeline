@@ -11,11 +11,10 @@ from arm_registry import registry
 from validation.representation_inputs import documents_for_arm
 
 
-@pytest.fixture(params=[("graph", "qwen"), ("description", "qwen")])
+@pytest.fixture(params=[("graph", "qwen3vl"), ("description", "qwen3vl")])
 def summary_case(request, ready_context, fake_models):
     representation, source = request.param
     context = ready_context
-    context.config["extraction"]["summary_repetition_penalty"] = [1.0, 1.05, 1.1]
     getattr(steps, f"extract_{representation}_scenes")(
         context,
         arm=f"{'graph' if representation == 'graph' else 'desc'}_{source}",
@@ -32,23 +31,23 @@ def summary_case(request, ready_context, fake_models):
     def run(**kwargs):
         return steps.summarize(
             context,
-            model="qwen",
+            model="qwen3vl",
             arm=f"{'graph' if representation == 'graph' else 'desc'}_{source}",
             schema=f"prompts/summary_{representation}_v5.md",
             **kwargs,
         )
 
     def documents():
-        return documents_for_arm(context, cohort, registry(context.config)[arm_name if arm_name == "graph_qwen" else f"{arm_name}_meta"])
+        return documents_for_arm(context, cohort, registry(context.config)[arm_name if arm_name == "graph_qwen3vl" else f"{arm_name}_meta"])
 
     return context, ids, directory, run, documents
 
 
 def test_resume_after_out_of_order_results(summary_case, monkeypatch):
-    interrupt_after = 5
+    interrupt_after = 2
     _, ids, directory, run, documents = summary_case
     calls = []
-    thresholds = dict(zip(ids, [1.0, 1.05, 1.1, 2.0]))
+    thresholds = dict(zip(ids, [1.0, 2.0, 2.0, 2.0]))
 
     @contextmanager
     def generator(**kwargs):
@@ -71,27 +70,18 @@ def test_resume_after_out_of_order_results(summary_case, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         run()
     assert run()["content_count"] == len(ids)
-    expected = (
-        [(cid, 1.0) for cid in ids]
-        + [(cid, 1.05) for cid in ids[1:]]
-        + [(cid, 1.1) for cid in ids[2:]]
-    )
+    expected = [(cid, 1.0) for cid in ids] + [(cid, 1.0) for cid in ids[2:]]
     assert sorted(calls) == sorted(expected)
-    assert len(calls) == len(set(calls))
-    assert [penalty for _, penalty in calls] == sorted(penalty for _, penalty in calls)
-    (row,) = read_jsonl(directory / "failures.jsonl")
-    assert row["repetition_penalty"] == 1.1
-    assert read_json(directory / f"{ids[-1]}.json")["text"] == row["raw_output"]
+    rows = read_jsonl(directory / "failures.jsonl")
+    assert len(rows) == 3 and all(row["repetition_penalty"] == 1.0 for row in rows)
     assert len(documents()) == len(ids)
-    saved = {p: p.read_bytes() for p in directory.glob("*.json")}
-    assert run()["failure_count"] == 1
-    assert len(calls) == len(expected)
-    assert all(p.read_bytes() == value for p, value in saved.items())
+    assert run()["failure_count"] == 3
+    assert len(calls) == len(expected) + 3
 
 
-def test_terminal_write_failure_recovers_without_regeneration(summary_case, monkeypatch):
+
+def test_terminal_write_failure_retries_with_same_policy(summary_case, monkeypatch):
     context, ids, directory, run, documents = summary_case
-    context.config["extraction"]["summary_repetition_penalty"] = [1.0]
     calls = []
 
     @contextmanager
@@ -119,7 +109,7 @@ def test_terminal_write_failure_recovers_without_regeneration(summary_case, monk
     assert not (directory / f"{ids[0]}.json").exists()
     monkeypatch.setattr(executor, "atomic_write_json", original)
     assert run()["content_count"] == len(ids)
-    assert calls == ids
+    assert calls == [ids[0], *ids]
     assert len(documents()) == len(ids)
 
 

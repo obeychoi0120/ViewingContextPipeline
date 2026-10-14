@@ -38,7 +38,7 @@ def test_config_without_arms_and_gemini_description_source(ready_context):
     assert (arm.scene_arm, arm.model, arm.representation, arm.uses_title) == (
         'desc_gemini', 'gemini', 'description', True)
     assert generation_registry(ready_context.config)['desc_gemini'].uses_title is False
-    for target in [None, [], ['desc_qwen'], ['desc_gemini'], ['graph_gemini'], ['meta', 'meta']]:
+    for target in [None, [], ['desc_qwen3vl'], ['desc_gemini'], ['graph_gemini'], ['meta', 'meta']]:
         with pytest.raises(ValueError):
             resolve_target_arms(target, config=ready_context.config)
 

@@ -8,18 +8,18 @@ from artifact_io import read_json
 
 
 @pytest.mark.parametrize('representation', ['description', 'graph'])
-@pytest.mark.parametrize('source', ['qwen', 'gemini'])
-@pytest.mark.parametrize('summary_model', ['qwen', 'gemini'])
+@pytest.mark.parametrize('source', ['qwen3vl', 'qwen3.5', 'gemini'])
+@pytest.mark.parametrize('summary_model', ['qwen3vl', 'qwen3.5', 'gemini'])
 def test_distinct_model_limits_reach_requests_provenance_and_logs(
     ready_context, fake_models, representation, source, summary_model
 ):
     context = ready_context
     for index, kind in enumerate(['description', 'graph']):
         context.config['extraction'][kind] = {
-            'qwen': {'scene_max_new_tokens': 301 + index, 'summary_max_new_tokens': 701 + index},
+            'qwen3vl': {'scene_max_new_tokens': 301 + index, 'summary_max_new_tokens': 701 + index},
+            'qwen3.5': {'scene_max_new_tokens': 501 + index, 'summary_max_new_tokens': 801 + index},
             'gemini': {'scene_max_new_tokens': 401 + index, 'summary_max_new_tokens': 901 + index},
         }
-    context.config["extraction"]["graph"]["minicpm"] = {"scene_max_new_tokens": 384}
     _validate_config(context.config)
     arm = f"{'desc' if representation == 'description' else 'graph'}_{source}"
     scene_schema = f"prompts/scene_{representation}_v{'2' if representation == 'description' else '5'}.md"

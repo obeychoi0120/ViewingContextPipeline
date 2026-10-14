@@ -17,7 +17,6 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
     visuals = [{"content_id": cid} for cid in ("a", "b")]
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
     monkeypatch.setattr(steps, "video_name_map", lambda _: {})
-    context.config["extraction"][f"{representation}_repetition_penalty"] = [1.0, 1.05, 1.1]
 
     def rows(visual, **kwargs):
         cid = visual["content_id"]
@@ -45,11 +44,10 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
             for task in tasks:
                 event = (task.repetition_penalty, task.task_id)
                 calls.append(event)
-                threshold = {"a:0": 1.1, "b:0": 1.05}.get(task.task_id, 1.0)
                 kwargs["runtime"].current_result = {
-                    "finish_reason": "stop" if task.repetition_penalty >= threshold else "length"
+                    "finish_reason": "length" if interrupt and task.task_id == "a:0" else "stop"
                 }
-                callback(task.task_id, graph if task.repetition_penalty >= threshold else "")
+                callback(task.task_id, "" if interrupt and task.task_id == "a:0" else graph)
                 if interrupt and event == (1.0, "a:1"):
                     raise KeyboardInterrupt
             return {}
@@ -62,8 +60,8 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
     with pytest.raises(KeyboardInterrupt):
         extract(
             context,
-            arm=f"{'graph' if representation == 'graph' else 'desc'}_qwen",
-            model="qwen",
+            arm=f"{'graph' if representation == 'graph' else 'desc'}_qwen3vl",
+            model="qwen3vl",
             schema=schema,
         )
     interrupt = False
@@ -71,8 +69,8 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
     assert (
         extract(
             context,
-            arm=f"{'graph' if representation == 'graph' else 'desc'}_qwen",
-            model="qwen",
+            arm=f"{'graph' if representation == 'graph' else 'desc'}_qwen3vl",
+            model="qwen3vl",
             schema=schema,
         )["failure_count"]
         == 0
@@ -81,11 +79,8 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
         (1.0, "a:0"),
         (1.0, "b:0"),
         (1.0, "b:1"),
-        (1.05, "a:0"),
-        (1.05, "b:0"),
-        (1.1, "a:0"),
     ]
-    scene_dir = context.extraction_dir(representation, "qwen", "scenes")
+    scene_dir = context.extraction_dir(representation, "qwen3vl", "scenes")
     assert not (scene_dir / ".recovery").exists()
     for cid in ("a", "b"):
         records = read_scene_records(scene_dir / f"{cid}.jsonl")

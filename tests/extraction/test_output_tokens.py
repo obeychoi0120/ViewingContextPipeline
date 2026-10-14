@@ -49,7 +49,7 @@ def install_generators(monkeypatch, representation, *, raw=False, cutoff=None):
     monkeypatch.setattr(steps, 'GeminiWorkerPool', Pool)
 
 
-def extract(context, representation, model='qwen'):
+def extract(context, representation, model='qwen3vl'):
     context.config['extraction'][f'{representation}_repetition_penalty'] = [1.0]
     name = f"{'desc' if representation == 'description' else 'graph'}_{model}"
     result = getattr(steps, f'extract_{representation}_scenes')(
@@ -58,7 +58,7 @@ def extract(context, representation, model='qwen'):
     return name, result
 
 
-@pytest.mark.parametrize('model', ['qwen', 'gemini'])
+@pytest.mark.parametrize('model', ['qwen3vl', 'gemini'])
 def test_cutoff_failure_retains_tokens_after_failure_log_reload(ready_context, monkeypatch, model):
     install_generators(monkeypatch, 'graph', cutoff='scene')
     arm, result = extract(ready_context, 'graph', model)

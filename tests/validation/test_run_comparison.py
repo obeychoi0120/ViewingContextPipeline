@@ -21,7 +21,7 @@ def paired_runs(tmp_path, monkeypatch):
                 config={
                     "experiment_config_version": "v6",
                     "protocol": {
-                        "arms": ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta"]
+                        "arms": ["meta", "graph_qwen3vl", "graph_qwen3vl_meta", "graph_gemini_meta"]
                     },
                 },
                 root=tmp_path,
@@ -54,14 +54,14 @@ def paired_runs(tmp_path, monkeypatch):
             "evaluation_contract": dict(EVALUATION_CONTRACT),
             "per_seed": [
                 {"split_hash": "test", "seed": 42, "arm": arm}
-                for arm in ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen", "graph_minicpm", "graph_minicpm_meta")
+                for arm in ("graph_gemini_meta", "graph_qwen3vl_meta", "graph_qwen3vl", "graph_qwen3.5", "graph_qwen3.5_meta")
             ]
         }
 
     def collect(ctx, config, cohort, *, arms):
-        values = [0.4, 0.25, 0.3, 0.32, 0.33] if ctx.run_id == "candidate" else [0.2, 0.15, 0.2, 0.22, 0.23]
+        values = [0.4, 0.25, 0.3, 0.35, 0.4] if ctx.run_id == "candidate" else [0.2, 0.15, 0.2, 0.2, 0.25]
         indices = [
-            ("graph_gemini_meta", "graph_qwen_meta", "graph_qwen", "graph_minicpm", "graph_minicpm_meta").index(name) for name in arms
+            ("graph_gemini_meta", "graph_qwen3vl_meta", "graph_qwen3vl", "graph_qwen3.5", "graph_qwen3.5_meta").index(name) for name in arms
         ]
         return (
             np.tile(np.array(values)[indices], (2, 1)),
@@ -78,13 +78,13 @@ def test_paired_run_effect_direction_and_partial_family(paired_runs):
     contexts, _ = paired_runs
     result = compare_graph_runs(contexts[0], "reference")
     assert result["comparisons"]["graph_gemini_meta"]["difference"] == pytest.approx(0.2)
-    assert result["comparisons"]["graph_qwen"]["ci_low"] == pytest.approx(0.1)
+    assert result["comparisons"]["graph_qwen3vl"]["ci_low"] == pytest.approx(0.1)
     assert result["model_interaction"] is None and result["model_interactions"] == {}
-    assert result["comparisons"]["graph_qwen"]["confidence_level"] == pytest.approx(1 - 0.05 / 5)
+    assert result["comparisons"]["graph_qwen3vl"]["confidence_level"] == pytest.approx(1 - 0.05 / 5)
     assert set(result["sources"]) == {"candidate", "reference"}
-    partial = compare_graph_runs(contexts[0], "reference", target=["graph_qwen"])
-    assert partial["comparisons"]["graph_qwen"]["difference"] == result["comparisons"]["graph_qwen"]["difference"]
-    assert partial["comparisons"]["graph_qwen"]["confidence_level"] == pytest.approx(0.95)
+    partial = compare_graph_runs(contexts[0], "reference", target=["graph_qwen3vl"])
+    assert partial["comparisons"]["graph_qwen3vl"]["difference"] == result["comparisons"]["graph_qwen3vl"]["difference"]
+    assert partial["comparisons"]["graph_qwen3vl"]["confidence_level"] == pytest.approx(0.95)
     assert partial["family_size"] == 1 and partial["model_interaction"] is None
 
 

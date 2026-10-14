@@ -46,15 +46,12 @@ def source_identity(context, cohort, arm):
         for item, title in zip(catalog, metadata, strict=True)
     ):
         raise ValueError("graph metadata/catalog order mismatch")
-    generation = {}
-    if arm.model == "minicpm":
-        from extraction.minicpm_provenance import current_contract
-        from model_provenance import canonical
-
-        generation["generation"] = canonical(current_contract(context, arm))
     sources = []
+    generation_identity = None
     if arm.model:
         directory = context.scene_arm_dir(arm.scene_arm)
+        identity_path = directory / "generation_identity.json"
+        generation_identity = read_json(identity_path) if identity_path.exists() else None
         for item in cohort["catalog"]:
             path = directory / f"{item['content_id']}.jsonl"
             if path.is_file():
@@ -63,10 +60,10 @@ def source_identity(context, cohort, arm):
     titles = [r["title"].strip() for r in cohort["metadata_titles"]] if arm.uses_title else []
     return fingerprint(
         {
-            **generation,
             "version": VERSION,
             "source": arm.scene_arm,
             "files": sources,
+            "generation_identity": generation_identity,
             "catalog": cohort["catalog"],
             "titles": titles,
             "encoder": context.config["validation"]["encoder"],

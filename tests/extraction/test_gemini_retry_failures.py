@@ -15,7 +15,6 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
 ):
     representation = "graph"
     context = ready_context
-    context.config["extraction"]["summary_repetition_penalty"] = [1.0]
     visual = steps.visual_rows(context)[0]
     cid = visual["content_id"]
     timestamp = Path(visual["timestamp_json"])

@@ -38,7 +38,7 @@ def test_single_prepare_command_completes_titles_without_extra_artifacts(
     assert all(p.read_bytes() == data for p, data in originals.items())
     assert not list(context.root.rglob("*.report.json"))
     assert not list(context.root.rglob("*completed.csv"))
-    assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation"}
+    assert {p.name for p in context.run_root.iterdir()} == {"extraction", "validation", "run_contract.json"}
     embed_representations(context, target=["meta"])
     with np.load(context.representations_dir / "meta_embeddings.npz") as arrays:
         assert np.all(arrays["title_values"][3] == 0)

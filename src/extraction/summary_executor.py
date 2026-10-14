@@ -13,9 +13,8 @@ from extraction.token_usage import qwen_output_tokens, gemini_output_tokens, val
 from artifact_io import atomic_write_json
 from extraction.backends.qwen_workers import QwenGenerationTask, QwenWorkerPool
 from extraction.descriptions import description_summary_prompt
-from extraction.errors import ExtractionStepError, UnsupportedArtifactError
+from extraction.errors import ExtractionStepError
 from artifact_io import fingerprint
-from extraction.qwen_config import penalty_schedule
 from model_provenance import canonical, without_provenance_arm
 from extraction.failures import FailureLog
 from extraction.generation import generate_once
@@ -87,7 +86,9 @@ def summary_scene_input(source, normalize, graph, provenance):
         raise ExtractionStepError(f"invalid scene input {source}: {exc}") from exc
     text_count = sum((r.get("parse_mode") == "text" for r in records)) if graph else 0
     raw_count = len(all_records) - len(records) + text_count
-    scene_provenance = [without_provenance_arm(r.get("provenance", {})) for r in records]
+    identity_path = source.parent / "generation_identity.json"
+    scene_identity = read_json(identity_path)["identity"] if identity_path.exists() else {}
+    scene_provenance = [without_provenance_arm(r.get("provenance", scene_identity)) for r in records]
     if not records:
         scene_provenance = [without_provenance_arm(r.get("provenance", {})) for r in scene_failures]
     prov = {
@@ -108,10 +109,6 @@ def summary_scene_input(source, normalize, graph, provenance):
 def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generation, model, force):
     output_dir = context.summary_arm_dir(arm.name)
     scene_dir = context.scene_arm_dir(arm.scene_arm)
-    if arm.model == "minicpm":
-        from extraction.minicpm_provenance import current_contract
-
-        current_contract(context, arm)
     if not force:
         check_summary_model(output_dir, model)
     failures = FailureLog(output_dir)
@@ -126,11 +123,7 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
     build_prompt = graph_summary_prompt if graph else description_summary_prompt
     settings = context.config["extraction"]
     max_tokens = settings["graph" if graph else "description"][model]["summary_max_new_tokens"]
-    schedule = (
-        penalty_schedule(settings["summary_repetition_penalty"]) if model == "qwen" else [1.0]
-    )
-    if any((left >= right for left, right in zip(schedule, schedule[1:]))):
-        raise ExtractionStepError("summary repetition penalties must be strictly increasing")
+    schedule = [1.0]
     batch = SummaryBatch(arm, output_dir, failures)
     pending, documents, next_penalties = batch.pending, batch.documents, batch.next_penalties
     publish = batch.publish
@@ -140,29 +133,30 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
         source = scene_dir / f"{cid}.jsonl"
         output = output_dir / f"{cid}.json"
         if output.is_file() and (not force) and (not failures.contains(cid, None)):
-            try:
-                existing = reuse_summary_document(output, content_id=cid, arm=arm.name)
-            except UnsupportedArtifactError:
-                raise
-            except ExtractionStepError:
-                pass
-            else:
-                prov = existing["provenance"]
-                if (
-                    prov.get("uses_title") is not False
-                    or "english_title" in prov
-                    or prov.get("scene_arm") != arm.scene_arm
-                ):
-                    raise ExtractionStepError(
-                        f"Summary source/title policy mismatch: {output}; use --force or a new run"
-                    )
-                if arm.model == "minicpm":
-                    from extraction.minicpm_provenance import check_summary_input
-
-                    check_summary_input(context, arm, cid, prov)
-                if existing["status"] == "complete":
-                    documents[cid] = existing
-                    continue
+            existing = reuse_summary_document(output, content_id=cid, arm=arm.name)
+            prov = existing["provenance"]
+            if (
+                prov.get("uses_title") is not False
+                or "english_title" in prov
+                or prov.get("scene_arm") != arm.scene_arm
+            ):
+                raise ExtractionStepError(
+                    f"Summary source/title policy mismatch: {output}; use --force or a new run"
+                )
+            recorded = {
+                **prov,
+                "settings": {k: v for k, v in prov.get("settings", {}).items()
+                             if k != "actual_repetition_penalty"},
+            }
+            if any(canonical(recorded.get(key)) != canonical(value)
+                   for key, value in provenance.items()):
+                raise ExtractionStepError(f"summary generation policy mismatch: {output}; use --force or a new run")
+            _, current_prov = summary_scene_input(source, normalize, graph, provenance)
+            if prov.get("scene_input_hash") != current_prov["scene_input_hash"] or canonical(prov.get("scene_provenance")) != canonical(current_prov["scene_provenance"]):
+                raise ExtractionStepError(f"summary scene input changed: {output}; use --force or a new run")
+            if existing["status"] == "complete":
+                documents[cid] = existing
+                continue
         records, prov = summary_scene_input(source, normalize, graph, provenance)
         if not records:
             pending[cid] = (records, prov, None)
@@ -179,46 +173,15 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
             **generation,
         )
         pending[cid] = (records, prov, task)
-        failed = failures.rows.get((cid, None))
-        input_changed = (
-            failed
-            and failed.get("provenance", {}).get("scene_input_hash")
-            and (failed["provenance"]["scene_input_hash"] != prov["scene_input_hash"])
-        )
-        if failed is None or model == "gemini" or input_changed:
-            next_penalties[cid] = schedule[0]
-        else:
-            last = failed.get("repetition_penalty")
-            if last is not None and (type(last) not in (int, float) or not 1 <= last <= 2):
-                raise ExtractionStepError(f"invalid summary repetition_penalty for {cid}: {last}")
-            next_penalty = next(
-                (value for value in schedule if last is not None and value > last), None
-            )
-            if next_penalty is None:
-                pending[cid] = (
-                    records,
-                    failed.get(
-                        "provenance", {"representation": arm.representation, "summary_model": model}
-                    ),
-                    task,
-                )
-                publish(
-                    cid,
-                    failed["raw_output"],
-                    failed["error"].split(", "),
-                    raw=True,
-                    tokens=failed.get("tokens"),
-                )
-            else:
-                next_penalties[cid] = next_penalty
+        next_penalties[cid] = schedule[0]
     return batch, schedule
 
 
-def run_qwen_summaries(context, batch, schedule, progress, generator_factory):
+def run_qwen_summaries(context, batch, schedule, progress, generator_factory, model):
     pending, next_penalties = batch.pending, batch.next_penalties
     failures, publish = batch.failures, batch.publish
     settings = context.config["extraction"]
-    output_dir, model = batch.output_dir, "qwen"
+    output_dir = batch.output_dir
     runtime = QwenRuntime()
 
     def receive(cid, text):
@@ -256,7 +219,7 @@ def run_qwen_summaries(context, batch, schedule, progress, generator_factory):
         progress.complete(task_id=cid, failed=bool(violations), raw=False)
 
     with generator_factory(
-        model_path=context.path("models", "qwen"),
+        model_path=context.path("models", model),
         settings=settings.get("qwen"),
         image_limit=settings["visual_evidence"]["num_keyframes"],
         runtime=runtime,
@@ -367,7 +330,7 @@ def run_summary_stage(
             if model == "gemini":
                 run_gemini_summaries(context, batch, progress, gemini_pool_factory)
             else:
-                run_qwen_summaries(context, batch, schedule, progress, generator_factory)
+                run_qwen_summaries(context, batch, schedule, progress, generator_factory, model)
     failed_count = batch.failures.count(content_ids)
     print(f"[SUMMARY] {arm.name}: outputs={len(batch.documents)} failed={failed_count}", flush=True)
     if model == "gemini" and failed_count:
@@ -379,8 +342,7 @@ def run_summary_stage(
 
 @contextmanager
 def qwen_generator(
-    *, model_path: Path, settings=None, image_limit=6, runtime=None, log=None,
-    on_progress=None, model="qwen"
+    *, model_path: Path, settings=None, image_limit=6, runtime=None, log=None, on_progress=None
 ) -> Iterator[GenerationFunction]:
 
     def ready(event):
@@ -388,7 +350,7 @@ def qwen_generator(
             runtime.engine_ready(event)
         if log:
             log(
-                f"[{model}] GPU {event['gpu_id']} ready | {event['gpu_name']} | settings={event['settings']}"
+                f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | settings={event['settings']}"
             )
 
     with ExitStack() as resources:
@@ -398,11 +360,10 @@ def qwen_generator(
             nonlocal pool
             if pool is None:
                 if log:
-                    log(f"[{model}] starting vLLM GPU workers")
+                    log("[Qwen] starting vLLM GPU workers")
                 pool = resources.enter_context(
                     QwenWorkerPool(
                         str(model_path),
-                        **({"model": model} if model != "qwen" else {}),
                         settings=settings,
                         image_limit=image_limit,
                         on_runtime=ready,

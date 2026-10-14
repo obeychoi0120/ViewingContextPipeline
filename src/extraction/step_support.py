@@ -39,6 +39,7 @@ def scene_generation_rows(
     prompt: str,
     max_new_tokens: int,
     repetition_penalty: float = 1.0,
+    generation: dict | None = None,
     scenes: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     if scenes is None:
@@ -63,7 +64,7 @@ def scene_generation_rows(
                     image_paths=tuple(image_paths),
                     prompt=prompt,
                     max_new_tokens=max_new_tokens,
-                    repetition_penalty=repetition_penalty,
+                    **({"repetition_penalty": repetition_penalty} | (generation or {})),
                 ),
                 "scene_idx": scene_idx,
                 "scene_start_seconds": scene["scene_start_seconds"],

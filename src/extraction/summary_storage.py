@@ -82,7 +82,7 @@ def summary_model_from_document(doc, *, path):
     """Read the explicit model field; never infer missing generation provenance."""
     provenance = doc.get("provenance")
     model = provenance.get("summary_model") if isinstance(provenance, dict) else None
-    if model not in {"qwen", "gemini"}:
+    if model not in {"qwen3vl", "qwen3.5", "gemini"}:
         raise UnsupportedArtifactError(f"missing/unsupported Summary summary_model: {path}")
     return model
 
@@ -115,7 +115,7 @@ def check_summary_model(directory, model):
         if summary_model_from_document(doc, path=path) != model:
             raise ExtractionStepError(f"summary model mismatch in {path}; use --force or a new run")
     for row in summary_failure_rows(directory).values():
-        if row.get("summary_model") not in {"qwen", "gemini"}:
+        if row.get("summary_model") not in {"qwen3vl", "qwen3.5", "gemini"}:
             raise UnsupportedArtifactError(f"missing/unsupported summary_model in {directory / 'failures.jsonl'}")
         if row["summary_model"] != model:
             raise ExtractionStepError(

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Any
 from functools import partial
 from tqdm import tqdm
 from arm_registry import generation_registry, resolve_generation_arm
@@ -8,7 +7,7 @@ from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import file_fingerprint
-from extraction.qwen_config import penalty_schedule
+from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
 from extraction.failures import FailureLog
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -25,17 +24,20 @@ from extraction.step_support import (
 from extraction.summary_executor import run_summary_stage, qwen_generator
 from extraction.scene_storage import read_scene_records
 from pipeline_logging import log_step_start
-from pipeline_runtime import RunContext
 
-GRAPH_SOURCES = ("qwen", "gemini", "minicpm")
+GRAPH_SOURCES = (*QWEN_MODELS, "gemini")
 
 
 def prompt_provenance(context, schema, arm, *, summary=False, model=None):
     path = context.prompt_path(schema)
     source = model if summary else arm.model
+    if source in QWEN_MODELS:
+        import json
+        checkpoint = context.path("models", source)
+        validate_checkpoint(source, json.loads((checkpoint / "config.json").read_text()))
     model = (
         local_model_identity(context.path("models", source))
-        if source in {"qwen", "minicpm"}
+        if source in QWEN_MODELS
         else context.config["models"][source]
     )
     extraction = context.config["extraction"]
@@ -45,39 +47,16 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
             "summary_max_new_tokens" if summary else "scene_max_new_tokens"
         ]
     }
-    if source == "qwen":
-        from extraction.qwen_config import qwen_settings
-
+    if source in QWEN_MODELS:
         settings.update(
-            backend="vllm-0.28.0",
+            backend="vllm",
             qwen=qwen_settings(extraction.get("qwen")),
-            repetition_penalty=penalty_schedule(
-                extraction[
-                    "summary_repetition_penalty" if summary else f"{kind}_repetition_penalty"
-                ]
-            ),
-        )
-    elif source == "minicpm":
-        from extraction.minicpm_config import (
-            NORMALIZATION_VERSION, minicpm_settings, processor_identity, processor_kwargs,
-        )
-
-        native = minicpm_settings(extraction.get("minicpm"))
-        directory = context.path("models", source)
-        settings.update(
-            backend="vllm", model_source=source, minicpm=native,
-            mm_processor_kwargs=processor_kwargs(native), enable_thinking=False,
-            normalization_version=NORMALIZATION_VERSION,
-            processor_files=processor_identity(directory),
-            repetition_penalty=penalty_schedule(extraction[f"{kind}_repetition_penalty"]),
+            generation=generation_settings(source, summary=summary),
+            repetition_penalty=[1.0],
         )
     else:
         settings["backend"] = "gemini"
-    if summary and source == "qwen":
-        settings["greedy_decoding"] = extraction["greedy_decoding"]
-        if not extraction["greedy_decoding"]:
-            settings["sampling"] = dict(extraction["summary_sampling"])
-    elif not summary:
+    if not summary:
         settings["visual_evidence"] = dict(extraction["visual_evidence"])
         if arm.representation == "graph":
             settings["response_parser"] = GRAPH_PARSER_VERSION
@@ -99,14 +78,6 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         if arm.representation == "graph"
         else "description/v2",
     }
-
-
-def _summary_generation_settings(context: RunContext) -> dict[str, Any]:
-    settings = context.config["extraction"]
-    generation = {"repetition_penalty": penalty_schedule(settings["summary_repetition_penalty"])[0]}
-    if not settings["greedy_decoding"]:
-        generation.update(do_sample=True, **settings["summary_sampling"])
-    return generation
 
 
 def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *, force):
@@ -168,16 +139,12 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
     prompt = path.read_text(encoding="utf-8")
     print("[PREPARE] Reading prompt/model settings and cohort...", flush=True)
     settings = context.config["extraction"]
-    penalties = (
-        settings[f"{representation}_repetition_penalty"]
-        if model in {"qwen", "minicpm"} else [1.0]
-    )
-    scene_dir = context.extraction_dir(arm.representation, model, "scenes")
+    penalties = [1.0]
     provenance = prompt_provenance(context, path, arm)
-    if model == "minicpm":
-        from extraction.minicpm_provenance import prepare_contract
+    scene_dir = context.extraction_dir(arm.representation, model, "scenes")
+    from extraction.scene_storage import ensure_generation_identity
 
-        prepare_contract(scene_dir, provenance, force=force)
+    ensure_generation_identity(scene_dir, provenance, force=force)
     failures = FailureLog(scene_dir, scenes=True)
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
@@ -188,7 +155,7 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
         scene_generation_rows,
         prompt=prompt,
         max_new_tokens=settings[representation][model]["scene_max_new_tokens"],
-        repetition_penalty=penalty_schedule(penalties)[0],
+        generation=generation_settings(model) if model in QWEN_MODELS else {},
     )
     print("[PREPARE] Counting pending scenes and checking cached outputs...", flush=True)
     existing, planned = prepare_scene_batch(
@@ -215,30 +182,23 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
         progress_factory=tqdm,
         track_structured=representation == "graph",
     ) as progress:
-        if model in {"qwen", "minicpm"}:
-            from extraction.minicpm_provenance import record_runtime
-
-            runtime = QwenRuntime(
-                on_ready=partial(record_runtime, scene_dir) if model == "minicpm" else None
-            )
+        if model in QWEN_MODELS:
             run_qwen_scenes(
                 pending_contents(),
                 provenance=provenance,
                 scene_dir=scene_dir,
                 failures=failures,
                 model_path=context.path("models", model),
-                generator_factory=(
-                    partial(qwen_generator, model=model) if model == "minicpm" else qwen_generator
-                ),
+                generator_factory=qwen_generator,
                 names=video_name_map(context),
                 progress=progress,
                 arm=representation,
                 source=model,
                 existing_records=existing,
-                qwen_options=settings.get(model),
+                qwen_options=settings.get("qwen"),
                 image_limit=settings["visual_evidence"]["num_keyframes"],
-                runtime=runtime,
-                penalties=penalty_schedule(penalties),
+                runtime=QwenRuntime(),
+                penalties=penalties,
             )
         else:
             pool = GeminiWorkerPool(
@@ -261,8 +221,8 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
 
 
 def _summarize(context, *, representation, model, schema, force=False, arm=None):
-    if model not in {"qwen", "gemini"}:
-        raise ValueError("summary model must be qwen or gemini")
+    if model not in GRAPH_SOURCES:
+        raise ValueError("summary model must be qwen3vl, qwen3.5 or gemini")
     if arm is None:
         raise ValueError("summarization requires --arm")
     arm = resolve_generation_arm(context.config, arm, representation, model, summary=True)
@@ -282,7 +242,7 @@ def _summarize(context, *, representation, model, schema, force=False, arm=None)
         schema=path,
         catalog=cohort["catalog"],
         provenance=prompt_provenance(context, path, arm, summary=True, model=model),
-        generation=_summary_generation_settings(context) if model == "qwen" else {},
+        generation=generation_settings(model, summary=True) if model in QWEN_MODELS else {},
         model=model,
         gemini_pool_factory=GeminiWorkerPool,
         force=force,

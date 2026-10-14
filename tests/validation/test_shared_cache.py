@@ -18,7 +18,7 @@ from validation.representation_provenance import matrix_hash, read_state, state_
 
 @pytest.mark.parametrize("scene_hash", [None, "", "unknown", "z" * 64, 123, []])
 def test_unidentified_scene_inputs_remain_local(scene_hash):
-    prov = {"prompt_hash": "summary", "model": "qwen", "settings": {"tokens": 100},
+    prov = {"prompt_hash": "summary", "model": "qwen3vl", "settings": {"tokens": 100},
             "scene_provenance": [{}], "scene_input_hash": scene_hash}
     assert not shareable_document({"source_provenance": prov})
     prov["scene_input_hash"] = "a" * 64
@@ -28,7 +28,7 @@ def test_unidentified_scene_inputs_remain_local(scene_hash):
         incomplete.pop(field)
         assert not shareable_document({"source_provenance": incomplete})
     prov.pop("scene_input_hash")
-    prov["scene_provenance"] = [{"prompt_hash": "scene", "model": "qwen",
+    prov["scene_provenance"] = [{"prompt_hash": "scene", "model": "qwen3vl",
                                  "settings": {"tokens": 100}}]
     assert shareable_document({"source_provenance": prov})
 
@@ -41,7 +41,7 @@ def test_description_changes_invalidate_only_description_arms(
     embed_representations(ready_context, target=list(registry(ready_context.config)))
     other = replace(ready_context, run_id="changed", run_root=ready_context.run_root.parent / "changed")
     shutil.copytree(ready_context.run_root / "extraction", other.run_root / "extraction")
-    path = next(other.summary_arm_dir("desc_qwen").glob("*.json"))
+    path = next(other.summary_arm_dir("desc_qwen3vl").glob("*.json"))
     doc = read_json(path)
     if changed == "text":
         doc["text"] += " A new detail."
@@ -52,11 +52,11 @@ def test_description_changes_invalidate_only_description_arms(
         doc["provenance"][changed] = "b" * 64
     write_json(path, doc)
     result = embed_representations(other, target=list(registry(other.config)))
-    assert result["generated_arms"] == ["desc_qwen_meta"]
-    assert result["reuse"]["shared"] == ["meta", "graph_qwen", "graph_qwen_meta", "graph_gemini_meta", "desc_gemini_meta", "graph_minicpm", "graph_minicpm_meta"]
+    assert result["generated_arms"] == ["desc_qwen3vl_meta"]
+    assert result["reuse"]["shared"] == [name for name in registry(other.config) if name != "desc_qwen3vl_meta"]
 
 
-@pytest.mark.parametrize("arm", ["meta", "graph_qwen_meta"])
+@pytest.mark.parametrize("arm", ["meta", "graph_qwen3vl_meta"])
 def test_small_text_arrays_rejected_in_local_and_shared_cache(
     ready_context, fake_models, generate_all, arm
 ):

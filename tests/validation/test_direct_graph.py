@@ -19,7 +19,7 @@ def scene():
 
 
 def write_scenes(context, cid, graphs):
-    path = context.scene_arm_dir('graph_qwen') / f'{cid}.jsonl'
+    path = context.scene_arm_dir('graph_qwen3vl') / f'{cid}.jsonl'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(''.join(json.dumps({'content_id': cid, 'scene_idx': i, 'tokens': None, 'warning': [], 'scene_graph': graph}) + '\n'
                             for i, graph in enumerate(graphs)))
@@ -44,13 +44,13 @@ def graph_data(ready_context, monkeypatch):
         return np.stack([np.random.default_rng(int.from_bytes(hashlib.sha256(t.encode()).digest()[:4]))
                          .normal(size=settings.embedding_dim) for t in texts]).astype(np.float32)
     monkeypatch.setattr('validation.graph_inputs.encode_texts', encode)
-    prepare(context, target=['graph_qwen', 'graph_qwen_meta', 'meta'])
+    prepare(context, target=['graph_qwen3vl', 'graph_qwen3vl_meta', 'meta'])
     return context, cohort
 
 
 def test_input_defaults_isolation_actionless_and_missing(graph_data):
     context, cohort = graph_data
-    store = GraphStore(context.representations_dir / 'graph_qwen_embeddings')
+    store = GraphStore(context.representations_dir / 'graph_qwen3vl_embeddings')
     assert store['video_offsets'].tolist() == [0, 2, 2, 3, 4]
     assert store['missing'][0].tolist() == [2, -1, -1, 0, 0, 1]
     for i in range(len(store['contexts'])):
@@ -59,12 +59,12 @@ def test_input_defaults_isolation_actionless_and_missing(graph_data):
         assert np.all(store['edges'][a:b, :2] >= low)
         assert np.all(store['edges'][a:b, :2] < high)
     assert np.all(store['titles'] == 0)
-    stats = json.loads((context.representations_dir / 'graph_qwen_embeddings' / 'statistics.json').read_text())
+    stats = json.loads((context.representations_dir / 'graph_qwen3vl_embeddings' / 'statistics.json').read_text())
     assert stats['counts']['raw'] == 1
     assert stats['counts']['actionless'] == 1
     assert stats['counts']['empty_video'] == 1
     assert len(store) == len(cohort['catalog'])
-    assert prepare(context, target=['graph_qwen'])['reused_arms'] == ['graph_qwen']
+    assert prepare(context, target=['graph_qwen3vl'])['reused_arms'] == ['graph_qwen3vl']
 
 
 @pytest.mark.parametrize('dimension,dtype', [(384, 'float32'), (1024, 'float64'), (None, None)])
@@ -74,7 +74,7 @@ def test_graph_cache_checks_actual_features_even_with_matching_provenance(graph_
     from validation.shared_cache import SharedCache, checksum
 
     context, cohort = graph_data
-    directory = context.representations_dir / 'graph_qwen_embeddings'
+    directory = context.representations_dir / 'graph_qwen3vl_embeddings'
     manifest_path = directory / 'manifest.json'
     manifest = json.loads(manifest_path.read_text())
     signature = manifest['input_hash']
@@ -86,7 +86,7 @@ def test_graph_cache_checks_actual_features_even_with_matching_provenance(graph_
     manifest_path.write_text(json.dumps(manifest))
     assert not bundle_valid(directory, signature, 1024)
     with pytest.raises(ValueError, match='corrupt graph inputs'):
-        verify(context, cohort, ['graph_qwen'])
+        verify(context, cohort, ['graph_qwen3vl'])
     # Matching hashes are insufficient for shared-cache reuse as well.
     cache = SharedCache(context, 'graph_inputs', signature)
     shared_manifest = json.loads((cache.path / 'cache.json').read_text())
@@ -95,8 +95,8 @@ def test_graph_cache_checks_actual_features_even_with_matching_provenance(graph_
         shared_manifest['files'][name] = checksum(cache.path / name)
     (cache.path / 'cache.json').write_text(json.dumps(shared_manifest))
     assert cache.valid()
-    result = prepare(context, target=['graph_qwen'])
-    assert result['generated_arms'] == ['graph_qwen']
+    result = prepare(context, target=['graph_qwen3vl'])
+    assert result['generated_arms'] == ['graph_qwen3vl']
     assert GraphStore(directory)['features'].shape == (manifest['feature_count'], 1024)
 
 
@@ -104,7 +104,7 @@ def test_graph_cache_checks_actual_features_even_with_matching_provenance(graph_
 def test_input_integrity_is_fatal(graph_data, corruption):
     context, cohort = graph_data
     cid = cohort['catalog'][0]['content_id']
-    p = context.scene_arm_dir('graph_qwen') / f'{cid}.jsonl'
+    p = context.scene_arm_dir('graph_qwen3vl') / f'{cid}.jsonl'
     line = p.read_text().splitlines()[0]
     if corruption == 'duplicate':
         p.write_text(line + '\n' + line)
@@ -113,12 +113,12 @@ def test_input_integrity_is_fatal(graph_data, corruption):
     else:
         p.write_text('{broken')
     with pytest.raises(ValueError):
-        build_input(context, cohort, registry(context.config)['graph_qwen'])
+        build_input(context, cohort, registry(context.config)['graph_qwen3vl'])
 
 
 def test_invalid_warning_variable_size_and_cache_invalidation(graph_data):
     context, cohort = graph_data
-    arm = registry(context.config)['graph_qwen']
+    arm = registry(context.config)['graph_qwen3vl']
     before = source_identity(context, cohort, arm)
     cid = cohort['catalog'][0]['content_id']
     large = scene()
@@ -136,7 +136,7 @@ def test_invalid_warning_variable_size_and_cache_invalidation(graph_data):
     assert stats['counts']['warning'] == 1
     assert source_identity(context, cohort, arm) != before
     with pytest.raises(ValueError, match='stale'):
-        verify(context, cohort, ['graph_qwen'])
+        verify(context, cohort, ['graph_qwen3vl'])
 
 
 @pytest.mark.parametrize('pool', ['mean'])
@@ -148,7 +148,7 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
     context, _ = graph_data
     context = graph_context(context, pool)
     config = validation_config(context)
-    model = new_graph_model(context, config, 'graph_qwen_meta', torch.device('cpu'))
+    model = new_graph_model(context, config, 'graph_qwen3vl_meta', torch.device('cpu'))
     batch = graph_batch(model.store, [0, 1, 2], 'cpu')
     encoder = model.graph_encoder
     output = encoder(batch)
@@ -183,7 +183,7 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
         expected = model.catalog_vectors()
         assert torch.count_nonzero(expected[1]) == 0
     torch.save(model.state_dict(), tmp_path / 'weights.pt')
-    restored = new_graph_model(context, config, 'graph_qwen_meta', torch.device('cpu'))
+    restored = new_graph_model(context, config, 'graph_qwen3vl_meta', torch.device('cpu'))
     restored.load_state_dict(torch.load(tmp_path / 'weights.pt', weights_only=True))
     restored.eval()
     with torch.no_grad():
@@ -192,7 +192,8 @@ def test_model_gradients_invariance_and_checkpoint(graph_data, pool, tmp_path):
 
 @pytest.mark.parametrize('pool', ['mean', 'gnn', 'transformer', 'transformer_pos', 'transformer_local',
                                   'attn_pool', 'gnn_attn'])
-def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch):
+@pytest.mark.parametrize('source_model', ['qwen3vl', 'qwen3.5'])
+def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeypatch, source_model):
     torch = pytest.importorskip('torch')
     from validation.steps import validation_config, run_diagnosis
     from validation.leave_one_out_data import EventTable
@@ -203,18 +204,23 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     from validation import recommendation_cache
     torch.set_num_threads(1)
     context, _ = graph_data
+    arm_name = f'graph_{source_model}_meta'
+    if source_model == 'qwen3.5':
+        import shutil
+        shutil.copytree(context.scene_arm_dir('graph_qwen3vl'), context.scene_arm_dir('graph_qwen3.5'))
+        prepare(context, target=[arm_name])
     context = graph_context(context, pool)
     config = validation_config(context)
     cohort = load_validation_cohort(context)
     table = EventTable(cohort['events'])
     split = cohort['plan']['splits'][0]
     identity = {'run_id': context.run_id, 'protocol': 'leave_one_out', 'split_hash': split['split_hash'],
-                'seed': config.model.seeds[0], 'arm': 'graph_qwen_meta',
+                'seed': config.model.seeds[0], 'arm': arm_name,
                 'deterministic': config.model.deterministic,
                 'training_input_hash': training_signature(context, cohort, config),
-                **recommendation_identity(context, 'graph_qwen_meta')}
+                **recommendation_identity(context, arm_name)}
     prepared = prepare_split(table, split)
-    run_combination(context, config, table, split, identity, 'graph_qwen_meta', prepared, torch.device('cpu'))
+    run_combination(context, config, table, split, identity, arm_name, prepared, torch.device('cpu'))
     directory = combination_dir(context, identity['seed'], identity['arm'])
     assert combination_complete(directory, identity, len(prepared[0]['test']))
     assert recommendation_cache.valid_bundle(directory, identity, table, split)
@@ -241,7 +247,7 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     assert recommendation_cache.restore(context, directory, identity, table, split)
     checkpoint = torch.load(directory / 'sasrec.pt', weights_only=True)
     from validation.graph_model import new_graph_model
-    model = new_graph_model(context, config, 'graph_qwen_meta', 'cpu')
+    model = new_graph_model(context, config, arm_name, 'cpu')
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
     with torch.no_grad():
@@ -258,13 +264,13 @@ def test_leave_one_out_train_resume_diagnosis_and_hash(graph_data, pool, monkeyp
     monkeypatch.setattr('validation.leave_one_out_diagnosis.training_signature', lambda *a: identity['training_input_hash'])
     reuse = {'run_id': context.run_id, 'local': 0, 'shared': 0, 'generated': 1}
     (context.recommendations_dir / 'reuse.json').write_text(json.dumps(reuse))
-    assert run_diagnosis(context, target=['graph_qwen_meta'], representation_mode='graph',
+    assert run_diagnosis(context, target=[arm_name], representation_mode='graph',
                          scene_aggregation=pool)['status'] == 'pass'
     diagnosis = json.loads(context.diagnosis_path.read_text())
     assert diagnosis['schema_version'] == 'leave-one-out-diagnosis/v4'
     assert 'graph_inputs' not in diagnosis
     assert set(diagnosis['recommendations']) == {'means'}
-    assert set(diagnosis['recommendations']['means']) == {'graph_qwen_meta'}
+    assert set(diagnosis['recommendations']['means']) == {arm_name}
     assert set(diagnosis['statistics']) == {'status', 'comparisons', 'metric', 'comparison_policy', 'targets', 'comparison_count', 'correction'}
     assert 'cohort' not in diagnosis
     assert diagnosis['statistics']['status'] == 'computed'
@@ -280,8 +286,8 @@ def test_title_order_and_missing_inputs(graph_data):
     # Fourth title remains, but Graph becomes unavailable.
     cid = cohort['catalog'][3]['content_id']
     write_scenes(context, cid, ['bad'])
-    prepare(context, target=['graph_qwen', 'graph_qwen_meta'])
-    for arm in ('graph_qwen', 'graph_qwen_meta'):
+    prepare(context, target=['graph_qwen3vl', 'graph_qwen3vl_meta'])
+    for arm in ('graph_qwen3vl', 'graph_qwen3vl_meta'):
         model = new_graph_model(context, validation_config(context), arm, 'cpu').eval()
         # Trainable biases cannot introduce an Item for a completely missing video.
         with torch.no_grad():
@@ -295,8 +301,8 @@ def test_title_order_and_missing_inputs(graph_data):
             title = title.masked_fill(~batch['title_available'][3:4, None].bool(), 0)
             fallback = model.graph_encoder.scene_mlp(torch.cat([title, torch.zeros(1, 384)], dim=-1))
         assert torch.count_nonzero(values[1]) == 0
-        assert bool(torch.count_nonzero(values[3])) == (arm == 'graph_qwen_meta')
-        if arm == 'graph_qwen_meta':
+        assert bool(torch.count_nonzero(values[3])) == (arm == 'graph_qwen3vl_meta')
+        if arm == 'graph_qwen3vl_meta':
             torch.testing.assert_close(values[3:4], fallback)
         assert values.shape == (4, 512)
         assert (model.title_projection.in_features, model.title_projection.out_features) == (1024, 128)
@@ -322,11 +328,11 @@ def test_graph_context_runs_in_spawned_workers(graph_data):
     jobs = []
     for seed in config.model.seeds[:2]:
         identity = {'run_id': context.run_id, 'protocol': 'leave_one_out', 'split_hash': split['split_hash'],
-                    'seed': seed, 'arm': 'graph_qwen',
+                    'seed': seed, 'arm': 'graph_qwen3vl',
                     'deterministic': config.model.deterministic,
                     'training_input_hash': training_signature(context, cohort, config),
-                    **recommendation_identity(context, 'graph_qwen')}
-        jobs.append((split, identity, 'graph_qwen'))
+                    **recommendation_identity(context, 'graph_qwen3vl')}
+        jobs.append((split, identity, 'graph_qwen3vl'))
     with tqdm(total=2, file=io.StringIO()) as progress:
         assert run_parallel(context, jobs, ['cpu', 'cpu'], progress) == 2
     for split, identity, branch in jobs:
@@ -347,8 +353,8 @@ def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data,
     first['actions'].append({**first['actions'][0], 'action': 'washing'})
     second['topics'] = ['food preparation']
     write_scenes(context, cid, [first, second])
-    prepare(context, target=['graph_qwen_meta'])
-    original = new_graph_model(context, validation_config(context), 'graph_qwen_meta', 'cpu').eval()
+    prepare(context, target=['graph_qwen3vl_meta'])
+    original = new_graph_model(context, validation_config(context), 'graph_qwen3vl_meta', 'cpu').eval()
     if pool.startswith('transformer'):  # Open the zero-initialized residual scales.
         with torch.no_grad():
             original.graph_encoder.scene_transformer.layers[0].residual_scale.fill_(0.5)
@@ -371,8 +377,8 @@ def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data,
                     action[role] = mapping[action[role]]
         renamed.append(graph)
     write_scenes(context, cid, renamed)
-    prepare(context, target=['graph_qwen_meta'])
-    actual = new_graph_model(context, validation_config(context), 'graph_qwen_meta', 'cpu').eval()
+    prepare(context, target=['graph_qwen3vl_meta'])
+    actual = new_graph_model(context, validation_config(context), 'graph_qwen3vl_meta', 'cpu').eval()
     actual.load_state_dict(original.state_dict())
     with torch.no_grad():
         torch.testing.assert_close(actual.catalog_vectors(), expected, atol=3e-6, rtol=1e-5)
@@ -384,7 +390,7 @@ def test_gnn_contract_reuses_features_but_separates_recommendation_cache(graph_d
     from validation.graph_context import GRAPH_MODEL
     context, cohort = graph_data
     gnn = graph_context(context, 'gnn')
-    arm = registry(context.config)['graph_qwen_meta']
+    arm = registry(context.config)['graph_qwen3vl_meta']
     assert source_identity(context, cohort, arm) == source_identity(gnn, cohort, arm)
     assert prepare(gnn, target=[arm.name])['reused_arms'] == [arm.name]
     mean_identity = recommendation_identity(context, arm.name)
@@ -413,9 +419,9 @@ def test_scene_order_changes_only_the_positional_transformer(graph_data):
         write_scenes(context, cid, list(order))
         for pool in ('transformer', 'transformer_pos'):
             pooled = graph_context(context, pool)
-            prepare(pooled, target=['graph_qwen_meta'])
+            prepare(pooled, target=['graph_qwen3vl_meta'])
             torch.manual_seed(0)
-            model = new_graph_model(pooled, validation_config(pooled), 'graph_qwen_meta', 'cpu')
+            model = new_graph_model(pooled, validation_config(pooled), 'graph_qwen3vl_meta', 'cpu')
             with torch.no_grad():  # Open the zero-initialized residual scales.
                 model.graph_encoder.scene_transformer.layers[0].residual_scale.fill_(0.5)
                 vectors.setdefault(pool, []).append(model.eval().catalog_vectors()[0].clone())
@@ -430,7 +436,7 @@ def test_transformer_contracts_share_features_but_separate_results(graph_data):
                                           TRANSFORMER_VARIANTS, validate_mode)
     from validation.cli import main
     context, cohort = graph_data
-    arm = registry(context.config)['graph_qwen_meta']
+    arm = registry(context.config)['graph_qwen3vl_meta']
     contexts = {pool: graph_context(context, pool) for pool in SCENE_AGGREGATIONS}
     identities = {pool: recommendation_identity(pooled, arm.name) for pool, pooled in contexts.items()}
     assert {i['embedding_hash'] for i in identities.values()} == {identities['mean']['embedding_hash']}
@@ -464,7 +470,7 @@ def test_attention_contracts_share_features_but_separate_results(graph_data):
                                           TRANSFORMER_VARIANTS, validate_mode)
     from validation.recommendation_contracts import DIAGNOSIS_ARCHITECTURE_VERSIONS
     context, cohort = graph_data
-    arm = registry(context.config)['graph_qwen_meta']
+    arm = registry(context.config)['graph_qwen3vl_meta']
     contexts = {pool: graph_context(context, pool)
                 for pool in ('mean', 'gnn', *TRANSFORMER_VARIANTS, *ATTENTION_AGGREGATIONS)}
     identities = {pool: recommendation_identity(pooled, arm.name) for pool, pooled in contexts.items()}
@@ -503,7 +509,7 @@ def test_previous_graph_input_contract_is_not_reused(graph_data):
     from validation.graph_inputs import bundle_valid
 
     context, _ = graph_data
-    directory = context.representations_dir / 'graph_qwen_embeddings'
+    directory = context.representations_dir / 'graph_qwen3vl_embeddings'
     path = directory / 'manifest.json'
     manifest = json.loads(path.read_text())
     manifest['version'] = 'role-graph-inputs/v3'
@@ -516,13 +522,13 @@ def test_unsupported_scene_blocks_existing_graph_cache_without_mutation(graph_da
 
     context, cohort = graph_data
     cid = cohort['catalog'][0]['content_id']
-    path = context.scene_arm_dir('graph_qwen') / f'{cid}.jsonl'
+    path = context.scene_arm_dir('graph_qwen3vl') / f'{cid}.jsonl'
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     rows[0]['scene_graph']['actions'][0]['receiver'] = None
     path.write_text('\n'.join(map(json.dumps, rows)))
-    cache = context.representations_dir / 'graph_qwen_embeddings' / 'manifest.json'
+    cache = context.representations_dir / 'graph_qwen3vl_embeddings' / 'manifest.json'
     original, manifest = path.read_bytes(), cache.read_bytes()
     with pytest.raises(UnsupportedArtifactError) as error:
-        prepare(context, target=['graph_qwen'])
+        prepare(context, target=['graph_qwen3vl'])
     assert str(path) in str(error.value)
     assert path.read_bytes() == original and cache.read_bytes() == manifest

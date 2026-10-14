@@ -26,7 +26,7 @@ def test_full_catalog_applies_to_all_targets_and_preserves_shared_data(summaries
     legacy_shared.write_bytes(b"preserve original rolling cohort")
     protected = {p: p.read_bytes() for p in (*legacy.iterdir(), legacy_shared)}
     original = {p: p.read_bytes() for p in context.cohort_dir.iterdir() if p.is_file()}
-    for path in context.summary_arm_dir("graph_qwen").glob("*.json"):
+    for path in context.summary_arm_dir("graph_qwen3vl").glob("*.json"):
         path.unlink()
     embed_representations(context, target=list(registry(context.config)))
     cohort = load_validation_cohort(context)
@@ -36,7 +36,7 @@ def test_full_catalog_applies_to_all_targets_and_preserves_shared_data(summaries
     table = EventTable(cohort["events"])
     assert table.items == ["1", "2", "3", "4"]
     assert len(table.rows) == 39
-    with np.load(context.representations_dir / "graph_qwen_embeddings.npz") as data:
+    with np.load(context.representations_dir / "graph_qwen3vl_embeddings.npz") as data:
         assert data["video_values"].shape == (4, 1024) and not data["video_values"].any()
     with np.load(context.representations_dir / "meta_embeddings.npz") as data:
         assert not data["title_values"][1].any()

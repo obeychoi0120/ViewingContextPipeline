@@ -24,14 +24,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--arm",
-        help="Generation source (v7: graph_qwen, desc_qwen, graph_gemini, desc_gemini, graph_minicpm); not a metadata-concat arm.",
+        help="Generation source (v7: graph_qwen3vl, desc_qwen3vl, graph_qwen3.5, desc_qwen3.5, graph_gemini, desc_gemini); not a metadata-concat arm.",
     )
     args = parser.parse_args(argv)
     try:
         if args.schema is None:
             raise ValueError(f"{args.step} requires --schema PATH.md")
         if args.model is None or args.arm is None:
-            raise ValueError("generation requires --model qwen|gemini|minicpm and --arm")
+            raise ValueError("generation requires --model qwen3vl|qwen3.5|gemini and --arm")
         context = RunContext.load(args.run_id)
         STEP_HANDLERS[args.step](
             context,

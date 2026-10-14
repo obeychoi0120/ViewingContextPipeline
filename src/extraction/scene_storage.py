@@ -91,15 +91,6 @@ def read_scene_records(path):
                 "semantic_warnings": row["warning"],
             }
         records.append(record)
-    if path.parent.name == "graph_minicpm":
-        from artifact_io import read_json
-
-        marker = path.parent / "generation.json"
-        if not marker.is_file():
-            raise ValueError(f"missing MiniCPM generation provenance: {marker}")
-        provenance = read_json(marker)
-        for record in records:
-            record["provenance"] = provenance
     return records
 
 
@@ -113,3 +104,26 @@ def write_scene_records(path, records):
         atomic_write_jsonl(path, payload, durable=True, sort_keys=False)
     else:
         path.unlink(missing_ok=True)
+
+
+def ensure_generation_identity(directory, provenance, *, force=False):
+    """Keep compact scene rows unchanged while protecting their generation policy."""
+    from artifact_io import read_json, atomic_write_json
+    from model_provenance import canonical
+
+    directory = Path(directory)
+    identity_path = directory / "generation_identity.json"
+    identity = canonical(provenance)
+    if not force:
+        if identity_path.exists():
+            if read_json(identity_path).get("identity") != identity:
+                raise ValueError(f"scene generation policy mismatch: {directory}; use --force or a new run")
+        elif any(directory.glob("*.jsonl")) or any((directory / "failures").glob("*.jsonl")):
+            raise ValueError(f"missing scene generation identity: {directory}; use --force or a new run")
+    directory.mkdir(parents=True, exist_ok=True)
+    if force:
+        # A new identity must never label old outputs after an interrupted regeneration.
+        for path in [*directory.glob("*.jsonl"), *(directory / "failures").glob("*.jsonl")]:
+            path.unlink()
+    if force or not identity_path.exists():
+        atomic_write_json(identity_path, {"identity": identity}, durable=True)

@@ -10,7 +10,7 @@ def scene(kind, index=0):
     row = {
         "scene_idx": index,
         "keyframes": [index * 30 + 5],
-        "provenance": {"arm": f"{kind}_qwen"},
+        "provenance": {"arm": f"{kind}_qwen3vl"},
         "generation": {"attempt_count": 2, "input_key": "key", "repair_mode": "native"},
     }
     if kind == "description":

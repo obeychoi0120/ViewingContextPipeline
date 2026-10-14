@@ -18,7 +18,7 @@ from validation.recommendation import _new_model  # noqa: E402
 from validation.representation_provenance import recommendation_identity  # noqa: E402
 
 
-@pytest.mark.parametrize("branch", ["meta", "desc_qwen_meta", "graph_qwen"])
+@pytest.mark.parametrize("branch", ["meta", "desc_qwen3vl_meta", "graph_qwen3vl"])
 @pytest.mark.parametrize("device", ["cpu"] + ([os.environ["GRAPH_TEST_CUDA"]] if os.environ.get("GRAPH_TEST_CUDA") else []))
 def test_large_production_text_dimensions_and_masks(tmp_path, branch, device):
     torch.set_num_threads(1)
@@ -110,12 +110,12 @@ def test_encoder_identity_and_video_structure_are_in_result_cache(current_contex
 
     monkeypatch.setattr("validation.representation_provenance.read_state",
                         lambda *a: {"recommendation_hash": "fixed-values"})
-    current = recommendation_identity(current_context, "desc_qwen_meta")
+    current = recommendation_identity(current_context, "desc_qwen3vl_meta")
     assert current["encoder"]["embedding_dim"] == 1024
     assert current["item_model"]["video_transform"] == "linear"
     original = cache_for(current_context, current).key
     current_context.config["models"]["bge"] = str(current_context.root / "bge-small-en-v1.5")
-    assert cache_for(current_context, recommendation_identity(current_context, "desc_qwen_meta")).key != original
+    assert cache_for(current_context, recommendation_identity(current_context, "desc_qwen3vl_meta")).key != original
     assert current["text_architecture"] == "sasrec-content-v8"
     assert current["item_model"]["item_mlp_linear_layers"] == 1
     old = {**current, "text_architecture": "sasrec-content-v7"}

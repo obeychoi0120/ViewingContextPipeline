@@ -11,7 +11,7 @@ from validation.recommendation_contracts import EVALUATION_CONTRACT
 @pytest.mark.parametrize('mode,aggregation', [('text', None), ('graph', 'mean'), ('graph', 'gnn')])
 def test_output_size_is_independent_of_cohort_and_provenance(tmp_path, mode, aggregation):
     scores = {'meta': {'HR@10': 0.5, 'NDCG@10': 0.123456789012345}}
-    comparisons = {'graph_qwen_meta-meta': {'difference': 0.02, 'ci_low': 0.01, 'ci_high': 0.03}}
+    comparisons = {'graph_qwen3vl_meta-meta': {'difference': 0.02, 'ci_low': 0.01, 'ci_high': 0.03}}
     bulk = [{'event_ids': list(range(13)), 'source_provenance': 'full evidence ' * 200}
             for _ in range(1000)]
     document = {

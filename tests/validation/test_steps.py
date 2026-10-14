@@ -8,7 +8,7 @@ def test_representation_cache_must_match_full_catalog(tmp_path) -> None:
     catalog = [{"item_id": "1"}, {"item_id": "2"}]
     item_index_path = tmp_path / "item_index.json"
     outputs = [
-        tmp_path / f"{branch}.npz" for branch in ("metadata", "graph_qwen", "graph_gemini", "desc")
+        tmp_path / f"{branch}.npz" for branch in ("metadata", "graph_qwen3vl", "graph_gemini", "desc")
     ]
     write_json(item_index_path, {"1": 0, "2": 1})
     for path in outputs:

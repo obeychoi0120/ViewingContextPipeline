@@ -29,7 +29,7 @@ def device(request):
 def profiler(path, device="cpu", every=4, *, operators=False):
     path.mkdir(exist_ok=True)
     return RunProfiler(
-        path, {"protocol": "leave_one_out", "split_hash": "test", "seed": 42, "arm": "graph_qwen"}, device, every,
+        path, {"protocol": "leave_one_out", "split_hash": "test", "seed": 42, "arm": "graph_qwen3vl"}, device, every,
         operators=operators,
     )
 

@@ -60,9 +60,27 @@ class RunContext:
         artifact_root = _resolve(
             repo_root, config.get("artifacts_root", "artifacts"), "artifacts_root"
         )
-        return cls(repo_root, selected, config, artifact_root / "runs" / selected)
+        run_root = artifact_root / "runs" / selected
+        for phase in ("scenes", "summaries"):
+            directory = run_root / "extraction" / phase
+            if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
+                raise ConfigError("legacy qwen Run contract is unsupported; use a new run_id (no automatic migration)")
+        contract_path = run_root / "run_contract.json"
+        if contract_path.exists():
+            from artifact_io import read_json
+            from arm_registry import CONCAT_ARM_CONTRACT
+            if read_json(contract_path) != {"experiment_config_version": EXPERIMENT_CONFIG_VERSION, "arm_contract": CONCAT_ARM_CONTRACT}:
+                raise ConfigError("Run contract mismatch; use a new run_id")
+        return cls(repo_root, selected, config, run_root)
 
     def initialize(self) -> None:
+        from artifact_io import atomic_write_json
+        from arm_registry import CONCAT_ARM_CONTRACT
+
+        self.run_root.mkdir(parents=True, exist_ok=True)
+        contract_path = self.run_root / "run_contract.json"
+        if not contract_path.exists():
+            atomic_write_json(contract_path, {"experiment_config_version": EXPERIMENT_CONFIG_VERSION, "arm_contract": CONCAT_ARM_CONTRACT}, durable=True)
         for directory in (
             self.cohort_dir,
             self.run_root / "extraction",
@@ -99,7 +117,7 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen", "gemini", "minicpm"} or phase not in {"scenes", "summaries"}:
+        if model not in {"qwen3vl", "qwen3.5", "gemini"} or phase not in {"scenes", "summaries"}:
             raise ValueError("invalid extraction model or phase")
         from arm_registry import generated_arm
 
@@ -187,8 +205,8 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "sampling": "fixed_windows",
         "cohort_sampling": "leave_one_out",
         "catalog_scope": "retained_sequence_catalog",
-        "graph_extractors": ["qwen", "gemini", "minicpm"],
-        "description_extractors": ["qwen", "gemini"],
+        "graph_extractors": ["qwen3vl", "qwen3.5", "gemini"],
+        "description_extractors": ["qwen3vl", "qwen3.5", "gemini"],
     }
     if set(protocol) != set(expected):
         raise ConfigError("invalid protocol keys")
@@ -209,36 +227,8 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         qwen_settings(extraction.get("qwen"))
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-    from extraction.minicpm_config import minicpm_settings
-
-    try:
-        minicpm_settings(_require_mapping(extraction, "minicpm"))
-    except ValueError as exc:
-        raise ConfigError(str(exc)) from exc
-    if set(extraction) - {"qwen", "minicpm"} != {
-        "greedy_decoding",
-        "visual_evidence",
-        "graph_repetition_penalty",
-        "description_repetition_penalty",
-        "summary_repetition_penalty",
-        "summary_sampling",
-        "graph",
-        "description",
-        "gemini",
-    }:
-        raise ConfigError(
-            "extraction must contain greedy_decoding, visual_evidence, graph_repetition_penalty, description_repetition_penalty, summary_repetition_penalty, summary_sampling, graph, description, and gemini"
-        )
-    if not isinstance(extraction.get("greedy_decoding"), bool):
-        raise ConfigError("extraction.greedy_decoding must be true or false")
-    for stage in ("graph", "description", "summary"):
-        key = f"{stage}_repetition_penalty"
-        from extraction.qwen_config import penalty_schedule
-
-        try:
-            penalty_schedule(extraction.get(key))
-        except ValueError as exc:
-            raise ConfigError(f"extraction.{key}: {exc}") from exc
+    if set(extraction) - {"qwen"} != {"visual_evidence", "graph", "description", "gemini"}:
+        raise ConfigError("extraction must contain visual_evidence, graph, description, gemini and optional qwen engine settings")
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution", "scene_duration", "num_keyframes"}:
         raise ConfigError(
@@ -262,44 +252,18 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         raise ConfigError(
             "extraction.visual_evidence.image_resolution must be two positive integers"
         )
-    summary_sampling = _require_mapping(extraction, "summary_sampling")
-    if set(summary_sampling) != {"temperature", "top_p", "top_k"}:
-        raise ConfigError("extraction.summary_sampling must contain temperature, top_p, and top_k")
-    sampling_temperature = summary_sampling.get("temperature")
-    if (
-        not isinstance(sampling_temperature, (int, float))
-        or isinstance(sampling_temperature, bool)
-        or (not 0 < float(sampling_temperature) <= 2)
-    ):
-        raise ConfigError("extraction.summary_sampling.temperature must be in (0, 2]")
-    sampling_top_p = summary_sampling.get("top_p")
-    if (
-        not isinstance(sampling_top_p, (int, float))
-        or isinstance(sampling_top_p, bool)
-        or (not 0 < float(sampling_top_p) <= 1)
-    ):
-        raise ConfigError("extraction.summary_sampling.top_p must be in (0, 1]")
-    sampling_top_k = summary_sampling.get("top_k")
-    if (
-        not isinstance(sampling_top_k, int)
-        or isinstance(sampling_top_k, bool)
-        or sampling_top_k <= 0
-    ):
-        raise ConfigError("extraction.summary_sampling.top_k must be a positive integer")
     generation_keys = {"scene_max_new_tokens", "summary_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
-        expected_models = {"qwen", "gemini", "minicpm"} if arm == "graph" else {"qwen", "gemini"}
-        if set(models) != expected_models:
-            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
-        for model in expected_models:
+        if set(models) != {"qwen3vl", "qwen3.5", "gemini"}:
+            raise ConfigError(f"extraction.{arm} must contain exactly qwen3vl, qwen3.5 and gemini")
+        for model in ("qwen3vl", "qwen3.5", "gemini"):
             settings = _require_mapping(models, model)
-            required = {"scene_max_new_tokens"} if model == "minicpm" else generation_keys
-            if set(settings) != required:
+            if set(settings) != generation_keys:
                 raise ConfigError(
-                    f"extraction.{arm}.{model} must contain exactly {sorted(required)}"
+                    f"extraction.{arm}.{model} must contain exactly {sorted(generation_keys)}"
                 )
-            for key in required:
+            for key in generation_keys:
                 setting = settings.get(key)
                 if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
                     raise ConfigError(f"extraction.{arm}.{model}.{key} must be a positive integer")
@@ -325,9 +289,11 @@ def _validate_models(value: dict[str, Any]) -> None:
         or not data["titles_supplement_csv"].strip()
     ):
         raise ConfigError("data.titles_supplement_csv must be a non-empty path")
-    if set(models) != {"qwen", "bge", "gemini", "minicpm"}:
-        raise ConfigError("models must contain exactly qwen, bge, gemini and minicpm")
-    _resolve(Path.cwd(), models.get("minicpm"), "models.minicpm")
+    if set(models) != {"qwen3vl", "qwen3.5", "bge", "gemini"}:
+        raise ConfigError("models must contain exactly qwen3vl, qwen3.5, bge, and gemini")
+    for key in ("qwen3vl", "qwen3.5", "bge"):
+        if not isinstance(models[key], str) or not models[key].strip():
+            raise ConfigError(f"models.{key} must be a non-empty local checkpoint path")
     gemini = _require_mapping(models, "gemini")
     gemini_keys = {
         "project_id",

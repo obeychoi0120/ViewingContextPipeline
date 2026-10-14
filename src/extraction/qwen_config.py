@@ -53,3 +53,37 @@ def penalty_schedule(value):
     ):
         raise ValueError("repetition penalty must be a number or non-empty list in [1, 2]")
     return [float(x) for x in values]
+
+
+QWEN_MODELS = ("qwen3vl", "qwen3.5")
+
+
+def generation_settings(model: str, *, summary: bool = False) -> dict[str, Any]:
+    """Official Non-thinking policy; summaries receive text-only scene records."""
+    if model not in QWEN_MODELS:
+        raise ValueError(f"unsupported Qwen model: {model}")
+    return {
+        "do_sample": True,
+        "temperature": 1.0 if summary else 0.7,
+        "top_p": 1.0 if summary else 0.8,
+        "top_k": 40 if summary and model == "qwen3vl" else 20,
+        "min_p": 0.0,
+        "presence_penalty": 2.0 if summary else 1.5,
+        "repetition_penalty": 1.0,
+        "enable_thinking": False if model == "qwen3.5" else None,
+        "model": model,
+    }
+
+
+def validate_checkpoint(model: str, config: dict) -> None:
+    expected = {
+        "qwen3vl": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),
+        "qwen3.5": ("qwen3_5", "Qwen3_5ForConditionalGeneration"),
+    }
+    if model not in expected:
+        raise ValueError(f"unsupported Qwen model: {model}")
+    model_type, architecture = expected[model]
+    if config.get("model_type") != model_type or architecture not in config.get("architectures", []):
+        raise ValueError(f"checkpoint does not match requested {model}: expected {model_type}/{architecture}")
+    if model == "qwen3vl" and config.get("_name_or_path") and "Thinking" in config["_name_or_path"]:
+        raise ValueError("qwen3vl requires the Instruct checkpoint")

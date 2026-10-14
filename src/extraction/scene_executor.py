@@ -229,7 +229,6 @@ def run_qwen_scenes(
             receive,
             log=lambda message: write_progress(progress, message),
             on_pass=begin_pass,
-            model=source or "Qwen",
         )
 
 

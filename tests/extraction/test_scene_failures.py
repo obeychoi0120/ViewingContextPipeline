@@ -12,11 +12,10 @@ from artifact_io import read_jsonl
 @pytest.mark.parametrize("recover", [False, True])
 def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypatch, recover):
     context = ready_context
-    context.config["extraction"]["graph_repetition_penalty"] = [1.0, 1.05]
     visuals = steps.visual_rows(context)[:1]
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
     cid = visuals[0]["content_id"]
-    directory = context.graph_scene_dir("qwen")
+    directory = context.graph_scene_dir("qwen3vl")
     calls = []
 
     @contextmanager
@@ -26,9 +25,9 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
                 calls.append(task.repetition_penalty)
                 kwargs["runtime"].current_result = {"finish_reason": "stop"}
                 text = ('[Context]\nmedium: live_action\nformat: other\ntopics: none\n[Entities]\nnone\n[Actions]\nnone' if recover and
-                        task.repetition_penalty == 1.05 else ' \n\t ')
+                        len(calls) > 1 else ' \n\t ')
                 callback(task.task_id, text)
-                if task.repetition_penalty == 1.0:
+                if len(calls) == 1:
                     assert not (directory / f"{cid}.jsonl").exists()
                     assert read_jsonl(directory / "failures" / f"{cid}.jsonl")[0]["error"] == (
                         "model produced an empty graph")
@@ -36,9 +35,12 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
         yield generate
 
     monkeypatch.setattr(steps, "qwen_generator", generator)
-    result = steps.extract_graph_scenes(context, model="qwen", arm="graph_qwen",
+    result = steps.extract_graph_scenes(context, model="qwen3vl", arm="graph_qwen3vl",
                                        schema="prompts/scene_graph_v8.md")
-    assert calls == [1.0, 1.05]
+    assert calls == [1.0]
+    result = steps.extract_graph_scenes(context, model="qwen3vl", arm="graph_qwen3vl",
+                                       schema="prompts/scene_graph_v8.md")
+    assert calls == [1.0, 1.0]
     assert result["failure_count"] == (0 if recover else 1)
     path = directory / f"{cid}.jsonl"
     if recover:
@@ -50,10 +52,8 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
 
 @pytest.mark.parametrize("truncated", [False, True])
 def test_description_cutoff_is_saved_only_as_failure(ready_context, monkeypatch, truncated):
-    model = "qwen"
+    model = "qwen3vl"
     context = ready_context
-    context.config["extraction"]["graph_repetition_penalty"] = [1.0]
-    context.config["extraction"]["description_repetition_penalty"] = [1.0]
     visuals = steps.visual_rows(context)[:1]
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
     cid = visuals[0]["content_id"]
@@ -98,7 +98,7 @@ def test_description_cutoff_is_saved_only_as_failure(ready_context, monkeypatch,
         assert records[0]["description"] == text.strip()
 
 
-@pytest.mark.parametrize("model", ["qwen", "gemini"])
+@pytest.mark.parametrize("model", ["qwen3vl", "gemini"])
 def test_graph_text_repair_and_cutoff_share_storage_and_failure_policy(
     ready_context,
     monkeypatch,
@@ -113,8 +113,6 @@ def test_graph_text_repair_and_cutoff_share_storage_and_failure_policy(
         MAX_TOKENS = "MAX_TOKENS"
 
     context = ready_context
-    context.config["extraction"]["graph_repetition_penalty"] = [1.0]
-    context.config["extraction"]["description_repetition_penalty"] = [1.0]
     visual = steps.visual_rows(context)[0]
     cid = visual["content_id"]
     monkeypatch.setattr(steps, "visual_rows", lambda _: [visual])

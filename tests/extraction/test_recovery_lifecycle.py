@@ -17,8 +17,8 @@ def test_summary_publish_error_requires_regeneration_without_journal(
     extract = getattr(steps, f"extract_{representation}_scenes")
     extract(
         context,
-        arm=f"{'graph' if representation == 'graph' else 'desc'}_qwen",
-        model="qwen",
+        arm=f"{'graph' if representation == 'graph' else 'desc'}_qwen3vl",
+        model="qwen3vl",
         schema=f"prompts/scene_{representation}_v{'4' if representation == 'graph' else '2'}.md",
     )
     calls = []
@@ -42,13 +42,13 @@ def test_summary_publish_error_requires_regeneration_without_journal(
     monkeypatch.setattr(executor, "atomic_write_json", fault)
     summarize = steps.summarize
     options = {
-        "arm": f"{'graph' if representation == 'graph' else 'desc'}_qwen",
+        "arm": f"{'graph' if representation == 'graph' else 'desc'}_qwen3vl",
         "schema": f"prompts/summary_{representation}_v5.md",
     }
     with pytest.raises(OSError, match="disk full"):
-        summarize(context, model="qwen", **options)
-    directory = context.summary_arm_dir(f"{'graph' if representation == 'graph' else 'desc'}_qwen")
+        summarize(context, model="qwen3vl", **options)
+    directory = context.summary_arm_dir(f"{'graph' if representation == 'graph' else 'desc'}_qwen3vl")
     assert not list(directory.rglob("*.json"))
     monkeypatch.setattr(executor, "atomic_write_json", original)
-    assert summarize(context, model="qwen", **options)["failure_count"] == 0
+    assert summarize(context, model="qwen3vl", **options)["failure_count"] == 0
     assert calls[0] == calls[1] and len(calls) == 5

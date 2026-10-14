@@ -6,11 +6,9 @@
 
 `preparation`은 원본 CSV·제목·영상 검증, 공유 cohort 입출력, duration·keyframe 준비를 담당합니다. `validation.leave_one_out_data`는 사용자별 순서와 마지막 2개 보류 정책을 담당합니다. 전체 원본은 공유 preparation에 보존하고, 최소 이력 5개·최근 13개 절단과 catalog 구성은 Run별 validation에서 수행합니다. 준비 결과는 `<artifacts_root>/preparation/`에 공유되므로 다른 원본 데이터셋은 별도 `artifacts_root`를 사용합니다.
 
-Qwen과 MiniCPM은 로컬 checkpoint와 공통 비동기 vLLM 엔진을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 로컬 VLM 추론은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
+Qwen은 로컬 checkpoint와 vLLM 0.28.0 이상을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 Qwen은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
 
-Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. Qwen·MiniCPM Scene은 greedy 생성이며 Summary의 샘플링은 `greedy_decoding`과 `summary_sampling` 설정을 따릅니다. Gemini는 설정된 생성 옵션을 사용합니다.
-
-MiniCPM의 Scene 토큰 한도는 `extraction.graph.minicpm.scene_max_new_tokens`, 엔진·시각 processor 설정은 독립적인 `extraction.minicpm`에 있습니다. Thinking을 명시적으로 끄고 정수 `vision_downsample: 4` 또는 `16`을 native `downsample_mode="4x"` 또는 `"16x"`로 변환합니다. 기본값은 16입니다. `transformers>=5.18.0`과 native MiniCPM-V 4.7 지원 vLLM 빌드가 필요하며 설치·설정 세부 사항은 [README](../README.md)를 따릅니다.
+Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델은 모델별 공식 sampling 정책을 사용합니다. 장면은 VL 설정, 요약은 Text 설정이며 Qwen3-VL Text top_k는 40, Qwen3.5 Text top_k는 20입니다. repetition penalty는 모든 요청·구조 복구에서 1.0으로 고정하며 재실행하면 실패 항목을 같은 정책으로 다시 시도합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
 
 ## Scene·Summary 저장
 
@@ -24,25 +22,22 @@ MiniCPM의 Scene 토큰 한도는 `extraction.graph.minicpm.scene_max_new_tokens
 - Scene: `runs/<RUN_ID>/extraction/scenes/<source>/<content_id>.jsonl`.
 - Description 행: `content_id`, `scene_idx`, `tokens`, `description`.
 - Graph 행: `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph`. `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다.
-- Summary: `runs/<RUN_ID>/extraction/summaries/<source>/<content_id>.json`. `video-summary/v5`이며 `complete`·`failed` 상태와 명시적인 `provenance.summary_model`(`qwen` 또는 `gemini`)을 요구합니다. 텍스트·장면 수·단어 수·토큰 수·생성 provenance를 저장합니다.
-- MiniCPM 생성 계약: Scene 소스 디렉터리의 `generation.json`. 모델·processor·chat template 지문, downsample·Thinking·정규화 버전을 저장합니다. `runtime.json`은 같은 생성 계약의 실행별 실제 엔진 설정·패키지 버전·확인 가능한 커밋을 보존합니다.
+- Summary: `runs/<RUN_ID>/extraction/summaries/<source>/<content_id>.json`. `video-summary/v5`이며 `complete`·`failed` 상태와 명시적인 `provenance.summary_model`(`qwen3vl`, `qwen3.5`, `gemini`)을 요구합니다. 텍스트·장면 수·단어 수·토큰 수·생성 provenance를 저장합니다.
 - Scene 실패: 해당 Scene 디렉터리의 `failures/<content_id>.jsonl`. Summary 실패: 해당 Summary 디렉터리의 `failures.jsonl`.
 
 Graph 출력은 JSON Schema로 강제하지 않습니다. 완전한 구조화 출력과 명확한 형식 변형은 파싱하고, 구조화되지 않는 출력은 원문으로 보존합니다. 토큰 한도 종료는 실제 backend 종료 사유로 판단합니다. 원문 Graph는 text Summary에 사용할 수 있지만 직접 graph 학습에서는 구조·warning 검사를 통과한 장면만 사용합니다. Parser `graph-text/v10`은 현재 Context·Entities·Actions 형식과 이에 대응하는 JSON만 구조화합니다. 보수적인 구두점 복구는 유지하지만 Relations·receiver·location 누락·구형 필드를 변환하지 않습니다.
 
 Summary에는 성공 장면만 넣습니다. 성공 장면이 없거나 최종 생성에 실패하면 `status="failed"`, `text=""`, `word_count=0`입니다. 문단·목록·줄바꿈을 허용하며 단어 수는 실패 기준이 아닙니다. 신규 실패의 `raw_output`은 빈 문자열이고 Graph 토큰 한도 종료는 원문을 보존합니다.
 
-출력 저장은 임시 파일을 작성한 뒤 원자적으로 교체합니다. 완료된 실패 시도는 실패 로그에 먼저 기록해, 결과 저장 중 중단되어도 같은 최종 시도를 불필요하게 반복하지 않습니다.
+출력 저장은 임시 파일을 작성한 뒤 원자적으로 교체합니다. 실패 시도는 실패 로그에 먼저 기록하고, 재실행하면 같은 공식 생성 정책으로 재시도합니다.
 
 ## 재사용과 재시도
 
-Scene은 위 compact 필드만 읽으며 저장된 `graph`·`raw_response` 별칭이나 과거 메타데이터·상태를 추론하지 않습니다. Summary v4·`raw_fallback`·모델 필드 누락도 지원하지 않습니다. 지원 밖 기존 입력은 경로와 원인을 명시하여 거부하고 일반 재실행에서 원본을 변환하거나 덮어쓰지 않습니다. Run 이름이나 생성 당시 프롬프트 버전만으로 현재 형식의 입력을 차단하지 않습니다.
+Scene은 위 compact 필드만 읽으며 저장된 `graph`·`raw_response` 별칭이나 과거 메타데이터·상태를 추론하지 않습니다. Summary v4·`raw_fallback`·모델 필드 누락도 지원하지 않습니다. 지원 밖 기존 입력은 경로와 원인을 명시하여 거부하고 일반 재실행에서 원본을 변환하거나 덮어쓰지 않습니다. Run 이름·파일 경로는 의미 해시에서 제외하지만 생성 모델·프롬프트·설정은 일치해야 합니다.
 
-MiniCPM의 생성 조건이 바뀌면 기존 Scene 재사용을 거부하며 `--force`가 필요합니다. 새 계약을 쓰기 전에 이전 Scene·실패 로그를 제거해 중단 후 재개에서도 조건이 섞이지 않습니다. Graph 입력을 다시 준비하면 생성 계약이 캐시 식별자에 반영되어 해당 표현·학습 결과를 갱신합니다. Text에서는 Scene 입력 해시가 바뀐 기존 Summary 재사용도 거부합니다.
 
-Qwen/Gemini의 일반 생성은 같은 Run의 성공 결과를 보존합니다. 프롬프트·모델 설정·Scene 입력을 변경해도 이미 성공한 Summary는 자동으로 갱신하지 않습니다. 생성 당시 provenance를 현재 설정으로 바꾸지 않습니다. 성공 결과 갱신은 `--force`를 사용합니다.
 
-Qwen Scene은 설정된 penalty마다 전체 pass를 마친 뒤 실패 항목만 다음 pass로 넘깁니다. 재실행은 첫 penalty부터 시작합니다. Qwen Summary는 신규 콘텐츠를 첫 penalty로 처리하고, 기존 실패는 마지막 기록보다 큰 다음 penalty부터 처리합니다. 마지막 penalty까지 완료한 실패와 penalty 기록이 없는 과거 실패는 빈 Summary를 유지합니다. 실패 당시 Scene 입력 해시가 현재 입력과 달라지면 재시도합니다.
+Scene 디렉터리에는 `generation_identity.json`을 저장하여 모델·프롬프트·생성 설정을 확인합니다. compact Scene payload는 그대로 유지합니다. Summary는 생성 provenance와 Scene 내용·생성 조건이 일치할 때만 재사용합니다. 조건 변경에는 `--force` 또는 새 Run이 필요합니다. 구형 `graph_qwen`·`desc_qwen` Run은 오류로 거부하고 원본 파일은 보존합니다.
 
 Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다른 오류는 해당 요청 실패로 처리합니다. 실패를 기록한 생성 단계는 오류를 반환할 수 있으며 같은 명령으로 다시 실행합니다. 성공적으로 복구한 항목의 실패 로그는 제거합니다.
 
@@ -50,14 +45,14 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 ## Text 표현과 공유 캐시
 
-`meta`는 제목을, `graph_qwen`은 제목 없는 Summary를 사용합니다. 결합 Arm은 양쪽 공백을 제거한 제목과 Summary를 빈 줄 하나로 합칩니다. 하나만 있으면 해당 값만 사용하고, 둘 다 없으면 영벡터입니다. BGE 최대 길이는 `validation.encoder.max_length`이며 truncation 수를 기록합니다.
+`meta`는 제목을, `graph_qwen3vl`은 제목 없는 Summary를 사용합니다. 결합 Arm은 양쪽 공백을 제거한 제목과 Summary를 빈 줄 하나로 합칩니다. 하나만 있으면 해당 값만 사용하고, 둘 다 없으면 영벡터입니다. BGE 최대 길이는 `validation.encoder.max_length`이며 truncation 수를 기록합니다.
 
 공유 캐시는 `<artifacts_root>/shared_cache/{embeddings,graph_inputs,recommendations}/`입니다. 로컬 결과를 먼저 검증하고, 공유 캐시를 확인한 뒤 필요한 계산만 수행합니다. 키별 파일 잠금·체크섬·원자적 게시로 완료 결과를 보호합니다. `--force`는 읽기를 우회하며 정상적인 기존 공유 엔트리를 덮어쓰지 않습니다.
 
 - 공통 데이터: 순서가 있는 평가 catalog, 보존된 events, 사용자별 분할.
 - Text 입력: 실제 결합 텍스트·결측 상태, BGE 식별자·설정, Arm·결합 계약, 생성 provenance.
 - 생성 provenance: 프롬프트 본문 해시, 모델, 설정, 실제 Scene 입력 해시. Run 이름·파일 경로·기록 시각은 의미 해시에서 제외합니다.
-- Graph 입력: 실제 Scene 파일 바이트, catalog 순서, 제목, BGE 식별자·설정, 변환 계약.
+- Graph 입력: 실제 Scene 파일 바이트·생성 조건 파일, catalog 순서, 제목, BGE 식별자·설정, 변환 계약.
 - 추천: 표현 입력·행렬 해시, 데이터·학습 계약, 프로토콜·분할 fingerprint·seed·설정. 직접 graph는 모델 구조와 pooling도 포함합니다.
 
 Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 간결한 Scene 형식도 Run 간 공유할 수 있습니다. 입력 해시가 없으면 검증 가능한 Scene 생성 provenance가 필요합니다. 검증되지 않는 결과는 로컬에서만 사용하며, 현재 설정을 과거 기록에 소급하지 않습니다.
@@ -66,7 +61,7 @@ Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 �
 
 ## 유지하는 계약과 지원 경계
 
-설정은 `experiment_config_version: v6`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v4`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm·Text 표현 계약은 유지합니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
+설정은 `experiment_config_version: v6`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v4`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm 계약은 `title-summary-nine-arms/v3`이며 신규 Run에서 구형 `qwen` 이름을 허용하지 않습니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
 
 주 CLI는 preparation의 두 단계, extraction의 두 Scene 추출 단계와 `summarize`, validation의 임베딩·추천·진단입니다. 과거 요약 별칭, Arm·Scene 일괄 변환 명령, 독립 제목 보완 CLI는 제거했습니다. 제목 보완은 `prepare-cohort`에서 수행합니다. 기존 Run·분석 보고서·프롬프트를 자동 이동하거나 삭제하지 않습니다.
 

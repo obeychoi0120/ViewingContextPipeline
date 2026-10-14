@@ -13,7 +13,7 @@ from artifact_io import read_json, read_jsonl
 from validation.representation_inputs import documents_for_arm
 
 
-@pytest.fixture(params=[("graph", "qwen"), ("description", "qwen")])
+@pytest.fixture(params=[("graph", "qwen3vl"), ("description", "qwen3vl")])
 def case(request, ready_context, fake_models):
     representation, source = request.param
     ctx = ready_context
@@ -48,7 +48,6 @@ def case(request, ready_context, fake_models):
 
 def test_gemini_text_only_and_reuse(case, monkeypatch):
     calls, configs = [], []
-    case.ctx.config["extraction"]["greedy_decoding"] = False
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
 
     def no_qwen(**kwargs):

@@ -15,7 +15,7 @@ from validation.representation_inputs import documents_for_arm
 @pytest.mark.parametrize("legacy", ["Relations", "receiver", "missing_location", "graph_alias", "raw_response", "metadata"])
 def test_unsupported_scene_is_not_rewritten_on_resume(ready_context, fake_models, generate_all, legacy):
     generate_all(ready_context)
-    directory = ready_context.scene_arm_dir("graph_qwen")
+    directory = ready_context.scene_arm_dir("graph_qwen3vl")
     path = next(directory.glob("*.jsonl"))
     row = json.loads(path.read_text().splitlines()[0])
     if legacy == "Relations":
@@ -34,14 +34,14 @@ def test_unsupported_scene_is_not_rewritten_on_resume(ready_context, fake_models
         read_scene_records(path)
     assert str(path) in str(error.value)
     with pytest.raises(ExtractionStepError, match="unsupported"):
-        steps.extract_graph_scenes(ready_context, model="qwen", arm="graph_qwen", schema="prompts/scene_graph_v8.md")
+        steps.extract_graph_scenes(ready_context, model="qwen3vl", arm="graph_qwen3vl", schema="prompts/scene_graph_v8.md")
     assert path.read_bytes() == original and len(fake_models) == calls
 
 
 @pytest.mark.parametrize("legacy", ["v4", "raw_fallback", "missing_model"])
 def test_unsupported_summary_rejected_by_resume_and_embedding(ready_context, fake_models, generate_all, legacy):
     generate_all(ready_context)
-    path = next(ready_context.summary_arm_dir("graph_qwen").glob("*.json"))
+    path = next(ready_context.summary_arm_dir("graph_qwen3vl").glob("*.json"))
     doc = read_json(path)
     if legacy == "v4":
         doc["schema_version"] = "video-summary/v4"
@@ -52,10 +52,10 @@ def test_unsupported_summary_rejected_by_resume_and_embedding(ready_context, fak
     write_json(path, doc)
     original, calls = path.read_bytes(), len(fake_models)
     with pytest.raises(UnsupportedArtifactError) as error:
-        steps.summarize(ready_context, arm="graph_qwen", model="gemini", schema="prompts/summary_graph_v8.md")
+        steps.summarize(ready_context, arm="graph_qwen3vl", model="gemini", schema="prompts/summary_graph_v8.md")
     assert str(path) in str(error.value)
     with pytest.raises(UnsupportedArtifactError):
-        documents_for_arm(ready_context, ready_context.require_ready_cohort(), registry(ready_context.config)["graph_qwen"])
+        documents_for_arm(ready_context, ready_context.require_ready_cohort(), registry(ready_context.config)["graph_qwen3vl"])
     assert path.read_bytes() == original and len(fake_models) == calls
 
 

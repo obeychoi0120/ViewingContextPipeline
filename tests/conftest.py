@@ -61,9 +61,18 @@ def current_context(tmp_path):
     config["validation"]["model"].update(max_epochs=1, patience=1)
     config["validation"]["evaluation"]["bootstrap_samples"] = 100
     config["extraction"]["visual_evidence"]["image_resolution"] = [16, 8]
-    for model in ("qwen", "bge", "minicpm"):
+    for model in ("qwen3vl", "qwen3.5", "bge"):
         config["models"][model] = str(tmp_path / model)
         Path(config["models"][model]).mkdir()
+        if model != "bge":
+            import json
+            model_type, architecture = {
+                "qwen3vl": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),
+                "qwen3.5": ("qwen3_5", "Qwen3_5ForConditionalGeneration"),
+            }[model]
+            (Path(config["models"][model]) / "config.json").write_text(
+                json.dumps({"model_type": model_type, "architectures": [architecture]})
+            )
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(config))
     shutil.copytree(ROOT / "prompts", tmp_path / "prompts")
     return RunContext.load("test_run", root=tmp_path)
@@ -135,7 +144,7 @@ def fake_models(monkeypatch):
 
 @pytest.fixture
 def generate_all():
-    """Generate the five scene/summary sources shared by the eight current arms."""
+    """Generate the six scene/summary sources shared by the nine current arms."""
     from arm_registry import generation_registry
     from extraction import steps
 

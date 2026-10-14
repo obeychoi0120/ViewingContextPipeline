@@ -6,11 +6,12 @@ protocol:
   cohort_sampling: leave_one_out
   catalog_scope: retained_sequence_catalog
   graph_extractors:
-  - qwen
+  - qwen3vl
+  - qwen3.5
   - gemini
-  - minicpm
   description_extractors:
-  - qwen
+  - qwen3vl
+  - qwen3.5
   - gemini
 artifacts_root: artifacts
 data:
@@ -20,8 +21,8 @@ data:
   titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
   titles_supplement_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-50k_titles.csv
 models:
-  minicpm: /home_nvme/shared/models/MiniCPM-V-4.7-1B/
-  qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
+  qwen3vl: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
+  qwen3.5: /home_nvme/shared/models/Qwen3.5-2B
   bge: /home_nvme/shared/models/bge-large-en-v1.5
   gemini:
     project_id: insight-dev-490002
@@ -31,14 +32,6 @@ models:
     thinking_level: low
     media_resolution: MEDIA_RESOLUTION_LOW
 extraction:
-  minicpm:
-    gpu_memory_utilization: 0.95
-    max_model_len: 8192
-    max_num_batched_tokens: 8192
-    max_num_seqs: 32
-    renderer_num_workers: 4
-    vision_downsample: 4
-    max_slice_nums: 9
   gemini:
     threads: 128
   qwen:
@@ -57,37 +50,21 @@ extraction:
     - 352
     scene_duration: 30
     num_keyframes: 6
-  greedy_decoding: true
-  graph_repetition_penalty:
-  - 1.05
-  - 1.1
-  - 1.15
-  - 1.20
-  description_repetition_penalty:
-  - 1.05
-  - 1.1
-  - 1.15
-  - 1.20
-  summary_repetition_penalty:
-  - 1.0
-  - 1.05
-  - 1.1
-  - 1.15
-  summary_sampling:
-    temperature: 0.2
-    top_p: 0.8
-    top_k: 20
   description:
-    qwen:
+    qwen3vl:
+      scene_max_new_tokens: 512
+      summary_max_new_tokens: 512
+    qwen3.5:
       scene_max_new_tokens: 512
       summary_max_new_tokens: 512
     gemini:
       scene_max_new_tokens: 1024
       summary_max_new_tokens: 1024
   graph:
-    minicpm:
+    qwen3vl:
       scene_max_new_tokens: 384
-    qwen:
+      summary_max_new_tokens: 512
+    qwen3.5:
       scene_max_new_tokens: 384
       summary_max_new_tokens: 512
     gemini:

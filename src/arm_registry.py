@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-CONCAT_ARM_CONTRACT = "title-summary-six-arms/v2"
+CONCAT_ARM_CONTRACT = "title-summary-nine-arms/v3"
 CONCAT_POLICY = "title-summary-double-newline/v1"
 EXPERIMENT_CONFIG_VERSION = "v6"
 
@@ -18,22 +18,24 @@ class Arm:
 
 ARMS = (
     Arm("meta", "metadata", uses_title=True),
-    Arm("graph_qwen", "graph", "qwen", False, "graph_qwen"),
-    Arm("graph_qwen_meta", "graph", "qwen", True, "graph_qwen"),
+    Arm("graph_qwen3vl", "graph", "qwen3vl", False, "graph_qwen3vl"),
+    Arm("graph_qwen3vl_meta", "graph", "qwen3vl", True, "graph_qwen3vl"),
+    Arm("graph_qwen3.5", "graph", "qwen3.5", False, "graph_qwen3.5"),
+    Arm("graph_qwen3.5_meta", "graph", "qwen3.5", True, "graph_qwen3.5"),
+    Arm("desc_qwen3.5_meta", "description", "qwen3.5", True, "desc_qwen3.5"),
     Arm("graph_gemini_meta", "graph", "gemini", True, "graph_gemini"),
-    Arm("desc_qwen_meta", "description", "qwen", True, "desc_qwen"),
+    Arm("desc_qwen3vl_meta", "description", "qwen3vl", True, "desc_qwen3vl"),
     Arm("desc_gemini_meta", "description", "gemini", True, "desc_gemini"),
-    Arm("graph_minicpm", "graph", "minicpm", False, "graph_minicpm"),
-    Arm("graph_minicpm_meta", "graph", "minicpm", True, "graph_minicpm"),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)
     for name, kind, model in (
-        ("graph_qwen", "graph", "qwen"),
-        ("desc_qwen", "description", "qwen"),
+        ("graph_qwen3vl", "graph", "qwen3vl"),
+        ("desc_qwen3vl", "description", "qwen3vl"),
+        ("graph_qwen3.5", "graph", "qwen3.5"),
+        ("desc_qwen3.5", "description", "qwen3.5"),
         ("graph_gemini", "graph", "gemini"),
         ("desc_gemini", "description", "gemini"),
-        ("graph_minicpm", "graph", "minicpm"),
     )
 )
 
@@ -65,8 +67,8 @@ def generation_registry(config):
 
 
 def generated_arm(config, representation, model):
-    if model not in {"gemini", "qwen", "minicpm"}:
-        raise ValueError("model/source must be qwen, gemini or minicpm")
+    if model not in {"gemini", "qwen3vl", "qwen3.5"}:
+        raise ValueError("model/source must be qwen3vl, qwen3.5 or gemini")
     source = next(
         (arm for arm in SOURCES if arm.representation == representation and arm.model == model),
         None,
