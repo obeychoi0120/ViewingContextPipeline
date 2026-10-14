@@ -21,8 +21,8 @@ GRAPH = {
         {"id": "person2", "name": "person", "attributes": ["blue shirt"]},
     ],
     "actions": [
-        {"actor": "person1", "action": "looking at", "target": "person2", "tool": None, "location": None},
-        {"actor": "person2", "action": "waving to", "target": "person1", "tool": None, "location": None},
+        {"actor": "person1", "action": "looking at", "target": "person2", "tool": None, "place": None},
+        {"actor": "person2", "action": "waving to", "target": "person1", "tool": None, "place": None},
     ],
 }
 PROSE = "A person in a red jacket looks at a person in a blue shirt, who waves back. The interaction appears to be a casual greeting."
@@ -97,7 +97,12 @@ def ready_context(current_context, monkeypatch):
 
 
 @pytest.fixture
-def fake_models(monkeypatch):
+def graph_response():
+    return GRAPH_TEXT
+
+
+@pytest.fixture
+def fake_models(monkeypatch, graph_response):
     calls = []
 
     @contextmanager
@@ -106,7 +111,7 @@ def fake_models(monkeypatch):
             tasks = list(tasks)
             calls.append(tasks)
             for task in tasks:
-                callback(task.task_id, GRAPH_TEXT if "[Entities]" in task.prompt else PROSE)
+                callback(task.task_id, graph_response if "[Entities]" in task.prompt else PROSE)
             return {}
 
         yield generate
@@ -124,7 +129,7 @@ def fake_models(monkeypatch):
                         task_id=task.task_id,
                         error=None,
                         response_diagnostics=None,
-                        text=GRAPH_TEXT if "[Entities]" in task.prompt else PROSE,
+                        text=graph_response if "[Entities]" in task.prompt else PROSE,
                     )
                 )
 

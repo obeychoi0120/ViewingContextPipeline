@@ -5,7 +5,7 @@ from itertools import chain
 from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
-from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
+from extraction.semantic_graph import parse_or_repair_graph
 from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
     write_progress,
@@ -14,7 +14,7 @@ from extraction.step_support import (
 
 
 def graph_scene_result(row, text, *, error=None, diagnostics=None):
-    """Convert one response without changing artifacts or the raw graph."""
+    """Convert one response; preserve unresolved graphs as raw text."""
     if error is None and not text.strip():
         error = "model produced an empty graph"
     parsed = parse_or_repair_graph(text) if error is None else None
@@ -27,7 +27,7 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None):
             **common,
             "graph": parsed.graph if structured else text,
             "parse_mode": parsed.parse_mode if structured else "text",
-            "semantic_warnings": graph_semantic_warnings(parsed.graph) if structured else warnings,
+            "semantic_warnings": warnings,
         }, None
     failure = {
         **common,

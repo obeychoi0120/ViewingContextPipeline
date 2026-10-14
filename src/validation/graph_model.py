@@ -30,7 +30,7 @@ class SceneRoleEncoder(nn.Module):
     Exchange: cosine GCN, attention GCN or Transformer; pooling: mean or attention.
     """
 
-    ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, location; receiver is ignored.
+    ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, place; receiver is ignored.
 
     def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean",
                  dropout=0.0):

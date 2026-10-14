@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import re
 
-from extraction.graph_warnings import MISSING_REQUIRED, INVALID_ACTION_SYNTAX, PARSE_ERROR
-from extraction.structured_output import OutputValidationError, validate_graph_structure
+from extraction.graph_warnings import MISSING_REQUIRED, PARSE_FAILED
+from extraction.structured_output import OutputValidationError, normalize_graph_references
 
 from extraction.semantic_graph.json_repair import (
     GraphParseResult,
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v10"
+GRAPH_PARSER_VERSION = "graph-text/v14"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -21,7 +21,7 @@ _ACTION_MARK = re.compile(r"[<>=→⇒←↔⇐⟵⟷⟺－＞]|(?<=\s)[-–—]
 
 
 class GraphTextError(ValueError):
-    def __init__(self, message, tag=PARSE_ERROR):
+    def __init__(self, message, tag=PARSE_FAILED):
         super().__init__(message)
         self.tag = tag
 
@@ -49,9 +49,13 @@ def _unwrap(text):
     return text
 
 
-def _entity(line, *, repair):
+def _entity(line, *, repair, named=False):
     parts = re.split(r"[:：]" if repair else ":", line, maxsplit=1)
-    if len(parts) != 2 or not _ID.fullmatch(parts[0].strip()):
+    if named:
+        parts = [re.split(r"[;；]", line, maxsplit=1)[0].strip(), line]
+        if not _valid_reference(parts[0], named=True) or parts[0].casefold() in {"none", "unknown"}:
+            raise GraphTextError("expected a non-reserved entity name")
+    if len(parts) != 2 or (not named and not _ID.fullmatch(parts[0].strip())):
         raise GraphTextError("expected entity 'id: kind; attribute'")
     values = [value.strip() for value in re.split(r"[;；]" if repair else ";", parts[1])]
     if not repair and any(char in parts[1] for char in "：；"):
@@ -65,7 +69,13 @@ def _entity(line, *, repair):
     return {"id": parts[0].strip(), "name": values[0], "attributes": values[1:]}
 
 
-def _action_endpoints(line):
+def _valid_reference(value, *, named):
+    if not named:
+        return bool(_ID.fullmatch(value))
+    return bool(value and not re.search(r"[;；:：\r\n]", value) and not _ACTION_MARK.search(value))
+
+
+def _action_endpoints(line, *, named=False):
     delimiters = list(_DELIMITER.finditer(line))
     if len(delimiters) != 2:
         raise GraphTextError("expected exactly two unambiguous action delimiters")
@@ -74,8 +84,8 @@ def _action_endpoints(line):
     predicate = line[left.end() : right.start()].strip()
     target = line[right.end() :].strip()
     if (
-        not _ID.fullmatch(subject)
-        or not _ID.fullmatch(target)
+        not _valid_reference(subject, named=named)
+        or not _valid_reference(target, named=named)
         or not predicate
         or _ACTION_MARK.search(predicate)
     ):
@@ -85,20 +95,13 @@ def _action_endpoints(line):
     return subject, predicate, target
 
 
-def _action(line, *, repair):
-    try:
-        return _action_fields(line, repair=repair)
-    except GraphTextError as exc:
-        raise GraphTextError(str(exc), INVALID_ACTION_SYNTAX) from exc
-
-
-def _action_fields(line, *, repair):
+def _action(line, *, repair, named=False):
     parts = re.split(r"[;；]" if repair else ";", line)
     if len(parts) != 3:
-        raise GraphTextError("expected actor - action - target; tool; location")
-    body, tool, location = (part.strip() for part in parts)
+        raise GraphTextError("expected actor - action - target; tool; place")
+    body, tool, place = (part.strip() for part in parts)
     if repair:
-        actor, action, target = _action_endpoints(body)
+        actor, action, target = _action_endpoints(body, named=named)
     else:
         fields = body.split(" - ")
         if len(fields) != 3:
@@ -106,8 +109,8 @@ def _action_fields(line, *, repair):
         actor, action, target = (part.strip() for part in fields)
         if not action or _ACTION_MARK.search(action):
             raise GraphTextError("empty or ambiguous action")
-    if any(not _ID.fullmatch(value) for value in (actor, target, tool, location)):
-        raise GraphTextError("expected endpoint IDs, none, or unknown")
+    if any(not _valid_reference(value, named=named) for value in (actor, target, tool, place)):
+        raise GraphTextError("expected entity references, none, or unknown")
 
     def reference(value):
         token = value.casefold() if repair else value
@@ -118,7 +121,7 @@ def _action_fields(line, *, repair):
         "action": action,
         "target": reference(target),
         "tool": reference(tool),
-        "location": reference(location),
+        "place": reference(place),
     }
 
 
@@ -181,6 +184,12 @@ def _parse_context_actions(text, *, repair):
             context[key] = value
     if set(context) != {"medium", "format", "topics"}:
         raise GraphTextError("missing context field", MISSING_REQUIRED)
+    # A whole entity section uses either v9 names or legacy id: kind rows.
+    entity_styles = {bool(re.search(r"[:：]", re.split(r"[;；]", row, maxsplit=1)[0]))
+                     for row in sections["Entities"]}
+    if len(entity_styles) > 1:
+        raise GraphTextError("mixed entity declaration formats")
+    named = entity_styles == {False}
     graph = dict(context)
     for section, parse in (("Entities", _entity), ("Actions", _action)):
         rows = sections[section]
@@ -192,12 +201,12 @@ def _parse_context_actions(text, *, repair):
                 raise GraphTextError(f"[{section}]: none mixed with other items")
             graph[section.lower()] = []
         else:
-            graph[section.lower()] = [parse(line, repair=repair) for line in rows]
-    return graph
+            graph[section.lower()] = [parse(line, repair=repair, named=named) for line in rows]
+    return graph, named
 
 
 def parse_or_repair_graph(text: str) -> GraphParseResult:
-    """Consume complete current Actions graphs without inventing or removing fields."""
+    """Parse complete Actions graphs; undeclared role IDs become unknown."""
     raw = str(text or "")
     if not raw.strip():
         return GraphParseResult(None, error="empty VLM output", warning=(MISSING_REQUIRED,))
@@ -206,22 +215,36 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
         if unwrapped.startswith("{"):
             parsed = parse_json_graph(unwrapped)
             if parsed.graph is not None:
-                try:
-                    validate_graph_structure(parsed.graph)
-                except OutputValidationError as exc:
-                    return GraphParseResult(None, error=str(exc), warning=tuple(exc.tags))
-                if unwrapped != raw.strip():
-                    return GraphParseResult(parsed.graph, parse_mode="repaired")
+                mode = "repaired" if unwrapped != raw.strip() else parsed.parse_mode
+                return _validated_graph(parsed.graph, mode)
             return parsed
         try:
-            graph = _parse_context_actions(raw, repair=False)
+            graph, named = _parse_context_actions(raw, repair=False)
             mode = "native"
         except GraphTextError:
-            graph = _parse_context_actions(unwrapped, repair=True)
+            graph, named = _parse_context_actions(unwrapped, repair=True)
             mode = "repaired"
-        validate_graph_structure(graph)
-        return GraphParseResult(graph, parse_mode=mode)
+        return _validated_graph(graph, mode, named=named)
     except OutputValidationError as exc:
         return GraphParseResult(None, error=str(exc), warning=tuple(exc.tags))
     except GraphTextError as exc:
         return GraphParseResult(None, error=f"graph text repair failed: {exc}", warning=(exc.tag,))
+
+
+def _validated_graph(graph, mode, *, named=False):
+    graph, changed = normalize_graph_references(graph)
+    if named:
+        # Resolve exact names before assigning IDs so an undeclared e1 cannot
+        # accidentally reference the first generated entity. Keep duplicate
+        # declarations and last-reference behavior consistent with legacy input.
+        ids = {entity["id"]: f"e{index}" for index, entity in enumerate(graph["entities"], 1)}
+        for index, entity in enumerate(graph["entities"], 1):
+            entity["id"] = f"e{index}"
+        for action in graph["actions"]:
+            for role in ("actor", "target", "tool", "place"):
+                value = action[role]
+                action[role] = value if value in (None, "unknown") else ids[value]
+    return GraphParseResult(
+        graph,
+        parse_mode="repaired" if changed else mode,
+    )

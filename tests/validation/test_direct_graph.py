@@ -15,7 +15,7 @@ def scene():
     return {'medium': 'live_action', 'format': 'demonstration', 'topics': ['cooking'],
             'entities': [{'id': 'p', 'name': 'cook', 'attributes': ['red apron']},
                          {'id': 'c', 'name': 'carrot', 'attributes': []}],
-            'actions': [{'actor': 'p', 'action': 'cutting', 'target': 'c', 'tool': None, 'location': 'unknown'}]}
+            'actions': [{'actor': 'p', 'action': 'cutting', 'target': 'c', 'tool': None, 'place': 'unknown'}]}
 
 
 def write_scenes(context, cid, graphs):
@@ -46,6 +46,27 @@ def graph_data(ready_context, monkeypatch):
     monkeypatch.setattr('validation.graph_inputs.encode_texts', encode)
     prepare(context, target=['graph_qwen3vl', 'graph_qwen3vl_meta', 'meta'])
     return context, cohort
+
+
+def test_place_reference_keeps_role_edge_and_rejects_old_location(graph_data):
+    from extraction.errors import UnsupportedArtifactError
+
+    context, cohort = graph_data
+    cid = cohort['catalog'][0]['content_id']
+    graph = scene()
+    graph['entities'].append({'id': 'k', 'name': 'kitchen', 'attributes': []})
+    graph['actions'][0]['place'] = 'k'
+    path = write_scenes(context, cid, [graph])
+    arm = registry(context.config)['graph_qwen3vl']
+    _, arrays, _ = build_input(context, cohort, arm)
+    assert [1, 3, 4] in arrays['edges'].tolist()  # Sorted IDs: c, k, p.
+    assert arrays['missing'][0].tolist() == [3, -1, -1, 0, 0, -1]
+    graph['actions'][0]['location'] = graph['actions'][0].pop('place')
+    write_scenes(context, cid, [graph])
+    original = path.read_bytes()
+    with pytest.raises(UnsupportedArtifactError, match='place required'):
+        build_input(context, cohort, arm)
+    assert path.read_bytes() == original
 
 
 def test_input_defaults_isolation_actionless_and_missing(graph_data):
@@ -125,18 +146,79 @@ def test_invalid_warning_variable_size_and_cache_invalidation(graph_data):
     large['entities'] += [{'id': f'e{i}', 'name': 'plate', 'attributes': []} for i in range(30)]
     large['actions'] *= 8
     invalid = scene()
-    invalid['actions'][0]['target'] = 'missing'
+    invalid['actions'][0]['actor'] = 123
     p = write_scenes(context, cid, [large, invalid, scene()])
     rows = [json.loads(line) for line in p.read_text().splitlines()]
-    rows[2]['warning'] = ['INVALID_REFERENCE']
+    rows[2]['warning'] = ['PARSE_FAILED']
     p.write_text('\n'.join(map(json.dumps, rows)))
     _, arrays, stats = build_input(context, cohort, arm)
     assert arrays['scene_offsets'][1] == 40
-    assert stats['counts']['invalid_structure'] == 1
-    assert stats['counts']['warning'] == 1
+    assert stats['counts']['invalid_structure'] == 0
+    assert stats['counts']['warning'] == 2
     assert source_identity(context, cohort, arm) != before
     with pytest.raises(ValueError, match='stale'):
         verify(context, cohort, ['graph_qwen3vl'])
+
+
+@pytest.mark.parametrize('raw', [False, True])
+def test_repaired_references_reach_graph_training_without_rewriting_sources(graph_data, raw):
+    context, cohort = graph_data
+    arm = registry(context.config)['graph_qwen3vl']
+    graph = scene()
+    graph['actions'][0].update(actor='absent-person', tool='absent-tool', place='absent-place')
+    cid = cohort['catalog'][0]['content_id']
+    path = write_scenes(context, cid, [json.dumps(graph) if raw else graph])
+    row = json.loads(path.read_text())
+    row['warning'] = ['INVALID_REFERENCE']
+    path.write_text(json.dumps(row) + '\n')
+    original = path.read_bytes()
+    _, arrays, stats = build_input(context, cohort, arm)
+    assert stats['videos'][0]['valid_scenes'] == 1
+    # Actor/tool/place are unknown; target keeps its declared entity edge.
+    assert arrays['missing'][0].tolist() == [2, 1, -1, 1, 0, 1]
+    assert arrays['edges'][:2].tolist() == [[0, 2, 1], [2, 0, 6]]
+    assert path.read_bytes() == original
+    assert prepare(context, target=['graph_qwen3vl'])['generated_arms'] == ['graph_qwen3vl']
+    assert prepare(context, target=['graph_qwen3vl'])['reused_arms'] == ['graph_qwen3vl']
+    torch = pytest.importorskip('torch')
+    from validation.graph_model import new_graph_model, graph_batch
+    from validation.steps import validation_config
+    model = new_graph_model(context, validation_config(context), 'graph_qwen3vl', 'cpu')
+    output = model.graph_encoder(graph_batch(model.store, [0], 'cpu'))
+    assert torch.isfinite(output).all()
+    output.square().sum().backward()
+    assert any(p.grad is not None and p.grad.abs().sum() > 0
+               for p in model.graph_encoder.parameters())
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize('case', ['duplicate', 'unknown-endpoints', 'none-endpoints'])
+@pytest.mark.parametrize('raw', [False, True])
+def test_semantic_errors_are_used_and_duplicate_references_use_last_entity(graph_data, case, raw):
+    context, cohort = graph_data
+    graph = scene()
+    if case == 'duplicate':
+        graph['entities'].append({'id': 'p', 'name': 'second cook', 'attributes': ['blue apron']})
+    elif case == 'unknown-endpoints':
+        graph['actions'][0].update(actor='absent', target='absent')
+    else:
+        graph['actions'][0].update(actor=None, target=None)
+    path = write_scenes(context, cohort['catalog'][0]['content_id'], [json.dumps(graph) if raw else graph])
+    row = json.loads(path.read_text())
+    row['warning'] = ['INVALID_REFERENCE', 'DUPLICATE_ENTITY_ID', 'INVALID_ACTION_SYNTAX']
+    path.write_text(json.dumps(row) + '\n')
+    original = path.read_bytes()
+    texts, arrays, stats = build_input(context, cohort, registry(context.config)['graph_qwen3vl'])
+    assert stats['videos'][0]['valid_scenes'] == 1
+    assert stats['counts']['warning'] == 0
+    if case == 'duplicate':
+        assert arrays['scene_offsets'][1] == 4
+        assert arrays['edges'][:4].tolist() == [[2, 3, 0], [3, 2, 5], [0, 3, 1], [3, 0, 6]]
+        assert any('second cook' in text for text in texts)
+    else:
+        assert arrays['edge_offsets'][1] == 0
+        assert arrays['missing'][0, 1:3].tolist() == ([1, 1] if case == 'unknown-endpoints' else [0, 0])
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize('pool', ['mean'])
@@ -372,7 +454,7 @@ def test_entity_id_renaming_and_all_scene_orderings_preserve_outputs(graph_data,
         for entity in graph['entities']:
             entity['id'] = mapping[entity['id']]
         for action in graph['actions']:
-            for role in ('actor', 'target', 'tool', 'location'):
+            for role in ('actor', 'target', 'tool', 'place'):
                 if action.get(role) in mapping:
                     action[role] = mapping[action[role]]
         renamed.append(graph)
@@ -512,7 +594,7 @@ def test_previous_graph_input_contract_is_not_reused(graph_data):
     directory = context.representations_dir / 'graph_qwen3vl_embeddings'
     path = directory / 'manifest.json'
     manifest = json.loads(path.read_text())
-    manifest['version'] = 'role-graph-inputs/v3'
+    manifest['version'] = 'role-graph-inputs/v7'
     path.write_text(json.dumps(manifest))
     assert not bundle_valid(directory, manifest['input_hash'], 1024)
 

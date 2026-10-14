@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from extraction.scene_storage import read_scene_records
@@ -29,7 +31,7 @@ def scene(kind, index=0):
         row.update(
             graph='{"entities": [',
             parse_mode="text",
-            semantic_warnings=["PARSE_ERROR"],
+            semantic_warnings=["PARSE_FAILED"],
         )
     return row
 
@@ -72,3 +74,43 @@ def test_interrupted_publication_preserves_readable_previous_results(tmp_path, m
     assert path.read_bytes() == before
     assert read_scene_records(path)[0]["scene_idx"] == 3
     assert not (path.parent / ".metadata").exists()
+
+
+@pytest.mark.parametrize('raw', [False, True])
+def test_existing_reference_warning_is_recovered_in_memory_and_delivered_to_summary(tmp_path, raw):
+    from extraction.semantic_graph import graph_summary_prompt
+
+    graph = {
+        **GRAPH,
+        'entities': [{'id': 'p', 'name': 'person', 'attributes': []}],
+        'actions': [{'actor': 'p', 'action': 'holding', 'target': 'missing',
+                     'tool': None, 'place': 'unknown'}],
+    }
+    path = tmp_path / 'video.jsonl'
+    path.write_text(json.dumps({
+        'content_id': 'video', 'scene_idx': 0, 'tokens': 12,
+        'warning': ['INVALID_REFERENCE'],
+        'scene_graph': json.dumps(graph) if raw else graph,
+    }) + '\n')
+    original = path.read_bytes()
+    records = read_scene_records(path)
+    restored = records[0]
+    assert restored['parse_mode'] == 'repaired'
+    assert restored['tokens'] == 12 and restored['semantic_warnings'] == []
+    assert restored['graph']['actions'][0]['target'] == 'unknown'
+    assert json.loads(graph_summary_prompt('{scenes}', records))[0]['observation'] == restored['graph']
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize('legacy,current', [
+    (['PARSE_ERROR'], ['PARSE_FAILED']),
+    (['INVALID_REFERENCE', 'DUPLICATE_ENTITY_ID', 'INVALID_ACTION_SYNTAX'], []),
+    (['MISSING_REQUIRED', 'PARSE_ERROR', 'PARSE_FAILED'], ['MISSING_REQUIRED', 'PARSE_FAILED']),
+])
+def test_only_two_warning_tags_remain_and_legacy_tags_are_normalized(legacy, current):
+    from extraction.graph_warnings import WARNING_TAGS, warning_tags
+
+    assert WARNING_TAGS == ('MISSING_REQUIRED', 'PARSE_FAILED')
+    assert warning_tags(legacy) == current
+    with pytest.raises(ValueError):
+        warning_tags(['UNRECOGNIZED'])

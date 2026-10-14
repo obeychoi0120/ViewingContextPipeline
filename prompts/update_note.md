@@ -8,9 +8,20 @@
 
 ## scene_graph
 
-대상(최신순): [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
+대상(최신순): [v9](../prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
 
 **개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소.**
+
+### v8 → v9: 개체 이름 직접 참조와 place 용어 적용
+
+2026-10-14 프롬프트 반영. [scene_graph_v9](../prompts/scene_graph_v9.md)는 별도 ID와 개체 이름을 대응시키는 생성 부담을 줄이려는 설계입니다. 2B 모델의 정확도 개선은 아직 검증되지 않은 가설입니다.
+
+- Entities를 `id: kind; attribute; attribute`에서 `name; attribute; attribute`로 변경합니다. 같은 이름의 서로 다른 개체가 여러 개일 때만 `person1`, `person2`처럼 번호를 붙입니다.
+- Actions는 선언된 이름을 공백과 번호까지 정확히 재사용하며, 같은 개체의 이름과 번호를 유지합니다. 동의어 치환이나 속성을 포함한 참조는 허용하지 않습니다.
+- 행동 형식을 `actor - action - target; tool; place`로 변경합니다. place는 행동이 일어나는 장소이며 목적지가 아닙니다. 불명확한 장소는 `unknown`으로 표현합니다.
+- 두 사람이 등장하는 예시로 번호 구분과 이름 참조를 설명합니다. Context, 개수 상한, 근거 제한, none/unknown 구분, 전달 물체를 target으로 두는 원칙은 유지합니다.
+
+**연동 및 검증 범위:** 내부 필드도 `place`로 변경하는 사용자 결정에 맞춘 프롬프트입니다. 후속 코드 작업에서 내부 `location` → `place` 전환을 반영했습니다. 파서 `graph-text/v14`, 장면 스키마 `scene-graph/v8`, 직접 Graph 입력 `role-graph-inputs/v8`을 사용합니다. 기존 정책대로 `location` 구조화 데이터는 자동 변환 없이 거부하고 원본을 보존합니다. 이름 기반 v9 출력의 파싱·참조 처리를 구현했습니다. 공백·번호를 포함한 이름을 정확히 대조한 뒤 장면별 내부 ID를 부여하며 이름·속성을 보존합니다. 기존 ID 선언 형식과 현재 place JSON도 지원합니다. 미선언 이름은 기존 정책대로 warning 없이 unknown으로 처리하고, 중복 이름은 선언을 모두 보존하되 마지막 선언으로 연결합니다. v9 예시의 파싱·저장·요약 전달과 Qwen3-VL·Qwen3.5·Gemini 실행 경로 및 직접 Graph 입력을 가짜 backend로 검증했습니다. 실제 모델 생성·추천 성능은 검증하지 않았습니다. [summary_graph_v9](../prompts/summary_graph_v9.md)도 place와 장면별 이름·번호 해석에 맞춰 갱신합니다. 기존 v8 파일은 보존합니다.
 
 ### v7 → v8: receiver 제거로 행동 역할 단순화
 
@@ -106,9 +117,19 @@ v1은 직접 보이는 배경·개체·행동·변화를 포괄적으로 묘사�
 
 ## summary_graph
 
-대상(최신순): [v8](../prompts/summary_graph_v8.md) → [v7](../prompts/summary_graph_v7.md) → [v6](../prompts/summary_graph_v6.md) → [v5](../prompts/summary_graph_v5.md)
+대상(최신순): [v9](../prompts/summary_graph_v9.md) → [v8](../prompts/summary_graph_v8.md) → [v7](../prompts/summary_graph_v7.md) → [v6](../prompts/summary_graph_v6.md) → [v5](../prompts/summary_graph_v5.md)
 
 **개선 흐름: 중복을 줄인 자연어 요약 → Context + Actions의 의미 보존 → 확장 역할과 누락값 의미 보존 → receiver 없는 입력 해석으로 동기화.**
+
+### v8 → v9: place 필드와 장면별 개체 이름·번호 해석 반영
+
+2026-10-14 프롬프트 반영. [summary_graph_v9](../prompts/summary_graph_v9.md)는 [scene_graph_v9](../prompts/scene_graph_v9.md) 및 내부 장소 필드를 `place`로 변경하는 결정에 맞춰 요약 지침을 갱신합니다.
+
+- 장소 역할 설명과 누락 기본값을 `location`에서 `place`로 변경합니다. 행동 장소와 목적지를 구분하고, `unknown`인 장소를 추측하지 않는 원칙은 유지합니다.
+- 장면별 동일성 제한을 ID뿐 아니라 개체 이름과 번호에도 적용합니다. 서로 다른 장면의 `person1`이 같은 사람이라는 의미는 아니며, 요약 본문에 식별용 번호를 노출하지 않도록 명시합니다.
+- actor·target·tool의 의미, 전달 수령자 추측 금지, none/unknown 해석, 근거 제한과 영문 자연어 200–300단어 권장·350단어 최대는 유지합니다. 입력 자리표시자 `{scenes}`도 유지합니다.
+
+**호환성과 검증 범위:** 내부 `place` 필드를 사용하는 입력을 전제로 한 새 프롬프트이며, 기존 v8은 보존합니다. 프롬프트 변경만으로 내부 스키마나 과거 Run 데이터가 변환되지는 않습니다. 후속 코드 작업에서 내부 스키마·파서·저장·Summary 입력·직접 Graph 역할을 `place`로 통일했습니다. 구형 `location` 구조화 데이터는 자동 변환하지 않고 거부합니다. 실제 Summary 생성·추천 성능 평가는 수행하지 않았습니다.
 
 ### v7 → v8: receiver 제외와 수령자 추측 방지
 

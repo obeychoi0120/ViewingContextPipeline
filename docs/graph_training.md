@@ -29,13 +29,13 @@ Text는 `--representation-mode text`를 사용하며 Description Arm은 text에�
 | Text Graph·Desc | 제목 BGE 1024 → Linear 128; Summary BGE 1024 → Linear 384 → concat 512 → R |
 | Graph | 네 성분의 독립 Linear 1024→128 → Action 역할 결합 → Scene concat 512 → R_scene → 유효 Scene Mean |
 
-Graph의 네 Projection은 Title·Entities·Actions·Context마다 독립적이고 모든 Scene에서 공유됩니다. 제목은 영상당 한 번 projection합니다. 각 Action은 `[action, actor, target, tool, location]`의 640차원 concat에서 `a + ReLU(Linear(640,128)(concat))`으로 보정합니다. 역할 연결의 Entity projection을 사용하고 `none`과 `unknown`은 역할별 별도 학습 가능한 상태 벡터를 사용합니다. 현재 입력에는 receiver가 없으며 Entity→Action 한 번만 전달합니다. 역방향 갱신·node-type embedding·다층 message passing은 없습니다.
+Graph의 네 Projection은 Title·Entities·Actions·Context마다 독립적이고 모든 Scene에서 공유됩니다. 제목은 영상당 한 번 projection합니다. 각 Action은 `[action, actor, target, tool, place]`의 640차원 concat에서 `a + ReLU(Linear(640,128)(concat))`으로 보정합니다. 역할 연결의 Entity projection을 사용하고 `none`과 `unknown`은 역할별 별도 학습 가능한 상태 벡터를 사용합니다. 현재 입력에는 receiver가 없으며 Entity→Action 한 번만 전달합니다. 역방향 갱신·node-type embedding·다층 message passing은 없습니다.
 
 Scene은 `[title; Entity mean; 보정된 Action mean; Context]` 순서로 concat하고 Scene MLP를 적용한 **뒤** 평균냅니다. Entity나 Action이 없으면 해당 슬롯은 0입니다. Scene이 없고 제목만 있으면 `[title; 0; 0; 0]`을 Scene MLP에 넣습니다. 제목과 유효 Scene 모두 없거나 padding이면 최종 Item은 정확히 0입니다. Graph에는 pooling 뒤 Item MLP가 없습니다.
 
 Text의 누락 성분은 projection 이후 0으로 마스킹하며, 전체 누락과 padding은 Item MLP 이후 다시 0으로 마스킹합니다. 부분 누락 슬롯은 MLP를 거친 후에도 0이어야 하는 것은 아닙니다.
 
-BGE Large 1024차원 float32 특징은 동결됩니다. 현재 compact Scene·Context/Entities/Actions를 읽으며 Entity·Action 인덱스, edge·결측 배열의 shape는 유지합니다. 입력 계약은 `role-graph-inputs/v4`입니다. receiver 예약 슬롯은 모델/checkpoint shape를 위해 유지하고 항상 absent 상태입니다. Relations·receiver가 있는 기존 Scene은 오류로 거부하고 원본은 보존합니다. raw·warning·구조 오류 Scene은 제외하고 정상적인 Action 없는 Scene·고립 Entity는 유지합니다. location은 명시해야 하며 `unknown`과 `none`을 구분합니다. Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
+BGE Large 1024차원 float32 특징은 동결됩니다. 현재 compact Scene·Context/Entities/Actions를 읽으며 Entity·Action 인덱스, edge·결측 배열의 shape는 유지합니다. 입력 계약은 `role-graph-inputs/v8`입니다. receiver 예약 슬롯은 모델/checkpoint shape를 위해 유지하고 항상 absent 상태입니다. Relations·receiver가 있는 기존 Scene은 오류로 거부하고 원본은 보존합니다. 미선언 역할 참조는 Warning 없이 `unknown`으로 바꾸고 actor·target이 모두 불명인 Action도 유지합니다. 중복 ID의 Entity는 모두 보존하며 참조 Edge는 같은 ID의 마지막 선언에 연결합니다. Warning은 `MISSING_REQUIRED`와 `PARSE_FAILED`만 기록하며, 구조화할 수 없는 Raw Text와 필수 필드·타입 오류 Scene은 제외합니다. 기존 Scene의 제거된 Warning은 무시하고 Raw Text는 읽을 때 다시 파싱합니다. 원본 파일은 변경하지 않습니다. 정상적인 Action 없는 Scene·고립 Entity도 유지합니다. place은 명시해야 하며 `unknown`과 `none`을 구분합니다. Entity ID는 BGE 입력에 넣지 않습니다. Scene·노드 수는 자르지 않습니다.
 
 Entity·Action·Context는 각각 별도로 BGE에 입력합니다. Entity는 `Name` 다음 `Attributes`, Context는 `Format`·`Medium`·`Topics` 순서로 줄바꿈하며, Action은 동작 텍스트만 사용합니다. Attributes와 Topics 원소는 기존처럼 정렬하고 `, `로 연결합니다. 빈 목록은 필드명과 콜론만 남깁니다. 예시 입력은 다음과 같습니다.
 
@@ -62,7 +62,7 @@ Context는 위 세 필드를 합친 문자열 하나를 Scene별로 임베딩합
 
 Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph gnn은 `sasrec-role-graph/v10`, 학습 구현은 `shared-scenes-leave-one-out-training/v2`, packed 실행은 `packed-role-graph/v2`입니다. 모델 identity에는 MLP 구조·정규화 제거·역할 결합·Scene 차원·Pooling이 포함되며 학습 설정은 training hash와 `training.json`에 기록됩니다. 과거 checkpoint·추천 결과는 새 결과로 재사용하지 않습니다. 원본·인코더·현재 입력 계약이 동일한 BGE 입력 캐시는 재사용합니다. 이전 Graph 입력 계약 캐시는 새 경로에서 재생성합니다.
 
-배치 준비에서 Action별 actor·target·tool·location의 Entity 인덱스와 결측 상태를 계산합니다. 학습 중 가중치나 상태 벡터는 준비 단계에서 계산하지 않습니다. GPU 고정 특징 캐시, 영상 chunk, checkpoint, 평가 catalog 캐시는 유지하며 optimizer step마다 Item cache를 폐기합니다. checkpoint 재계산은 이미 준비한 정적 입력의 신경망 연산만 반복합니다.
+배치 준비에서 Action별 actor·target·tool·place의 Entity 인덱스와 결측 상태를 계산합니다. 학습 중 가중치나 상태 벡터는 준비 단계에서 계산하지 않습니다. GPU 고정 특징 캐시, 영상 chunk, checkpoint, 평가 catalog 캐시는 유지하며 optimizer step마다 Item cache를 폐기합니다. checkpoint 재계산은 이미 준비한 정적 입력의 신경망 연산만 반복합니다.
 
 `validation.graph_execution` 기본값은 `chunk_items: 256`, `chunk_nodes: 32768`, `checkpoint: auto`, `feature_cache_mb: 2048`입니다. CUDA auto checkpoint는 새 Projection·역할 결합·512차원 Scene MLP의 전체 배치 활성값을 추정하여 `min(8 GiB, 여유 메모리의 35%)` 초과 시 사용합니다. CPU auto는 checkpoint를 사용하지 않습니다. 이는 메모리 상한 보장이 아닌 추정 규칙입니다. `always`/`never`로 비교할 수 있습니다. 실행 chunk/cache 옵션은 모델 의미와 training identity를 바꾸지 않습니다.
 
@@ -159,7 +159,7 @@ gnn_attn:   f = [Entity 평균; Action 평균; Context] 384 (제목 제외, gnn�
 - `meta`는 attention을 적용하지 않는 동일 제목 모델입니다. 계약에는 `attention_pool_applied: false`(`attn_pool`) 또는 `gcn_applied: false`(`gnn_attn`)로 기록됩니다.
 - 두 경로 모두 장면 순서를 바꿔도 영상 벡터가 같습니다.
 
-모델 계약은 `sasrec-role-graph/v12`입니다. leave-one-out 병합 때 origin의 mean `v9`·gnn `v10`과 겹치지 않도록 기존 `v10`에서 바꿨습니다. 점수 입력·초기화·정규화는 `graph_model.attention_pool` 또는 `graph_model.gcn`에 기록합니다. 현재 입력 계약 `role-graph-inputs/v4`와 BGE 특징 캐시를 `mean`/`gnn`과 공유하므로 aggregation별 **재임베딩이 필요 없습니다.**
+모델 계약은 `sasrec-role-graph/v12`입니다. leave-one-out 병합 때 origin의 mean `v9`·gnn `v10`과 겹치지 않도록 기존 `v10`에서 바꿨습니다. 점수 입력·초기화·정규화는 `graph_model.attention_pool` 또는 `graph_model.gcn`에 기록합니다. 현재 입력 계약 `role-graph-inputs/v8`와 BGE 특징 캐시를 `mean`/`gnn`과 공유하므로 aggregation별 **재임베딩이 필요 없습니다.**
 
 추천 결과·checkpoint·shared cache·진단은 aggregation별 경로로 분리됩니다(`recommendations/graph/<attn_pool|gnn_attn>/`, `diagnosis/graph_<aggregation>_diagnosis.json`). Profiler는 `attn_pool`을 `graph_encoder/video_pooling`에, `gnn_attn`을 `graph_encoder/scene_attention`·`scene_gcn`에 기록합니다. auto checkpoint 추정에는 두 경로의 활성값을 추가했습니다.
 
@@ -251,7 +251,7 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 
 장면 1개 영상도 Transformer를 거칩니다(자기 자신만 attention). 장면 없이 제목만 있으면 기존 `[title; 0; 0; 0]` fallback을 쓰고 Transformer를 건너뜁니다. 전체 결측·padding은 최종 0이며, `meta`는 Transformer를 적용하지 않는 동일 제목 모델입니다. C와 C0는 장면 순서를 바꿔도 영상 벡터가 같고 D만 달라집니다.
 
-세 변형의 모델 계약은 `sasrec-role-graph/v11`입니다. leave-one-out 병합 때 origin의 mean `v9`와 겹치지 않도록 기존 `v9`에서 바꿨습니다. `graph_model.transformer`에 층·head·FFN·위치·attention 범위·정규화·residual scale·위치 스케일·위치 주입 방식을 기록하며, `meta`는 `transformer_applied: false`입니다. 현재 입력 계약 `role-graph-inputs/v4`와 BGE 특징 캐시는 `mean`/`gnn`과 공유하므로 aggregation별 **재임베딩이 필요 없습니다.** 추천 결과·checkpoint·shared cache는 aggregation별로 분리됩니다. `mean`/`gnn`의 identity·모델 버전·초기 가중치는 바뀌지 않았습니다. Chunk는 `gnn`과 같은 `chunk_scene_pairs`(S² 합) 기준을 따르고, auto checkpoint 추정에는 attention 점수와 FFN 활성값을 추가했습니다. Profiler는 `graph_encoder/scene_transformer`와 `workload.scene_pairs`를 기록합니다. 학습된 `[α₁, α₂]`는 `training.json`의 `execution.graph_training.scene_transformer_residual_scales`에 기록되며 checkpoint에도 포함됩니다. leave-one-out에는 refit이 없으므로 이전 rolling의 `graph_selection`·`graph_refit` 구분은 없습니다. 0에 가까우면 해당 sublayer를 거의 쓰지 않은 것입니다.
+세 변형의 모델 계약은 `sasrec-role-graph/v11`입니다. leave-one-out 병합 때 origin의 mean `v9`와 겹치지 않도록 기존 `v9`에서 바꿨습니다. `graph_model.transformer`에 층·head·FFN·위치·attention 범위·정규화·residual scale·위치 스케일·위치 주입 방식을 기록하며, `meta`는 `transformer_applied: false`입니다. 현재 입력 계약 `role-graph-inputs/v8`와 BGE 특징 캐시는 `mean`/`gnn`과 공유하므로 aggregation별 **재임베딩이 필요 없습니다.** 추천 결과·checkpoint·shared cache는 aggregation별로 분리됩니다. `mean`/`gnn`의 identity·모델 버전·초기 가중치는 바뀌지 않았습니다. Chunk는 `gnn`과 같은 `chunk_scene_pairs`(S² 합) 기준을 따르고, auto checkpoint 추정에는 attention 점수와 FFN 활성값을 추가했습니다. Profiler는 `graph_encoder/scene_transformer`와 `workload.scene_pairs`를 기록합니다. 학습된 `[α₁, α₂]`는 `training.json`의 `execution.graph_training.scene_transformer_residual_scales`에 기록되며 checkpoint에도 포함됩니다. leave-one-out에는 refit이 없으므로 이전 rolling의 `graph_selection`·`graph_refit` 구분은 없습니다. 0에 가까우면 해당 sublayer를 거의 쓰지 않은 것입니다.
 
 | 경로 | 신규 산출물 |
 |---|---|
@@ -319,7 +319,7 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 
 Profiler는 `graph_encoder/scene_similarity`, `graph_encoder/scene_gcn`과 `workload.scene_pairs`를 기록합니다. Checkpoint 재계산이 수집되면 해당 연산·장면 쌍도 누적됩니다.
 
-GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 MLP를 1층으로 변경한 현재 계약은 Text v8·mean v9·gnn v10이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v4`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
+GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 MLP를 1층으로 변경한 현재 계약은 Text v8·mean v9·gnn v10이며 유사도·정규화·residual·층수와 `meta`의 GCN 미적용을 계약에 기록합니다. 입력 계약 `role-graph-inputs/v8`와 BGE 특징 캐시는 공유합니다. 다른 aggregation의 결과/checkpoint를 재개에 사용하지 않습니다. `--compare-run-id`는 같은 aggregation·모델 계약끼리 비교합니다. Mean/gnn 자동 통계 비교는 별도 후속 작업입니다.
 
 | 경로 | 신규 산출물 |
 |---|---|

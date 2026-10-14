@@ -63,7 +63,7 @@ BGE Large, 30초 창·6개 키프레임, 각 성분의 차원 배분은 현재 �
 
 기본 설정은 30초 고정 시간 창, 창당 6개 키프레임, 640×352 해상도입니다. 마지막 짧은 창은 키프레임이 더 적을 수 있습니다. 여기서 Scene은 시간 창을 뜻하며, 의미적 장면 전환을 검출한 결과는 아닙니다. 입력은 시각 정보만 사용합니다.
 
-[모듈 1 피드백](docs/feedback_260923.md#모듈-1-관련-scene-to-graph-generation)은 역할 분해와 추천 활용성의 관점에서 Graph를 평가하도록 제안했습니다. 현재 Graph는 누가(actor), 무엇을 하는지(action), 무엇에(target), 어떤 도구로(tool), 어디에서(location)를 분리합니다. Description은 같은 시각 관측을 자연어로 표현합니다.
+[모듈 1 피드백](docs/feedback_260923.md#모듈-1-관련-scene-to-graph-generation)은 역할 분해와 추천 활용성의 관점에서 Graph를 평가하도록 제안했습니다. 현재 Graph는 누가(actor), 무엇을 하는지(action), 무엇에(target), 어떤 도구로(tool), 어디에서(place)를 분리합니다. Description은 같은 시각 관측을 자연어로 표현합니다.
 
 <details>
 <summary>장면 출력 예시와 프롬프트·저장 형식</summary>
@@ -86,14 +86,14 @@ p1 - cutting - f1; t1; l1
 
 이를 파싱하여 `scene_graph` 객체로 저장합니다. 역할에는 선언된 Entity ID 또는 `none`·`unknown`을 사용합니다. `none`은 부재·비해당, `unknown`은 식별할 수 없는 값이며, ID는 장면 내부에서만 유효합니다. Description 예시는 `A person wearing an apron cuts a tomato with a knife in a kitchen.`과 같은 자연어입니다.
 
-- Graph 프롬프트: [scene_graph_v8.md](prompts/scene_graph_v8.md)
+- Graph 프롬프트: [scene_graph_v9.md](prompts/scene_graph_v9.md)
 - Description 프롬프트: [scene_description_v3.md](prompts/scene_description_v3.md)
 - 저장: `extraction/scenes/<source>/<content_id>.jsonl`. Graph 행에는 `scene_graph`·`warning`, Description 행에는 `description`이 들어갑니다. 공통으로 콘텐츠·장면 식별자와 토큰 사용량을 기록합니다.
 - 구조화하지 못한 Graph 출력은 원문으로 보존합니다. 원문 관측은 Text Summary에 사용할 수 있지만, 직접 Graph 학습에는 구조·warning 검사를 통과한 장면만 사용합니다.
 
-구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; location`입니다. Relations·receiver·location 누락을 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 현재 형식의 파일은 모델·프롬프트·생성 설정·장면 입력이 일치할 때 재사용합니다. Scene 디렉터리의 `generation_identity.json`으로 compact payload의 생성 조건을 확인하며, 불일치하면 `--force` 또는 새 Run이 필요합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
+구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; place`입니다. v9의 개체 이름 참조는 공백·번호를 포함해 정확히 연결하고 장면별 내부 ID로 변환합니다. 기존 `id: kind` 선언도 지원합니다. Relations·receiver·place 누락과 구형 `location` 필드를 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 현재 형식의 파일은 모델·프롬프트·생성 설정·장면 입력이 일치할 때 재사용합니다. Scene 디렉터리의 `generation_identity.json`으로 compact payload의 생성 조건을 확인하며, 불일치하면 `--force` 또는 새 Run이 필요합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
 
-Text 경로의 Summary는 장면 관측을 영상 단위 자연어로 모읍니다. [Graph Summary](prompts/summary_graph_v8.md)와 [Description Summary](prompts/summary_description_v5.md)의 입력에는 제목이 없으며, `{scenes}`가 필요하고 `{english_title}`은 허용하지 않습니다. 출력은 `extraction/summaries/<source>/<content_id>.json`에 텍스트·상태·장면 수·단어 수·토큰 수·생성 출처(provenance)와 함께 저장합니다.
+Text 경로의 Summary는 장면 관측을 영상 단위 자연어로 모읍니다. [Graph Summary](prompts/summary_graph_v9.md)와 [Description Summary](prompts/summary_description_v5.md)의 입력에는 제목이 없으며, `{scenes}`가 필요하고 `{english_title}`은 허용하지 않습니다. 출력은 `extraction/summaries/<source>/<content_id>.json`에 텍스트·상태·장면 수·단어 수·토큰 수·생성 출처(provenance)와 함께 저장합니다.
 
 저장·파싱·실패 처리의 계약은 [실행·저장 계약](docs/runtime.md)의 **Scene·Summary 저장** 절을 참고하세요.
 
@@ -123,10 +123,10 @@ Text 경로는 제목과 Summary를 각각 BGE로 인코딩하고, 학습한 pro
 
 Graph의 Entity 입력은 이름·속성, Action 입력은 동작 텍스트, Context 입력은 Format·Medium·Topics입니다. ID는 역할 연결을 구성하는 데 쓰며 BGE 입력에는 넣지 않습니다. 같은 영상·다른 영상의 Entity ID를 공유 노드로 합치지 않습니다.
 
-Action은 연결된 actor·target·tool·location의 Entity 벡터로 보정합니다. 역할값 `none`과 `unknown`에는 역할별 학습 가능한 상태 벡터를 사용합니다.
+Action은 연결된 actor·target·tool·place의 Entity 벡터로 보정합니다. 역할값 `none`과 `unknown`에는 역할별 학습 가능한 상태 벡터를 사용합니다.
 
 ```text
-Action 보정 = Action + ReLU(Linear([Action; actor; target; tool; location]))
+Action 보정 = Action + ReLU(Linear([Action; actor; target; tool; place]))
 Scene = R([Title 128; Entity 평균 128; 보정된 Action 평균 128; Context 128])
 R(x) = x + ReLU(Linear(x))
 ```
@@ -277,8 +277,8 @@ python -m preparation prepare-input-data --run-id "$RUN_ID"
 `--schema`에는 실제 존재하는 Markdown 프롬프트 하나를 지정합니다. 상대 경로는 저장소 루트 기준입니다. 생성 소스(`--arm`)는 `graph_qwen3vl`, `graph_qwen3.5`, `graph_gemini`, `desc_qwen3vl`, `desc_qwen3.5`, `desc_gemini`이며 결합 평가 Arm을 생성에 지정하지 않습니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model qwen3vl --arm graph_qwen3vl
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model gemini --arm graph_gemini
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model gemini --arm graph_gemini
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3vl --arm desc_qwen3vl
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
@@ -286,8 +286,8 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prom
 Text 평가에는 선택한 소스의 Summary를 생성합니다. 아래 예시는 네 소스 모두 Gemini로 요약합니다. Qwen 요약에는 `--model qwen3vl`을 지정합니다.
 
 ```bash
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model gemini --arm graph_qwen3vl
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model gemini --arm graph_gemini
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_qwen3vl
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_gemini
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen3vl
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
 ```
@@ -406,9 +406,9 @@ artifacts/
 Qwen3.5 실행 예시:
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v8.md --model qwen3.5 --arm graph_qwen3.5
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3.5 --arm desc_qwen3.5
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v8.md --model qwen3.5 --arm graph_qwen3.5
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model qwen3.5 --arm graph_qwen3.5
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model qwen3.5 --arm desc_qwen3.5
 ```
 

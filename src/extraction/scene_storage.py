@@ -7,7 +7,9 @@ from extraction.errors import UnsupportedArtifactError
 from extraction.token_usage import validate_tokens
 from extraction.graph_warnings import warning_tags
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
-from extraction.structured_output import GRAPH_JSON_SCHEMA
+from extraction.structured_output import (
+    GRAPH_JSON_SCHEMA, OutputValidationError, normalize_graph_references,
+)
 
 GRAPH_FIELDS = ("content_id", "scene_idx", "tokens", "warning", "scene_graph")
 DESCRIPTION_FIELDS = ("content_id", "scene_idx", "tokens", "description")
@@ -32,7 +34,7 @@ def validate_scene_payload(path, row):
                 isinstance(action, dict) and set(action) != set(GRAPH_JSON_SCHEMA["properties"]["actions"]["items"]["properties"])
                 for action in graph["actions"]
             ):
-                raise UnsupportedArtifactError(f"unsupported Action fields; receiver-free roles and location required: {path}")
+                raise UnsupportedArtifactError(f"unsupported Action fields; receiver-free roles and place required: {path}")
         elif not isinstance(graph, str) or not graph.strip():
             raise ValueError(f"invalid graph observation: {path}")
     elif not isinstance(row["description"], str) or not row["description"].strip():
@@ -46,8 +48,24 @@ def _graph_warning(record, value):
         return warning_tags(record["semantic_warnings"])
     if isinstance(value, str):
         parsed = parse_or_repair_graph(value)
-        return list(parsed.warning) if parsed.graph is None else graph_semantic_warnings(parsed.graph)
+        return list(parsed.warning)
     return graph_semantic_warnings(value)
+
+
+def recover_scene_graph(graph, warnings):
+    """Reparse stored text and normalize references without semantic warning checks."""
+    warnings = warning_tags(warnings)
+    if isinstance(graph, str):
+        parsed = parse_or_repair_graph(graph)
+        return (
+            graph if parsed.graph is None else parsed.graph,
+            list(parsed.warning),
+        )
+    try:
+        normalized, _ = normalize_graph_references(graph)
+    except OutputValidationError as exc:
+        return graph, exc.tags
+    return normalized, warnings
 
 
 def _payload(path, record):
@@ -85,10 +103,13 @@ def read_scene_records(path):
                 **common, "description": row["description"],
             }
         else:
+            graph, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
             record = {
-                **common, "graph": row["scene_graph"],
-                "parse_mode": "text" if isinstance(row["scene_graph"], str) else "unknown",
-                "semantic_warnings": row["warning"],
+                **common, "graph": graph,
+                "parse_mode": "text" if isinstance(graph, str) else (
+                    "repaired" if graph != row["scene_graph"] else "unknown"
+                ),
+                "semantic_warnings": warnings,
             }
         records.append(record)
     return records

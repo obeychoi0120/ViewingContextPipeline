@@ -25,7 +25,7 @@ Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5
 - Summary: `runs/<RUN_ID>/extraction/summaries/<source>/<content_id>.json`. `video-summary/v5`이며 `complete`·`failed` 상태와 명시적인 `provenance.summary_model`(`qwen3vl`, `qwen3.5`, `gemini`)을 요구합니다. 텍스트·장면 수·단어 수·토큰 수·생성 provenance를 저장합니다.
 - Scene 실패: 해당 Scene 디렉터리의 `failures/<content_id>.jsonl`. Summary 실패: 해당 Summary 디렉터리의 `failures.jsonl`.
 
-Graph 출력은 JSON Schema로 강제하지 않습니다. 완전한 구조화 출력과 명확한 형식 변형은 파싱하고, 구조화되지 않는 출력은 원문으로 보존합니다. 토큰 한도 종료는 실제 backend 종료 사유로 판단합니다. 원문 Graph는 text Summary에 사용할 수 있지만 직접 graph 학습에서는 구조·warning 검사를 통과한 장면만 사용합니다. Parser `graph-text/v10`은 현재 Context·Entities·Actions 형식과 이에 대응하는 JSON만 구조화합니다. 보수적인 구두점 복구는 유지하지만 Relations·receiver·location 누락·구형 필드를 변환하지 않습니다.
+Graph 출력은 JSON Schema로 강제하지 않습니다. Parser `graph-text/v14`는 v9의 `name; attribute` 형식과 기존 `id: kind; attribute` 형식, 현재 스키마의 JSON을 지원합니다. v9 이름은 공백과 번호를 포함해 정확히 대조하고 장면 내 `e1`, `e2` 등의 내부 ID로 변환합니다. 이름·속성은 보존하며 동의어·대소문자로 개체를 추측하지 않습니다. 한 출력에서 두 선언 형식을 혼용하면 원문으로 보존합니다. 필수 필드와 타입을 검사합니다. Warning은 `MISSING_REQUIRED`(필수 요소 누락), `PARSE_FAILED`(형식·타입 파싱 실패) 두 가지입니다. 미선언 역할 참조는 Warning 없이 `unknown`으로 바꾸며 actor·target이 모두 불명이거나 없는 Action도 유지합니다. 중복 Entity ID는 모든 Entity를 보존하고 같은 ID의 참조는 마지막 선언에 연결합니다. 구조화할 수 없는 출력은 원문으로 보존하여 Text Summary에 사용할 수 있지만 직접 Graph 학습에서는 제외합니다. 기존 Scene은 읽을 때 다시 파싱하며 제거된 Warning은 무시하고 `PARSE_ERROR`는 `PARSE_FAILED`로 읽습니다. 원본 파일은 덮어쓰지 않습니다. 토큰 한도 종료는 실제 backend 종료 사유로 판단합니다. 보수적인 구두점 복구는 유지하지만 Relations·receiver·place 누락·구형 필드를 변환하지 않습니다.
 
 Summary에는 성공 장면만 넣습니다. 성공 장면이 없거나 최종 생성에 실패하면 `status="failed"`, `text=""`, `word_count=0`입니다. 문단·목록·줄바꿈을 허용하며 단어 수는 실패 기준이 아닙니다. 신규 실패의 `raw_output`은 빈 문자열이고 Graph 토큰 한도 종료는 원문을 보존합니다.
 
@@ -61,7 +61,7 @@ Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 �
 
 ## 유지하는 계약과 지원 경계
 
-설정은 `experiment_config_version: v6`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v4`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm 계약은 `title-summary-nine-arms/v3`이며 신규 Run에서 구형 `qwen` 이름을 허용하지 않습니다. Graph 입력은 `role-graph-inputs/v4`로 갱신하여 이전 정규화 캐시를 차단합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
+설정은 `experiment_config_version: v6`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v4`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm 계약은 `title-summary-nine-arms/v3`이며 신규 Run에서 구형 `qwen` 이름을 허용하지 않습니다. 장면 스키마는 `scene-graph/v8`이며 장소 필드는 `place`입니다. 구형 `location` 구조화 입력은 자동 변환 없이 거부합니다. Graph 입력은 `role-graph-inputs/v8`로 갱신하여 이전 장소 필드·파싱·의미 검사 정책의 입력 캐시를 차단합니다. 변경된 입력으로 추천 학습도 다시 수행해야 합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
 
 주 CLI는 preparation의 두 단계, extraction의 두 Scene 추출 단계와 `summarize`, validation의 임베딩·추천·진단입니다. 과거 요약 별칭, Arm·Scene 일괄 변환 명령, 독립 제목 보완 CLI는 제거했습니다. 제목 보완은 `prepare-cohort`에서 수행합니다. 기존 Run·분석 보고서·프롬프트를 자동 이동하거나 삭제하지 않습니다.
 

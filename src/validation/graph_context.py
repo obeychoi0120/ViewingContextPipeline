@@ -13,7 +13,7 @@ GRAPH_MODEL = {
     "fusion": "role_gather_scene_residual_mlp_then_mean",
     "scene_readout": "title_entity_action_context_concat",
     "projections": "separate_title_entity_action_context",
-    "roles": ["actor", "target", "tool", "location"],
+    "roles": ["actor", "target", "tool", "place"],
     "role_fusion": "action_plus_relu_linear_640_to_128",
     "scene_mlp": {"hidden_dim": 512, "activation": "relu", "normalization": "none",
                   "linear_layers": 1, "formula": "x_plus_relu_linear_x"},

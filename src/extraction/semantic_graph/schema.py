@@ -9,7 +9,7 @@ from extraction.summary_storage import (
     validate_summary as validate_summary,
 )
 
-GRAPH_SCHEMA_VERSION = "scene-graph/v7"
+GRAPH_SCHEMA_VERSION = "scene-graph/v8"
 
 
 class SemanticGraphError(ValueError):

@@ -12,7 +12,7 @@ from extraction import steps
 from validation.representation_inputs import documents_for_arm
 
 
-@pytest.mark.parametrize("legacy", ["Relations", "receiver", "missing_location", "graph_alias", "raw_response", "metadata"])
+@pytest.mark.parametrize("legacy", ["Relations", "receiver", "missing_place", "location", "graph_alias", "raw_response", "metadata"])
 def test_unsupported_scene_is_not_rewritten_on_resume(ready_context, fake_models, generate_all, legacy):
     generate_all(ready_context)
     directory = ready_context.scene_arm_dir("graph_qwen3vl")
@@ -22,8 +22,11 @@ def test_unsupported_scene_is_not_rewritten_on_resume(ready_context, fake_models
         row["scene_graph"] = {"entities": [], "relations": [], "context": []}
     elif legacy == "receiver":
         row["scene_graph"]["actions"][0]["receiver"] = None
-    elif legacy == "missing_location":
-        row["scene_graph"]["actions"][0].pop("location")
+    elif legacy == "missing_place":
+        row["scene_graph"]["actions"][0].pop("place")
+    elif legacy == "location":
+        action = row["scene_graph"]["actions"][0]
+        action["location"] = action.pop("place")
     elif legacy in {"graph_alias", "raw_response"}:
         row["graph" if legacy == "graph_alias" else "raw_response"] = row.pop("scene_graph")
     else:
@@ -66,7 +69,7 @@ def test_unsupported_generated_json_keeps_raw_and_warning(tmp_path):
              "entities": [], "actions": []}
     old = copy.deepcopy(graph)
     old["actions"] = [{"actor": "p", "action": "holding", "target": None,
-                       "tool": None, "location": None, "receiver": None}]
+                       "tool": None, "place": None, "receiver": None}]
     text = json.dumps(old)
     record, failure = graph_scene_result({"scene_idx": 0, "keyframes": []}, text)
     assert failure is None and record["graph"] == text and record["semantic_warnings"]

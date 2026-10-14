@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import re
+from copy import deepcopy
 
 from extraction.graph_warnings import (
     MISSING_REQUIRED,
-    INVALID_ACTION_SYNTAX,
-    INVALID_REFERENCE,
-    DUPLICATE_ENTITY_ID,
-    PARSE_ERROR,
+    PARSE_FAILED,
 )
 
 
@@ -49,7 +46,7 @@ GRAPH_JSON_SCHEMA = _object(
                     "action": STRING,
                     "target": REFERENCE,
                     "tool": REFERENCE,
-                    "location": REFERENCE,
+                    "place": REFERENCE,
                 },
             )
         ),
@@ -58,15 +55,29 @@ GRAPH_JSON_SCHEMA = _object(
 
 
 class OutputValidationError(ValueError):
-    def __init__(self, message, tags=(PARSE_ERROR,)):
+    def __init__(self, message, tags=(PARSE_FAILED,)):
         super().__init__(message)
         self.tags = list(dict.fromkeys(tags))
 
 
 def validate_graph_structure(value, path="graph"):
-    """Enforce current structural integrity; budgets and enums are prompt guidance."""
+    """Require readable fields and types, without validating Graph semantics."""
     _validate_shape(value, GRAPH_JSON_SCHEMA, path)
-    _validate_actions(value, path)
+
+
+def normalize_graph_references(graph):
+    """Use unknown for undeclared role IDs, keeping all entities and actions."""
+    _validate_shape(graph, GRAPH_JSON_SCHEMA, "graph")
+    ids = {entity["id"] for entity in graph["entities"]}
+    repaired = deepcopy(graph)
+    changed = False
+    for action in repaired["actions"]:
+        for field in ("actor", "target", "tool", "place"):
+            value = action[field]
+            if value not in (None, "unknown") and value not in ids:
+                action[field] = "unknown"
+                changed = True
+    return repaired, changed
 
 
 def _validate_shape(value, schema, path):
@@ -80,8 +91,7 @@ def _validate_shape(value, schema, path):
         raise OutputValidationError(f"{path}: expected {kind}")
     if kind == "object":
         if set(schema["required"]) - set(value):
-            tag = INVALID_ACTION_SYNTAX if ".actions[" in path else MISSING_REQUIRED
-            raise OutputValidationError(f"{path}: missing required fields", (tag,))
+            raise OutputValidationError(f"{path}: missing required fields", (MISSING_REQUIRED,))
         if set(value) - set(schema["properties"]):
             raise OutputValidationError(f"{path}: extra fields")
         for key, child in schema["properties"].items():
@@ -93,39 +103,6 @@ def _validate_shape(value, schema, path):
         for index, item in enumerate(value):
             _validate_shape(item, schema["items"], f"{path}[{index}]")
     elif not value.strip():
-        raise OutputValidationError(
-            f"{path}: empty string",
-            (INVALID_ACTION_SYNTAX if ".actions[" in path else PARSE_ERROR,),
-        )
+        raise OutputValidationError(f"{path}: empty string")
     if "enum" in schema and value not in schema["enum"]:
         raise OutputValidationError(f"{path}: invalid value {value!r}")
-
-
-def _validate_actions(graph, path):
-    ids, tags, messages = set(), [], []
-
-    def report(tag, message):
-        tags.append(tag)
-        messages.append(message)
-
-    for entity in graph["entities"]:
-        identifier = entity["id"]
-        if not re.fullmatch(r"[\w.-]+", identifier) or identifier.casefold() in {"none", "unknown"}:
-            report(PARSE_ERROR, f"invalid entity ID {identifier!r}")
-        if identifier in ids:
-            report(DUPLICATE_ENTITY_ID, f"duplicate entity ID {identifier!r}")
-        ids.add(identifier)
-    for action in graph["actions"]:
-        if not any(
-            action[field] in ids and action[field] not in {"none", "unknown"}
-            for field in ("actor", "target")
-        ):
-            report(INVALID_ACTION_SYNTAX, "action requires a declared actor or target")
-        if any(mark in action["action"] for mark in (" - ", "->", "→", "⇒", ";", "\n")):
-            report(INVALID_ACTION_SYNTAX, "ambiguous action phrase")
-        for field in ("actor", "target", "tool", "location"):
-            value = action.get(field)
-            if value not in (None, "unknown") and value not in ids:
-                report(INVALID_REFERENCE, f"undeclared {field} {value!r}")
-    if tags:
-        raise OutputValidationError(f"{path}: " + "; ".join(messages), tags)

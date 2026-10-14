@@ -6,6 +6,7 @@ import io
 import json
 import tokenize
 from typing import Any
+from extraction.graph_warnings import MISSING_REQUIRED, PARSE_FAILED
 
 
 @dataclass(frozen=True)
@@ -20,14 +21,14 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Parse one JSON object, then apply one deterministic repair pass."""
     raw = str(text or "")
     if not raw.strip():
-        return GraphParseResult(graph=None, error="empty VLM output", warning=("MISSING_REQUIRED",))
+        return GraphParseResult(graph=None, error="empty VLM output", warning=(MISSING_REQUIRED,))
     parsed = _load_json_dict(raw)
     if parsed is not None:
         return GraphParseResult(graph=parsed, parse_mode="native")
     repaired = repair_graph_json_once(raw)
     if repaired is not None:
         return GraphParseResult(graph=repaired, parse_mode="repaired")
-    return GraphParseResult(graph=None, error="JSON repair failed", warning=("PARSE_ERROR",))
+    return GraphParseResult(graph=None, error="JSON repair failed", warning=(PARSE_FAILED,))
 
 
 def repair_graph_json_once(text: str) -> dict[str, Any] | None:
