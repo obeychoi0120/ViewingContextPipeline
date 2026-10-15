@@ -61,7 +61,6 @@ class InferenceProgress:
         empty=0,
         progress_factory=tqdm,
         clock=None,
-        track_structured=False,
     ):
         self.bar = progress_factory(
             total=total,
@@ -78,8 +77,7 @@ class InferenceProgress:
         self.reused = reused
         self.empty = empty
         self.success = self.failed = 0
-        self.raw = 0
-        self.track_structured = track_structured
+        self.warning = 0
         self._outcomes = {}
         self.stats = {"phase": "initializing", "inflight": 0}
         self._clock = clock or time.monotonic
@@ -133,21 +131,22 @@ class InferenceProgress:
             self.total = self.discovered
             self.bar.total = self.total
 
-    def complete(self, *, failed=False, task_id=None, raw=False):
+    def complete(self, *, failed=False, task_id=None, warning=False):
+        warning = warning and not failed
         with self._lock:
             if task_id is not None:
                 previous = self._outcomes.get(task_id)
                 if previous is not None:
-                    was_failed, was_raw = previous
+                    was_failed, was_warning = previous
                     self.failed -= was_failed
-                    self.success -= not was_failed
-                    self.raw -= was_raw
-                self._outcomes[task_id] = (failed, raw)
+                    self.success -= not was_failed and not was_warning
+                    self.warning -= was_warning
+                self._outcomes[task_id] = (failed, warning)
             if failed:
                 self.failed += 1
-            else:
+            elif not warning:
                 self.success += 1
-            self.raw += raw
+            self.warning += warning
         # Counts are collected immediately; only the timer paints them.
 
     def begin_pass(self, total, *, index, count):
@@ -156,7 +155,7 @@ class InferenceProgress:
             if self._outcomes:
                 self._render(refresh=True)
             self.total = self.discovered = total
-            self.success = self.failed = self.raw = 0
+            self.success = self.failed = self.warning = 0
             self._outcomes.clear()
             self.stats = {"phase": "initializing", "inflight": 0}
             self._started = self._clock()
@@ -180,7 +179,7 @@ class InferenceProgress:
 
     def _render(self, *, refresh):
         with self._lock, tqdm.get_lock():
-            completed = self.success + self.failed
+            completed = self.success + self.warning + self.failed
             remaining = None if self.total is None else max(0, self.total - completed)
             elapsed = max(0, self._clock() - self._started) if self._started is not None else 0
             rate = completed / elapsed if elapsed > 0 else 0
@@ -193,12 +192,9 @@ class InferenceProgress:
                 eta = tqdm.format_interval(remaining / rate)
             else:
                 eta = "estimating"
-            fields = f"ETA={eta} success={self.success} failed={self.failed}"
+            fields = f"ETA={eta} success={self.success} warning={self.warning} failed={self.failed}"
             if hasattr(self, "pass_label"):
                 fields = f"{self.pass_label} {fields}"
-            fields += f" raw={self.raw}"
-            if self.track_structured:
-                fields += f" structured={self.success - self.raw}"
             formatted_rate = f"{rate:.2f}" if elapsed > 0 else "--"
             fields += f" {self.unit}/s={formatted_rate}"
             self.bar.n = completed

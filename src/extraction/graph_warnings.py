@@ -1,4 +1,4 @@
-"""Stable tags for Graph structure recovery; generation failures use their own log."""
+"""Stable tags for Graph structure recovery; failed Scene rows carry an error instead."""
 
 MISSING_REQUIRED = "MISSING_REQUIRED"
 PARSE_FAILED = "PARSE_FAILED"

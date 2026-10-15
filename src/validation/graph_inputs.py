@@ -93,6 +93,7 @@ def build_input(context, cohort, arm):
                 "actionless",
                 "raw",
                 "warning",
+                "failed",
                 "unsupported_format",
                 "invalid_structure",
                 "missing_file",
@@ -140,6 +141,9 @@ def build_input(context, cohort, arm):
                 )
 
             validate_scene_payload(path, row)
+            if "error" in row:
+                reject("failed", row["error"])
+                continue
             g, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
             if not isinstance(g, dict):
                 reject("raw")

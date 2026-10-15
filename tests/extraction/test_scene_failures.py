@@ -10,7 +10,7 @@ from artifact_io import read_jsonl
 
 
 @pytest.mark.parametrize("recover", [False, True])
-def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypatch, recover):
+def test_qwen_empty_graph_retries_with_inline_failure(ready_context, monkeypatch, recover):
     context = ready_context
     visuals = steps.visual_rows(context)[:1]
     monkeypatch.setattr(steps, "visual_rows", lambda _: visuals)
@@ -28,8 +28,8 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
                         len(calls) > 1 else ' \n\t ')
                 callback(task.task_id, text)
                 if len(calls) == 1:
-                    assert not (directory / f"{cid}.jsonl").exists()
-                    assert read_jsonl(directory / "failures" / f"{cid}.jsonl")[0]["error"] == (
+                    assert read_scene_records(directory / f"{cid}.jsonl") == []
+                    assert read_jsonl(directory / f"{cid}.jsonl")[0]["error"] == (
                         "model produced an empty graph")
             return {}
         yield generate
@@ -47,7 +47,8 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
         assert isinstance(read_jsonl(path)[0]["scene_graph"], dict)
         assert not (directory / "failures" / f"{cid}.jsonl").exists()
     else:
-        assert not path.exists()
+        assert read_scene_records(path) == []
+        assert read_jsonl(path)[0]["raw_output"] == " \n\t "
 
 
 @pytest.mark.parametrize("truncated", [False, True])
@@ -80,20 +81,20 @@ def test_description_cutoff_is_saved_only_as_failure(ready_context, monkeypatch,
     )
     assert result["failure_count"] == int(truncated)
     directory = context.extraction_dir("description", model, "scenes")
-    failure_path = directory / "failures" / f"{cid}.jsonl"
+    failure_path = directory / f"{cid}.jsonl"
     if truncated:
-        assert not (directory / f"{cid}.jsonl").exists()
+        assert read_scene_records(failure_path) == []
         assert read_jsonl(failure_path) == [
             {
                 "content_id": cid,
                 "scene_idx": 0,
                 "error": "description: output truncated at token limit",
-                "raw_output": "",
-                "provenance": read_jsonl(failure_path)[0]["provenance"],
+                "raw_output": text,
+                "tokens": None,
             }
         ]
     else:
-        assert not failure_path.exists()
+        assert not (directory / "failures").exists()
         records = read_scene_records(directory / f"{cid}.jsonl")
         assert records[0]["description"] == text.strip()
 
@@ -221,7 +222,7 @@ person1 -> holding -> cup1; none; unknown
         == 2
     )
     assert calls == [f"{cid}:{i}" for i in range(len(responses))]
-    assert (instances[-1].success, instances[-1].failed, instances[-1].raw) == (5, 2, 1)
+    assert (instances[-1].success, instances[-1].warning, instances[-1].failed) == (4, 1, 2)
     directory = context.graph_scene_dir(model)
     records = read_scene_records(directory / f"{cid}.jsonl")
     by_scene = {row["scene_idx"]: row for row in records}
@@ -232,10 +233,10 @@ person1 -> holding -> cup1; none; unknown
     assert by_scene[1]["parse_mode"] == "unknown"
     assert "provenance" not in by_scene[0]
     assert all(list(row) == ["content_id", "scene_idx", "tokens", "warning", "scene_graph"]
-               for row in read_jsonl(directory / f"{cid}.jsonl"))
+               for row in read_jsonl(directory / f"{cid}.jsonl") if "error" not in row)
     assert by_scene[0]["graph"]["entities"][0]["attributes"] == ["long-haired"]
     assert by_scene[6]["graph"] == empty
-    failures = read_jsonl(directory / "failures" / f"{cid}.jsonl")
+    failures = [row for row in read_jsonl(directory / f"{cid}.jsonl") if "error" in row]
     assert {row["scene_idx"] for row in failures} == {4, 5}
     for failure in failures:
         index = failure["scene_idx"]
@@ -254,5 +255,5 @@ person1 -> holding -> cup1; none; unknown
         == 2
     )
     expected = [f"{cid}:{i}" for i in range(len(responses))]
-    expected.extend(f"{cid}:{i}" for i in (4, 5))
+    expected.extend(f"{cid}:{i}" for i in (3, 4, 5))
     assert calls == expected

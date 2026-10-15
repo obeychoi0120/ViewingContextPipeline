@@ -8,7 +8,7 @@
 
 Qwen은 로컬 checkpoint와 vLLM 0.28.0 이상을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 Qwen은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
 
-Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델의 장면 추출과 요약은 greedy decoding을 사용합니다(temperature 0.0, top_p 1.0, top_k 0). Qwen 장면 추출·요약 CLI의 `--repetition-penalty FLOAT`는 해당 실행에 적용할 유한한 단일 값(1.0~2.0)을 받습니다. 생략하면 Graph 장면 추출은 **1.05**, Description 장면 추출과 모든 요약은 **1.0**입니다. Gemini에 이 옵션을 지정하면 오류입니다. 생성된 토큰에만 적용하는 기존 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용을 막습니다. 최초 요청·구조 복구·실패 후 재실행에 같은 값을 전달하며 증가 schedule은 사용하지 않습니다. 새 요청·schedule·provenance에 적용값을 기록하며, 기록된 repetition penalty와 다른 값을 지정해도 완료 결과는 재사용하고 누락·실패 항목만 현재 값으로 생성합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
+Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델의 장면 추출과 요약은 greedy decoding을 사용합니다(temperature 0.0, top_p 1.0, top_k 0). Qwen 장면 추출·요약 CLI의 `--repetition-penalty FLOAT`는 해당 실행에 적용할 유한한 단일 값(1.0~2.0)을 받습니다. 생략하면 Graph 장면 추출은 **1.05**, Description 장면 추출과 모든 요약은 **1.0**입니다. Gemini에 이 옵션을 지정하면 오류입니다. 생성된 토큰에만 적용하는 기존 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용을 막습니다. 최초 요청·구조 복구·실패 후 재실행에 같은 값을 전달하며 증가 schedule은 사용하지 않습니다. 새 요청·schedule·provenance에 적용값을 기록하며, 기록된 repetition penalty와 다른 값을 지정해도 정상 Scene과 완료 Summary는 재사용하고 누락·실패·warning Scene 및 실패 Summary는 현재 값으로 생성합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
 
 ## Scene·Summary 저장
 
@@ -23,28 +23,32 @@ Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5
 - Description 행: `content_id`, `scene_idx`, `tokens`, `description`.
 - Graph 행: `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph`. `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다.
 - Summary: `runs/<RUN_ID>/extraction/summaries/<source>/<content_id>.json`. `video-summary/v5`이며 `complete`·`failed` 상태와 명시적인 `provenance.summary_model`(`qwen3vl`, `qwen3.5`, `gemini`)을 요구합니다. 텍스트·장면 수·단어 수·토큰 수·생성 provenance를 저장합니다.
-- Scene 실패: 해당 Scene 디렉터리의 `failures/<content_id>.jsonl`. Summary 실패: 해당 Summary 디렉터리의 `failures.jsonl`.
+- Scene 실패: 정상·warning 행과 같은 `<content_id>.jsonl`에 `content_id`, `scene_idx`, `tokens`, `error`, `raw_output` 다섯 필드로 저장합니다. `tokens`는 실제 출력 토큰 수 또는 null, `error`는 실패 사유, `raw_output`은 실제 응답 원문(없으면 빈 문자열)입니다. Summary 실패는 기존 Summary 디렉터리의 `failures.jsonl`에 저장합니다.
 - Graph 추출 집계: `extract-graph-scenes` 완료 후 같은 Scene 디렉터리의 `generation_stats.json`에 `total`, `success`, `warning`, `failed`, `warning_counts`를 저장합니다. 현재 실행 대상의 재사용 Scene과 새 생성 결과를 모두 포함합니다. `success`는 Warning 없는 정상 Graph, `warning`은 Warning이 있는 Scene 수, `failed`는 최종 실패 Scene 수입니다. `warning_counts`에는 `MISSING_REQUIRED`, `PARSE_FAILED`별 Scene 수를 기록하며 여러 태그가 있는 Scene은 각 태그에 포함합니다.
 
 Graph 출력은 JSON Schema로 강제하지 않습니다. Parser `graph-text/v14`는 v9의 `name; attribute` 형식과 기존 `id: kind; attribute` 형식, 현재 스키마의 JSON을 지원합니다. v9 이름은 공백과 번호를 포함해 정확히 대조하고 장면 내 `e1`, `e2` 등의 내부 ID로 변환합니다. 이름·속성은 보존하며 동의어·대소문자로 개체를 추측하지 않습니다. 한 출력에서 두 선언 형식을 혼용하면 원문으로 보존합니다. 필수 필드와 타입을 검사합니다. Warning은 `MISSING_REQUIRED`(필수 요소 누락), `PARSE_FAILED`(형식·타입 파싱 실패) 두 가지입니다. 미선언 역할 참조는 Warning 없이 `unknown`으로 바꾸며 actor·target이 모두 불명이거나 없는 Action도 유지합니다. 중복 Entity ID는 모든 Entity를 보존하고 같은 ID의 참조는 마지막 선언에 연결합니다. 구조화할 수 없는 출력은 원문으로 보존하여 Text Summary에 사용할 수 있지만 직접 Graph 학습에서는 제외합니다. 기존 Scene은 읽을 때 다시 파싱하며 제거된 Warning은 무시하고 `PARSE_ERROR`는 `PARSE_FAILED`로 읽습니다. 원본 파일은 덮어쓰지 않습니다. 토큰 한도 종료는 실제 backend 종료 사유로 판단합니다. 보수적인 구두점 복구는 유지하지만 Relations·receiver·place 누락·구형 필드를 변환하지 않습니다.
 
-Summary에는 성공 장면만 넣습니다. 성공 장면이 없거나 최종 생성에 실패하면 `status="failed"`, `text=""`, `word_count=0`입니다. 문단·목록·줄바꿈을 허용하며 단어 수는 실패 기준이 아닙니다. 신규 실패의 `raw_output`은 빈 문자열이고 Graph 토큰 한도 종료는 원문을 보존합니다.
+Summary에는 성공 장면만 넣습니다. 성공 장면이 없거나 최종 생성에 실패하면 `status="failed"`, `text=""`, `word_count=0`입니다. 문단·목록·줄바꿈을 허용하며 단어 수는 실패 기준이 아닙니다. 실패 Scene은 Graph·Description 모두 토큰 한도 종료 여부와 관계없이 받은 원문을 `raw_output`에 보존합니다. 이 원문은 Summary·임베딩·Graph 구성에 사용하지 않습니다. 실패 Summary의 `raw_output`은 기존처럼 빈 문자열입니다.
 
-출력 저장은 임시 파일을 작성한 뒤 원자적으로 교체합니다. 실패 시도는 실패 로그에 먼저 기록하고, 재실행하면 같은 공식 생성 정책으로 재시도합니다.
+출력 저장은 임시 파일을 작성한 뒤 원자적으로 교체합니다. Scene 결과는 콘텐츠별로 정렬하여 원자적으로 교체하며 `(content_id, scene_idx)`당 최신 결과 한 행만 유지합니다. 재시도 결과가 도착하지 않은 기존 warning·실패 행은 보존합니다. 같은 명령을 재실행하면 정상 Scene만 재사용하고 누락·실패·Graph warning을 현재 설정으로 한 번씩 생성합니다. 실행 중 자동 추가 pass는 없습니다.
 
 ## 재사용과 재시도
+
+기존 Scene `failures/<content_id>.jsonl`은 추출 재개 준비 시 원본 JSONL에 통합합니다. 같은 Scene이 양쪽에 있으면 기존 실패 로그를 우선하고, 토큰 수가 없으면 null로 둡니다. 원본 JSONL 저장이 완료된 뒤 해당 실패 파일을 제거하므로 저장·정리 중 중단되어도 재개할 수 있습니다. 새 Scene 실패 디렉터리는 만들지 않습니다. Summary는 기존 실패 로그 형식을 유지합니다.
+
+진행바는 `success=정상`, `warning=경고`, `failed=실패`이며 완료 수는 세 값의 합입니다. 처리량·ETA도 같은 완료 수로 계산합니다. 기존 `raw`·`structured` 표시는 제거합니다. 최종 `generation_stats.json`도 같은 분류로 현재 실행 대상 전체를 집계합니다.
 
 Scene은 위 compact 필드만 읽으며 저장된 `graph`·`raw_response` 별칭이나 과거 메타데이터·상태를 추론하지 않습니다. Summary v4·`raw_fallback`·모델 필드 누락도 지원하지 않습니다. 지원 밖 기존 입력은 경로와 원인을 명시하여 거부하고 일반 재실행에서 원본을 변환하거나 덮어쓰지 않습니다. Run 이름·파일 경로는 의미 해시에서 제외하지만 생성 모델·프롬프트·설정은 일치해야 합니다.
 
 
 
-Scene 디렉터리의 `generation_identity.json`은 생성 설정 기록으로 유지하며 재사용을 막는 비교에는 사용하지 않습니다. 기존 기록은 보존하고, 기록이 없으면 현재 설정으로 생성합니다. 이 파일은 폴더 내 모든 Scene이 동일한 설정으로 생성되었다는 보장이 아닙니다. 완료 Scene과 Summary는 생성 설정이 달라도 재사용하고 누락·실패 항목만 현재 설정으로 생성합니다. Summary의 실제 Scene 내용 변경, 모델·소스·제목 및 저장 형식 계약 검증은 유지합니다. `--force`는 기존 결과까지 현재 설정으로 재생성할 때 사용합니다. 구형 `graph_qwen`·`desc_qwen` Run은 오류로 거부하고 원본 파일은 보존합니다.
+Scene 디렉터리의 `generation_identity.json`은 생성 설정 기록으로 유지하며 재사용을 막는 비교에는 사용하지 않습니다. 기존 기록은 보존하고, 기록이 없으면 현재 설정으로 생성합니다. 이 파일은 폴더 내 모든 Scene이 동일한 설정으로 생성되었다는 보장이 아닙니다. 정상 Scene과 완료 Summary는 생성 설정이 달라도 재사용하고 누락·실패·warning Scene 및 실패 Summary는 현재 설정으로 생성합니다. Summary의 실제 Scene 내용 변경, 모델·소스·제목 및 저장 형식 계약 검증은 유지합니다. `--force`는 기존 결과까지 현재 설정으로 재생성할 때 사용합니다. 구형 `graph_qwen`·`desc_qwen` Run은 오류로 거부하고 원본 파일은 보존합니다.
 
 Graph 추출을 재실행하면 기존 `generation_stats.json`을 제거하고, 모든 요청 처리가 끝난 뒤 원자적으로 다시 저장합니다. 최종 실패 Scene이 남아 있어도 집계하며, 실행 중단·예외로 끝난 경우에는 완료 통계를 저장하지 않습니다. 모든 Scene을 재사용하는 실행에서도 집계 파일을 생성합니다.
 
-Qwen의 Graph·Description 추출과 요약은 greedy decoding을 사용합니다. `--presence-penalty FLOAT`는 Qwen에서만 지원하며 유한한 -2~2 값으로 지정합니다. 생략 시 Scene 1.5·Summary 2.0을 유지하고, 0이면 presence penalty를 끕니다. 적용값은 새 요청과 해당 provenance의 `settings.generation.presence_penalty`에 기록됩니다. 기존 sampling 결과나 다른 penalty 값의 완료 결과도 재사용하며, 기존 파일의 생성 기록은 덮어쓰지 않습니다.
+Qwen의 Graph·Description 추출과 요약은 greedy decoding을 사용합니다. `--presence-penalty FLOAT`는 Qwen에서만 지원하며 유한한 -2~2 값으로 지정합니다. 생략 시 Scene 1.5·Summary 2.0을 유지하고, 0이면 presence penalty를 끕니다. 적용값은 새 요청과 해당 provenance의 `settings.generation.presence_penalty`에 기록됩니다. 기존 sampling 결과나 다른 penalty 값의 정상 Scene·완료 Summary도 재사용하며, 기존 파일의 생성 기록은 덮어쓰지 않습니다.
 
-Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다른 오류는 해당 요청 실패로 처리합니다. 실패를 기록한 생성 단계는 오류를 반환할 수 있으며 같은 명령으로 다시 실행합니다. 성공적으로 복구한 항목의 실패 로그는 제거합니다.
+Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다른 오류는 해당 요청 실패로 처리합니다. 실패를 기록한 생성 단계는 오류를 반환할 수 있으며 같은 명령으로 다시 실행합니다. 성공적으로 복구한 Scene은 같은 JSONL의 실패 행을 관측 행으로 교체합니다. Summary의 복구된 실패 로그는 제거합니다.
 
 현재 Run의 기존 Description Summary에는 다른 Run에서 생성된 provenance가 들어 있을 수 있습니다. 원래 모델·프롬프트·입력 해시는 유지하고, 경로가 과거 Run을 가리킨다는 이유만으로 재생성하지 않습니다.
 

@@ -44,8 +44,9 @@ def test_fixed_scene_policy_retries_only_failed_scenes(ready_context, monkeypatc
     assert identity['generation']['repetition_penalty'] == penalty
     assert identity['repetition_penalty'] == [penalty]
     for cid in ids[1:]:
-        failed = read_jsonl(directory / 'failures' / f'{cid}.jsonl')[0]
-        assert failed['provenance']['settings']['actual_repetition_penalty'] == penalty
+        failed = read_jsonl(directory / f'{cid}.jsonl')[0]
+        assert set(failed) == {'content_id', 'scene_idx', 'tokens', 'error', 'raw_output'}
+        assert failed['error'].endswith('output truncated at token limit')
     saved = (directory / f'{ids[0]}.jsonl').read_bytes()
     succeed = True
     assert extract(context, **options)['failure_count'] == 0

@@ -63,7 +63,6 @@ class SceneResults:
         pending,
         *,
         scene_dir,
-        failures,
         records,
         progress,
         arm,
@@ -73,7 +72,6 @@ class SceneResults:
     ):
         self.pending = pending
         self.scene_dir = scene_dir
-        self.failures = failures
         self.records = records
         self.progress = progress
         self.arm = arm
@@ -139,28 +137,18 @@ class SceneResults:
                 record["provenance"] = provenance
             self.contents[cid][int(row["scene_idx"])] = record
         else:
-            self.contents[cid].pop(int(row["scene_idx"]), None)
+            self.contents[cid][int(row["scene_idx"])] = {
+                "content_id": cid, "scene_idx": int(row["scene_idx"]),
+                "tokens": tokens, "error": failure["error"], "raw_output": text,
+            }
         records = list(self.contents[cid].values())
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
         self.records[cid] = records
-        if failure is not None:
-            raw_output = text if self.arm == "graph" and truncated else ""
-            self.failures.record(
-                cid,
-                int(row["scene_idx"]),
-                failure["error"],
-                raw_output,
-                provenance=provenance,
-                tokens=tokens,
-            )
-        else:
-            self.failures.remove(cid, int(row["scene_idx"]))
         self.completed.add(task_id)
         self.progress.complete(
             task_id=task_id,
             failed=failure is not None,
-            raw=record is not None
-            and record.get("parse_mode") == "text",
+            warning=record is not None and bool(record.get("semantic_warnings")),
         )
         return failure is not None
 
@@ -169,7 +157,6 @@ def run_qwen_scenes(
     pending,
     *,
     scene_dir,
-    failures,
     model_path,
     generator_factory,
     names,
@@ -186,7 +173,6 @@ def run_qwen_scenes(
     results = SceneResults(
         pending,
         scene_dir=scene_dir,
-        failures=failures,
         records=existing_records,
         progress=progress,
         arm=arm,
@@ -238,7 +224,6 @@ def run_gemini_scenes(
     pool,
     records_by_content,
     scene_dir,
-    failures,
     names,
     progress,
     arm="graph",
@@ -247,7 +232,6 @@ def run_gemini_scenes(
     results = SceneResults(
         pending,
         scene_dir=scene_dir,
-        failures=failures,
         records=records_by_content,
         progress=progress,
         arm=arm,

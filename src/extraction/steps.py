@@ -8,7 +8,6 @@ from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
 from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
-from extraction.failures import FailureLog
 from extraction.graph_warnings import WARNING_TAGS
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -23,7 +22,7 @@ from extraction.step_support import (
     visual_rows,
 )
 from extraction.summary_executor import run_summary_stage, qwen_generator
-from extraction.scene_storage import read_scene_records
+from extraction.scene_storage import read_scene_records, migrate_scene_failures
 from pipeline_logging import log_step_start
 
 GRAPH_SOURCES = (*QWEN_MODELS, "gemini")
@@ -91,7 +90,7 @@ def prompt_provenance(
     }
 
 
-def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *, force):
+def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
     existing, planned = {}, []
     for visual in visuals:
         cid = visual["content_id"]
@@ -99,7 +98,7 @@ def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *
         rows = prepare_rows(visual)
         try:
             cached = (
-                normalize(read_scene_records(output), output)
+                read_scene_records(output, include_failures=True)
                 if output.is_file() and (not force)
                 else []
             )
@@ -107,20 +106,19 @@ def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *
             raise ExtractionStepError(
                 f"cannot safely identify existing scenes: {output}: {exc}"
             ) from exc
+        normalize([
+            row for row in cached if "error" not in row and not row.get("semantic_warnings")
+        ], output)
         by_index = {r["scene_idx"]: r for r in cached}
         if len(by_index) != len(cached):
             raise ExtractionStepError(f"duplicate cached scenes: {output}")
-        retained, missing = ([], [])
+        missing = []
         for row in rows:
             saved = by_index.get(row["scene_idx"])
-            reusable = saved is not None
-            if failures.contains(cid, row["scene_idx"]):
+            if saved is None or "error" in saved or saved.get("semantic_warnings"):
                 missing.append(row)
-            elif reusable:
-                retained.append(saved)
-            elif not failures.contains(cid, row["scene_idx"]):
-                missing.append(row)
-        existing[cid] = retained
+        expected_indices = {row["scene_idx"] for row in rows}
+        existing[cid] = [row for row in cached if row["scene_idx"] in expected_indices]
         if missing:
             planned.append(
                 (
@@ -167,12 +165,9 @@ def _extract(
     ensure_generation_identity(scene_dir, provenance, force=force)
     if representation == "graph":
         (scene_dir / "generation_stats.json").unlink(missing_ok=True)
-    failures = FailureLog(scene_dir, scenes=True)
+    migrate_scene_failures(scene_dir)
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
-    content_ids = [visual["content_id"] for visual in visuals]
-    if force:
-        failures.clear_contents(content_ids)
     prepare_rows = partial(
         scene_generation_rows,
         prompt=prompt,
@@ -183,13 +178,15 @@ def _extract(
     existing, planned = prepare_scene_batch(
         visuals,
         scene_dir,
-        failures,
         prepare_rows,
         normalize,
         force=force,
     )
     total = sum((len(scenes) for _, scenes in planned))
-    reused = sum((len(records) for records in existing.values()))
+    reused = sum(
+        "error" not in row and not row.get("semantic_warnings")
+        for records in existing.values() for row in records
+    )
 
     def pending_contents():
         for visual, scenes in planned:
@@ -202,14 +199,12 @@ def _extract(
         desc=arm.name,
         unit="scene",
         progress_factory=tqdm,
-        track_structured=representation == "graph",
     ) as progress:
         if model in QWEN_MODELS:
             run_qwen_scenes(
                 pending_contents(),
                 provenance=provenance,
                 scene_dir=scene_dir,
-                failures=failures,
                 model_path=context.path("models", model),
                 generator_factory=qwen_generator,
                 names=video_name_map(context),
@@ -232,12 +227,11 @@ def _extract(
                 pool=pool,
                 records_by_content=existing,
                 scene_dir=scene_dir,
-                failures=failures,
                 names=video_name_map(context),
                 progress=progress,
                 arm=representation,
             )
-    failure_count = failures.count(content_ids)
+    failure_count = sum("error" in row for records in existing.values() for row in records)
     if representation == "graph":
         stats = {
             "total": total + reused,
@@ -248,6 +242,8 @@ def _extract(
         }
         for records in existing.values():
             for record in records:
+                if "error" in record:
+                    continue
                 tags = record["semantic_warnings"]
                 stats["warning" if tags else "success"] += 1
                 for tag in tags:

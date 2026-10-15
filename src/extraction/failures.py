@@ -1,4 +1,4 @@
-"""Terminal scene failures per content, and summary failures in one JSONL file."""
+"""Terminal summary failures in one JSONL file; Scene failures live inline."""
 
 import json
 from pathlib import Path
@@ -9,13 +9,12 @@ from extraction.token_usage import validate_tokens
 
 
 class FailureLog:
-    def __init__(self, directory, *, scenes=False):
+    def __init__(self, directory):
         directory = Path(directory)
-        self.scenes = scenes
-        self.path = directory / ("failures" if scenes else "failures.jsonl")
+        self.path = directory / "failures.jsonl"
         self.rows = {}
         self.by_content = {}
-        sources = sorted(self.path.glob("*.jsonl")) if scenes else [self.path]
+        sources = [self.path]
         for path in sources:
             if not path.is_file():
                 continue
@@ -31,9 +30,6 @@ class FailureLog:
                     tokens=row.get("tokens"),
                 )
 
-    def path_for(self, content_id):
-        return self.path / f"{content_id}.jsonl" if self.scenes else self.path
-
     def _remember(
         self,
         content_id,
@@ -48,12 +44,7 @@ class FailureLog:
     ):
         cid = str(content_id)
         row = {"content_id": cid}
-        if self.scenes:
-            if type(scene_idx) is not int or scene_idx < 0:
-                raise ValueError(f"invalid failed scene index for {cid}: {scene_idx}")
-            row["scene_idx"] = scene_idx
-        else:
-            scene_idx = None
+        scene_idx = None
         row.update(error=str(error), raw_output=raw_output if raw_output is not None else "")
         if tokens is not None:
             row["tokens"] = validate_tokens(tokens)
@@ -82,9 +73,9 @@ class FailureLog:
         key = (cid, scene_idx)
         if key not in self.rows:
             return
-        rows = self.by_content[cid].values() if self.scenes else self.rows.values()
+        rows = self.rows.values()
         remaining = [row for row in rows if (row["content_id"], row.get("scene_idx")) != key]
-        self._write(self.path_for(cid), remaining)
+        self._write(self.path, remaining)
         del self.rows[key]
         del self.by_content[cid][scene_idx]
         if not self.by_content[cid]:
@@ -122,12 +113,12 @@ class FailureLog:
         )
         if previous == row:
             return
-        path = self.path_for(cid)
+        path = self.path
         if previous is not None:
-            rows = self.by_content[cid].values() if self.scenes else self.rows.values()
+            rows = self.rows.values()
             self._write(path, list(rows))
             return
-        # New failures append in O(1), including runs with many failed scenes.
+        # New failures append in O(1).
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -139,10 +130,7 @@ class FailureLog:
         for cid in selected:
             for scene_idx in self.by_content.pop(cid):
                 del self.rows[(cid, scene_idx)]
-            if self.scenes:
-                self.path_for(cid).unlink(missing_ok=True)
-        if not self.scenes:
-            self._write(self.path, list(self.rows.values()))
+        self._write(self.path, list(self.rows.values()))
 
     def count(self, content_ids):
         return sum(len(self.by_content.get(str(cid), {})) for cid in set(content_ids))

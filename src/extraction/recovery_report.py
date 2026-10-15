@@ -20,10 +20,16 @@ def recovery_report(context, *, branches=None, content_ids=None):
                 continue
             if contents is not None and path.stem not in contents:
                 continue
-            for row in read_scene_records(path):
+            for row in read_scene_records(path, include_failures=True):
                 history = row.get("generation", {})
                 unknown += not bool(history)
                 attempt_count += history.get("attempt_count", int(bool(history.get("input_key"))))
+                if "error" in row:
+                    modes["failed"] += 1
+                    continue
+                if row.get("semantic_warnings"):
+                    modes["warning"] += 1
+                    continue
                 modes[
                     row.get("status", row.get("parse_mode", history.get("repair_mode", "unknown")))
                 ] += 1

@@ -207,11 +207,14 @@ def _scene_arm_contract(
             f"{arm} scene outcomes",
             errors,
             report_error=False,
-            reader=read_scene_records,
+            reader=lambda path: read_scene_records(path, include_failures=True),
         )
         if not scene_loaded and (scene_dir / f"{content_id}.jsonl").exists():
             issues["missing_or_invalid_scene_file"] += 1
-        failure_rows = failures_by_content.get(content_id, [])
+        failure_rows = failures_by_content.get(content_id, []) + [
+            row for row in scene_rows if "error" in row
+        ]
+        scene_rows = [row for row in scene_rows if "error" not in row]
         for outcome, rows, destination in (
             ("success", scene_rows, success),
             ("failure", failure_rows, failures),

@@ -34,7 +34,7 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
         ]
 
     monkeypatch.setattr(steps, "scene_generation_rows", rows)
-    graph = json.dumps({"entities": [], "relations": [], "context": []})
+    graph = json.dumps({"medium": "live_action", "format": "other", "topics": [], "entities": [], "actions": []})
     interrupt = True
     calls = []
 
@@ -130,14 +130,14 @@ def test_gemini_resume_preserves_out_of_order_completions_across_interrupts(
                 for task_id in ("b:1", "b:0", "a:0"):
                     callback(
                         GeminiGenerationOutcome(
-                            task_id, '{"entities": [], "relations": [], "context": []}'
+                            task_id, '{"medium": "live_action", "format": "other", "topics": [], "entities": [], "actions": []}'
                         )
                     )
                 raise KeyboardInterrupt
             for task in tasks:
                 callback(
                     GeminiGenerationOutcome(
-                        task.task_id, '{"entities": [], "relations": [], "context": []}'
+                        task.task_id, '{"medium": "live_action", "format": "other", "topics": [], "entities": [], "actions": []}'
                     )
                 )
 

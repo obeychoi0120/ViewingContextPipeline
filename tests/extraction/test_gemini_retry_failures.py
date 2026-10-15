@@ -9,11 +9,12 @@ from extraction.scene_storage import read_scene_records
 from artifact_io import read_jsonl
 
 
-def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last_success(
+@pytest.mark.parametrize("representation", ["graph", "description"])
+def test_gemini_scene_retry_preserves_other_failures_and_replaces_rows(
     ready_context,
     monkeypatch,
+    representation,
 ):
-    representation = "graph"
     context = ready_context
     visual = steps.visual_rows(context)[0]
     cid = visual["content_id"]
@@ -22,14 +23,14 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
     timestamp.write_text(json.dumps([{**original, "scene_idx": i} for i in range(3)]))
     monkeypatch.setattr(steps, "visual_rows", lambda _: [visual])
     directory = context.extraction_dir(representation, "gemini", "scenes")
-    failure_path = directory / "failures" / f"{cid}.jsonl"
+    failure_path = directory / f"{cid}.jsonl"
     extract = getattr(steps, f"extract_{representation}_scenes")
     options = dict(
         model="gemini",
         schema=f"prompts/scene_{representation}_v{'4' if representation == 'graph' else '2'}.md",
     )
     good = (
-        '{"entities": [], "relations": [], "context": []}'
+        '{"medium": "live_action", "format": "other", "topics": [], "entities": [], "actions": []}'
         if representation == "graph"
         else "A person walks."
     )
@@ -45,7 +46,7 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
                 idx = int(task.task_id.rsplit(":", 1)[1])
                 calls.append((phase, idx))
                 if phase == 1:
-                    assert len(read_jsonl(failure_path)) == 2
+                    assert len([r for r in read_jsonl(failure_path) if "error" in r]) == 2
                     raise KeyboardInterrupt
                 error = None
                 text = good
@@ -56,7 +57,7 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
                     error = "429 RESOURCE_EXHAUSTED"
                 callback(GeminiGenerationOutcome(task.task_id, text, error=error))
                 if phase == 2 and idx == 0:
-                    assert [row["scene_idx"] for row in read_jsonl(failure_path)] == [1]
+                    assert [row["scene_idx"] for row in read_jsonl(failure_path) if "error" in row] == [1]
             return {}
 
     monkeypatch.setattr(steps, "GeminiWorkerPool", Pool)
@@ -89,8 +90,8 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
         )["failure_count"]
         == 1
     )
-    rows = read_jsonl(failure_path)
-    assert len(rows) == 1 and rows[0]["raw_output"] == ""
+    rows = [r for r in read_jsonl(failure_path) if "error" in r]
+    assert len(rows) == 1 and rows[0]["raw_output"] == "failed output 2"
     phase = 3
     assert (
         extract(
@@ -100,7 +101,8 @@ def test_gemini_scene_retry_preserves_other_failures_and_removes_file_after_last
         )["failure_count"]
         == 0
     )
-    assert not failure_path.exists()
+    assert not any("error" in row for row in read_jsonl(failure_path))
+    assert not (directory / "failures").exists()
     assert calls == [(0, 0), (0, 1), (0, 2), (1, 0), (2, 0), (2, 1), (3, 1)]
     saved = read_scene_records(directory / f"{cid}.jsonl")
     assert [row["scene_idx"] for row in saved] == [0, 1, 2]

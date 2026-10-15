@@ -73,9 +73,12 @@ class SummaryBatch:
 
 def summary_scene_input(source, normalize, graph, provenance):
     try:
-        all_records = normalize(read_scene_records(source), source) if source.is_file() else []
+        outcomes = read_scene_records(source, include_failures=True) if source.is_file() else []
+        all_records = normalize([row for row in outcomes if "error" not in row], source)
         scene_failure_path = source.parent / "failures" / source.name
-        scene_failures = read_jsonl(scene_failure_path) if scene_failure_path.is_file() else []
+        scene_failures = [row for row in outcomes if "error" in row]
+        if scene_failure_path.is_file():
+            scene_failures.extend(read_jsonl(scene_failure_path))
         failed_indices = {r["scene_idx"] for r in scene_failures}
         records = [
             r
@@ -208,7 +211,7 @@ def run_qwen_summaries(context, batch, schedule, progress, generator_factory, mo
             publish(cid, normalized, [], tokens=tokens)
             failures.remove(cid, None)
             del next_penalties[cid]
-        progress.complete(task_id=cid, failed=bool(violations), raw=False)
+        progress.complete(task_id=cid, failed=bool(violations), warning=False)
 
     with generator_factory(
         model_path=context.path("models", model),
@@ -275,7 +278,7 @@ def run_gemini_summaries(context, batch, progress, gemini_pool_factory):
             publish(cid, normalized, [], tokens=tokens)
             failures.remove(cid, None)
         completed.add(cid)
-        progress.complete(task_id=cid, failed=bool(violations), raw=False)
+        progress.complete(task_id=cid, failed=bool(violations), warning=False)
 
     pool.generate(
         (pending[cid][2] for cid in next_penalties),

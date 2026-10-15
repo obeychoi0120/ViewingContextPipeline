@@ -13,18 +13,26 @@ from extraction.structured_output import (
 
 GRAPH_FIELDS = ("content_id", "scene_idx", "tokens", "warning", "scene_graph")
 DESCRIPTION_FIELDS = ("content_id", "scene_idx", "tokens", "description")
+FAILURE_FIELDS = ("content_id", "scene_idx", "tokens", "error", "raw_output")
 
 
 def validate_scene_payload(path, row):
     """Reject obsolete storage/Graph contracts without transforming source data."""
     path = Path(path)
-    fields = GRAPH_FIELDS if "scene_graph" in row else DESCRIPTION_FIELDS
+    fields = FAILURE_FIELDS if "error" in row else (
+        GRAPH_FIELDS if "scene_graph" in row else DESCRIPTION_FIELDS
+    )
     if set(row) != set(fields):
         raise UnsupportedArtifactError(f"unsupported compact scene fields: {path}")
     if row["content_id"] != path.stem or type(row["scene_idx"]) is not int or row["scene_idx"] < 0:
         raise ValueError(f"invalid scene identity: {path}")
     validate_tokens(row["tokens"])
-    if "scene_graph" in row:
+    if "error" in row:
+        if not isinstance(row["error"], str) or not row["error"].strip():
+            raise ValueError(f"invalid scene error: {path}")
+        if not isinstance(row["raw_output"], str):
+            raise ValueError(f"invalid failed scene output: {path}")
+    elif "scene_graph" in row:
         warning_tags(row["warning"])
         graph = row["scene_graph"]
         if isinstance(graph, dict):
@@ -69,6 +77,10 @@ def recover_scene_graph(graph, warnings):
 
 
 def _payload(path, record):
+    if "error" in record:
+        payload = {key: record[key] for key in FAILURE_FIELDS}
+        validate_scene_payload(path, payload)
+        return payload
     fields = set(record) & {"description", "graph", "scene_graph"}
     if len(fields) != 1 or "raw_response" in record:
         raise UnsupportedArtifactError(f"unsupported scene execution record: {path}")
@@ -86,7 +98,7 @@ def _payload(path, record):
     return {key: payload[key] for key in (GRAPH_FIELDS if "scene_graph" in payload else DESCRIPTION_FIELDS)}
 
 
-def read_scene_records(path):
+def read_scene_records(path, *, include_failures=False):
     """Adapt current persisted fields to the current in-memory execution contract."""
     path = Path(path)
     rows = read_jsonl(path)
@@ -96,6 +108,10 @@ def read_scene_records(path):
         raise ValueError(f"duplicate scene index: {path}")
     records = []
     for row in sorted(rows, key=lambda row: row["scene_idx"]):
+        if "error" in row:
+            if include_failures:
+                records.append(row)
+            continue
         common = {"scene_idx": row["scene_idx"], "keyframes": [], "tokens": row["tokens"]}
         if "description" in row:
             record = {
@@ -104,6 +120,9 @@ def read_scene_records(path):
             }
         else:
             graph, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
+            if include_failures and warning_tags(row["warning"]):
+                # Resume must retry persisted warnings even if a newer parser can repair them.
+                graph, warnings = row["scene_graph"], warning_tags(row["warning"])
             record = {
                 **common, "graph": graph,
                 "parse_mode": "text" if isinstance(graph, str) else (
@@ -113,6 +132,37 @@ def read_scene_records(path):
             }
         records.append(record)
     return records
+
+
+def migrate_scene_failures(directory):
+    """Publish legacy failures inline before removing their old per-content log."""
+    directory = Path(directory)
+    failure_dir = directory / "failures"
+    for source in sorted(failure_dir.glob("*.jsonl")):
+        target = directory / source.name
+        rows = read_jsonl(target) if target.is_file() else []
+        for row in rows:
+            validate_scene_payload(target, row)
+        by_index = {row["scene_idx"]: row for row in rows}
+        if len(by_index) != len(rows):
+            raise ValueError(f"duplicate scene index: {target}")
+        for row in read_jsonl(source):
+            failure = {
+                "content_id": row.get("content_id", source.stem),
+                "scene_idx": row.get("scene_idx"),
+                "tokens": row.get("tokens"),
+                "error": row.get("error") or "generation failed",
+                "raw_output": row.get("raw_output") or "",
+            }
+            validate_scene_payload(target, failure)
+            by_index[failure["scene_idx"]] = failure
+        atomic_write_jsonl(
+            target, sorted(by_index.values(), key=lambda row: row["scene_idx"]),
+            durable=True, sort_keys=False,
+        )
+        source.unlink()
+    if failure_dir.is_dir() and not any(failure_dir.iterdir()):
+        failure_dir.rmdir()
 
 
 def write_scene_records(path, records):

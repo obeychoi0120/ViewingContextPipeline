@@ -5,7 +5,7 @@ import pytest
 
 from extraction import steps
 from extraction.backends import GeminiGenerationOutcome
-from extraction.failures import FailureLog
+from extraction.scene_storage import read_scene_records
 
 GRAPH = '[Context]\nmedium: animation\nformat: unknown\ntopics: none\n[Entities]\nnone\n[Actions]\nnone'
 
@@ -59,11 +59,14 @@ def extract(context, representation, model='qwen3vl'):
 
 
 @pytest.mark.parametrize('model', ['qwen3vl', 'gemini'])
-def test_cutoff_failure_retains_tokens_after_failure_log_reload(ready_context, monkeypatch, model):
+def test_cutoff_failure_retains_tokens_after_inline_reload(ready_context, monkeypatch, model):
     install_generators(monkeypatch, 'graph', cutoff='scene')
     arm, result = extract(ready_context, 'graph', model)
     assert result['failure_count'] == 4
     directory = ready_context.scene_arm_dir(arm)
-    assert not list(directory.glob('*.jsonl'))
-    failures = FailureLog(directory, scenes=True)
-    assert all(row['tokens'] == 123 and row['raw_output'] == GRAPH for row in failures.rows.values())
+    failures = [row for path in directory.glob('*.jsonl')
+                for row in read_scene_records(path, include_failures=True)]
+    assert len(failures) == 4
+    assert all(row['tokens'] == 123 and row['raw_output'] == GRAPH for row in failures)
+    assert all(read_scene_records(path) == [] for path in directory.glob('*.jsonl'))
+    assert not (directory / 'failures').exists()
