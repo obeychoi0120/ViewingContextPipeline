@@ -58,11 +58,18 @@ def penalty_schedule(value):
 QWEN_MODELS = ("qwen3vl", "qwen3.5")
 
 
+def validate_presence_penalty(value: float) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value) or not -2 <= value <= 2:
+        raise ValueError("presence penalty must be a finite number in [-2, 2]")
+    return float(value)
+
+
 def generation_settings(
     model: str, *, representation: str, summary: bool = False,
     repetition_penalty: float | None = None,
+    presence_penalty: float | None = None,
 ) -> dict[str, Any]:
-    """Sampling defaults with an optional generated-token repetition penalty override."""
+    """Greedy generation with optional presence and generated-token repetition penalties."""
     if model not in QWEN_MODELS:
         raise ValueError(f"unsupported Qwen model: {model}")
     if representation not in ("graph", "description"):
@@ -71,12 +78,15 @@ def generation_settings(
     if repetition_penalty is not None:
         penalty = penalty_schedule([repetition_penalty])[0]
     return {
-        "do_sample": True,
-        "temperature": 1.0 if summary else 0.7,
-        "top_p": 1.0 if summary else 0.8,
-        "top_k": 40 if summary and model == "qwen3vl" else 20,
+        "do_sample": False,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 0,
         "min_p": 0.0,
-        "presence_penalty": 2.0 if summary else 1.5,
+        "presence_penalty": (
+            validate_presence_penalty(presence_penalty)
+            if presence_penalty is not None else (2.0 if summary else 1.5)
+        ),
         "repetition_penalty": penalty,
         "enable_thinking": False if model == "qwen3.5" else None,
         "model": model,

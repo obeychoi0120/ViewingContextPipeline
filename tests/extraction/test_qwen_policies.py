@@ -23,12 +23,13 @@ def test_actual_sampling_params(model, summary, representation, override):
     backend = object.__new__(QwenBackend)
     backend.stop_token_ids = [151645]
     task = QwenGenerationTask('a', (), 'prompt', 384, **generation_settings(
-        model, representation=representation, summary=summary, repetition_penalty=override))
+        model, representation=representation, summary=summary, repetition_penalty=override,
+        presence_penalty=0.0 if override is not None else None))
     params = backend.sampling_params(task)
-    assert params.temperature == (1.0 if summary else 0.7)
-    assert params.top_p == (1.0 if summary else 0.8)
-    assert params.top_k == (40 if summary and model == 'qwen3vl' else 20)
-    assert params.presence_penalty == (2.0 if summary else 1.5)
+    assert not task.do_sample and params.temperature == 0.0
+    assert params.top_p == 1.0
+    assert params.top_k == 0
+    assert params.presence_penalty == (0.0 if override is not None else (2.0 if summary else 1.5))
     assert params.min_p == 0.0 and params.repetition_penalty == 1.0
     assert params.max_tokens == 384 and params.stop_token_ids == [151645]
     expected_penalty = override if override is not None else (
@@ -83,7 +84,7 @@ def test_legacy_names_and_run_rejected(current_context):
 
 
 @pytest.mark.parametrize('model', ['qwen3vl', 'qwen3.5'])
-@pytest.mark.parametrize('changed_setting', ['temperature', 'repetition_penalty'])
+@pytest.mark.parametrize('changed_setting', ['temperature', 'repetition_penalty', 'presence_penalty'])
 def test_policy_change_requires_force(ready_context, fake_models, model, changed_setting):
     options = dict(model=model, arm=f'graph_{model}', schema='prompts/scene_graph_v8.md')
     steps.extract_graph_scenes(ready_context, **options)
@@ -96,7 +97,7 @@ def test_policy_change_requires_force(ready_context, fake_models, model, changed
         identity['identity']['settings']['generation']['repetition_penalty'] = 1.0
         identity['identity']['settings']['repetition_penalty'] = [1.0]
     else:
-        identity['identity']['settings']['generation']['temperature'] = 0.0
+        identity['identity']['settings']['generation'][changed_setting] = 0.7
     write_json(identity_path, identity)
     count = len(fake_models)
     with pytest.raises(ValueError, match='policy mismatch'):
@@ -118,7 +119,7 @@ def test_policy_change_requires_force(ready_context, fake_models, model, changed
     with pytest.raises(RuntimeError, match='policy mismatch'):
         steps.summarize(ready_context, **options)
     steps.summarize(ready_context, force=True, **options)
-    assert read_json(document_path)['provenance']['settings']['generation']['top_k'] == (40 if model == 'qwen3vl' else 20)
+    assert read_json(document_path)['provenance']['settings']['generation']['top_k'] == 0
 
 
 def test_force_interruption_does_not_reuse_stale_policy(ready_context, fake_models, monkeypatch):

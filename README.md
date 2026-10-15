@@ -398,15 +398,17 @@ artifacts/
 
 | 모델 | 장면 추출 (VL) | 장면 기록 요약 (Text) |
 | --- | --- | --- |
-| `qwen3vl` | temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5 | temperature 1.0, top_p 1.0, top_k 40, presence_penalty 2.0 |
-| `qwen3.5` | temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5 | temperature 1.0, top_p 1.0, top_k 20, presence_penalty 2.0 |
+| `qwen3vl` | greedy, presence_penalty 1.5 | greedy, presence_penalty 2.0 |
+| `qwen3.5` | greedy, presence_penalty 1.5 | greedy, presence_penalty 2.0 |
 
-두 모델은 공식 sampling 설정과 min_p 0.0을 사용합니다. 옵션을 생략하면 Graph 장면 추출에 repetition_penalty **1.05**, Description 장면 추출과 모든 요약에 **1.0**을 사용합니다. Qwen의 장면 추출·요약 명령에서 `--repetition-penalty FLOAT`로 해당 실행의 값을 덮어쓸 수 있습니다. 허용 범위는 유한한 단일 숫자 **1.0~2.0**이며 Gemini에는 지정할 수 없습니다. 기존 생성 토큰 전용 penalty 경로를 재사용하며 vLLM 기본 penalty와 중복 적용하지 않습니다. 기록된 값과 다른 값으로 변경하면 일반 resume할 수 없으므로 새 Run 또는 해당 단계의 `--force`로 전체를 재생성합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 출력 한도는 Graph 장면 384, Description 장면 512, 요약 512입니다. 생성 정책은 모델별로 고정되며 예전 전역 greedy·penalty schedule 설정은 받지 않습니다. 기존 greedy 실험과의 결과 차이에는 decoding 변경 효과도 포함됩니다. 근거: [Qwen3-VL 공식 설정](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct#generation-hyperparameters), [Qwen3.5 공식 설정](https://huggingface.co/Qwen/Qwen3.5-2B#best-practices).
+두 모델의 Graph·Description 장면 추출과 요약은 greedy decoding을 사용합니다(`do_sample=False`, temperature 0.0, top_p 1.0, top_k 0, min_p 0.0). Presence penalty는 생략 시 장면 추출 **1.5**, 요약 **2.0**이며 `--presence-penalty FLOAT`로 덮어씁니다. 허용 범위는 유한한 단일 숫자 **-2.0~2.0**이고 `0`은 비활성화입니다. Greedy에서도 presence·repetition penalty는 적용됩니다. 이번 decoding 변경으로 형식 준수율이나 추천 성능이 개선되는지는 아직 검증하지 않았습니다.
+
+옵션을 생략하면 Graph 장면 추출에 repetition_penalty **1.05**, Description 장면 추출과 모든 요약에 **1.0**을 사용합니다. Qwen의 장면 추출·요약 명령에서 `--repetition-penalty FLOAT`로 해당 실행의 값을 덮어쓸 수 있습니다. 허용 범위는 유한한 단일 숫자 **1.0~2.0**입니다. 두 penalty CLI 옵션은 Gemini에는 지정할 수 없습니다. 기존 생성 토큰 전용 repetition penalty 경로를 재사용하며 vLLM 기본 penalty와 중복 적용하지 않습니다. Greedy 전환 전의 sampling 결과나 다른 penalty 값으로 생성한 결과는 일반 resume에서 거부합니다. 새 Run 또는 해당 단계의 `--force`로 전체를 재생성해야 하며, 설정이 같은 완료 결과는 재사용합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 출력 한도는 Graph 장면 384, Description 장면 512, 요약 512입니다. 예전 전역 greedy·penalty schedule 설정은 받지 않습니다.
 
 Qwen3.5 실행 예시:
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5 --repetition-penalty 1.05
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5 --repetition-penalty 1.05 --presence-penalty 0
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3.5 --arm desc_qwen3.5
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model qwen3.5 --arm graph_qwen3.5
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model qwen3.5 --arm desc_qwen3.5
