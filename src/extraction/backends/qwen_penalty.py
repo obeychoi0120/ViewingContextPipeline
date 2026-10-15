@@ -102,7 +102,12 @@ class GeneratedTokenPenaltyV2:
         rows, vocab = logits.shape
         # The extra column is a sentinel: stale/padded history never marks token 0.
         seen = torch.zeros((rows, vocab + 1), device=logits.device, dtype=torch.bool)
-        upper_bounds = ctx.seq_lens_upper_bound_np - states.prompt_len.np[ctx.idx_mapping_np]
+        # vLLM may pad lengths for CUDA graphs; mappings contain only active requests.
+        num_reqs = len(ctx.idx_mapping_np)
+        upper_bounds = (
+            ctx.seq_lens_upper_bound_np[:num_reqs]
+            - states.prompt_len.np[ctx.idx_mapping_np]
+        )
         history_width = max(0, int(upper_bounds.max(initial=0)))
         if history_width:
             positions = starts[:, None] + torch.arange(history_width, device=logits.device)

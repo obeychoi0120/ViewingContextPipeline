@@ -1,14 +1,6 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from uuid import uuid4
-
-
-def result_hash(value):
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
 
 
 class QwenRuntime:

@@ -128,7 +128,8 @@ def test_v2_permuted_slots_resumption_and_unique_tokens(device, factor):
     torch.testing.assert_close(penalty.apply(scores(device, 1), ctx), expected)
 
 
-def test_v2_draft_rows_no_future_or_cross_request_leak(device):
+@pytest.mark.parametrize('padding', [0, 6])
+def test_v2_draft_rows_no_future_or_cross_request_leak(device, padding):
     import torch
 
     histories, prompts = [[1, 4], [2, 6, 5]], [2, 1]
@@ -140,9 +141,34 @@ def test_v2_draft_rows_no_future_or_cross_request_leak(device):
     # First draft row still ends at the last prompt token, so has no generated history.
     # Later rows may see their own earlier drafts but not future drafts or other slots.
     slots, positions, inputs = [0, 1, 0, 0], [1, 2, 2, 3], [4, 5, 7, 2]
-    ctx = context(device, slots, positions, inputs, [4, 3])
+    ctx = context(device, slots, positions, inputs, [4, 3] + [0] * padding)
     expected = reference(scores(device, 4), histories, prompts, [2, 1.5], slots, positions, inputs)
     torch.testing.assert_close(penalty.apply(scores(device, 4), ctx), expected)
+
+
+@pytest.mark.parametrize('active,padded', [(31, 32), (17, 24), (3, 8), (1, 8)])
+def test_v2_padded_lengths_use_only_active_requests_in_batch_order(device, active, padded):
+    import torch
+
+    # Persistent slots differ from batch positions and can exceed the padded batch size.
+    count = padded + 5
+    prompts = [1 + slot % 3 for slot in range(count)]
+    histories = [[1, 5, 7][:prompt] + [2, 2, 3, 4] for prompt in prompts]
+    state = buffers(device, histories, prompts)
+    penalty = GeneratedTokenPenaltyV2(None, state)
+    factors = [1.0 if slot % 3 == 1 else 1.05 for slot in range(count)]
+    for slot, factor in enumerate(factors):
+        penalty.add_request(slot, params(factor))
+    penalty.apply_staged_writes()
+    slots = list(range(count - 1, count - active - 1, -1))
+    positions = [len(histories[slot]) - 1 for slot in slots]
+    inputs = [histories[slot][-1] for slot in slots]
+    upper_bounds = [len(histories[slot]) for slot in slots] + [0] * (padded - active)
+    ctx = context(device, slots, positions, inputs, upper_bounds)
+    before = ctx.seq_lens_upper_bound_np.copy()
+    expected = reference(scores(device, active), histories, prompts, factors, slots, positions, inputs)
+    torch.testing.assert_close(penalty.apply(scores(device, active), ctx), expected)
+    np.testing.assert_array_equal(ctx.seq_lens_upper_bound_np, before)
 
 
 def test_v2_recycled_slot_clears_old_penalty_and_snapshot(device):

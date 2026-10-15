@@ -169,8 +169,6 @@ for AGG in attn_pool gnn_attn; do
   python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
   python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 done
-# 합성 입력의 학습 비용 비교(선택)
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --device cuda:0 --aggregations mean attn_pool gnn gnn_attn
 GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_attention.py tests/validation/test_direct_graph.py
 ```
 
@@ -264,8 +262,6 @@ for AGG in transformer_local transformer transformer_pos; do
   python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
   python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 done
-# 합성 입력의 학습 비용 비교(선택)
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --device cuda:0 --aggregations mean gnn transformer_local transformer transformer_pos
 GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_transformer.py tests/validation/test_direct_graph.py
 ```
 
@@ -334,10 +330,9 @@ python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode
 python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --target meta graph_qwen graph_qwen_meta graph_gemini_meta
 ```
 
-같은 synthetic 입력과 공통 가중치에서 profiler를 끈 mean/gnn 학습 비용을 측정하는 코드는 `benchmarks/scene_gcn_benchmark.py`입니다. BGE나 Run 입력은 읽지 않으며 실제 추천 품질·RTX 6000 Ada 처리량을 검증하는 실험이 아닙니다. 저장할 경우 Run별 측정 결과는 `artifacts/runs/<RUN_ID>/reports/` 아래에 지정합니다.
+아래 과거 mean/gnn 학습 비용 측정에는 같은 synthetic 입력과 공통 가중치를 사용하고 profiler를 껐습니다. BGE나 Run 입력은 읽지 않았으며 실제 추천 품질·RTX 6000 Ada 처리량을 검증한 실험이 아닙니다. 해당 측정 도구 `benchmarks/scene_gcn_benchmark.py`는 2026-10-15 보조 개발 도구 정리에서 제거했습니다. 기존 측정 결과와 검증 기록은 보존합니다.
 
 ```bash
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python benchmarks/scene_gcn_benchmark.py --device cuda:0 --videos 64 --batch-size 128 --warmup 5 --steps 10 --repeats 3
 GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_gcn.py
 ```
 

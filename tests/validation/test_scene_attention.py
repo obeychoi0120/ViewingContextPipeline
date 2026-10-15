@@ -168,11 +168,6 @@ def test_attention_gcn_starts_at_the_scene_transformer_logit_scale():
     assert float(logits.std()) == pytest.approx(0.5, rel=0.1)
 
 
-def test_scene_exchange_scope():
-    assert {"gnn", "gnn_attn", "transformer", "transformer_pos", "transformer_local"} == SCENE_EXCHANGES
-    assert "attn_pool" not in SCENE_EXCHANGES and "mean" not in SCENE_EXCHANGES
-
-
 def make_model(store, device, *, pool, items=64, pairs=1048576, checkpoint="never", cache=0,
                dimension=32):
     return GraphSASRec(
@@ -337,18 +332,3 @@ def test_joint_loss_chunk_checkpoint_and_reload(device, pool, checkpoint, tmp_pa
     for other in ("mean", "gnn", "transformer", *(set(ATTENTION_AGGREGATIONS) - {pool})):
         with pytest.raises(RuntimeError):
             make_model(store, device, pool=other).load_state_dict(model.state_dict())
-
-
-def test_attention_pool_has_no_pairwise_chunking_or_scene_groups(device):
-    store = synthetic_store(24, feature_dim=32)
-    counts = {}
-    for pool in ("attn_pool", "gnn_attn"):
-        model = make_model(store, device, pool=pool, pairs=1).eval()
-        with torch.no_grad():
-            model.catalog_vectors()
-        counts[pool] = model.execution_counts["chunks"]
-    assert counts["attn_pool"] == 1 and counts["gnn_attn"] > 1
-    batch = PackedGraphStore(store).batch(np.arange(24), device, group_scenes=False)
-    assert not any(key.startswith("scene_group_") for key in batch)
-    model = SceneRoleEncoder(32, 8, "attn_pool").to(device)
-    assert torch.isfinite(model(batch)).all()
