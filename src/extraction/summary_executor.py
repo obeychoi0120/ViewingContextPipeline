@@ -143,16 +143,8 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
                 raise ExtractionStepError(
                     f"Summary source/title policy mismatch: {output}; use --force or a new run"
                 )
-            recorded = {
-                **prov,
-                "settings": {k: v for k, v in prov.get("settings", {}).items()
-                             if k != "actual_repetition_penalty"},
-            }
-            if any(canonical(recorded.get(key)) != canonical(value)
-                   for key, value in provenance.items()):
-                raise ExtractionStepError(f"summary generation policy mismatch: {output}; use --force or a new run")
             _, current_prov = summary_scene_input(source, normalize, graph, provenance)
-            if prov.get("scene_input_hash") != current_prov["scene_input_hash"] or canonical(prov.get("scene_provenance")) != canonical(current_prov["scene_provenance"]):
+            if prov.get("scene_input_hash") != current_prov["scene_input_hash"]:
                 raise ExtractionStepError(f"summary scene input changed: {output}; use --force or a new run")
             if existing["status"] == "complete":
                 documents[cid] = existing

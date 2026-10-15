@@ -1,4 +1,4 @@
-"""CLI overrides reach requests, identities, reuse checks and forced regeneration."""
+"""CLI overrides reach pending requests while completed outputs remain reusable."""
 
 import pytest
 
@@ -44,9 +44,15 @@ def test_cli_penalty_reaches_scene_and_summary_requests_and_reuse_checks(
         assert main(args) == 0
         assert len(fake_models) == calls
         changed = [*args[:-1], str(updated_value)]
-        assert main(changed) == 1
+        assert main(changed) == 0
         assert len(fake_models) == calls
         assert before == {p.name: p.read_bytes() for p in directory.iterdir() if p.is_file()}
+        # Missing outputs use the new settings while other completed outputs stay intact.
+        output = next(directory.glob('*.json' if summary else '*.jsonl'))
+        output.unlink()
+        assert main(changed) == 0
+        assert len(fake_models) == calls + 1
+        assert all(getattr(task, penalty) == updated_value for task in fake_models[-1])
         assert main([*changed, '--force']) == 0
         assert all(getattr(task, penalty) == updated_value for task in fake_models[-1])
         updated = read_json(identity_path)

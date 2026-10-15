@@ -85,7 +85,7 @@ def test_legacy_names_and_run_rejected(current_context):
 
 @pytest.mark.parametrize('model', ['qwen3vl', 'qwen3.5'])
 @pytest.mark.parametrize('changed_setting', ['temperature', 'repetition_penalty', 'presence_penalty'])
-def test_policy_change_requires_force(ready_context, fake_models, model, changed_setting):
+def test_policy_change_reuses_completed_outputs(ready_context, fake_models, model, changed_setting):
     options = dict(model=model, arm=f'graph_{model}', schema='prompts/scene_graph_v8.md')
     steps.extract_graph_scenes(ready_context, **options)
     directory = ready_context.scene_arm_dir(options['arm'])
@@ -100,10 +100,16 @@ def test_policy_change_requires_force(ready_context, fake_models, model, changed
         identity['identity']['settings']['generation'][changed_setting] = 0.7
     write_json(identity_path, identity)
     count = len(fake_models)
-    with pytest.raises(ValueError, match='policy mismatch'):
-        steps.extract_graph_scenes(ready_context, **options)
+    recorded_identity = identity_path.read_bytes()
+    steps.extract_graph_scenes(ready_context, **options)
     assert len(fake_models) == count
     assert scene_file.read_bytes() == before
+    assert identity_path.read_bytes() == recorded_identity
+    # Existing compact outputs can also resume without an identity sidecar.
+    identity_path.unlink()
+    steps.extract_graph_scenes(ready_context, **options)
+    assert len(fake_models) == count and scene_file.read_bytes() == before
+    assert identity_path.is_file()
     steps.extract_graph_scenes(ready_context, force=True, **options)
     assert len(fake_models) == count + 1
     assert all(task.repetition_penalty == 1.05 for task in fake_models[-1])
@@ -115,9 +121,12 @@ def test_policy_change_requires_force(ready_context, fake_models, model, changed
     document_path = next(ready_context.summary_arm_dir(options['arm']).glob('*.json'))
     document = read_json(document_path)
     document['provenance']['settings']['generation']['top_k'] = 1
+    document['provenance']['scene_provenance'] = [{'settings': {'presence_penalty': 0.7}}]
     write_json(document_path, document)
-    with pytest.raises(RuntimeError, match='policy mismatch'):
-        steps.summarize(ready_context, **options)
+    before = document_path.read_bytes()
+    count = len(fake_models)
+    steps.summarize(ready_context, **options)
+    assert len(fake_models) == count and document_path.read_bytes() == before
     steps.summarize(ready_context, force=True, **options)
     assert read_json(document_path)['provenance']['settings']['generation']['top_k'] == 0
 

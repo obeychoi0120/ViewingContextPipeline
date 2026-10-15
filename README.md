@@ -91,7 +91,7 @@ p1 - cutting - f1; t1; l1
 - 저장: `extraction/scenes/<source>/<content_id>.jsonl`. Graph 행에는 `scene_graph`·`warning`, Description 행에는 `description`이 들어갑니다. 공통으로 콘텐츠·장면 식별자와 토큰 사용량을 기록합니다.
 - 구조화하지 못한 Graph 출력은 원문으로 보존합니다. 원문 관측은 Text Summary에 사용할 수 있지만, 직접 Graph 학습에는 구조·warning 검사를 통과한 장면만 사용합니다.
 
-구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; place`입니다. v9의 개체 이름 참조는 공백·번호를 포함해 정확히 연결하고 장면별 내부 ID로 변환합니다. 기존 `id: kind` 선언도 지원합니다. Relations·receiver·place 누락과 구형 `location` 필드를 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 현재 형식의 파일은 모델·프롬프트·생성 설정·장면 입력이 일치할 때 재사용합니다. Scene 디렉터리의 `generation_identity.json`으로 compact payload의 생성 조건을 확인하며, 불일치하면 `--force` 또는 새 Run이 필요합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
+구조화 Graph는 현재 Context·Entities·Actions 형식만 지원하며, Actions는 `actor - action - target; tool; place`입니다. v9의 개체 이름 참조는 공백·번호를 포함해 정확히 연결하고 장면별 내부 ID로 변환합니다. 기존 `id: kind` 선언도 지원합니다. Relations·receiver·place 누락과 구형 `location` 필드를 자동 보정하지 않습니다. Scene은 현재 compact 필드만, Summary는 `video-summary/v5`의 `complete`·`failed`와 명시적인 `provenance.summary_model`만 읽습니다. 지원 밖 기존 입력은 경로와 원인을 포함한 오류로 거부하며 일반 재실행에서 변환하거나 덮어쓰지 않습니다. 현재 형식의 완료 Scene은 생성 설정이 달라도 재사용하며 누락·실패 Scene만 현재 설정으로 생성합니다. Scene 디렉터리의 `generation_identity.json`은 기존 기록을 보존하고, 없을 때만 현재 설정으로 생성합니다. 설정 차이를 이유로 실행을 막지 않으며 같은 폴더에 서로 다른 생성 조건의 결과가 섞일 수 있습니다. Summary도 생성 설정 차이로 재사용을 막지 않지만, 실제 Scene 내용이 바뀌면 재생성이 필요합니다. 새 비지원 Graph 응답은 원문과 warning을 보존합니다.
 
 Text 경로의 Summary는 장면 관측을 영상 단위 자연어로 모읍니다. [Graph Summary](prompts/summary_graph_v9.md)와 [Description Summary](prompts/summary_description_v5.md)의 입력에는 제목이 없으며, `{scenes}`가 필요하고 `{english_title}`은 허용하지 않습니다. 출력은 `extraction/summaries/<source>/<content_id>.json`에 텍스트·상태·장면 수·단어 수·토큰 수·생성 출처(provenance)와 함께 저장합니다.
 
@@ -403,7 +403,7 @@ artifacts/
 
 두 모델의 Graph·Description 장면 추출과 요약은 greedy decoding을 사용합니다(`do_sample=False`, temperature 0.0, top_p 1.0, top_k 0, min_p 0.0). Presence penalty는 생략 시 장면 추출 **1.5**, 요약 **2.0**이며 `--presence-penalty FLOAT`로 덮어씁니다. 허용 범위는 유한한 단일 숫자 **-2.0~2.0**이고 `0`은 비활성화입니다. Greedy에서도 presence·repetition penalty는 적용됩니다. 이번 decoding 변경으로 형식 준수율이나 추천 성능이 개선되는지는 아직 검증하지 않았습니다.
 
-옵션을 생략하면 Graph 장면 추출에 repetition_penalty **1.05**, Description 장면 추출과 모든 요약에 **1.0**을 사용합니다. Qwen의 장면 추출·요약 명령에서 `--repetition-penalty FLOAT`로 해당 실행의 값을 덮어쓸 수 있습니다. 허용 범위는 유한한 단일 숫자 **1.0~2.0**입니다. 두 penalty CLI 옵션은 Gemini에는 지정할 수 없습니다. 기존 생성 토큰 전용 repetition penalty 경로를 재사용하며 vLLM 기본 penalty와 중복 적용하지 않습니다. Greedy 전환 전의 sampling 결과나 다른 penalty 값으로 생성한 결과는 일반 resume에서 거부합니다. 새 Run 또는 해당 단계의 `--force`로 전체를 재생성해야 하며, 설정이 같은 완료 결과는 재사용합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 출력 한도는 Graph 장면 384, Description 장면 512, 요약 512입니다. 예전 전역 greedy·penalty schedule 설정은 받지 않습니다.
+옵션을 생략하면 Graph 장면 추출에 repetition_penalty **1.05**, Description 장면 추출과 모든 요약에 **1.0**을 사용합니다. Qwen의 장면 추출·요약 명령에서 `--repetition-penalty FLOAT`로 해당 실행의 값을 덮어쓸 수 있습니다. 허용 범위는 유한한 단일 숫자 **1.0~2.0**입니다. 두 penalty CLI 옵션은 Gemini에는 지정할 수 없습니다. 기존 생성 토큰 전용 repetition penalty 경로를 재사용하며 vLLM 기본 penalty와 중복 적용하지 않습니다. Greedy 전환 전의 sampling 결과나 다른 penalty 값의 완료 결과도 일반 resume에서 재사용합니다. 누락·실패 항목만 현재 설정으로 생성하므로 기존 결과의 설정과 달라질 수 있습니다. 완료 결과까지 현재 설정으로 다시 만들려면 해당 단계에 `--force`를 지정합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 출력 한도는 Graph 장면 384, Description 장면 512, 요약 512입니다. 예전 전역 greedy·penalty schedule 설정은 받지 않습니다.
 
 Qwen3.5 실행 예시:
 

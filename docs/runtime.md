@@ -8,7 +8,7 @@
 
 Qwen은 로컬 checkpoint와 vLLM 0.28.0 이상을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 Qwen은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
 
-Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델은 모델별 공식 sampling 정책을 사용합니다. 장면은 VL 설정, 요약은 Text 설정이며 Qwen3-VL Text top_k는 40, Qwen3.5 Text top_k는 20입니다. Qwen 장면 추출·요약 CLI의 `--repetition-penalty FLOAT`는 해당 실행에 적용할 유한한 단일 값(1.0~2.0)을 받습니다. 생략하면 Graph 장면 추출은 **1.05**, Description 장면 추출과 모든 요약은 **1.0**입니다. Gemini에 이 옵션을 지정하면 오류입니다. 생성된 토큰에만 적용하는 기존 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용을 막습니다. 최초 요청·구조 복구·실패 후 재실행에 같은 값을 전달하며 증가 schedule은 사용하지 않습니다. 요청·schedule·provenance에 동일한 값을 기록하고, 기록된 repetition penalty와 다른 값을 지정하면 일반 resume를 거부하므로 새 Run 또는 해당 단계의 `--force`로 전체를 재생성해야 합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
+Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델의 장면 추출과 요약은 greedy decoding을 사용합니다(temperature 0.0, top_p 1.0, top_k 0). Qwen 장면 추출·요약 CLI의 `--repetition-penalty FLOAT`는 해당 실행에 적용할 유한한 단일 값(1.0~2.0)을 받습니다. 생략하면 Graph 장면 추출은 **1.05**, Description 장면 추출과 모든 요약은 **1.0**입니다. Gemini에 이 옵션을 지정하면 오류입니다. 생성된 토큰에만 적용하는 기존 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용을 막습니다. 최초 요청·구조 복구·실패 후 재실행에 같은 값을 전달하며 증가 schedule은 사용하지 않습니다. 새 요청·schedule·provenance에 적용값을 기록하며, 기록된 repetition penalty와 다른 값을 지정해도 완료 결과는 재사용하고 누락·실패 항목만 현재 값으로 생성합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
 
 ## Scene·Summary 저장
 
@@ -38,11 +38,11 @@ Scene은 위 compact 필드만 읽으며 저장된 `graph`·`raw_response` 별�
 
 
 
-Scene 디렉터리에는 `generation_identity.json`을 저장하여 모델·프롬프트·생성 설정을 확인합니다. compact Scene payload는 그대로 유지합니다. Summary는 생성 provenance와 Scene 내용·생성 조건이 일치할 때만 재사용합니다. 조건 변경에는 `--force` 또는 새 Run이 필요합니다. 구형 `graph_qwen`·`desc_qwen` Run은 오류로 거부하고 원본 파일은 보존합니다.
+Scene 디렉터리의 `generation_identity.json`은 생성 설정 기록으로 유지하며 재사용을 막는 비교에는 사용하지 않습니다. 기존 기록은 보존하고, 기록이 없으면 현재 설정으로 생성합니다. 이 파일은 폴더 내 모든 Scene이 동일한 설정으로 생성되었다는 보장이 아닙니다. 완료 Scene과 Summary는 생성 설정이 달라도 재사용하고 누락·실패 항목만 현재 설정으로 생성합니다. Summary의 실제 Scene 내용 변경, 모델·소스·제목 및 저장 형식 계약 검증은 유지합니다. `--force`는 기존 결과까지 현재 설정으로 재생성할 때 사용합니다. 구형 `graph_qwen`·`desc_qwen` Run은 오류로 거부하고 원본 파일은 보존합니다.
 
 Graph 추출을 재실행하면 기존 `generation_stats.json`을 제거하고, 모든 요청 처리가 끝난 뒤 원자적으로 다시 저장합니다. 최종 실패 Scene이 남아 있어도 집계하며, 실행 중단·예외로 끝난 경우에는 완료 통계를 저장하지 않습니다. 모든 Scene을 재사용하는 실행에서도 집계 파일을 생성합니다.
 
-Qwen의 Graph·Description 추출과 요약은 greedy decoding을 사용합니다. `--presence-penalty FLOAT`는 Qwen에서만 지원하며 유한한 -2~2 값으로 지정합니다. 생략 시 Scene 1.5·Summary 2.0을 유지하고, 0이면 presence penalty를 끕니다. 적용값은 요청과 `settings.generation.presence_penalty`에 기록되며 Scene의 생성 identity와 Summary provenance 비교에 포함됩니다. 기존 sampling 결과 또는 다른 penalty 값의 결과는 새 Run이나 `--force` 없이 재사용하지 않습니다.
+Qwen의 Graph·Description 추출과 요약은 greedy decoding을 사용합니다. `--presence-penalty FLOAT`는 Qwen에서만 지원하며 유한한 -2~2 값으로 지정합니다. 생략 시 Scene 1.5·Summary 2.0을 유지하고, 0이면 presence penalty를 끕니다. 적용값은 새 요청과 해당 provenance의 `settings.generation.presence_penalty`에 기록됩니다. 기존 sampling 결과나 다른 penalty 값의 완료 결과도 재사용하며, 기존 파일의 생성 기록은 덮어쓰지 않습니다.
 
 Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다른 오류는 해당 요청 실패로 처리합니다. 실패를 기록한 생성 단계는 오류를 반환할 수 있으며 같은 명령으로 다시 실행합니다. 성공적으로 복구한 항목의 실패 로그는 제거합니다.
 

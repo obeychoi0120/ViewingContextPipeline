@@ -128,19 +128,13 @@ def write_scene_records(path, records):
 
 
 def ensure_generation_identity(directory, provenance, *, force=False):
-    """Keep compact scene rows unchanged while protecting their generation policy."""
-    from artifact_io import read_json, atomic_write_json
+    """Record initial generation settings without blocking resume after policy changes."""
+    from artifact_io import atomic_write_json
     from model_provenance import canonical
 
     directory = Path(directory)
     identity_path = directory / "generation_identity.json"
     identity = canonical(provenance)
-    if not force:
-        if identity_path.exists():
-            if read_json(identity_path).get("identity") != identity:
-                raise ValueError(f"scene generation policy mismatch: {directory}; use --force or a new run")
-        elif any(directory.glob("*.jsonl")) or any((directory / "failures").glob("*.jsonl")):
-            raise ValueError(f"missing scene generation identity: {directory}; use --force or a new run")
     directory.mkdir(parents=True, exist_ok=True)
     if force:
         # A new identity must never label old outputs after an interrupted regeneration.
