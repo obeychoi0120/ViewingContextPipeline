@@ -8,7 +8,7 @@
 
 Qwen은 로컬 checkpoint와 vLLM 0.28.0 이상을 사용하고, 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`를 지정하지 않으면 보이는 모든 GPU를 사용합니다. GPU가 없으면 Qwen은 실패합니다. 추천은 GPU가 없으면 CPU로 실행할 수 있습니다. `--gpus` 옵션은 없습니다. Gemini의 전체 Scene 동시성은 `extraction.gemini.threads`로 정하며, 콘텐츠 구분 없이 worker가 대기 중인 장면을 처리합니다.
 
-Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델은 모델별 공식 sampling 정책을 사용합니다. 장면은 VL 설정, 요약은 Text 설정이며 Qwen3-VL Text top_k는 40, Qwen3.5 Text top_k는 20입니다. repetition penalty는 모든 요청·구조 복구에서 1.0으로 고정하며 재실행하면 실패 항목을 같은 정책으로 다시 시도합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
+Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}`에 있습니다. Summary는 원본 추출 모델이 아니라 실제 요약 모델의 한도를 사용합니다. 두 Qwen 모델은 모델별 공식 sampling 정책을 사용합니다. 장면은 VL 설정, 요약은 Text 설정이며 Qwen3-VL Text top_k는 40, Qwen3.5 Text top_k는 20입니다. Qwen 장면 추출·요약 CLI의 `--repetition-penalty FLOAT`는 해당 실행에 적용할 유한한 단일 값(1.0~2.0)을 받습니다. 생략하면 Graph 장면 추출은 **1.05**, Description 장면 추출과 모든 요약은 **1.0**입니다. Gemini에 이 옵션을 지정하면 오류입니다. 생성된 토큰에만 적용하는 기존 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용을 막습니다. 최초 요청·구조 복구·실패 후 재실행에 같은 값을 전달하며 증가 schedule은 사용하지 않습니다. 요청·schedule·provenance에 동일한 값을 기록하고, 기록된 repetition penalty와 다른 값을 지정하면 일반 resume를 거부하므로 새 Run 또는 해당 단계의 `--force`로 전체를 재생성해야 합니다. Qwen3.5는 Thinking을 해제합니다. 출력 한도는 Graph 장면 384, Description 장면·요약 512입니다. 공통 vLLM 자원 설정은 `extraction.qwen`이며 모델 선택과는 별개입니다.
 
 ## Scene·Summary 저장
 

@@ -77,36 +77,38 @@ def reference(logits, histories, prompt_lengths, penalties, slots, positions, in
     return expected
 
 
-def test_v1_live_outputs_moves_and_prompt_exclusion(device):
+@pytest.mark.parametrize('factor', [1.05, 2.0])
+def test_v1_live_outputs_moves_and_prompt_exclusion(device, factor):
     import torch
 
     penalty = GeneratedTokenPenalty(None, device, False)
     outputs = [2, 2, 3, 0]
-    penalty.update_state(SimpleNamespace(removed=[], added=[(0, params(2), [1, 4], outputs)], moved=[]))
+    penalty.update_state(SimpleNamespace(removed=[], added=[(0, params(factor), [1, 4], outputs)], moved=[]))
     logits = scores(device, 2)
     expected = logits.clone()
-    expected[0, 2] *= 2
-    expected[0, 3] /= 2
+    expected[0, 2] *= factor
+    expected[0, 3] /= factor
     torch.testing.assert_close(penalty.apply(logits), expected)
     outputs.append(4)
     penalty.update_state(SimpleNamespace(removed=[], added=[], moved=[(0, 1, SimpleNamespace(name='UNIDIRECTIONAL'))]))
     expected = scores(device, 2)
-    expected[1, 2] *= 2
-    expected[1, 3] /= 2
-    expected[1, 4] *= 2
+    expected[1, 2] *= factor
+    expected[1, 3] /= factor
+    expected[1, 4] *= factor
     torch.testing.assert_close(penalty.apply(scores(device, 2)), expected)
     penalty.update_state(SimpleNamespace(removed=[1], added=[], moved=[]))
     torch.testing.assert_close(penalty.apply(scores(device, 2)), scores(device, 2))
 
 
-def test_v2_permuted_slots_resumption_and_unique_tokens(device):
+@pytest.mark.parametrize('factor', [1.05, 2.0])
+def test_v2_permuted_slots_resumption_and_unique_tokens(device, factor):
     import torch
 
     histories = [[1, 4, 2, 2, 3, 0], [2, 5], [1, 6, 7, 6, 10]]
     prompts = [2, 1, 1]
     state = buffers(device, histories, prompts, prefill=[6, 2, 5])
     penalty = GeneratedTokenPenaltyV2(None, state)
-    penalties = [2., 1., 1.5]
+    penalties = [factor, 1., 1.5]
     for slot, factor in enumerate(penalties):
         assert penalty.add_request(slot, params(factor)) == (factor > 1)
     penalty.apply_staged_writes()

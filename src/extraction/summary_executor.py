@@ -123,7 +123,7 @@ def prepare_summary_batch(context, *, arm, schema, catalog, provenance, generati
     build_prompt = graph_summary_prompt if graph else description_summary_prompt
     settings = context.config["extraction"]
     max_tokens = settings["graph" if graph else "description"][model]["summary_max_new_tokens"]
-    schedule = [1.0]
+    schedule = [generation.get("repetition_penalty", 1.0)]
     batch = SummaryBatch(arm, output_dir, failures)
     pending, documents, next_penalties = batch.pending, batch.documents, batch.next_penalties
     publish = batch.publish

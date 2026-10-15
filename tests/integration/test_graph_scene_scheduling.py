@@ -48,7 +48,7 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
                     "finish_reason": "length" if interrupt and task.task_id == "a:0" else "stop"
                 }
                 callback(task.task_id, "" if interrupt and task.task_id == "a:0" else graph)
-                if interrupt and event == (1.0, "a:1"):
+                if interrupt and event == (1.05, "a:1"):
                     raise KeyboardInterrupt
             return {}
 
@@ -76,9 +76,9 @@ def test_qwen_resume_reuses_successes_and_retries_failures_from_first_penalty(
         == 0
     )
     assert calls == [
-        (1.0, "a:0"),
-        (1.0, "b:0"),
-        (1.0, "b:1"),
+        (1.05, "a:0"),
+        (1.05, "b:0"),
+        (1.05, "b:1"),
     ]
     scene_dir = context.extraction_dir(representation, "qwen3vl", "scenes")
     assert not (scene_dir / ".recovery").exists()

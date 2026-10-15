@@ -28,9 +28,13 @@ from pipeline_logging import log_step_start
 GRAPH_SOURCES = (*QWEN_MODELS, "gemini")
 
 
-def prompt_provenance(context, schema, arm, *, summary=False, model=None):
+def prompt_provenance(
+    context, schema, arm, *, summary=False, model=None, repetition_penalty=None,
+):
     path = context.prompt_path(schema)
     source = model if summary else arm.model
+    if repetition_penalty is not None and source not in QWEN_MODELS:
+        raise ValueError("repetition penalty is supported only for Qwen models")
     if source in QWEN_MODELS:
         import json
         checkpoint = context.path("models", source)
@@ -48,11 +52,14 @@ def prompt_provenance(context, schema, arm, *, summary=False, model=None):
         ]
     }
     if source in QWEN_MODELS:
+        generation = generation_settings(
+            source, representation=kind, summary=summary, repetition_penalty=repetition_penalty,
+        )
         settings.update(
             backend="vllm",
             qwen=qwen_settings(extraction.get("qwen")),
-            generation=generation_settings(source, summary=summary),
-            repetition_penalty=[1.0],
+            generation=generation,
+            repetition_penalty=[generation["repetition_penalty"]],
         )
     else:
         settings["backend"] = "gemini"
@@ -128,19 +135,24 @@ def prepare_scene_batch(visuals, scene_dir, failures, prepare_rows, normalize, *
     return existing, planned
 
 
-def _extract(context, *, representation, model, schema, force=False, arm=None):
+def _extract(
+    context, *, representation, model, schema, force=False, arm=None, repetition_penalty=None,
+):
     if arm is None:
         raise ValueError("extraction requires --arm")
     arm = resolve_generation_arm(context.config, arm, representation, model)
     stage = f"extract-{representation}-scenes"
     path = context.prompt_path(schema)
-    log_step_start(context, stage, model=model, schema=path, force=force, arm=arm.name)
+    log_step_start(
+        context, stage, model=model, schema=path, force=force, arm=arm.name,
+        **({"repetition_penalty": repetition_penalty} if repetition_penalty is not None else {}),
+    )
     context.initialize()
     prompt = path.read_text(encoding="utf-8")
     print("[PREPARE] Reading prompt/model settings and cohort...", flush=True)
     settings = context.config["extraction"]
-    penalties = [1.0]
-    provenance = prompt_provenance(context, path, arm)
+    provenance = prompt_provenance(context, path, arm, repetition_penalty=repetition_penalty)
+    penalties = provenance["settings"].get("repetition_penalty", [1.0])
     scene_dir = context.extraction_dir(arm.representation, model, "scenes")
     from extraction.scene_storage import ensure_generation_identity
 
@@ -155,7 +167,7 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
         scene_generation_rows,
         prompt=prompt,
         max_new_tokens=settings[representation][model]["scene_max_new_tokens"],
-        generation=generation_settings(model) if model in QWEN_MODELS else {},
+        generation=provenance["settings"].get("generation", {}),
     )
     print("[PREPARE] Counting pending scenes and checking cached outputs...", flush=True)
     existing, planned = prepare_scene_batch(
@@ -220,7 +232,9 @@ def _extract(context, *, representation, model, schema, force=False, arm=None):
     )
 
 
-def _summarize(context, *, representation, model, schema, force=False, arm=None):
+def _summarize(
+    context, *, representation, model, schema, force=False, arm=None, repetition_penalty=None,
+):
     if model not in GRAPH_SOURCES:
         raise ValueError("summary model must be qwen3vl, qwen3.5 or gemini")
     if arm is None:
@@ -229,20 +243,24 @@ def _summarize(context, *, representation, model, schema, force=False, arm=None)
     path = context.prompt_path(schema)
     stage = f"summarize-{representation}"
     log_step_start(
-        context, stage, source=arm.model, model=model, schema=path, force=force, arm=arm.name
+        context, stage, source=arm.model, model=model, schema=path, force=force, arm=arm.name,
+        **({"repetition_penalty": repetition_penalty} if repetition_penalty is not None else {}),
     )
     from extraction.summary_storage import validate_summary_template
 
     validate_summary_template(path.read_text(), arm.uses_title)
     context.initialize()
     cohort = context.require_ready_cohort()
+    provenance = prompt_provenance(
+        context, path, arm, summary=True, model=model, repetition_penalty=repetition_penalty,
+    )
     return run_summary_stage(
         context,
         arm=arm,
         schema=path,
         catalog=cohort["catalog"],
-        provenance=prompt_provenance(context, path, arm, summary=True, model=model),
-        generation=generation_settings(model, summary=True) if model in QWEN_MODELS else {},
+        provenance=provenance,
+        generation=provenance["settings"].get("generation", {}),
         model=model,
         gemini_pool_factory=GeminiWorkerPool,
         force=force,
@@ -250,25 +268,28 @@ def _summarize(context, *, representation, model, schema, force=False, arm=None)
     )
 
 
-def extract_graph_scenes(context, *, model, schema, force=False, arm=None):
+def extract_graph_scenes(context, *, model, schema, force=False, arm=None, repetition_penalty=None):
     return _extract(
-        context, representation="graph", model=model, schema=schema, force=force, arm=arm
+        context, representation="graph", model=model, schema=schema, force=force, arm=arm,
+        repetition_penalty=repetition_penalty,
     )
 
 
-def extract_description_scenes(context, *, model, schema, force=False, arm=None):
+def extract_description_scenes(context, *, model, schema, force=False, arm=None, repetition_penalty=None):
     return _extract(
-        context, representation="description", model=model, schema=schema, force=force, arm=arm
+        context, representation="description", model=model, schema=schema, force=force, arm=arm,
+        repetition_penalty=repetition_penalty,
     )
 
 
-def summarize(context, *, model, schema, arm=None, force=False):
+def summarize(context, *, model, schema, arm=None, force=False, repetition_penalty=None):
     if arm is None:
         raise ValueError("summarize requires --arm")
     selected = generation_registry(context.config).get(arm)
     representation = selected.representation if selected else None
     return _summarize(
-        context, representation=representation, model=model, schema=schema, force=force, arm=arm
+        context, representation=representation, model=model, schema=schema, force=force, arm=arm,
+        repetition_penalty=repetition_penalty,
     )
 
 

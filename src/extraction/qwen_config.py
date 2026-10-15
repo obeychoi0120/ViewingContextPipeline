@@ -58,10 +58,18 @@ def penalty_schedule(value):
 QWEN_MODELS = ("qwen3vl", "qwen3.5")
 
 
-def generation_settings(model: str, *, summary: bool = False) -> dict[str, Any]:
-    """Official Non-thinking policy; summaries receive text-only scene records."""
+def generation_settings(
+    model: str, *, representation: str, summary: bool = False,
+    repetition_penalty: float | None = None,
+) -> dict[str, Any]:
+    """Sampling defaults with an optional generated-token repetition penalty override."""
     if model not in QWEN_MODELS:
         raise ValueError(f"unsupported Qwen model: {model}")
+    if representation not in ("graph", "description"):
+        raise ValueError(f"unsupported representation: {representation}")
+    penalty = 1.05 if representation == "graph" and not summary else 1.0
+    if repetition_penalty is not None:
+        penalty = penalty_schedule([repetition_penalty])[0]
     return {
         "do_sample": True,
         "temperature": 1.0 if summary else 0.7,
@@ -69,7 +77,7 @@ def generation_settings(model: str, *, summary: bool = False) -> dict[str, Any]:
         "top_k": 40 if summary and model == "qwen3vl" else 20,
         "min_p": 0.0,
         "presence_penalty": 2.0 if summary else 1.5,
-        "repetition_penalty": 1.0,
+        "repetition_penalty": penalty,
         "enable_thinking": False if model == "qwen3.5" else None,
         "model": model,
     }

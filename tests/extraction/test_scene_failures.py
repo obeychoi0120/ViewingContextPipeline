@@ -37,10 +37,10 @@ def test_qwen_empty_graph_retries_without_publishing_raw(ready_context, monkeypa
     monkeypatch.setattr(steps, "qwen_generator", generator)
     result = steps.extract_graph_scenes(context, model="qwen3vl", arm="graph_qwen3vl",
                                        schema="prompts/scene_graph_v8.md")
-    assert calls == [1.0]
+    assert calls == [1.05]
     result = steps.extract_graph_scenes(context, model="qwen3vl", arm="graph_qwen3vl",
                                        schema="prompts/scene_graph_v8.md")
-    assert calls == [1.0, 1.0]
+    assert calls == [1.05, 1.05]
     assert result["failure_count"] == (0 if recover else 1)
     path = directory / f"{cid}.jsonl"
     if recover:

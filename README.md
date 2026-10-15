@@ -277,7 +277,7 @@ python -m preparation prepare-input-data --run-id "$RUN_ID"
 `--schema`에는 실제 존재하는 Markdown 프롬프트 하나를 지정합니다. 상대 경로는 저장소 루트 기준입니다. 생성 소스(`--arm`)는 `graph_qwen3vl`, `graph_qwen3.5`, `graph_gemini`, `desc_qwen3vl`, `desc_qwen3.5`, `desc_gemini`이며 결합 평가 Arm을 생성에 지정하지 않습니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl --repetition-penalty 1.05
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model gemini --arm graph_gemini
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3vl --arm desc_qwen3vl
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
@@ -378,8 +378,8 @@ artifacts/
 <details>
 <summary>재개·실패 재시도·결측·캐시 규칙</summary>
 
-- **생성 재개:** 같은 명령을 재실행합니다. 성공 Scene·Summary는 프롬프트나 설정이 달라져도 재사용합니다. 성공 결과를 갱신하려면 해당 단계에 `--force`를 지정합니다.
-- **실패 재시도:** 두 Qwen 모델은 공식 repetition penalty `1.0`을 유지하며, 같은 명령을 재실행하면 실패 항목만 같은 생성 설정으로 재시도합니다. Gemini 실패는 재실행으로 재시도합니다.
+- **생성 재개:** 같은 명령을 재실행합니다. 성공 Scene·Summary는 생성 조건과 입력이 일치할 때 재사용합니다. 프롬프트나 설정이 바뀌면 새 Run 또는 해당 단계의 `--force`로 재생성합니다.
+- **실패 재시도:** 두 Qwen 모델은 `--repetition-penalty FLOAT`로 지정한 값을 사용합니다. 생략 시 Graph 장면 추출은 `1.05`, Description 장면 추출과 모든 요약은 `1.0`입니다. 같은 명령을 재실행하면 실패 항목만 같은 값으로 재시도하며 penalty를 증가시키지 않습니다. Gemini 실패는 재실행으로 재시도합니다.
 - **실패 확인:** Scene은 `scenes/<source>/failures/<content_id>.jsonl`, Summary는 `summaries/<source>/failures.jsonl`을 확인합니다. 실패 Summary는 빈 텍스트로 저장합니다.
 - **Text 결측:** 제목 또는 Summary 중 있는 값을 사용합니다. 누락 성분은 projection 후 0으로 마스킹하고, 둘 다 없으면 최종 영상 벡터는 0입니다.
 - **Graph 결측:** 구조·warning 검사를 통과한 장면을 사용합니다. Entity·Action이 없으면 해당 슬롯은 0입니다. 장면 없이 제목만 있으면 제목 기반 Scene MLP 경로를 사용하고 GCN을 건너뜁니다. 제목과 유효 장면이 모두 없으면 최종 영상 벡터는 0입니다.
@@ -392,7 +392,7 @@ artifacts/
 </details>
 
 
-### Qwen 공식 생성 정책
+### Qwen 생성 정책
 
 신규 Run은 `qwen3vl` (Qwen3-VL-2B-Instruct), `qwen3.5` (Qwen3.5-2B), `gemini`를 지원합니다. 기존 `qwen` 별칭은 없으며 구형 Run은 자동 변환하지 않습니다. 설치 extra 이름 `qwen`과 공통 엔진 설정 `extraction.qwen`은 두 로컬 Qwen 모델의 공용 런타임을 뜻합니다.
 
@@ -401,12 +401,12 @@ artifacts/
 | `qwen3vl` | temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5 | temperature 1.0, top_p 1.0, top_k 40, presence_penalty 2.0 |
 | `qwen3.5` | temperature 0.7, top_p 0.8, top_k 20, presence_penalty 1.5 | temperature 1.0, top_p 1.0, top_k 20, presence_penalty 2.0 |
 
-두 모델은 sampling을 사용하고 repetition_penalty 1.0, min_p 0.0을 유지합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 출력 한도는 Graph 장면 384, Description 장면 512, 요약 512입니다. 생성 정책은 모델별로 고정되며 예전 전역 greedy·penalty schedule 설정은 받지 않습니다. 기존 greedy 실험과의 결과 차이에는 decoding 변경 효과도 포함됩니다. 근거: [Qwen3-VL 공식 설정](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct#generation-hyperparameters), [Qwen3.5 공식 설정](https://huggingface.co/Qwen/Qwen3.5-2B#best-practices).
+두 모델은 공식 sampling 설정과 min_p 0.0을 사용합니다. 옵션을 생략하면 Graph 장면 추출에 repetition_penalty **1.05**, Description 장면 추출과 모든 요약에 **1.0**을 사용합니다. Qwen의 장면 추출·요약 명령에서 `--repetition-penalty FLOAT`로 해당 실행의 값을 덮어쓸 수 있습니다. 허용 범위는 유한한 단일 숫자 **1.0~2.0**이며 Gemini에는 지정할 수 없습니다. 기존 생성 토큰 전용 penalty 경로를 재사용하며 vLLM 기본 penalty와 중복 적용하지 않습니다. 기록된 값과 다른 값으로 변경하면 일반 resume할 수 없으므로 새 Run 또는 해당 단계의 `--force`로 전체를 재생성합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 출력 한도는 Graph 장면 384, Description 장면 512, 요약 512입니다. 생성 정책은 모델별로 고정되며 예전 전역 greedy·penalty schedule 설정은 받지 않습니다. 기존 greedy 실험과의 결과 차이에는 decoding 변경 효과도 포함됩니다. 근거: [Qwen3-VL 공식 설정](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct#generation-hyperparameters), [Qwen3.5 공식 설정](https://huggingface.co/Qwen/Qwen3.5-2B#best-practices).
 
 Qwen3.5 실행 예시:
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5 --repetition-penalty 1.05
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3.5 --arm desc_qwen3.5
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model qwen3.5 --arm graph_qwen3.5
 python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model qwen3.5 --arm desc_qwen3.5
