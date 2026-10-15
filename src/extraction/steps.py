@@ -6,9 +6,10 @@ from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
-from artifact_io import file_fingerprint
+from artifact_io import atomic_write_json, file_fingerprint
 from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
 from extraction.failures import FailureLog
+from extraction.graph_warnings import WARNING_TAGS
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
 from extraction.semantic_graph import GRAPH_SCHEMA_VERSION
@@ -157,6 +158,8 @@ def _extract(
     from extraction.scene_storage import ensure_generation_identity
 
     ensure_generation_identity(scene_dir, provenance, force=force)
+    if representation == "graph":
+        (scene_dir / "generation_stats.json").unlink(missing_ok=True)
     failures = FailureLog(scene_dir, scenes=True)
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
@@ -227,8 +230,24 @@ def _extract(
                 progress=progress,
                 arm=representation,
             )
+    failure_count = failures.count(content_ids)
+    if representation == "graph":
+        stats = {
+            "total": total + reused,
+            "success": 0,
+            "warning": 0,
+            "failed": failure_count,
+            "warning_counts": dict.fromkeys(WARNING_TAGS, 0),
+        }
+        for records in existing.values():
+            for record in records:
+                tags = record["semantic_warnings"]
+                stats["warning" if tags else "success"] += 1
+                for tag in tags:
+                    stats["warning_counts"][tag] += 1
+        atomic_write_json(scene_dir / "generation_stats.json", stats, durable=True)
     return result(
-        f"{stage}-{model}", content_count=len(visuals), failure_count=failures.count(content_ids)
+        f"{stage}-{model}", content_count=len(visuals), failure_count=failure_count
     )
 
 

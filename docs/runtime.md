@@ -24,6 +24,7 @@ Scene·Summary 토큰 한도는 `extraction.{graph,description}.{qwen3vl,qwen3.5
 - Graph 행: `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph`. `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다.
 - Summary: `runs/<RUN_ID>/extraction/summaries/<source>/<content_id>.json`. `video-summary/v5`이며 `complete`·`failed` 상태와 명시적인 `provenance.summary_model`(`qwen3vl`, `qwen3.5`, `gemini`)을 요구합니다. 텍스트·장면 수·단어 수·토큰 수·생성 provenance를 저장합니다.
 - Scene 실패: 해당 Scene 디렉터리의 `failures/<content_id>.jsonl`. Summary 실패: 해당 Summary 디렉터리의 `failures.jsonl`.
+- Graph 추출 집계: `extract-graph-scenes` 완료 후 같은 Scene 디렉터리의 `generation_stats.json`에 `total`, `success`, `warning`, `failed`, `warning_counts`를 저장합니다. 현재 실행 대상의 재사용 Scene과 새 생성 결과를 모두 포함합니다. `success`는 Warning 없는 정상 Graph, `warning`은 Warning이 있는 Scene 수, `failed`는 최종 실패 Scene 수입니다. `warning_counts`에는 `MISSING_REQUIRED`, `PARSE_FAILED`별 Scene 수를 기록하며 여러 태그가 있는 Scene은 각 태그에 포함합니다.
 
 Graph 출력은 JSON Schema로 강제하지 않습니다. Parser `graph-text/v14`는 v9의 `name; attribute` 형식과 기존 `id: kind; attribute` 형식, 현재 스키마의 JSON을 지원합니다. v9 이름은 공백과 번호를 포함해 정확히 대조하고 장면 내 `e1`, `e2` 등의 내부 ID로 변환합니다. 이름·속성은 보존하며 동의어·대소문자로 개체를 추측하지 않습니다. 한 출력에서 두 선언 형식을 혼용하면 원문으로 보존합니다. 필수 필드와 타입을 검사합니다. Warning은 `MISSING_REQUIRED`(필수 요소 누락), `PARSE_FAILED`(형식·타입 파싱 실패) 두 가지입니다. 미선언 역할 참조는 Warning 없이 `unknown`으로 바꾸며 actor·target이 모두 불명이거나 없는 Action도 유지합니다. 중복 Entity ID는 모든 Entity를 보존하고 같은 ID의 참조는 마지막 선언에 연결합니다. 구조화할 수 없는 출력은 원문으로 보존하여 Text Summary에 사용할 수 있지만 직접 Graph 학습에서는 제외합니다. 기존 Scene은 읽을 때 다시 파싱하며 제거된 Warning은 무시하고 `PARSE_ERROR`는 `PARSE_FAILED`로 읽습니다. 원본 파일은 덮어쓰지 않습니다. 토큰 한도 종료는 실제 backend 종료 사유로 판단합니다. 보수적인 구두점 복구는 유지하지만 Relations·receiver·place 누락·구형 필드를 변환하지 않습니다.
 
@@ -38,6 +39,8 @@ Scene은 위 compact 필드만 읽으며 저장된 `graph`·`raw_response` 별�
 
 
 Scene 디렉터리에는 `generation_identity.json`을 저장하여 모델·프롬프트·생성 설정을 확인합니다. compact Scene payload는 그대로 유지합니다. Summary는 생성 provenance와 Scene 내용·생성 조건이 일치할 때만 재사용합니다. 조건 변경에는 `--force` 또는 새 Run이 필요합니다. 구형 `graph_qwen`·`desc_qwen` Run은 오류로 거부하고 원본 파일은 보존합니다.
+
+Graph 추출을 재실행하면 기존 `generation_stats.json`을 제거하고, 모든 요청 처리가 끝난 뒤 원자적으로 다시 저장합니다. 최종 실패 Scene이 남아 있어도 집계하며, 실행 중단·예외로 끝난 경우에는 완료 통계를 저장하지 않습니다. 모든 Scene을 재사용하는 실행에서도 집계 파일을 생성합니다.
 
 Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다른 오류는 해당 요청 실패로 처리합니다. 실패를 기록한 생성 단계는 오류를 반환할 수 있으며 같은 명령으로 다시 실행합니다. 성공적으로 복구한 항목의 실패 로그는 제거합니다.
 
