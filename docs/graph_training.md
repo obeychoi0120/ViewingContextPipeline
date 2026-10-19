@@ -98,7 +98,7 @@ python -m pytest -q tests
 | `gnn` | C | cosine GCN 1층 | 평균 | `mean` → 장면 간 정보 교환 |
 | `gnn_attn` | D | **학습 attention GCN 1층** | 평균 | `gnn` → 이웃 가중치를 학습하는 효과 |
 
-`gnn_attn` 추천 구조 전체(Baseline·Text·Graph): [PNG](design/gnn_attn/recsys_diagram_gnn_attn.png) · [편집 가능한 PPTX](design/gnn_attn/recsys_diagram_gnn_attn.pptx) · [갱신 코드](design/generate_recsys_diagram_gnn_attn.py). `gnn_attn` 상세 구조: [PNG](design/gnn_attn/gnn_attn_detail_diagram.png) · [갱신 코드](design/generate_gnn_attn_detail_diagram.py). attention 계산 단계별 예시: [PNG](design/gnn_attn/gnn_attn_walkthrough_diagram.png) · [갱신 코드](design/generate_gnn_attn_walkthrough_diagram.py). 두 그림의 장면·가중치 값은 설명용 가상 예시입니다.
+`gnn_attn` 추천 구조 전체(Baseline·Text·Graph): [PNG](design/recsys_diagram_gnn_attn.png) · [편집 가능한 PPTX](design/recsys_diagram_gnn_attn.pptx) · [갱신 코드](design/generate_recsys_diagram_gnn_attn.py). Attention 가중치 계산과 GCN 전달 수식은 아래에서 설명합니다.
 
 `gnn` → `gnn_attn` → `transformer` 순서로 비교하면 효과를 나눠 볼 수 있습니다. `gnn_attn`은 가중치를 정하는 방식만 바꾸고, `transformer`는 여기에 LN·FFN·2 heads·ReZero 용량을 더합니다. 아래 Transformer 절의 C0/C/D는 이 표의 A–D와 다른 라벨입니다.
 

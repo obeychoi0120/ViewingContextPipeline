@@ -3,7 +3,7 @@
 Run: python docs/design/generate_recsys_diagram_gnn_attn.py
 Builds on generate_recsys_diagram_gnn.py and keeps its layout; only the scene-weight box,
 the GCN box, the subtitle and the footnotes change, so the figure shows gnn_attn alone.
-Writes gnn_attn/recsys_diagram_gnn_attn.{pptx,png}; the GNN diagram is not modified.
+Writes recsys_diagram_gnn_attn.{pptx,png} beside this script; the GNN diagram is not modified.
 Requires python-pptx, PyMuPDF and LibreOffice; no model is executed.
 Mirrors src/validation/scene_attention.py (SceneAttentionGCN) and graph_context.py.
 """
@@ -89,7 +89,7 @@ def build(presentation):
 
 def main():
     directory = Path(__file__).resolve().parent
-    output = directory / "gnn_attn" / "recsys_diagram_gnn_attn.pptx"
+    output = directory / "recsys_diagram_gnn_attn.pptx"
     output.parent.mkdir(exist_ok=True)
     build(Presentation(directory / "recsys_diagram.pptx")).save(output)
     render(output, expected_size=(3440, 2112))
