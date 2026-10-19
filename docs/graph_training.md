@@ -10,9 +10,9 @@ Run 평가 산출물은 `validation/`에 직접 저장합니다. 기존 파일�
 
 ```bash
 RUN_ID="새_Run_ID"
-python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
 ```
 
 Text는 `--representation-mode text`를 사용하며 Description Arm은 text에서만 지원합니다. 두 경로의 `meta`는 동일한 Metadata 모델입니다. 실제 제목 BGE 입력의 동일성은 각 입력 manifest로 별도 확인해야 합니다.
@@ -56,7 +56,7 @@ Topics: cooking, food preparation
 
 Context는 위 세 필드를 합친 문자열 하나를 Scene별로 임베딩합니다. `v2`의 JSON 문자열 입력 캐시는 새 입력으로 재사용하지 않으며, 입력 hash 변경으로 해당 추천 결과와 체크포인트도 구분됩니다. 새 Run에서 Graph embedding → 추천 학습 → 진단을 다시 실행하십시오. 기존 추출 Scene과 Text Summary 입력은 그대로 사용할 수 있습니다. 기존 Run 산출물은 이 코드 변경으로 수정하지 않습니다.
 
-학습은 `learning_rate=0.0001`, `batch_size=128`, `patience=5`, `min_delta=0`, `deterministic=true`입니다. AdamW, weight decay 0.1, 최대 50 epoch, seed 42/43/44, loss와 이력 길이 10을 유지하며 사용자별 leave-one-out 분할과 validation HR@10 최고 checkpoint를 사용합니다. 동점이면 최초 epoch를 유지하고, 최종 보고·paired bootstrap의 주 지표는 NDCG@10입니다. 원본 이력 5개 이상, 최근 13개 보존, 마지막 2개 보류로 구성합니다. test 입력에는 validation이 포함되며 refit은 수행하지 않습니다. 새 Run의 설정 snapshot을 확인하십시오. 기존 Run snapshot은 수정하지 않습니다.
+학습 설정·seed·결정적 연산 사용 여부는 [config.yaml](../config.yaml)의 `validation.model`, 평가·통계 설정은 `validation.evaluation`, 사용자 필터·보존 이력은 `validation.cohort`를 참고하십시오. Checkpoint는 validation HR@10으로 선택하고 최종 보고·paired bootstrap의 주 지표는 NDCG@10입니다. 사용자별 마지막 2개를 validation/test로 보류하고 test 이력에는 validation을 포함하며 refit은 수행하지 않습니다. 기존 Run snapshot은 수정하지 않습니다.
 
 ## 캐시 및 packed 실행
 
@@ -71,17 +71,14 @@ Text 모델은 `sasrec-content-v8`, Graph mean은 `sasrec-role-graph/v9`, Graph 
 | Run 아래 위치 | 내용 |
 |---|---|
 | `validation/representations/graph/<arm>_embeddings/` | 고정 BGE·노드·edge·결측·offset·제목 배열, manifest, statistics |
-| `validation/recommendations/graph/mean/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
-| `validation/diagnosis/graph_mean_diagnosis.json` | leave-one-out-diagnosis/v3 최종 HR/NDCG·수치 비교·평가 계약·실행 판정 |
+| `validation/recommendations/graph/<aggregation>/seed_<seed>/<arm>/` | checkpoint, catalog_vectors.npy, training.json, per-event metrics, complete |
+| `validation/diagnosis/graph_<aggregation>_diagnosis.json` | 최종 HR/NDCG·수치 비교·평가 계약·실행 판정 |
 | `validation/diagnosis/text_diagnosis.json` | Text 진단 |
 
 기존 Attention 산출물과 과거 Run은 수정·이동하지 않습니다. 같은 Run의 기존 결과 경로에서 재학습하면 해당 조합을 대체하므로 보존 실험에는 새 Run을 사용하십시오. `--compare-run-id`는 선택한 경로·aggregation의 결과만 읽고 프로토콜·전처리·원본·분할·catalog·seed가 다른 Run을 거절합니다.
 
 ```bash
-OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation
-GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_graph_execution.py tests/validation/test_large_optimizations.py -k cuda
-# CUDA operator profiler는 CPU profiler와 분리한 새 프로세스에서 실행합니다.
-GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_profiling.py -k cuda
+python -m pytest -q tests
 ```
 
 검증은 소형 고정 특징 및 학습·평가·진단 fixture를 사용합니다. 전체 데이터 재학습, 추천 성능 개선, 실제 BGE 추론 처리량은 별도 실험 대상입니다.
@@ -166,10 +163,10 @@ gnn_attn:   f = [Entity 평균; Action 평균; Context] 384 (제목 제외, gnn�
 ```bash
 RUN_ID="사용할_Run_ID"
 for AGG in attn_pool gnn_attn; do
-  python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-  python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+  python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
+  python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
 done
-GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_attention.py tests/validation/test_direct_graph.py
+python -m pytest -q tests/test_models.py tests/test_representations.py
 ```
 
 ### 이번 변경의 검증
@@ -259,10 +256,10 @@ GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q t
 ```bash
 RUN_ID="사용할_Run_ID"
 for AGG in transformer_local transformer transformer_pos; do
-  python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-  python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+  python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --workers-per-gpu 1 --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
+  python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation "$AGG" --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
 done
-GRAPH_TEST_CUDA=cuda:0 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest -q tests/validation/test_scene_transformer.py tests/validation/test_direct_graph.py
+python -m pytest -q tests/test_models.py tests/test_representations.py
 ```
 
 진단은 aggregation 하나 안에서 arm끼리 비교합니다. C0·C·D 사이의 날짜×seed 짝 비교는 아직 자동화하지 않았으며, Run별 분석 코드와 보고서는 `artifacts/runs/<RUN_ID>/reports/`에 둡니다.
@@ -326,8 +323,8 @@ GCN 최초 구현 당시 Text·mean v7과 GNN v8을 사용했습니다. 영상 M
 
 ```bash
 RUN_ID="사용할_Run_ID"
-python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --workers-per-gpu 1 --target meta graph_qwen graph_qwen_meta graph_gemini_meta
-python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --target meta graph_qwen graph_qwen_meta graph_gemini_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --workers-per-gpu 1 --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation gnn --target meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta
 ```
 
 아래 과거 mean/gnn 학습 비용 측정에는 같은 synthetic 입력과 공통 가중치를 사용하고 profiler를 껐습니다. BGE나 Run 입력은 읽지 않았으며 실제 추천 품질·RTX 6000 Ada 처리량을 검증한 실험이 아닙니다. 해당 측정 도구 `benchmarks/scene_gcn_benchmark.py`는 2026-10-15 보조 개발 도구 정리에서 제거했습니다. 기존 측정 결과와 검증 기록은 보존합니다.
@@ -476,8 +473,8 @@ Attention 점수 MLP는 384→128→1이며, 장면 순서 정보나 장면 간 
 
 ```bash
 python -m validation run-recommendation \
-  --run-id 260928_v7 --representation-mode graph --scene-aggregation mean \
-  --target graph_qwen --workers-per-gpu 1 --profile-every 100
+  --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean \
+  --target graph_qwen3vl --workers-per-gpu 1 --profile-every 100
 ```
 
 각 train epoch와 validation/test에서 **첫 3개 배치 및 N의 배수 배치**를 측정합니다.

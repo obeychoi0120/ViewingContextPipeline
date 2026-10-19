@@ -95,8 +95,8 @@ def build(presentation):
     d.box("Graph Action role fusion", 12.5, 4.96, 5.3, 1.15, "FFFFFF", TEAL)
     d.text("Graph Action role fusion text", 12.58, 5.02, 5.14, 1.03,
            [("Entity → Action role fusion", 18, INK, False),
-            ("actor · target · tool · location", 15, MUTED, False),
-            ("640 → 128", 15, MUTED, False)])
+            ("actor · target · tool · place", 15, MUTED, False),
+            ("Action + ReLU(Linear 640 → 128)", 15, MUTED, False)])
     d.wire("Entity projection to role fusion", [(13.75, 4.6), (13.75, 4.96)], TEAL)
     d.wire("Action projection to role fusion", [(16.55, 4.6), (16.55, 4.96)], TEAL)
     # Entity vectors stay unchanged; only Actions receive Entity information.
@@ -122,11 +122,10 @@ def build(presentation):
         d.wire(name, [(15.15, start), (15.15, end)], TEAL)
     text(shapes["TextBox 90"], ["Last valid position", "User Residual MLP · GELU + LN"], 16)
     slide.notes_slide.notes_text_frame.text = (
-        "Text: sasrec-content-v8; Graph mean: sasrec-role-graph/v9. "
         "Baseline/Text Item and Graph Scene residual blocks use x + ReLU(Linear(x)), "
         "with one Linear 512-to-512. "
         "Graph projects Title, Entities, Actions and Context independently to 128. "
-        "Actor, target, tool and location enrich Actions from Entities in one direction. "
+        "Actor, target, tool and place enrich Actions from Entities in one direction. "
         "Scene concat is [Title; Entity mean; Action mean; Context] at 512 dimensions; "
         "the Scene MLP precedes valid-scene mean pooling. "
         "Text encodes Title and Summary separately with frozen BGE Large. "

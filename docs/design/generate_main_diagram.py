@@ -2,7 +2,7 @@
 
 Run: python docs/design/generate_main_diagram.py
 Requires python-pptx, PyMuPDF and LibreOffice. No recommendation model is run.
-The overview ends at item representations; the recsys diagram covers the details.
+The overview includes item representations and the shared recommendation flow.
 """
 
 import os
@@ -142,7 +142,8 @@ def build():
     d.node("Video", 1.1, 2.85, 4.0, 0.8, "Video")
     d.node("Keyframes", 1.1, 4.0, 4.0, 1.1, "Keyframes",
            "1 Scene: 30s, 6 keyframes", subtitle_size=20)
-    d.node("Extraction", 1.1, 5.5, 4.0, 1.0, "Scene Extraction", "Qwen / Gemini")
+    d.node("Extraction", 1.1, 5.5, 4.0, 1.0, "Scene Extraction",
+           "Qwen3-VL · Qwen3.5 · Gemini", subtitle_size=16)
     d.node("Descriptions", 1.1, 7.0, 4.0, 0.9, "Scene Descriptions", ink=BLUE)
     d.node("Graphs", 1.1, 8.9, 4.0, 0.9, "Scene Graphs", ink=TEAL)
     d.wire("Video to keyframes", [(3.1, 3.65), (3.1, 4.0)])
@@ -186,7 +187,7 @@ def build():
     d.wire("Text embeddings to fusion", [(14.45, 6.4), (14.75, 6.4)], BLUE)
 
     # The projected title joins role-enriched scene features BEFORE scene MLP
-    # and video mean pooling. No separate Item MLP follows pooling.
+    # and the selected scene aggregation. No separate Item MLP follows pooling.
     d.label("Graph heading", 6.4, 8.4, 3.0, 0.42, "GRAPH PATH", 28, TEAL, True,
             PP_ALIGN.LEFT)
     d.node("Graph title", 6.4, 8.95, 3.6, 1.0, "Title", ink=TEAL)
@@ -201,7 +202,7 @@ def build():
             ("Role fusion E → A · 384", 18, MUTED, False)])
     d.node("Graph scene MLP", 14.75, 9.45, 2.55, 0.9, "Scene MLP", "Concat 512", ink=TEAL,
            fill="DFF2F0", size=22, subtitle_size=19)
-    d.node("Graph mean pooling", 14.75, 10.65, 2.55, 0.8, "Mean Pooling", "Item 512",
+    d.node("Graph aggregation", 14.75, 10.65, 2.55, 0.8, "Aggregation", "Item 512",
            ink=TEAL, fill="DFF2F0", size=20, subtitle_size=18)
     d.wire("Graphs to graph elements", [(5.9, 9.35), (5.9, 10.95), (6.4, 10.95)], TEAL)
     d.junction("Graph source fork", 5.9, 9.35, TEAL)
@@ -213,7 +214,7 @@ def build():
                                               (14.45, 9.9)], TEAL, arrow=False)
     d.junction("Graph scene input merge", 14.45, 9.9, TEAL)
     d.wire("Graph features to scene MLP", [(14.45, 9.9), (14.75, 9.9)], TEAL)
-    d.wire("Scene MLP to mean pooling", [(16.025, 10.35), (16.025, 10.65)], TEAL)
+    d.wire("Scene MLP to aggregation", [(16.025, 10.35), (16.025, 10.65)], TEAL)
 
     # Alternative per-path models, not concatenation of their final outputs.
     d.wire("Baseline item vectors", [(17.3, 2.9), (17.8, 2.9)], GRAY, arrow=False)
@@ -226,18 +227,34 @@ def build():
     d.box("Recommendation", 18.55, 4.0, 4.4, 7.8, "E7EDF5", NAVY)
     d.label("Recommendation heading", 18.75, 4.3, 4.0, 0.6,
             "Recommendation", 24, NAVY, True)
-    d.text("Text path arms", 18.85, 5.2, 3.8, 3.3,
-           [("Text Path", 22, BLUE, True),
-            *[("• " + name, 20, NAVY, False) for name in (
-                "Meta", "Graph_Qwen", "Graph_Qwen_Meta", "Graph_Gemini_Meta",
-                "Desc_Qwen_Meta", "Desc_Gemini_Meta",
-            )]], align=PP_ALIGN.LEFT)
-    d.text("Graph path arms", 18.85, 8.85, 3.8, 2.6,
-           [("Graph Path", 22, TEAL, True),
-            *[("• " + name, 20, NAVY, False) for name in (
-                "Meta", "Graph_Qwen", "Graph_Qwen_Meta", "Graph_Gemini_Meta",
-            )]], align=PP_ALIGN.LEFT)
+    d.text("User representation", 18.85, 5.15, 3.8, 1.85,
+           [("Viewing history", 22, NAVY, True),
+            ("Past item vectors", 19, MUTED, False),
+            ("SASRec + User MLP", 19, NAVY, False),
+            ("User 512", 20, NAVY, True)])
+    d.text("Candidate scoring", 18.85, 7.65, 3.8, 1.85,
+           [("Candidate scoring", 22, NAVY, True),
+            ("Candidate item vectors", 18, MUTED, False),
+            ("User · Candidate", 20, NAVY, True),
+            ("Full-catalog ranking", 19, MUTED, False)])
+    d.text("Evaluation", 18.85, 10.05, 3.8, 1.25,
+           [("Evaluation", 22, NAVY, True),
+            ("Validation: HR@10", 19, MUTED, False),
+            ("Test: NDCG / HR", 19, MUTED, False)])
+    d.label("Aggregation choices", 0.6, 12.18, 22.8, 0.5,
+            "Graph aggregation: mean · gnn · attn_pool · gnn_attn · transformer · "
+            "transformer_pos · transformer_local", 19, TEAL, align=PP_ALIGN.LEFT)
     d.wire("Item vectors to recommendation", [(17.8, 7.4), (18.55, 7.4)], NAVY)
+    d.slide.notes_slide.notes_text_frame.text = (
+        "Scene extraction supports qwen3vl, qwen3.5 and gemini. "
+        "Graphs feed both paths; Descriptions feed only the Summary-based Text path. "
+        "Title is excluded from extraction and summarization. Title branches shown here "
+        "are used only by title-enabled arms; other arms mask the title component. "
+        "BGE features are frozen; video encoders and SASRec train jointly. "
+        "The three item-vector paths are alternative models, not concatenated outputs. "
+        "Direct Graph uses the selected aggregation after its Scene MLP. "
+        "Current arm names and required inputs are listed in README."
+    )
     return d.presentation
 
 

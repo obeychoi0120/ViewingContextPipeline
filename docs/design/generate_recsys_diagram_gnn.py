@@ -50,7 +50,7 @@ def build(presentation):
     d.box("Graph Action role fusion", 12.5, 4.66, 5.3, 0.80, "FFFFFF", TEAL)
     fusion = d.text("Graph Action role fusion text", 12.58, 4.70, 5.14, 0.72,
                     [("Entity → Action role fusion", 16, INK, False),
-                     ("actor · target · tool · location", 13, MUTED, False),
+                     ("actor · target · tool · place", 13, MUTED, False),
                      ("Action + ReLU(Linear 640 → 128)", 13, MUTED, False)])
     for paragraph in fusion.text_frame.paragraphs:
         paragraph.space_after = Pt(0)
@@ -114,7 +114,7 @@ def build(presentation):
             ("Title-only: existing fallback (GCN skipped)  |  Meta: Baseline  |  Fully missing / padding: 0", 13, MUTED, False)],
            align=PP_ALIGN.LEFT)
     slide.notes_slide.notes_text_frame.text = (
-        "Graph experiment: sasrec-role-graph/v10; aggregation=gnn. "
+        "Graph experiment: aggregation=gnn. "
         "A DCGN-inspired recommendation variant, not a reproduction of hierarchical DCGN. "
         "X concatenates entity means, role-enriched action means and projected Context, "
         "before the Scene MLP and without Title. L2 normalization uses eps=1e-8; "
@@ -125,7 +125,6 @@ def build(presentation):
         "No temporal convolution, hierarchy, gate, attention or GCN dropout. "
         "BGE stays fixed; projections, role fusion, Scene MLP, GCN and SASRec train jointly. "
         "Item/Scene residual blocks use x + ReLU(Linear(x)), with one Linear layer. "
-        "Text uses sasrec-content-v8; mean uses sasrec-role-graph/v9. "
         "SASRec and its two-Linear GELU User MLP with LayerNorm remain unchanged."
     )
     return presentation
