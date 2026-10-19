@@ -31,7 +31,7 @@ def generate_penalty_passes(generate, tasks, penalties, complete, log=None, on_p
     complete(task_id, text, final=...) publishes the outcome and returns failure.
     """
     from dataclasses import replace
-    from extraction.recovery import penalty_schedule
+    from extraction.qwen_config import penalty_schedule
 
     schedule = penalty_schedule(penalties)
     for index, penalty in enumerate(schedule):

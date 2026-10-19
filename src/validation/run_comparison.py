@@ -1,33 +1,43 @@
-"""Compare graph results from two runs with matched users, events, dates and seeds."""
+"""Compare graph results from two runs with matched users, events, partitions and seeds."""
 
 from __future__ import annotations
-
 import numpy as np
-
-from extraction.recovery import fingerprint
-from pipeline_runtime import RunContext, read_jsonl
+from artifact_io import fingerprint
+from pipeline_runtime import RunContext
+from validation.selection import load_validation_cohort
 from validation.representation_provenance import read_state
 
 
 def compare_graph_runs(context, reference_run_id, *, target=None):
-    from validation.rolling_diagnosis import cluster_bootstrap, collect_metrics
+    from validation.leave_one_out_diagnosis import cluster_bootstrap, collect_metrics
     from validation.steps import validation_config
 
     if reference_run_id == context.run_id:
         raise ValueError("comparison requires two different run IDs")
     reference = RunContext.load(reference_run_id, root=context.root)
-    names = [name for name in ("graph_gemini", "graph_qwen") if target is None or name in target]
+    from validation.graph_context import is_graph, graph_context
+
+    if is_graph(context):
+        reference = graph_context(reference, context.scene_aggregation)
+    from arm_registry import registry
+
+    names = [
+        name
+        for name, arm in registry(context.config).items()
+        if arm.representation == "graph" and (target is None or name in target)
+    ]
     if not names:
         raise ValueError("run comparison requires at least one Graph target")
     arms = {name: name for name in names}
-    cohorts = [ctx.require_ready_cohort() for ctx in (context, reference)]
-    for filename in ("events.jsonl", "catalog.jsonl"):
-        if fingerprint(read_jsonl(context.cohort_dir / filename)) != fingerprint(
-            read_jsonl(reference.cohort_dir / filename)
-        ):
+    cohorts = [load_validation_cohort(ctx) for ctx in (context, reference)]
+    for key in ("protocol", "preprocessing", "source_data_hash"):
+        if cohorts[0]["plan"][key] != cohorts[1]["plan"][key]:
+            raise ValueError(f"run comparison requires identical {key}")
+    for filename in ("events", "catalog"):
+        if fingerprint(cohorts[0][filename]) != fingerprint(cohorts[1][filename]):
             raise ValueError(f"run comparison requires identical {filename}")
     if cohorts[0]["plan"]["splits"] != cohorts[1]["plan"]["splits"]:
-        raise ValueError("run comparison requires identical evaluation dates")
+        raise ValueError("run comparison requires identical evaluation partitions")
     configs = [validation_config(ctx) for ctx in (context, reference)]
     aggregates = [
         collect_metrics(ctx, config, cohort, arms=arms)
@@ -35,8 +45,13 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     ]
     left, counts, left_report = aggregates[0]
     right, other_counts, right_report = aggregates[1]
+    from validation.recommendation_contracts import EVALUATION_CONTRACT
+
+    if any(report.get("evaluation_contract") != EVALUATION_CONTRACT
+           for report in (left_report, right_report)):
+        raise ValueError("run comparison requires identical current evaluation contracts")
     grids = [
-        [(r["evaluation_date"], r["seed"], r["arm"]) for r in report["daily"]]
+        [(r["split_hash"], r["seed"], r["arm"]) for r in report["per_seed"]]
         for report in (left_report, right_report)
     ]
     if grids[0] != grids[1] or not np.array_equal(counts, other_counts):
@@ -44,8 +59,7 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     observed, draws, bootstrap = cluster_bootstrap(
         left - right, counts, samples=configs[0].evaluation.bootstrap_samples
     )
-    # Two prespecified model comparisons, even when only one model is selected.
-    alpha = configs[0].evaluation.familywise_alpha / 2
+    alpha = configs[0].evaluation.familywise_alpha / len(names)
     intervals = np.quantile(draws, [alpha / 2, 1 - alpha / 2], axis=0)
     results = {
         name: {
@@ -56,16 +70,8 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         }
         for i, name in enumerate(names)
     }
+    interactions = {}
     interaction = None
-    if len(names) == 2:
-        lo, hi = np.quantile(draws[:, 0] - draws[:, 1], [0.025, 0.975])
-        interaction = {
-            "role": "exploratory",
-            "difference": float(observed[0] - observed[1]),
-            "ci_low": float(lo),
-            "ci_high": float(hi),
-            "confidence_level": 0.95,
-        }
     return {
         "run_id": context.run_id,
         "reference_run_id": reference.run_id,
@@ -73,10 +79,19 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         "metric": "NDCG@10",
         "bootstrap": bootstrap,
         "correction": "bonferroni",
-        "family_size": 2,
+        "family_size": len(names),
+        "targets": names,
         "comparisons": results,
         "model_interaction": interaction,
-        "interpretation": "Includes differences in extraction, summary prompts, models and fallback; inspect provenance.",
+        **{"model_interactions": interactions},
+        "interpretation": "Includes extraction and direct-graph training differences; identical pooling mode required."
+        if is_graph(context)
+        else "Includes differences in extraction, summary prompts, models and fallback; inspect provenance.",
+        **(
+            {"representation_mode": "graph", "scene_aggregation": context.scene_aggregation}
+            if is_graph(context)
+            else {}
+        ),
         "sources": {
             ctx.run_id: {name: read_state(ctx, name).get("sources", []) for name in names}
             for ctx in (context, reference)

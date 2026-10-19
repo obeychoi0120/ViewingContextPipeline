@@ -88,8 +88,13 @@ class GeminiWorkerPool:
             if on_progress:
                 stats = throughput.snapshot()
                 stats.pop("output_tokens_per_second")
-                on_progress({**stats, "completed": len(outcomes),
-                             "inflight": min(len(workers), len(task_ids) - len(outcomes))})
+                on_progress(
+                    {
+                        **stats,
+                        "completed": len(outcomes),
+                        "inflight": min(len(workers), len(task_ids) - len(outcomes)),
+                    }
+                )
 
         try:
             report()
@@ -156,8 +161,10 @@ class GeminiWorkerPool:
                     task.max_new_tokens,
                 )
                 outcome = GeminiGenerationOutcome(
-                    task.task_id, text,
-                    response_diagnostics=getattr(backend, "last_response_diagnostics", None))
+                    task.task_id,
+                    text,
+                    response_diagnostics=getattr(backend, "last_response_diagnostics", None),
+                )
             except Exception as exc:  # SDK errors are persisted per scene by the caller.
                 outcome = GeminiGenerationOutcome(
                     task.task_id,

@@ -1,22 +1,17 @@
-schema_version: viewing-context-config/v5
+experiment_config_version: v6
 protocol:
   dataset: microlens_100k
   modality: visual_only
   sampling: fixed_windows
-  cohort_sampling: full_rolling
-  catalog_scope: full_source_catalog
+  cohort_sampling: leave_one_out
+  catalog_scope: retained_sequence_catalog
   graph_extractors:
-  - qwen
+  - qwen3vl
+  - qwen3.5
   - gemini
-  graph_summarizer: qwen
-  arms:
-  - desc_gemini
-  - desc_qwen
-  - graph_gemini
-  - graph_qwen
-  - metadata
   description_extractors:
-  - qwen
+  - qwen3vl
+  - qwen3.5
   - gemini
 artifacts_root: artifacts
 data:
@@ -26,7 +21,8 @@ data:
   titles_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-100k_title_en.csv
   titles_supplement_csv: /home_nvme/shared/data/microlens_100k/Annotations/MicroLens-50k_titles.csv
 models:
-  qwen: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
+  qwen3vl: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
+  qwen3.5: /home_nvme/shared/models/Qwen3.5-2B
   bge: /home_nvme/shared/models/bge-large-en-v1.5
   gemini:
     project_id: insight-dev-490002
@@ -39,7 +35,7 @@ extraction:
   gemini:
     threads: 128
   qwen:
-    gpu_memory_utilization: 0.9
+    gpu_memory_utilization: 0.95
     max_num_seqs: 32
     max_num_batched_tokens: 16384
     max_model_len: auto
@@ -54,58 +50,57 @@ extraction:
     - 352
     scene_duration: 30
     num_keyframes: 6
-  greedy_decoding: true
-  graph_repetition_penalty:
-  - 1.0
-  - 1.05
-  - 1.1
-  - 1.15
-  - 1.2
-  description_repetition_penalty:
-  - 1.0
-  - 1.05
-  - 1.1
-  - 1.15
-  - 1.2
-  summary_repetition_penalty:
-  - 1.0
-  - 1.05
-  - 1.1
-  - 1.15
-  - 1.2
-  summary_sampling:
-    temperature: 0.2
-    top_p: 0.8
-    top_k: 20
-  graph:
-    scene_max_new_tokens: 1024
-    summary_max_new_tokens: 512
   description:
-    scene_max_new_tokens: 1024
-    summary_max_new_tokens: 512
+    qwen3vl:
+      scene_max_new_tokens: 512
+      summary_max_new_tokens: 512
+    qwen3.5:
+      scene_max_new_tokens: 512
+      summary_max_new_tokens: 512
+    gemini:
+      scene_max_new_tokens: 1024
+      summary_max_new_tokens: 1024
+  graph:
+    qwen3vl:
+      scene_max_new_tokens: 384
+      summary_max_new_tokens: 512
+    qwen3.5:
+      scene_max_new_tokens: 384
+      summary_max_new_tokens: 512
+    gemini:
+      scene_max_new_tokens: 1024
+      summary_max_new_tokens: 1024
 validation:
   cohort:
-    mode: full_rolling
+    mode: leave_one_out
     metadata_missing_policy: zero_vector
     user_count: 100000
     interaction_count: 719405
     item_count: 19738
     timezone: UTC
-    evaluation_days: 7
-    exclude_final_day: true
+    min_user_interactions: 5
+    retained_sequence_length: 13
   encoder:
     embedding_dim: 1024
     max_length: 512
     batch_size: 32
+  graph_execution:
+    chunk_items: 256
+    chunk_nodes: 32768
+    chunk_scene_pairs: 1048576
+    checkpoint: auto
+    feature_cache_mb: 2048
   model:
+    deterministic: false
     max_sequence_length: 10
     embedding_dim: 512
     num_blocks: 2
     num_heads: 2
     dropout: 0.1
-    batch_size: 256
+    batch_size: 128
     max_epochs: 50
     patience: 5
+    min_delta: 0
     learning_rate: 0.0001
     popularity_power: 1.0
     seeds:
@@ -113,6 +108,7 @@ validation:
     - 43
     - 44
   evaluation:
+    checkpoint_metric: HR@10
     cutoffs:
     - 4
     - 8

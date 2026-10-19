@@ -1,50 +1,16 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any
-
 import yaml
-
-from artifact_io import atomic_write_json, atomic_write_jsonl
+from arm_registry import EXPERIMENT_CONFIG_VERSION
 from visual_sampling import validate_sampling
 
-
 CONFIG_PATH = Path("config.yaml")
-CONFIG_SCHEMA = "viewing-context-config/v5"
 
 
 class ConfigError(RuntimeError):
     pass
-
-
-def read_json(path: str | Path) -> dict[str, Any]:
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"JSON root must be an object: {path}")
-    return value
-
-
-def read_jsonl(path: str | Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with Path(path).open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            value = json.loads(line)
-            if not isinstance(value, dict):
-                raise ValueError(f"JSONL row {line_number} must be an object: {path}")
-            rows.append(value)
-    return rows
-
-
-def write_json(path: str | Path, value: dict[str, Any]) -> None:
-    atomic_write_json(path, value, durable=False)
-
-
-def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
-    atomic_write_jsonl(path, rows, durable=False)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -81,47 +47,68 @@ class RunContext:
     @classmethod
     def load(cls, run_id: str, *, root: Path | None = None) -> "RunContext":
         repo_root = (root or Path(__file__).resolve().parents[1]).resolve()
-        selected = str(run_id or "").strip()
+        selected = str(run_id).strip()
         if (
             not selected
             or selected in {".", "..", "resized_keyframes", "source_assets"}
             or Path(selected).name != selected
-            or "\\" in selected
+            or ("\\" in selected)
         ):
             raise ConfigError("run_id must be a single non-empty directory name")
         config = _load_yaml(repo_root / CONFIG_PATH)
         _validate_config(config)
         artifact_root = _resolve(
-            repo_root,
-            config.get("artifacts_root", "artifacts"),
-            "artifacts_root",
+            repo_root, config.get("artifacts_root", "artifacts"), "artifacts_root"
         )
-        return cls(
-            repo_root,
-            selected,
-            config,
-            artifact_root / "runs" / selected,
-        )
+        run_root = artifact_root / "runs" / selected
+        for phase in ("scenes", "summaries"):
+            directory = run_root / "extraction" / phase
+            if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
+                raise ConfigError("legacy qwen Run contract is unsupported; use a new run_id (no automatic migration)")
+        contract_path = run_root / "run_contract.json"
+        if contract_path.exists():
+            from artifact_io import read_json
+            from arm_registry import CONCAT_ARM_CONTRACT
+            if read_json(contract_path) != {"experiment_config_version": EXPERIMENT_CONFIG_VERSION, "arm_contract": CONCAT_ARM_CONTRACT}:
+                raise ConfigError("Run contract mismatch; use a new run_id")
+        return cls(repo_root, selected, config, run_root)
 
     def initialize(self) -> None:
-        for directory in (self.cohort_dir, self.run_root / "extraction", self.run_root / "validation"):
+        from artifact_io import atomic_write_json
+        from arm_registry import CONCAT_ARM_CONTRACT
+
+        self.run_root.mkdir(parents=True, exist_ok=True)
+        contract_path = self.run_root / "run_contract.json"
+        if not contract_path.exists():
+            atomic_write_json(contract_path, {"experiment_config_version": EXPERIMENT_CONFIG_VERSION, "arm_contract": CONCAT_ARM_CONTRACT}, durable=True)
+        for directory in (
+            self.cohort_dir,
+            self.run_root / "extraction",
+            self.run_root / "validation",
+        ):
             directory.mkdir(parents=True, exist_ok=True)
 
     def require_ready_cohort(self) -> dict[str, Any]:
-        from validation.rolling_data import load_cohort
-        return load_cohort(self.cohort_dir, self.run_id)
+        from preparation.cohort import load_cohort
+
+        return load_cohort(self.cohort_dir)
+
+    @property
+    def preparation_dir(self) -> Path:
+        return self.run_root.parent.parent / "preparation"
 
     @property
     def cohort_dir(self) -> Path:
-        return self.run_root / "cohort"
+        return self.preparation_dir / "cohort" / "leave_one_out"
 
     @property
     def evidence_dir(self) -> Path:
-        return self.run_root.parent.parent
+        return self.preparation_dir
 
     @property
     def keyframes_dir(self) -> Path:
-        return self.evidence_dir / "resized_keyframes"
+        width, height = self.config["extraction"]["visual_evidence"]["image_resolution"]
+        return self.evidence_dir / "resized_keyframes" / f"{width}_{height}"
 
     @property
     def source_assets_dir(self) -> Path:
@@ -130,33 +117,34 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen", "gemini"} or phase not in {"scenes", "summaries"}:
+        if model not in {"qwen3vl", "qwen3.5", "gemini"} or phase not in {"scenes", "summaries"}:
             raise ValueError("invalid extraction model or phase")
-        return self.run_root / "extraction" / representation / model / phase
+        from arm_registry import generated_arm
+
+        if phase == "scenes":
+            return self.scene_arm_dir(generated_arm(self.config, representation, model).name)
+        return self.summary_arm_dir(generated_arm(self.config, representation, model).name)
+
+    def scene_arm_dir(self, arm):
+        from arm_registry import generation_registry
+
+        selected = generation_registry(self.config)[arm]
+        if selected.model is None or selected.name != selected.scene_arm:
+            raise ValueError(f"not a Scene arm: {arm}")
+        return self.run_root / "extraction" / "scenes" / arm
+
+    def summary_arm_dir(self, arm):
+        from arm_registry import generation_registry
+
+        if generation_registry(self.config)[arm].model is None:
+            raise ValueError("Meta has no Summary artifacts")
+        return self.run_root / "extraction" / "summaries" / arm
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("graph", source, "scenes")
 
-    def graph_failure_path(self, source: str, content_id: str) -> Path:
-        return self.graph_scene_dir(source) / "failures" / f"{content_id}.jsonl"
-
     def description_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("description", source, "scenes")
-
-    def description_failure_path(self, source: str, content_id: str) -> Path:
-        return self.description_scene_dir(source) / "failures" / f"{content_id}.jsonl"
-
-    def graph_summary_dir(self, source: str) -> Path:
-        return self.extraction_dir("graph", source, "summaries")
-
-    def graph_summary_failure_path(self, source: str) -> Path:
-        return self.graph_summary_dir(source) / "failures.jsonl"
-
-    def description_summary_dir(self, source: str) -> Path:
-        return self.extraction_dir("description", source, "summaries")
-
-    def description_summary_failure_path(self, source: str) -> Path:
-        return self.description_summary_dir(source) / "failures.jsonl"
 
     def prompt_path(self, schema: str | Path) -> Path:
         path = _resolve(self.root, str(schema), "--schema")
@@ -167,24 +155,20 @@ class RunContext:
         return path
 
     @property
+    def validation_dir(self) -> Path:
+        return self.run_root / "validation"
+
+    @property
     def representations_dir(self) -> Path:
-        return self.run_root / "validation" / "representations"
+        return self.validation_dir / "representations" / "text"
 
     @property
     def recommendations_dir(self) -> Path:
-        return self.run_root / "validation" / "recommendations"
+        return self.validation_dir / "recommendations" / "text"
 
     @property
     def diagnosis_path(self) -> Path:
-        return self.run_root / "validation" / "diagnosis" / "diagnosis.json"
-
-    def config_path(self, *keys: str) -> Path:
-        value: Any = self.config
-        for key in keys:
-            if not isinstance(value, dict) or key not in value:
-                raise ConfigError("missing config value: " + ".".join(keys))
-            value = value[key]
-        return _resolve(self.root, value, ".".join(keys))
+        return self.validation_dir / "diagnosis" / "text_diagnosis.json"
 
     def path(self, section: str, key: str) -> Path:
         values = _require_mapping(self.config, section)
@@ -193,7 +177,7 @@ class RunContext:
 
 def _validate_config(value: dict[str, Any]) -> None:
     expected_keys = {
-        "schema_version",
+        "experiment_config_version",
         "protocol",
         "artifacts_root",
         "data",
@@ -201,10 +185,10 @@ def _validate_config(value: dict[str, Any]) -> None:
         "extraction",
         "validation",
     }
+    if value.get("experiment_config_version") != EXPERIMENT_CONFIG_VERSION:
+        raise ConfigError(f"experiment_config_version must be {EXPERIMENT_CONFIG_VERSION}")
     if set(value) != expected_keys:
         raise ConfigError(f"pipeline config must contain exactly {sorted(expected_keys)}")
-    if value.get("schema_version") != CONFIG_SCHEMA:
-        raise ConfigError(f"schema_version must be {CONFIG_SCHEMA}")
     _validate_protocol(value)
     _validate_extraction(value)
     _validate_models(value)
@@ -213,14 +197,18 @@ def _validate_config(value: dict[str, Any]) -> None:
 
 def _validate_protocol(value: dict[str, Any]) -> None:
     from arm_registry import active_arms
+
     protocol = _require_mapping(value, "protocol")
     expected = {
-        "dataset": "microlens_100k", "modality": "visual_only", "sampling": "fixed_windows",
-        "cohort_sampling": "full_rolling", "catalog_scope": "full_source_catalog",
-        "graph_extractors": ["qwen", "gemini"], "graph_summarizer": "qwen",
-        "description_extractors": ["qwen", "gemini"],
+        "dataset": "microlens_100k",
+        "modality": "visual_only",
+        "sampling": "fixed_windows",
+        "cohort_sampling": "leave_one_out",
+        "catalog_scope": "retained_sequence_catalog",
+        "graph_extractors": ["qwen3vl", "qwen3.5", "gemini"],
+        "description_extractors": ["qwen3vl", "qwen3.5", "gemini"],
     }
-    if set(protocol) != set(expected) | {"arms"}:
+    if set(protocol) != set(expected):
         raise ConfigError("invalid protocol keys")
     for key, setting in expected.items():
         if protocol.get(key) != setting:
@@ -239,36 +227,12 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         qwen_settings(extraction.get("qwen"))
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-    if set(extraction) - {"qwen"} != {
-        "greedy_decoding",
-        "visual_evidence",
-        "graph_repetition_penalty",
-        "description_repetition_penalty",
-        "summary_repetition_penalty",
-        "summary_sampling",
-        "graph",
-        "description",
-        "gemini",
-    }:
-        raise ConfigError(
-            "extraction must contain greedy_decoding, visual_evidence, "
-            "graph_repetition_penalty, description_repetition_penalty, "
-            "summary_repetition_penalty, summary_sampling, graph, description, and gemini"
-        )
-    if not isinstance(extraction.get("greedy_decoding"), bool):
-        raise ConfigError("extraction.greedy_decoding must be true or false")
-    for stage in ("graph", "description", "summary"):
-        key = f"{stage}_repetition_penalty"
-        from extraction.recovery import penalty_schedule
-        try:
-            penalty_schedule(extraction.get(key))
-        except ValueError as exc:
-            raise ConfigError(f"extraction.{key}: {exc}") from exc
+    if set(extraction) - {"qwen"} != {"visual_evidence", "graph", "description", "gemini"}:
+        raise ConfigError("extraction must contain visual_evidence, graph, description, gemini and optional qwen engine settings")
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution", "scene_duration", "num_keyframes"}:
         raise ConfigError(
-            "extraction.visual_evidence must contain image_resolution, scene_duration, "
-            "and num_keyframes"
+            "extraction.visual_evidence must contain image_resolution, scene_duration, and num_keyframes"
         )
     try:
         validate_sampling(visual_evidence["scene_duration"], visual_evidence["num_keyframes"])
@@ -279,50 +243,30 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         not isinstance(resolution, list)
         or len(resolution) != 2
         or any(
-            not isinstance(value, int) or isinstance(value, bool) or value <= 0
-            for value in resolution
+            (
+                not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                for value in resolution
+            )
         )
     ):
         raise ConfigError(
             "extraction.visual_evidence.image_resolution must be two positive integers"
         )
-    summary_sampling = _require_mapping(extraction, "summary_sampling")
-    if set(summary_sampling) != {"temperature", "top_p", "top_k"}:
-        raise ConfigError("extraction.summary_sampling must contain temperature, top_p, and top_k")
-    sampling_temperature = summary_sampling.get("temperature")
-    if (
-        not isinstance(sampling_temperature, (int, float))
-        or isinstance(sampling_temperature, bool)
-        or not 0 < float(sampling_temperature) <= 2
-    ):
-        raise ConfigError("extraction.summary_sampling.temperature must be in (0, 2]")
-    sampling_top_p = summary_sampling.get("top_p")
-    if (
-        not isinstance(sampling_top_p, (int, float))
-        or isinstance(sampling_top_p, bool)
-        or not 0 < float(sampling_top_p) <= 1
-    ):
-        raise ConfigError("extraction.summary_sampling.top_p must be in (0, 1]")
-    sampling_top_k = summary_sampling.get("top_k")
-    if (
-        not isinstance(sampling_top_k, int)
-        or isinstance(sampling_top_k, bool)
-        or sampling_top_k <= 0
-    ):
-        raise ConfigError("extraction.summary_sampling.top_k must be a positive integer")
-    generation_keys = {
-        "scene_max_new_tokens",
-        "summary_max_new_tokens",
-    }
+    generation_keys = {"scene_max_new_tokens", "summary_max_new_tokens"}
     for arm in ("graph", "description"):
-        settings = _require_mapping(extraction, arm)
-        expected = generation_keys
-        if set(settings) != expected:
-            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected)}")
-        for key in ("scene_max_new_tokens", "summary_max_new_tokens"):
-            setting = settings.get(key)
-            if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
-                raise ConfigError(f"extraction.{arm}.{key} must be a positive integer")
+        models = _require_mapping(extraction, arm)
+        if set(models) != {"qwen3vl", "qwen3.5", "gemini"}:
+            raise ConfigError(f"extraction.{arm} must contain exactly qwen3vl, qwen3.5 and gemini")
+        for model in ("qwen3vl", "qwen3.5", "gemini"):
+            settings = _require_mapping(models, model)
+            if set(settings) != generation_keys:
+                raise ConfigError(
+                    f"extraction.{arm}.{model} must contain exactly {sorted(generation_keys)}"
+                )
+            for key in generation_keys:
+                setting = settings.get(key)
+                if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
+                    raise ConfigError(f"extraction.{arm}.{model}.{key} must be a positive integer")
     gemini = _require_mapping(extraction, "gemini")
     if set(gemini) != {"threads"}:
         raise ConfigError("extraction.gemini must contain exactly threads")
@@ -335,14 +279,21 @@ def _validate_models(value: dict[str, Any]) -> None:
     data = _require_mapping(value, "data")
     models = _require_mapping(value, "models")
     data_keys = {"videos_dir", "pairs_tsv", "titles_csv"}
-    if value["schema_version"] == CONFIG_SCHEMA:
-        data_keys.add("pairs_csv")
+    data_keys.add("pairs_csv")
     if not data_keys <= set(data) or set(data) - data_keys - {"titles_supplement_csv"}:
-        raise ConfigError(f"data must contain {sorted(data_keys)} and optionally titles_supplement_csv")
-    if "titles_supplement_csv" in data and (not isinstance(data["titles_supplement_csv"], str) or not data["titles_supplement_csv"].strip()):
+        raise ConfigError(
+            f"data must contain {sorted(data_keys)} and optionally titles_supplement_csv"
+        )
+    if "titles_supplement_csv" in data and (
+        not isinstance(data["titles_supplement_csv"], str)
+        or not data["titles_supplement_csv"].strip()
+    ):
         raise ConfigError("data.titles_supplement_csv must be a non-empty path")
-    if set(models) != {"qwen", "bge", "gemini"}:
-        raise ConfigError("models must contain exactly qwen, bge, and gemini")
+    if set(models) != {"qwen3vl", "qwen3.5", "bge", "gemini"}:
+        raise ConfigError("models must contain exactly qwen3vl, qwen3.5, bge, and gemini")
+    for key in ("qwen3vl", "qwen3.5", "bge"):
+        if not isinstance(models[key], str) or not models[key].strip():
+            raise ConfigError(f"models.{key} must be a non-empty local checkpoint path")
     gemini = _require_mapping(models, "gemini")
     gemini_keys = {
         "project_id",
@@ -361,7 +312,7 @@ def _validate_models(value: dict[str, Any]) -> None:
     if (
         not isinstance(temperature, (int, float))
         or isinstance(temperature, bool)
-        or not 0 <= temperature <= 2
+        or (not 0 <= temperature <= 2)
     ):
         raise ConfigError("models.gemini.temperature must be a number from 0 to 2")
     if gemini.get("thinking_level") not in {"low", "medium", "high"}:
@@ -381,17 +332,18 @@ def _validate_models(value: dict[str, Any]) -> None:
 def _validate_validation(value: dict[str, Any]) -> None:
     validation = _require_mapping(value, "validation")
     expected_validation_keys = {"cohort", "encoder", "model", "evaluation"}
-    if set(validation) != expected_validation_keys:
-        raise ConfigError(f"validation must contain exactly {sorted(expected_validation_keys)}")
+    if set(validation) - {"graph_execution"} != expected_validation_keys:
+        raise ConfigError(f"validation requires {sorted(expected_validation_keys)} and optional graph_execution")
     try:
         from pydantic import ValidationError
-
         from validation.config import build_validation_config
 
         build_validation_config(
-            run_id="config-validation", dataset=value["data"],
+            run_id="config-validation",
+            dataset=value["data"],
             settings={**validation, "encoder": _require_mapping(validation, "encoder")},
-            model_path=value["models"].get("bge"), output_dir=value.get("artifacts_root"),
+            model_path=value["models"].get("bge"),
+            output_dir=value.get("artifacts_root"),
         )
     except ValidationError as exc:
         raise ConfigError(f"invalid validation config: {exc}") from exc

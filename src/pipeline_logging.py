@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json
 from pathlib import Path
-from arm_registry import generated_arm, select_arms
+from arm_registry import generation_registry, generated_arm, select_arms
 from pipeline_runtime import CONFIG_PATH
 
 
@@ -17,18 +17,25 @@ def step_settings(context, step, **options):
         summary = step.startswith("summarize-")
         kind = "graph" if "graph" in step else "description"
         source = options.get("source" if summary else "model")
-        arm = generated_arm(context.config, kind, source)
+        arm = (
+            generation_registry(context.config)[options["arm"]]
+            if options.get("arm")
+            else generated_arm(context.config, kind, source)
+        )
+        source = arm.model
         phase = "summaries" if summary else "scenes"
         values.update(
             arm=arm.name,
-            model="qwen" if summary else source,
-            model_settings=context.config["models"]["qwen" if summary else source],
+            model=options["model"] if summary else source,
+            model_settings=context.config["models"][options["model"] if summary else source],
             source=source,
             prompt=context.prompt_path(options["schema"]),
-            output_dir=context.extraction_dir(arm.representation, source, phase),
+            output_dir=context.summary_arm_dir(arm.name)
+            if summary
+            else context.extraction_dir(arm.representation, source, phase),
             max_new_tokens=context.config["extraction"][kind][
-                "summary_max_new_tokens" if summary else "scene_max_new_tokens"
-            ],
+                options["model"] if summary else source
+            ]["summary_max_new_tokens" if summary else "scene_max_new_tokens"],
         )
     else:
         values["output_dir"] = {
@@ -48,6 +55,6 @@ def log_step_start(context, step, **options):
     print(f"[STEP] {step}", flush=True)
     for key, value in step_settings(context, step, **options).items():
         print(
-            f"  {key}: {str(value) if isinstance(value, (str, Path)) else json.dumps(value)}",
+            f"  {key}: {(str(value) if isinstance(value, (str, Path)) else json.dumps(value))}",
             flush=True,
         )

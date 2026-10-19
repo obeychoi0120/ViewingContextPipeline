@@ -16,7 +16,7 @@ class DatasetConfig(StrictModel):
     titles_supplement_csv: Path | None = None
 
 
-class RollingDatasetConfig(DatasetConfig):
+class LeaveOneOutDatasetConfig(DatasetConfig):
     pairs_csv: Path
 
 
@@ -28,14 +28,16 @@ class EncoderConfig(StrictModel):
 
 
 class ModelConfig(StrictModel):
+    deterministic: bool = Field(default=True, strict=True)
     max_sequence_length: Literal[10]
     embedding_dim: Literal[512]
     num_blocks: Literal[2]
     num_heads: Literal[2]
     dropout: float = Field(ge=0, lt=1)
-    batch_size: Literal[256]
+    batch_size: int = Field(gt=0)
     max_epochs: int = Field(gt=0)
     patience: int = Field(gt=0)
+    min_delta: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     learning_rate: float = Field(gt=0)
     popularity_power: Literal[1.0]
     seeds: list[int]
@@ -50,6 +52,7 @@ class ModelConfig(StrictModel):
 
 
 class EvaluationConfig(StrictModel):
+    checkpoint_metric: Literal["HR@10"]
     cutoffs: list[int]
     primary_cutoff: Literal[10]
     bootstrap_samples: int = Field(gt=0)
@@ -66,26 +69,35 @@ class EvaluationConfig(StrictModel):
 
 
 class FullCohortConfig(StrictModel):
-    mode: Literal["full_rolling"]
+    mode: Literal["leave_one_out"]
     metadata_missing_policy: Literal["zero_vector"]
     user_count: int = Field(gt=0)
     interaction_count: int = Field(gt=0)
     item_count: int = Field(gt=0)
     timezone: Literal["UTC"]
-    evaluation_days: Literal[7]
-    exclude_final_day: Literal[True]
+    min_user_interactions: Literal[5]
+    retained_sequence_length: Literal[13]
+
+
+class GraphExecutionConfig(StrictModel):
+    # Execution choices only: no change to model weights, loss or cache identity.
+    chunk_items: int = Field(default=256, gt=0)
+    chunk_nodes: int = Field(default=32768, gt=0)
+    chunk_scene_pairs: int = Field(default=1048576, gt=0)
+    checkpoint: Literal["auto", "always", "never"] = "auto"
+    feature_cache_mb: int = Field(default=2048, ge=0)
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v5"]
+    schema_version: Literal["validation-config/v8"]
     run_id: str
-    dataset: RollingDatasetConfig
+    dataset: LeaveOneOutDatasetConfig
     cohort: FullCohortConfig
     encoder: EncoderConfig
     model: ModelConfig
     evaluation: EvaluationConfig
+    graph_execution: GraphExecutionConfig = Field(default_factory=GraphExecutionConfig)
     output_dir: Path
-
 
 
 def build_validation_config(
@@ -94,13 +106,14 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v5",
+            "schema_version": "validation-config/v8",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),
             "encoder": {**settings["encoder"], "model_path": model_path},
             "model": settings.get("model"),
             "evaluation": settings.get("evaluation"),
+            "graph_execution": settings.get("graph_execution", {}),
             "output_dir": output_dir,
         }
     )

@@ -1,124 +1,194 @@
-"""Scene payloads carry their own identity; no metadata sidecars are written."""
+"""Current compact scene payloads and atomic writes from execution records."""
 
 from pathlib import Path
 
-from artifact_io import atomic_write_jsonl
-from extraction.recovery import fingerprint
-from pipeline_runtime import read_json, read_jsonl
+from artifact_io import atomic_write_jsonl, read_jsonl
+from extraction.errors import UnsupportedArtifactError
+from extraction.token_usage import validate_tokens
+from extraction.graph_warnings import warning_tags
+from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
+from extraction.structured_output import (
+    GRAPH_JSON_SCHEMA, OutputValidationError, normalize_graph_references,
+)
 
-METADATA_SCHEMA = "scene-metadata/v1"  # Read-only compatibility with older artifacts.
+GRAPH_FIELDS = ("content_id", "scene_idx", "tokens", "warning", "scene_graph")
+DESCRIPTION_FIELDS = ("content_id", "scene_idx", "tokens", "description")
+FAILURE_FIELDS = ("content_id", "scene_idx", "tokens", "error", "raw_output")
 
 
-def metadata_path(path):
+def validate_scene_payload(path, row):
+    """Reject obsolete storage/Graph contracts without transforming source data."""
     path = Path(path)
-    return path.parent / ".metadata" / f"{path.stem}.json"
-
-
-def is_compact_scene(row):
-    return isinstance(row, dict) and set(row) in (
-        {"content_id", "description"}, {"content_id", "scene_graph"},
-        {"content_id", "scene_idx", "description"}, {"content_id", "scene_idx", "scene_graph"},
+    fields = FAILURE_FIELDS if "error" in row else (
+        GRAPH_FIELDS if "scene_graph" in row else DESCRIPTION_FIELDS
     )
+    if set(row) != set(fields):
+        raise UnsupportedArtifactError(f"unsupported compact scene fields: {path}")
+    if row["content_id"] != path.stem or type(row["scene_idx"]) is not int or row["scene_idx"] < 0:
+        raise ValueError(f"invalid scene identity: {path}")
+    validate_tokens(row["tokens"])
+    if "error" in row:
+        if not isinstance(row["error"], str) or not row["error"].strip():
+            raise ValueError(f"invalid scene error: {path}")
+        if not isinstance(row["raw_output"], str):
+            raise ValueError(f"invalid failed scene output: {path}")
+    elif "scene_graph" in row:
+        warning_tags(row["warning"])
+        graph = row["scene_graph"]
+        if isinstance(graph, dict):
+            if set(graph) != set(GRAPH_JSON_SCHEMA["properties"]):
+                raise UnsupportedArtifactError(f"unsupported Graph fields; expected Context/Entities/Actions: {path}")
+            if isinstance(graph["actions"], list) and any(
+                isinstance(action, dict) and set(action) != set(GRAPH_JSON_SCHEMA["properties"]["actions"]["items"]["properties"])
+                for action in graph["actions"]
+            ):
+                raise UnsupportedArtifactError(f"unsupported Action fields; receiver-free roles and place required: {path}")
+        elif not isinstance(graph, str) or not graph.strip():
+            raise ValueError(f"invalid graph observation: {path}")
+    elif not isinstance(row["description"], str) or not row["description"].strip():
+        raise ValueError(f"invalid description observation: {path}")
+
+
+def _graph_warning(record, value):
+    if "warning" in record:
+        return warning_tags(record["warning"])
+    if "semantic_warnings" in record:
+        return warning_tags(record["semantic_warnings"])
+    if isinstance(value, str):
+        parsed = parse_or_repair_graph(value)
+        return list(parsed.warning)
+    return graph_semantic_warnings(value)
+
+
+def recover_scene_graph(graph, warnings):
+    """Reparse stored text and normalize references without semantic warning checks."""
+    warnings = warning_tags(warnings)
+    if isinstance(graph, str):
+        parsed = parse_or_repair_graph(graph)
+        return (
+            graph if parsed.graph is None else parsed.graph,
+            list(parsed.warning),
+        )
+    try:
+        normalized, _ = normalize_graph_references(graph)
+    except OutputValidationError as exc:
+        return graph, exc.tags
+    return normalized, warnings
 
 
 def _payload(path, record):
-    fields = set(record) & {"description", "graph", "raw_response", "scene_graph"}
-    if len(fields) != 1 or record.get("content_id", path.stem) != path.stem:
-        raise ValueError(f"invalid scene record: {path}")
-    index = record.get("scene_idx")
-    if type(index) is not int or index < 0:
-        raise ValueError(f"invalid scene index: {path}")
+    if "error" in record:
+        payload = {key: record[key] for key in FAILURE_FIELDS}
+        validate_scene_payload(path, payload)
+        return payload
+    fields = set(record) & {"description", "graph", "scene_graph"}
+    if len(fields) != 1 or "raw_response" in record:
+        raise UnsupportedArtifactError(f"unsupported scene execution record: {path}")
     field = fields.pop()
-    public_field = "description" if field == "description" else "scene_graph"
-    return {"content_id": path.stem, "scene_idx": index, public_field: record[field]}
+    payload = {
+        "content_id": record.get("content_id", path.stem),
+        "scene_idx": record.get("scene_idx"),
+        "tokens": validate_tokens(record.get("tokens")),
+    }
+    if field == "description":
+        payload["description"] = record[field]
+    else:
+        payload.update(warning=_graph_warning(record, record[field]), scene_graph=record[field])
+    validate_scene_payload(path, payload)
+    return {key: payload[key] for key in (GRAPH_FIELDS if "scene_graph" in payload else DESCRIPTION_FIELDS)}
 
 
-def read_scene_records(path):
-    """Read current payloads or recover explicit indices from legacy metadata."""
+def read_scene_records(path, *, include_failures=False):
+    """Adapt current persisted fields to the current in-memory execution contract."""
     path = Path(path)
     rows = read_jsonl(path)
-    if not rows:
-        return []
-    if any(is_compact_scene(row) and "scene_idx" not in row for row in rows):
-        sidecar = metadata_path(path)
-        if not sidecar.is_file():
-            raise ValueError(f"legacy scene file has no scene_idx or metadata: {path}; "
-                             "restore its original .metadata before migration")
-        metadata = read_json(sidecar)
-        if (metadata.get("schema_version") != METADATA_SCHEMA
-                or metadata.get("content_id") != path.stem
-                or metadata.get("payload_hash") != fingerprint(rows)
-                or not isinstance(metadata.get("rows"), list)
-                or len(metadata["rows"]) != len(rows)):
-            raise ValueError(f"scene metadata does not match legacy payload: {path}")
-        rows = [{**row, "scene_idx": saved["record"]["scene_idx"]}
-                for row, saved in zip(rows, metadata["rows"])]
-    payload = [_payload(path, row) for row in rows]
-    if len({row["scene_idx"] for row in payload}) != len(payload):
+    for row in rows:
+        validate_scene_payload(path, row)
+    if len({row["scene_idx"] for row in rows}) != len(rows):
         raise ValueError(f"duplicate scene index: {path}")
-    failure_path = path.parent / "failures" / f"{path.stem}.jsonl"
-    failures = {row["scene_idx"]: row for row in read_jsonl(failure_path)} if failure_path.exists() else {}
     records = []
-    for row in sorted(payload, key=lambda row: row["scene_idx"]):
-        common = {"scene_idx": row["scene_idx"], "keyframes": []}
+    for row in sorted(rows, key=lambda row: row["scene_idx"]):
+        if "error" in row:
+            if include_failures:
+                records.append(row)
+            continue
+        common = {"scene_idx": row["scene_idx"], "keyframes": [], "tokens": row["tokens"]}
         if "description" in row:
-            record = {"schema_version": "scene-description/v2", "content_id": path.stem,
-                      **common, "description": row["description"]}
-            failed = failures.get(row["scene_idx"])
-            if failed and failed.get("raw_output") == row["description"]:
-                record["status"] = "raw_fallback"
-        elif isinstance(row["scene_graph"], str):
-            record = {"schema_version": "graph-scene-raw/v1", "status": "raw_fallback",
-                      **common, "raw_response": row["scene_graph"]}
+            record = {
+                "schema_version": "scene-description/v2", "content_id": path.stem,
+                **common, "description": row["description"],
+            }
         else:
-            record = {**common, "graph": row["scene_graph"], "parse_mode": "unknown", "semantic_warnings": []}
+            graph, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
+            if include_failures and warning_tags(row["warning"]):
+                # Resume must retry persisted warnings even if a newer parser can repair them.
+                graph, warnings = row["scene_graph"], warning_tags(row["warning"])
+            record = {
+                **common, "graph": graph,
+                "parse_mode": "text" if isinstance(graph, str) else (
+                    "repaired" if graph != row["scene_graph"] else "unknown"
+                ),
+                "semantic_warnings": warnings,
+            }
         records.append(record)
     return records
 
 
-def _remove_metadata(path):
-    sidecar = metadata_path(path)
-    sidecar.unlink(missing_ok=True)
-    try:
-        sidecar.parent.rmdir()
-    except (FileNotFoundError, OSError):
-        pass  # Other legacy contents may still need their metadata.
+def migrate_scene_failures(directory):
+    """Publish legacy failures inline before removing their old per-content log."""
+    directory = Path(directory)
+    failure_dir = directory / "failures"
+    for source in sorted(failure_dir.glob("*.jsonl")):
+        target = directory / source.name
+        rows = read_jsonl(target) if target.is_file() else []
+        for row in rows:
+            validate_scene_payload(target, row)
+        by_index = {row["scene_idx"]: row for row in rows}
+        if len(by_index) != len(rows):
+            raise ValueError(f"duplicate scene index: {target}")
+        for row in read_jsonl(source):
+            failure = {
+                "content_id": row.get("content_id", source.stem),
+                "scene_idx": row.get("scene_idx"),
+                "tokens": row.get("tokens"),
+                "error": row.get("error") or "generation failed",
+                "raw_output": row.get("raw_output") or "",
+            }
+            validate_scene_payload(target, failure)
+            by_index[failure["scene_idx"]] = failure
+        atomic_write_jsonl(
+            target, sorted(by_index.values(), key=lambda row: row["scene_idx"]),
+            durable=True, sort_keys=False,
+        )
+        source.unlink()
+    if failure_dir.is_dir() and not any(failure_dir.iterdir()):
+        failure_dir.rmdir()
 
 
 def write_scene_records(path, records):
-    """Atomically publish self-contained payloads before deleting legacy metadata."""
+    """Validate all rows before publishing; never migrate existing artifacts."""
     path = Path(path)
     payload = sorted((_payload(path, row) for row in records), key=lambda row: row["scene_idx"])
     if len({row["scene_idx"] for row in payload}) != len(payload):
         raise ValueError(f"duplicate scene index: {path}")
     if payload:
-        atomic_write_jsonl(path, payload, durable=True)
+        atomic_write_jsonl(path, payload, durable=True, sort_keys=False)
     else:
         path.unlink(missing_ok=True)
-    _remove_metadata(path)
 
 
-def migrate_scene_file(path, records):
-    path = Path(path)
-    if metadata_path(path).exists() or any(not is_compact_scene(row) or "scene_idx" not in row
-                                         for row in read_jsonl(path)):
-        write_scene_records(path, records)
-        return True
-    return False
+def ensure_generation_identity(directory, provenance, *, force=False):
+    """Record initial generation settings without blocking resume after policy changes."""
+    from artifact_io import atomic_write_json
+    from model_provenance import canonical
 
-
-def migrate_scene_schema(context, *, force=False):
-    """Remove legacy metadata after preserving scene indices, without model calls."""
-    converted = unchanged = 0
-    for representation in ("description", "graph"):
-        for model in ("qwen", "gemini"):
-            directory = context.extraction_dir(representation, model, "scenes")
-            for path in sorted(directory.glob("*.jsonl")):
-                if path.name in {"failure.jsonl", "failures.jsonl"}:
-                    continue
-                if migrate_scene_file(path, read_scene_records(path)):
-                    converted += 1
-                else:
-                    unchanged += 1
-    print(f"[SCHEMA] converted={converted} unchanged={unchanged}", flush=True)
-    return {"converted": converted, "unchanged": unchanged}
+    directory = Path(directory)
+    identity_path = directory / "generation_identity.json"
+    identity = canonical(provenance)
+    directory.mkdir(parents=True, exist_ok=True)
+    if force:
+        # A new identity must never label old outputs after an interrupted regeneration.
+        for path in [*directory.glob("*.jsonl"), *(directory / "failures").glob("*.jsonl")]:
+            path.unlink()
+    if force or not identity_path.exists():
+        atomic_write_json(identity_path, {"identity": identity}, durable=True)

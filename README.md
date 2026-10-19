@@ -1,189 +1,540 @@
-# ViewingContextPipeline v5
+# ViewingContextPipeline
 
-![ViewingContextPipeline 구성도](docs/design/Diagram_preview.png)
+MicroLens-100K 영상에서 시청 맥락을 추출하고, **영문 제목에 영상 관측 정보를 더했을 때 추천 성능이 어떻게 달라지는지** 비교하는 실험 파이프라인입니다. Qwen3-VL·Qwen3.5·Gemini로 장면 정보를 생성하고, 동일한 사용자·후보 영상 목록(catalog)·사용자별 분할에서 SASRec을 학습·평가합니다.
 
-MicroLens-100K 영상의 Description, Scene Graph, 영문 title 표현을 BGE로 임베딩하고 동일한 SASRec 구조로 추천 성능을 비교하는 PoC입니다. 시각 표현이 title을 대체했을 때의 효과를 측정합니다.
+## 전체 흐름
 
-## 비교 Arm
+- **Text 경로:** 키프레임 → Scene Graph 또는 Description → 영상 Summary → 고정 BGE 특징 → 학습한 영상 벡터
+- **직접 Graph 경로:** 키프레임 → Scene Graph → 고정 BGE 특징·역할 연결 → 장면 표현·집계 → 학습한 영상 벡터
+- **공통 추천:** 과거 시청 영상 벡터 → SASRec 사용자 벡터 → 후보 영상 벡터와 내적 → 추천 순위·평가 지표
 
-각 Run은 선택한 프롬프트로 하나의 Graph 표현을 평가합니다. ASIS·TOBE 전용 설정이나 버전별 Arm은 없으며, 프롬프트 경로·내용 해시와 생성 provenance로 실험을 구분합니다.
+**직접 Graph 경로에는 Summary가 필요하지 않습니다.** 제목은 Scene 추출·Summary 생성에 넣지 않고, 제목을 사용하는 Arm(비교 실험 조건)에서 영상 정보와 결합합니다. BGE는 동결하며, 영상 encoder와 SASRec은 추천 loss로 함께 학습합니다.
 
-| 입력 표현 | Arm / CLI target |
-| --- | --- |
-| Gemini Description → Qwen Summary | `desc_gemini` |
-| Qwen Description → Qwen Summary | `desc_qwen` |
-| Gemini Graph → Qwen Summary | `graph_gemini` |
-| Qwen Graph → Qwen Summary | `graph_qwen` |
-| 영문 title | `metadata` |
+![ViewingContextPipeline 전체 흐름](docs/design/main_diagram.png)
 
-```yaml
-protocol:
-  arms: [desc_gemini, desc_qwen, graph_gemini, graph_qwen, metadata]
-```
+그림의 Text·Graph는 제목을 함께 쓰는 예시입니다. 제목을 쓰지 않는 Arm은 해당 성분을 마스킹합니다. 직접 Graph의 집계 방식은 선택할 수 있으며, 지원 목록은 아래 모듈 3에서 확인합니다. [편집 가능한 PPTX](docs/design/main_diagram.pptx) · [그림 생성 코드](docs/design/generate_main_diagram.py)
 
-`protocol.arms`는 실행할 Arm 목록입니다. embedding·추천·진단에서 `--target`을 생략하면 이 목록을 사용합니다. CLI, 저장 문서의 `arm`, embedding 파일명, 추천 디렉터리와 진단은 위의 고정 이름을 사용합니다. 프롬프트 파일명의 버전을 바꿔도 Arm 이름은 바뀌지 않습니다.
+[시작하기](#시작하기) · [단계별 입력과 출력](#단계별-입력과-출력) · [모듈 상세](#모듈별-동작과-세부사항) · [실험 조건](#실험-조건과-결과-해석) · [산출물·재현](#산출물과-재현)
 
-Run 내부에서는 표현 방식(Description–Graph), 추출 모델(Gemini–Qwen), 컨텍스트 제공(시각 표현–Metadata)을 비교합니다. Graph 프롬프트 간 비교는 Run을 나누어 수행합니다. 모델 비교는 현재 프롬프트·fallback을 포함한 파이프라인 비교로 해석합니다.
+## 시작하기
 
-## 실행 준비
-
-Ubuntu/Bash, Python 3.11+와 저장소 루트를 기준으로 합니다. 입력 준비에는 ffmpeg·ffprobe가 필요합니다. 모델과 데이터는 자동 다운로드하지 않습니다.
+저장소 루트에서 실행합니다. Ubuntu/Bash·Python 3.11 이상과 `ffmpeg`·`ffprobe`가 필요하며, 데이터와 로컬 모델 가중치는 미리 준비합니다. Qwen은 Linux/CUDA와 비양자화 BF16 체크포인트를 사용하고, Gemini는 Vertex ADC 인증과 호출 권한이 필요합니다.
 
 ```bash
-python -m pip install -e ".[qwen,train,gemini,dev]"
+python -m pip install -e ".[qwen,gemini,train,embedding,dev]"
 python -m pip check
+export RUN_ID="new_run_id"
 ```
 
-Gemini 전용 환경은 `.[gemini,dev]`로 설치할 수 있습니다. Vertex ADC와 설정한 프로젝트·모델 호출 권한, 준비된 cohort·timestamp·공유 keyframe이 필요합니다. Qwen은 로컬 checkpoint와 vLLM 0.28.0을 사용합니다. [Qwen 실행 가이드](docs/qwen_vllm.md)를 참고하세요.
+먼저 [config.yaml](config.yaml)의 데이터·모델 경로와 Vertex 프로젝트 설정을 실행 환경에 맞게 바꾸세요. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
 
-[config.yaml](config.yaml)에서 다음 경로와 모델 설정을 맞춥니다.
+<details>
+<summary>환경별 설치와 확인할 설정</summary>
 
-| 설정 | 입력 |
+Gemini 생성 환경은 `.[gemini,dev]`, 임베딩·추천 환경은 `.[train,embedding,dev]`로 나누어 설치할 수 있습니다. Qwen·임베딩·추천의 GPU는 `CUDA_VISIBLE_DEVICES`로 선택합니다. Qwen은 GPU당 하나의 엔진을 실행하고, 추천의 `--workers-per-gpu`는 GPU당 독립 학습 작업 수입니다(기본 1).
+
+| config.yaml 항목 | 확인할 내용 |
 | --- | --- |
-| `data.pairs_csv` | `user,item,timestamp` CSV, 정수 밀리초 |
-| `data.pairs_tsv` | 존재하면 CSV와 사용자별 interaction multiset을 검증 |
-| `data.videos_dir` | `{item_id}.mp4` 파일들 |
-| `data.titles_csv` | 원본 `MicroLens-100k_title_en.csv` (영문 title) |
-| `data.titles_supplement_csv` | 보완용 `MicroLens-50k_titles.csv`. 지정하면 빈 제목·누락 행을 자동 보완 |
-| `models.qwen`, `models.bge` | 로컬 모델 디렉터리 |
+| `data` | interaction CSV·검증용 TSV, 영상 디렉터리, 제목·보완 제목 CSV의 경로 |
+| `models.qwen3vl`, `models.qwen3.5`, `models.bge` | 로컬 모델 디렉터리 |
 | `models.gemini` | Vertex 프로젝트·위치·모델·생성 설정 |
-| `artifacts_root` | 산출물 상위 경로. 기본 `artifacts` |
+| `extraction.visual_evidence` | 시간 창·키프레임 수·해상도 |
+| `extraction.qwen`, `extraction.gemini` | 추론 엔진·동시 실행 설정 |
+| `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}` | Scene·Summary 출력 토큰 한도 |
+| `validation.cohort` | 사용자 필터·보존 이력 길이 |
+| `validation.encoder`, `validation.graph_execution` | BGE 인코딩·Graph 실행 자원 |
+| `validation.model` | 학습 설정·seed·결정적 연산 사용 여부 |
+| `validation.evaluation` | checkpoint 지표·평가 cutoff·통계 설정 |
+| `artifacts_root` | 산출물 상위 디렉터리 |
 
-## 전체 실행
+interaction CSV는 `user,item,timestamp` 형식이며 timestamp는 정수 밀리초입니다. 영상은 `{item_id}.mp4`로 준비합니다. TSV가 있으면 사용자별 interaction multiset을 CSV와 대조합니다. 제목 보완은 원본의 비어 있지 않은 제목을 우선하고 필요한 빈 제목·누락 행만 채웁니다. 보완 CSV를 사용해도 해결되지 않은 제목은 빈 문자열로 저장하며, 보완 CSV가 없을 때 제목 행 누락은 오류입니다. 원본 CSV는 수정하지 않습니다.
+
+</details>
+
+<details>
+<summary>1–2단계: 데이터·키프레임 준비</summary>
 
 ```bash
-RUN_ID=experiment_v5
-
 python -m preparation prepare-cohort --run-id "$RUN_ID"
 python -m preparation prepare-input-data --run-id "$RUN_ID"
-
-python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model qwen
-python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/description_scene_v2.md --model gemini
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/graph_scene_v3.md --model qwen
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/graph_scene_v3.md --model gemini
-
-python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4.md --source qwen
-python -m extraction summarize-description --run-id "$RUN_ID" --schema prompts/description_summary_v4.md --source gemini
-python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --source qwen
-python -m extraction summarize-graph --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md --source gemini
-
-python -m validation embed-representations --run-id "$RUN_ID"
-python -m validation run-recommendation --run-id "$RUN_ID"
-python -m validation run-diagnosis --run-id "$RUN_ID"
 ```
 
-`prepare-cohort` 한 번으로 required items 생성 → 원본·보완 CSV의 제목 병합 → 영상·제목 검증을 완료합니다. 원본의 비어 있지 않은 제목을 우선하고, 필요한 아이템의 빈 제목·누락 행만 보완합니다. 끝내 찾지 못한 제목은 빈 값으로 저장해 Metadata embedding에서 영벡터로 처리합니다. 보완 CSV 자체가 없거나 손상된 경우에는 실패합니다.
+`prepare-cohort`는 전체 원본 interaction과 catalog를 준비하고 필요한 영상·제목을 검사합니다. 원본 목록만 확인하는 `--plan-only`도 있지만 다음 단계 전에 전체 준비를 완료해야 합니다. `prepare-input-data`는 정상적인 기존 프레임을 재사용합니다. 준비 결과는 Run 간 공유하므로 데이터셋이나 준비 구성이 다른 실험은 `artifacts_root`를 분리합니다.
 
-병합 결과는 `artifacts/runs/$RUN_ID/cohort/metadata_titles.jsonl`, 출처·보완 통계는 같은 폴더의 `cohort_plan.json`에 저장합니다. 원본 CSV를 변경하거나 별도 completed CSV·report 파일을 만들지 않습니다. `--plan-only`나 별도 `validation.complete_titles` 실행은 필요하지 않습니다. 재실행하면 최신 CSV를 다시 읽습니다. 이미 완성된 제목 CSV를 사용할 때는 `data.titles_csv`에 지정하고 `data.titles_supplement_csv`를 생략하면 됩니다(이 경우 누락 행은 오류).
+Run별 leave-one-out 분할·평가 catalog는 이후 `embed-representations`에서 준비하며 `reports/leave_one_out_cohort.{json,md}`에 전처리 요약을 기록합니다.
 
-기존 `validation.complete_titles` 독립 명령도 유지합니다. 수동 실행 시 `--required-items`의 현재 경로는 `artifacts/runs/$RUN_ID/cohort/required_items.jsonl`이며 이전 `data/cohort/` 경로를 사용하지 않습니다. `--plan-only`는 목록만 미리 확인할 때 선택적으로 사용할 수 있습니다.
+</details>
 
-`--schema`는 **실제 존재하는 Markdown 프롬프트 파일 하나**입니다. 저장소 루트 기준 상대 경로와 절대 경로를 허용합니다. 와일드카드 문자열은 허용하지 않습니다. 네 생성 명령에서 필수이며, 추출은 `--model`, 요약은 `--source`도 필수입니다. 요약 모델은 항상 Qwen이고 `--source`는 입력 장면을 만든 모델입니다. Graph 명령은 항상 `graph`에 쓰며 선택 프롬프트와 관계없이 `entities / relations / context` 출력 계약으로 검증합니다.
+<details>
+<summary>3–4단계: Scene 추출·Text 경로의 Summary 생성</summary>
 
-Qwen 추출·요약은 `CUDA_VISIBLE_DEVICES`에 지정된 GPU를 모두 사용하며 `--gpus` 인자를 받지 않습니다. 예를 들어 `CUDA_VISIBLE_DEVICES=0,2 python -m extraction summarize-graph --source gemini --run-id "$RUN_ID" --schema prompts/graph_summary_v4.md`는 두 GPU를 사용합니다. 환경 변수를 설정하지 않으면 CUDA에서 보이는 모든 GPU를 사용하고, 보이는 GPU가 없으면 오류를 냅니다. 추천도 보이는 GPU를 모두 사용하며 `--gpus`를 받지 않습니다. 기본 GPU당 한 작업을 실행하고 `--workers-per-gpu N`으로 GPU당 동시 작업 수를 조절합니다. 추천은 GPU가 없으면 기본 설정에서 CPU로 실행합니다. Gemini는 영상 구분 없이 scene 큐를 공유하며, 전체 장면 동시 실행 수는 `extraction.gemini.threads`입니다.
+생성 명령에는 `--model`, `--arm`, Markdown 프롬프트 경로인 `--schema`를 지정합니다. `--arm`은 생성 소스이며 평가용 `_meta` Arm을 지정하지 않습니다. 상대 경로는 저장소 루트 기준입니다.
 
-일부 Arm만 실행하는 예:
+| 모델 (`--model`) | Graph 소스 (`--arm`) | Description 소스 (`--arm`) |
+| --- | --- | --- |
+| `qwen3vl` | `graph_qwen3vl` | `desc_qwen3vl` |
+| `qwen3.5` | `graph_qwen3.5` | `desc_qwen3.5` |
+| `gemini` | `graph_gemini` | `desc_gemini` |
+
+아래는 Qwen3-VL·Gemini의 두 관측 형식을 준비하는 예시입니다. Qwen3.5는 위 표에 맞추어 모델·소스를 바꾸면 됩니다.
 
 ```bash
-python -m validation embed-representations --run-id "$RUN_ID" --target desc_qwen graph_qwen metadata
-python -m validation run-recommendation --run-id "$RUN_ID" --target desc_qwen graph_qwen metadata
-python -m validation run-diagnosis --run-id "$RUN_ID" --target desc_qwen graph_qwen metadata
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model gemini --arm graph_gemini
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3vl --arm desc_qwen3vl
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
 
-`diagnosis.json`의 `rolling-diagnosis/v3`는 아이템별 출처 전체 대신 arm별 해시·truncation·출처 분포·단어 수 요약을 저장합니다. 예외와 Gemini fallback 예시는 각각 최대 10개이며 전체 건수와 생략 건수를 함께 기록합니다. 출처 분포도 빈도순 최대 10개 값과 생략된 레코드 수를 기록합니다. `details_path`는 run 디렉터리 기준 상대경로이며, 상세 기록은 `validation/representations/.inputs/{arm}.json`의 `sources`에 보존됩니다. 결과를 옮길 때 상세 추적이 필요하면 이 숨김 디렉터리도 함께 복사하세요. v2의 `representations.*.sources`는 `sources_summary`와 `details_path`로, `gemini_summary_fallbacks.*` 배열은 `count`·`examples`·`omitted_count`·`details_path` 객체로 변경되었습니다.
-
-진단은 저장된 `sasrec-content-v2`와 `sasrec-content-v3` 추천 결과를 지원하며, 실제 버전을 `recommendations.architecture_version`에 기록합니다. 선택한 날짜·seed·arm에 서로 다른 버전이 섞이면 집계하지 않습니다. 추천 학습 재개는 현재 코드의 모델 버전만 재사용하므로, 과거 버전의 결과를 진단할 때는 `run-diagnosis`만 실행하면 됩니다.
-
-## Graph 프롬프트 비교: Run 분리
-
-비교할 프롬프트마다 별도의 Run을 사용하고 동일한 cohort·catalog·평가 날짜·학습 설정·seed를 유지합니다. 각 Run에서 장면 추출 → 요약 → embedding → 추천을 완료한 뒤 비교합니다.
+Text 경로에는 선택한 소스의 Summary가 필요합니다. 아래는 네 소스 모두 Gemini로 요약하는 예시입니다. 요약 모델을 Qwen으로 선택하려면 `--model qwen3vl` 또는 `--model qwen3.5`를 사용합니다. 소스 이름은 Scene을 생성한 모델을 유지합니다.
 
 ```bash
-python -m validation run-diagnosis --run-id "$RUN_ID" --compare-run-id reference_run --target graph_gemini graph_qwen
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_qwen3vl
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_gemini
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen3vl
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
 ```
 
-현재 Run에서 reference Run을 뺀 NDCG@10 차이를 `validation/diagnosis/diagnosis.json`의 `run_comparison`에 기록합니다. 원본 사건·catalog·평가 날짜·seed와 사건 수가 일치해야 하며 두 Run의 추천 캐시도 검증합니다. 모델별 두 비교는 Bonferroni 보정, 개선 폭의 모델 간 차이는 탐색적 95% 구간을 사용합니다. 프롬프트·모델·요약 정책·fallback의 차이가 함께 포함될 수 있으므로 출처를 확인합니다.
+같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 해당 소스의 `summarize --force`가 필요합니다.
 
-`--schema`는 프롬프트 선택이며 Python 출력 검증 계약을 바꾸지 않습니다. 다른 본문 구조의 과거 Graph나 Summary를 그대로 입력하는 ASIS 전용 경로·본문 자동 변환은 제공하지 않습니다. 기존 artifact를 수동 재사용하려면 현재 계약과 provenance를 충족해야 합니다.
+</details>
 
-## Artifact 구조
+<details>
+<summary>5–8단계: Text 특징 준비·추천·진단</summary>
+
+```bash
+TARGETS=(meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta desc_qwen3vl_meta desc_gemini_meta)
+python -m validation embed-representations --run-id "$RUN_ID" --target "${TARGETS[@]}" --representation-mode text
+python -m validation run-recommendation --run-id "$RUN_ID" --target "${TARGETS[@]}" --representation-mode text
+python -m validation run-diagnosis --run-id "$RUN_ID" --target "${TARGETS[@]}" --representation-mode text
+```
+
+위 예시는 6개 Arm을 선택합니다. 사용할 조건에 맞게 `TARGETS`를 변경하며 선택하지 않은 소스의 Summary는 필요하지 않습니다.
+
+</details>
+
+<details>
+<summary>5–8단계: 직접 Graph 특징 준비·집계 방식별 추천·진단</summary>
+
+Summary를 생성하지 않고 Scene Graph에서 고정 입력을 준비합니다. 아래는 `mean`과 `gnn`을 각각 학습·진단하는 예시이며, 모든 집계 방식은 고정 Graph 입력을 공유합니다.
+
+```bash
+TARGETS=(meta graph_qwen3vl graph_qwen3vl_meta graph_gemini_meta)
+python -m validation embed-representations --run-id "$RUN_ID" --target "${TARGETS[@]}" --representation-mode graph
+for AGG in mean gnn; do
+  python -m validation run-recommendation --run-id "$RUN_ID" --target "${TARGETS[@]}" --representation-mode graph --scene-aggregation "$AGG"
+  python -m validation run-diagnosis --run-id "$RUN_ID" --target "${TARGETS[@]}" --representation-mode graph --scene-aggregation "$AGG"
+done
+```
+
+Graph 추천·진단에는 모듈 3 표의 7종 중 하나를 `--scene-aggregation`으로 지정합니다. 집계 방식을 바꾸면 추천부터 별도 학습하며 결과도 분리합니다. embedding과 Text에는 aggregation을 지정하지 않습니다. Description Arm은 직접 Graph에서 지원하지 않습니다.
+
+학습 시간은 `run-recommendation --profile-every 100`으로 측정할 수 있습니다. [측정 항목과 해석](docs/graph_training.md#추천-학습-병목-프로파일링)을 참고하세요.
+
+</details>
+
+## 단계별 입력과 출력
+
+실행 패키지는 `preparation → extraction → validation` 순서입니다. 연구 모듈 2·3·4는 모두 `validation` 안에 있으며 영상·사용자 표현은 `run-recommendation`에서 함께 학습합니다.
+
+| 단계 | 입력 | 출력 | 명령·담당 코드 |
+| --- | --- | --- | --- |
+| 1. 데이터 준비 | interaction·제목·영상 목록 | 전체 원본 catalog·interaction·제목 매핑 | `prepare-cohort` · [데이터 준비](src/preparation/cohort.py) |
+| 2. 영상 관측 준비 | 영상·sampling 설정 | 키프레임 이미지·timestamp | `prepare-input-data` · [입력 준비](src/preparation/input_data.py) |
+| 3. 장면 정보 추출 | 키프레임·프롬프트 | Scene Graph 또는 Description JSONL | `extract-graph-scenes` / `extract-description-scenes` · [추출](src/extraction/steps.py) |
+| 4. 영상 요약 — Text 경로 | 장면 관측·프롬프트 | 영상 단위 영문 Summary JSON | `summarize` · [요약](src/extraction/summary_executor.py) |
+| 5. 평가·고정 특징 준비 | 원본 이력·제목·Summary 또는 Graph | 사용자별 분할·평가 catalog·1024차원 BGE 특징; Graph는 역할 연결·장면 경계 포함 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Graph 입력](src/validation/graph_inputs.py) |
+| 6. 영상 표현 학습 | 고정 특징·Graph 구조 | 영상당 512차원 벡터 | `run-recommendation` 내부 · [Text 모델](src/validation/model.py), [Graph 모델](src/validation/graph_model.py) |
+| 7. 사용자 표현·추천 평가 | 시청 이력·후보 영상 벡터 | checkpoint·학습 기록·이벤트별 HR/NDCG | `run-recommendation` · [학습·평가](src/validation/leave_one_out_recommendation.py) |
+| 8. 진단 | 이벤트 지표·입력·학습 기록 | 최종 점수·통계 비교·실행 판정 JSON | `run-diagnosis` · [Text 진단](src/validation/leave_one_out_diagnosis.py), [Graph 진단](src/validation/graph_diagnosis.py) |
+
+**5단계의 고정 입력 특징과 6단계의 학습된 추천용 영상 벡터는 다릅니다.** 영상 안의 장면 순서와 사용자의 시청 순서도 구분합니다. SASRec은 사용자의 시간순 시청 이력을 처리합니다.
+
+## 모듈별 동작과 세부사항
+
+직접 Graph 경로를 네 가지 연구 질문으로 나눕니다. 각 모듈은 설계 질문·입출력·현재 구현을 설명하고, 계산·저장 규칙은 드롭다운에서 확인합니다.
+
+| 모듈 | 중심 질문 | 입력 → 현재 출력 |
+| --- | --- | --- |
+| 1. 스키마와 장면 간 관계 | 무엇을 기록하고 어떤 관계로 장면을 연결할 것인가? | 키프레임 → 장면별 Scene Graph |
+| 2. Scene Graph의 벡터화 | 관측의 의미와 역할 구조를 어떻게 벡터에 담을 것인가? | Scene Graph → Scene vector |
+| 3. 영상 단위 집계 | 어떤 inductive bias로 장면들을 통합할 것인가? | Scene vectors → Video vector |
+| 4. 추천 학습과 평가 | 영상 표현을 실제 추천에 어떻게 사용할 것인가? | Video vectors·시청 이력 → 추천 순위·평가 지표 |
+
+이 구분은 연구 질문에 따른 것이며 독립 실행·학습 단계를 뜻하지 않습니다. **BGE는 동결하고 모듈 2·3의 학습 가능한 부분과 모듈 4의 추천기는 추천 loss로 함께 학습합니다.** `embed-representations`는 고정 BGE 특징·역할 연결을 준비하며, 학습된 Scene·Video vectors는 `run-recommendation`의 forward에서 계산합니다.
+
+### 모듈 1. Scene Graph 스키마, 장면 간 관계 정의
+
+추천에 필요한 시각 관측을 Context·Entities·Actions로 정리합니다. 장면 내부의 역할 관계를 정의하고, 장면 사이에는 동일 개체·시간적 연속성·사건 관계를 어떤 근거로 표현할지 검토합니다.
+
+현재 Scene은 의미적 장면 전환을 검출한 결과가 아니라 30초 고정 시간 창입니다. 창당 6개 키프레임·640×352 해상도를 사용하며 마지막 짧은 창은 키프레임이 적을 수 있습니다. 오디오는 사용하지 않습니다. **현재 스키마의 이름·ID는 장면 내부에서만 유효하며, 장면 간 동일 개체 추적·명시적인 사건 관계는 구현되어 있지 않습니다.**
+
+<details>
+<summary>Schema·프롬프트·장면 출력 예시</summary>
+
+[Scene Graph 프롬프트](prompts/scene_graph_v9.md)는 시간순 키프레임에서 다음 정보를 추출합니다.
+
+| 성분 | 기록할 내용 |
+| --- | --- |
+| Context | 표현 매체(medium)·형식(format)·주제(topics) |
+| Entities | 중요한 개체의 이름·속성 |
+| Actions | 누가(actor) 무엇을 하는지(action), 무엇에(target), 어떤 도구로(tool), 어디에서(place) |
+
+아래는 출력 형식을 설명하기 위한 예시이며 실제 Run 결과가 아닙니다.
+
+```text
+[Context]
+medium: live_action
+format: demonstration
+topics: food preparation
+[Entities]
+person; wearing apron
+tomato
+knife
+kitchen
+[Actions]
+person - cutting - tomato; knife; kitchen
+```
+
+</details>
+
+<details>
+<summary>이름 참조·역할·none/unknown·파싱과 저장 규칙</summary>
+
+Action은 `actor - action - target; tool; place`의 다섯 슬롯입니다. 역할에는 선언한 개체 이름을 공백·번호까지 정확히 복사하거나 `none`(부재·비해당), `unknown`(식별 불가)을 사용합니다. 같은 이름의 서로 다른 개체를 구분할 때만 `person1`, `person2`처럼 번호를 붙입니다. Actions가 없으면 `none`을 씁니다.
+
+파서는 이름을 장면 내부 ID로 변환합니다. 위 예시는 `person → e1`, `tomato → e2`, `knife → e3`, `kitchen → e4`가 되며 Action의 역할 참조도 같은 ID로 연결됩니다. `none`은 저장 시 `null`, `unknown`은 문자열로 유지합니다. 미선언 역할 참조는 `unknown`으로 정규화합니다.
+
+Graph는 `extraction/scenes/<source>/<content_id>.jsonl`에 `content_id`·`scene_idx`·`tokens`·`warning`·`scene_graph`를 저장합니다. 실패 행은 같은 파일의 `content_id`·`scene_idx`·`tokens`·`error`·`raw_output`이며, 같은 Scene은 최신 결과 한 행으로 교체합니다.
+
+구조화하지 못한 Graph는 원문과 warning을 보존합니다. 직접 Graph 경로는 구조·warning 검사를 통과한 장면만 사용하며 실패 행의 `raw_output`은 관측·임베딩에 사용하지 않습니다. 파싱 성공과 warning 부재는 시각적 사실성 검증을 뜻하지 않습니다.
+
+기존 `id: kind` 형식의 선언도 읽을 수 있지만 Relations·receiver·구형 `location` 필드·place 누락은 자동 보정하지 않습니다. 지원하지 않는 저장 형식은 경로·원인을 포함한 오류로 거부합니다. 자세한 계약은 [실행·저장 계약](docs/runtime.md)을 참고하세요.
+
+</details>
+
+<details>
+<summary>장면 간 연결: 현재 지원 범위와 남은 설계 질문</summary>
+
+현재 Graph 입력은 장면을 `scene_idx` 순서로 모으지만 개체 이름·번호·ID가 다른 장면에서도 같다고 동일 개체로 간주하지 않습니다. 한 영상이나 여러 영상의 Entity ID를 공유 노드로 합치지 않습니다.
+
+| 관계 | 현재 구현 | 남은 설계 질문 |
+| --- | --- | --- |
+| 장면 순서 | 유효 장면을 시간순으로 유지 | 원본 시간·장면 간 간격을 어떻게 표현할 것인가? |
+| 장면 간 동일 개체 | 장면별 독립 ID 사용. 장면 간 추적 없음 | 어떤 시각 근거로 동일 개체를 연결할 것인가? |
+| 사건 간 관계 | 명시적 연속·인과 관계 저장 없음 | 어떤 관계를 관측으로 인정하고 스키마에 기록할 것인가? |
+
+위 질문은 후속 설계 검토 범위입니다. 현재 GNN·Transformer가 벡터 사이에서 수행하는 정보 전달은 모듈 3에서 다룹니다. 모듈 1은 관계의 의미·표현 규칙을, 모듈 3은 관계나 벡터 유사도를 이용한 집계 연산을 설명합니다.
+
+</details>
+
+### 모듈 2. Scene Graph를 Scene Vector Representation으로 인코딩
+Entity의 이름·속성, Action의 동작, Context의 자연어 필드를 각각 BGE로 인코딩합니다. 역할에 연결된 Entity 정보를 Action에 반영하고 요소별 표현을 결합해 **512차원 Scene vector**를 만듭니다. BGE는 동결하며 projection·역할 결합·Scene MLP는 추천 학습에서 갱신합니다.
+
+<details>
+<summary>자연어 필드별 BGE 입력과 벡터 차원</summary>
+
+| 성분 | BGE에 넣는 자연어 | 고정 특징 → 학습 가능한 projection |
+| --- | --- | --- |
+| Entity | 이름·속성 | 개체별 1024 → 128 |
+| Action | 동작 텍스트 | 동작별 1024 → 128 |
+| Context | Format·Medium·Topics | 장면별 1024 → 128 |
+
+BGE는 large-en-v1.5를 사용합니다. ID는 역할 연결에만 사용하며 BGE 입력에는 넣지 않습니다. Entity·Action은 각각 인코딩한 뒤 역할 결합과 평균을 거치고, Context는 세 필드를 합친 문자열 하나로 인코딩합니다.
+
+</details>
+
+<details>
+<summary>Entity→Action 역할 결합과 Scene vector 계산</summary>
+
+Action은 actor·target·tool·place에 연결된 Entity의 128차원 벡터를 가져와 보정합니다. Entity 벡터 자체는 이 역할 결합으로 갱신하지 않습니다. `none`·`unknown`에는 역할별 학습 가능한 상태 벡터를 사용합니다.
+
+```text
+Action 보정 = Action + ReLU(Linear([Action; actor; target; tool; place]))
+Scene = R([Title 128; Entity 평균 128; 보정된 Action 평균 128; Context 128])
+R(x) = x + ReLU(Linear(x))
+```
+
+역할 결합은 640 → 128차원, Scene concat은 512차원입니다. Scene MLP는 Linear 512→512 하나와 ReLU를 쓰며 LayerNorm이 없습니다. **장면 내부의 Entity→Action 역할 결합과 모듈 3의 장면 간 정보 전달은 서로 다른 연산입니다.**
+
+</details>
+
+<details>
+<summary>제목 결합과 결측 처리</summary>
+
+제목을 사용하는 Arm은 제목의 고정 BGE 특징 1024차원을 별도 projection으로 128차원으로 줄여 Scene concat에 넣습니다. 제목은 관측 생성 입력에 넣지 않으며, 제목을 사용하지 않거나 제목이 없으면 projection 뒤 해당 성분을 0으로 마스킹합니다.
+
+유효 장면에 Entity·Action이 없으면 해당 슬롯은 0입니다. 모듈 3의 GCN 가중치 입력은 제목을 제외한 Entity·보정된 Action·Context 성분을 사용합니다. 장면이 전혀 없는 영상의 처리는 모듈 3의 결측 규칙을 따릅니다.
+
+</details>
+
+### 모듈 3. Scene vectors들을 Video vector로 집계
+모든 장면을 동등하게 볼지, 중요한 장면에 가중치를 줄지, 장면 사이에서 정보를 교환할지, 순서를 반영할지에 따라 영상 표현이 달라집니다. 현재 구현은 이러한 가정이 다른 일곱 가지 집계 방식으로 **512차원 Video vector**를 만듭니다. 구조적 가정과 추천 성능의 우열은 별도의 비교 실험으로 구분합니다.
+
+<details>
+<summary>집계 방식별 inductive bias</summary>
+
+| `--scene-aggregation` | 담고 있는 가정·구조 | 영상 집계 |
+| --- | --- | --- |
+| `mean` | 모든 유효 장면을 동등하게 사용. 순서 정보 없음 | 장면 평균 |
+| `attn_pool` | 장면별 중요도 학습. 장면 간 정보 교환 없음 | 학습한 가중치로 집계 |
+| `gnn` | cosine 유사도로 가중한 장면 간 정보 전달. 순서 정보 없음 | GCN 전달 후 평균 |
+| `gnn_attn` | 장면 간 전달 가중치를 attention으로 학습. 순서 정보 없음 | attention 가중 GCN 전달 후 평균 |
+| `transformer` | 위치 정보 없이 장면 간 상호작용 학습 | Transformer 후 평균 |
+| `transformer_pos` | 장면 간 상호작용에 유효 장면 순번의 위치 정보 추가 | Transformer 후 평균 |
+| `transformer_local` | 각 장면의 자기 자신에 대한 변환만 허용하는 대조군 | 장면별 Transformer 후 평균 |
+
+각 집계는 한 영상 내부에서 수행합니다. 모든 방식이 고정 Graph 입력을 공유하며, 집계 방식을 바꾸면 추천부터 별도 학습합니다. 과거 이름인 `attention`은 지원하지 않습니다.
+
+</details>
+
+<details>
+<summary>GCN·attention·Transformer의 계산과 도표</summary>
+
+GCN 가중치 입력은 Scene MLP 이전의 `[Entity 평균; 보정된 Action 평균; Context]` 384차원으로 제목을 제외합니다. `gnn`은 같은 영상의 모든 유효 장면 쌍에 대해 cosine의 음수는 0, self-loop는 1로 두고 대칭 degree 정규화한 인접 행렬 `Â`를 만듭니다. `H′ = H + ReLU(Â H W + b)`로 전달한 뒤 평균합니다. 유사도는 매 forward 계산하며 gradient를 차단하지 않습니다.
+
+`gnn_attn`은 같은 가중치 입력에서 학습한 query·key로 점수를 계산하고 행별 softmax로 전달 가중치를 정합니다. `attn_pool`은 Scene MLP 출력에서 장면별 점수를 계산하고 영상 안에서 softmax로 정규화해 가중합합니다.
+
+Transformer 계열은 Scene MLP 출력에 1층 Transformer를 적용한 뒤 평균합니다. `transformer`는 위치 정보 없이 모든 장면을 보고, `transformer_pos`는 유효 장면 순번의 위치 정보를 추가하며, `transformer_local`은 자기 자신만 보도록 attention을 제한합니다.
+
+아래 도표는 모듈 2의 장면 표현, 모듈 3의 GCN 집계, 모듈 4의 추천을 연결한 예시입니다.
+
+![추천 모델 구조 — Baseline, Text, Graph GNN](docs/design/recsys_diagram_gnn.png)
+
+[GNN PPTX](docs/design/recsys_diagram_gnn.pptx) · [GNN 그림 생성 코드](docs/design/generate_recsys_diagram_gnn.py) · [mean PNG](docs/design/recsys_diagram.png) · [mean PPTX](docs/design/recsys_diagram.pptx) · [세부 수식·구현·캐시 계약](docs/graph_training.md)
+
+</details>
+
+<details>
+<summary>순서 정보·장면 수·결측 처리의 범위</summary>
+
+유효 장면은 시간순으로 모으지만 순서 정보의 사용 여부는 집계 방식에 달려 있습니다. `transformer_pos`의 위치는 유효 장면 순번이며 제외된 장면까지 포함한 원본 timestamp나 시간 간격이 아닙니다. `transformer_local`은 장면 간 교환의 효과를 비교하기 위한 대조군입니다.
+
+장면이 한 개여도 GCN·Transformer의 변환은 적용됩니다. 유효 장면이 없고 제목만 있으면 `[Title; 0; 0; 0]`을 Scene MLP에 넣은 결과를 사용하고 장면 집계는 건너뜁니다. 제목·유효 장면이 모두 없거나 padding이면 최종 영상 벡터는 0입니다. 집계 뒤 별도의 Item MLP는 없습니다. 제목 기준선 `meta`에는 장면 집계를 적용하지 않습니다.
+
+</details>
+
+### 모듈 4. Video Vector들로 추천 학습 및 평가
+
+과거 시청 영상의 Video vectors를 SASRec으로 인코딩하고 User MLP를 적용해 512차원 사용자 벡터를 만듭니다. 사용자 벡터와 후보 영상 벡터의 내적으로 순위를 계산하고 사용자별 leave-one-out 방식으로 평가합니다. 모듈 3의 영상 안 장면 순서와 이 모듈의 사용자 시청 순서는 구분합니다.
+
+학습 설정은 [config.yaml](config.yaml)의 **`validation.model`**, 평가·통계 설정은 **`validation.evaluation`**, 사용자 필터·보존 이력은 **`validation.cohort`**를 참고하세요.
+
+<details>
+<summary>사용자 표현·후보 점수 계산과 공동 학습</summary>
+
+SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마지막 유효 위치의 출력에 2층 GELU User Residual MLP를 적용해 사용자 벡터를 만듭니다. SASRec과 User MLP 내부의 LayerNorm은 유지합니다. 후보 영상 벡터는 영상 encoder에서 직접 가져옵니다.
+
+```text
+추천 점수 = 사용자 벡터 · 후보 영상 벡터
+```
+
+모듈 2·3의 학습 가능한 영상 encoder와 SASRec은 추천 loss로 함께 갱신하며 seed·Arm·Graph 집계 방식별로 별도 학습합니다. 고정 BGE 특징과 학습된 Scene·Video vectors를 구분하고, 장면 encoder나 집계를 독립적으로 사전 학습한 것으로 해석하지 않습니다.
+
+</details>
+
+<details>
+<summary>사용자별 leave-one-out 분할과 평가 규칙</summary>
+
+현재 분할은 원본 이력이 5개 이상인 사용자의 최근 13개 interaction을 보존한 뒤 마지막 2개를 보류합니다. 동일 timestamp는 원본 event_id 순서로 정하며 마지막 날짜도 포함합니다.
+
+| 단계 | 정답·역할 | 입력 이력 |
+| --- | --- | --- |
+| Train | 마지막 2개를 제외한 다음 아이템 전이 학습 | 각 정답보다 앞선 이력 |
+| Validation | 끝에서 두 번째 interaction으로 HR@10 checkpoint 선택 | train 이력 |
+| Test | 마지막 interaction으로 선택된 checkpoint 평가 | train + validation 이력 |
+
+각 정답 앞의 최대 10개를 모델에 입력하며 첫 이벤트는 학습 정답으로 쓰지 않습니다. validation 이후 재학습(refit)은 하지 않습니다. 후보 catalog는 보존된 사용자 시퀀스 전체의 아이템이며 앞선 보존 이력 전체를 마스킹합니다. 반복 정답도 마스킹합니다.
+
+순위는 사용자별 `torch.argsort(scores, descending=True)`로 계산하므로 동률 순서는 PyTorch·device 환경에 따라 달라질 수 있습니다. validation/test는 학습 정답·학습 빈도에 넣지 않습니다. checkpoint는 validation **HR@10**으로 선택하고, 최종 보고·paired bootstrap의 주 지표는 **NDCG@10**입니다. 동점이면 최초 epoch를 유지하며 최적 가중치로 test를 한 번 평가합니다.
+
+전처리는 [MicroLens 공식 SASRec 코드](https://github.com/microlens2023/microlens-dataset/blob/master/Code/VideoRec/SASRec/utils/load_data.py)의 최소 이력·절단·마지막 2개 보류 흐름을 따릅니다. 모델·손실함수까지 논문 전체를 재현한 것은 아니며 사용자별 분할은 사용자 사이의 공통 시간 경계를 보장하지 않습니다.
+
+</details>
+
+<details>
+<summary>비교 경로: 제목 기준선과 Text Summary</summary>
+
+네 모듈의 직접 Graph 경로와 함께 제목 기준선·Text 경로를 비교합니다. Description은 시각 관측을 자연어로 표현하고, Text 경로는 장면별 Graph 또는 Description을 영상 Summary로 모은 뒤 벡터화합니다.
+
+| 단계 | 프롬프트 | 입력 → 출력 |
+| --- | --- | --- |
+| Description 추출 | [Scene Description](prompts/scene_description_v3.md) | 시간순 키프레임 → 주제·구별되는 관측을 담은 영문 문단 |
+| Graph 요약 | [Graph Summary](prompts/summary_graph_v9.md) | 장면 Graph 관측 → 영상 단위 영문 요약 |
+| Description 요약 | [Description Summary](prompts/summary_description_v5.md) | 장면 Description → 영상 단위 영문 요약 |
+
+Description의 짧은 예시는 `A person wearing an apron cuts a tomato with a knife in a kitchen.`입니다. 두 Summary 프롬프트에는 `{scenes}`가 필요하고 제목 자리표시자 `{english_title}`은 허용하지 않습니다. 구조화하지 못해 원문·warning으로 보존한 Graph 관측은 Text Summary에 사용할 수 있습니다.
+
+| 경로 | Video vector 계산 |
+| --- | --- |
+| 제목 기준선 `meta` | 제목 BGE 1024 → Linear 512 → 1층 Residual MLP |
+| Text | 제목 BGE 1024 → Linear 128; Summary BGE 1024 → Linear 384 → concat 512 → 1층 Residual MLP |
+
+Item MLP는 `R(x) = x + ReLU(Linear(x))`이며 LayerNorm이 없습니다. 누락 성분은 projection 뒤 0으로 마스킹하고 제목·Summary가 모두 없으면 최종 영상 벡터는 0입니다. 추천에는 모듈 4의 SASRec·내적·평가 규칙을 사용합니다.
+
+Description 행은 `extraction/scenes/<source>/<content_id>.jsonl`에 `content_id`·`scene_idx`·`tokens`·`description`을 저장합니다. Summary는 `extraction/summaries/<source>/<content_id>.json`에 텍스트·상태(`complete`/`failed`)·장면 수·단어 수·토큰 수·provenance를 저장합니다. 실제 Scene 내용이 바뀐 완료 Summary는 일반 재개에서 거부하므로 새 Run 또는 `summarize --force`로 다시 생성합니다.
+
+</details>
+
+<details>
+<summary>설계 근거와 연구실 자문 반영 범위</summary>
+
+[연구실 자문 기록](docs/feedback_260923.md)의 세 모듈 번호는 원문의 구분입니다. 이 README의 네 모듈과 다음과 같이 대응합니다.
+
+| 자문 원문의 구분 | 이 README의 연결 모듈 | 현재 구현과 반영 범위 |
+| --- | --- | --- |
+| 자문 모듈 1: 역할 분해 Graph의 추천 활용성 | 모듈 1·2 | Context·Entities·Actions를 정의하고 역할 구조를 장면 표현에 반영 |
+| 자문 모듈 2: 장면 유사도 기반 GCN aggregation | 모듈 2·3 | 장면 벡터를 구성하고 한 영상 안에서 GCN 전달 후 집계. 자문 방법 전체의 재현은 아님 |
+| 자문 모듈 3: 사용자·아이템의 공통 feature space | 모듈 4 | SASRec 사용자 벡터와 후보 영상 벡터를 내적으로 비교 |
+
+제목은 관측 생성에서 제외하고 추천 단계에서 결합하며 고정 BGE 특징과 학습 가능한 영상 encoder를 분리합니다. 장면 간 동일 개체·사건 관계, 영상 간 노드 공유·어휘 정규화, 계층적 DCGN·UniMP·CSA, 사용자 평균·LightGCN·clustering 비교는 후속 검토 범위입니다. 구현 상태·실험 기록은 [프로젝트 이정표](docs/TODO.md)를 참고하세요.
+
+</details>
+
+## 실험 조건과 결과 해석
+
+같은 Arm 이름이라도 `text`는 Summary를, `graph`는 Scene Graph 구조를 사용합니다. 결과에는 **Run·Arm·표현 모드·Graph 집계 방식**을 함께 명시합니다. 모든 validation 명령에 `--target`과 `--representation-mode`가 필요하며 기본 target 목록은 없습니다.
+
+<details>
+<summary>전체 평가 Arm과 필요한 입력</summary>
+
+| `--target` | Text 입력 | 직접 Graph 입력 |
+| --- | --- | --- |
+| `meta` | 영문 제목 | 영문 제목 |
+| `graph_qwen3vl` | Qwen3-VL Graph Summary | Qwen3-VL Scene Graph |
+| `graph_qwen3vl_meta` | 제목 + Qwen3-VL Graph Summary | 제목 + Qwen3-VL Scene Graph |
+| `graph_qwen3.5` | Qwen3.5 Graph Summary | Qwen3.5 Scene Graph |
+| `graph_qwen3.5_meta` | 제목 + Qwen3.5 Graph Summary | 제목 + Qwen3.5 Scene Graph |
+| `desc_qwen3.5_meta` | 제목 + Qwen3.5 Description Summary | 미지원 |
+| `graph_gemini_meta` | 제목 + Gemini Graph Summary | 제목 + Gemini Scene Graph |
+| `desc_qwen3vl_meta` | 제목 + Qwen3-VL Description Summary | 미지원 |
+| `desc_gemini_meta` | 제목 + Gemini Description Summary | 미지원 |
+
+모델 접미사는 Scene 추출 모델을 뜻하며 Summary 모델은 별도로 선택합니다. `graph_gemini`는 생성 소스이고 평가에서는 `graph_gemini_meta`를 사용합니다. 현재 지원 범위는 Text 9 Arm·직접 Graph 6 Arm입니다.
+
+</details>
+
+Text의 Graph/Description 비교는 두 관측을 요약문으로 사용한 결과입니다. 구조 활용이나 집계 효과는 입력·모델·학습·평가 조건을 맞춘 비교로 확인해야 합니다. 현재 진단은 선택한 표현 모드·aggregation 내부에서 수행하며 Text/Graph·서로 다른 aggregation 사이의 자동 paired 비교는 지원하지 않습니다.
+
+<details>
+<summary>학습 조합 수·통계 비교와 검증 범위</summary>
+
+학습 조합 수는 `seed 수 × 선택한 Arm 수`입니다. 현재 설정의 3 seed에서 Text 9 Arm 전체는 27조합이며 시작하기의 Text 6 Arm 예시는 18조합입니다. 직접 Graph는 집계 방식별로 별도 학습합니다.
+
+NDCG@10은 사용자 단위 paired bootstrap으로 비교합니다. 사용자별 seed 평균을 구한 뒤 사용자에 동일 가중치를 두며 각 seed의 사용자 평균도 보고합니다. 각 실행에서 선택한 target의 모든 쌍을 하나의 Bonferroni 비교군으로 두어 비교 수는 `n × (n−1) / 2`입니다. Text 9 Arm은 36쌍, Graph 6 Arm은 15쌍입니다. 비교 방향은 registry에서 뒤의 Arm − 앞의 Arm이며 CLI 순서와 무관합니다. cutoff·bootstrap 횟수·유의수준은 `config.yaml`의 `validation.evaluation`을 확인하세요.
+
+`run-diagnosis --compare-run-id <참조_Run>`은 선택한 Graph Arm에 대해 사용자·이벤트·분할·seed·평가 계약이 일치하는 Run을 비교하며 직접 Graph는 집계 방식도 같아야 합니다. 이때 Bonferroni 분모는 비교하는 Graph Arm 수입니다. [통계 정책 코드](src/validation/diagnosis_statistics.py) · [Run 비교 코드](src/validation/run_comparison.py)
+
+구현 검증과 전체 데이터의 추천 성능 실험은 구분합니다. 현재 회귀 테스트는 다음 명령으로 실행하며 소형 입력·CPU·오프라인 대역을 사용합니다. 실제 모델 추론·CUDA 처리량·전체 데이터 추천 성능은 이 테스트가 검증하지 않습니다.
+
+```bash
+python -m pytest -q tests
+```
+
+Run별 성능·비용 분석은 해당 입력·모델·평가 조건과 함께 `artifacts/runs/<RUN_ID>/reports/`에 보관합니다.
+
+</details>
+
+## 산출물과 재현
+
+준비 결과는 공유하고 추출·표현·추천·진단은 Run별로 저장합니다. **Run별 분석 코드·보고서·표·이미지는 `artifacts/runs/<RUN_ID>/reports/`에 보관합니다.**
+
+**재실행은 정상 Scene·완료 Summary를 재사용합니다.** 생성 설정을 바꾸어도 자동 갱신하지 않으며, 같은 Run에 서로 다른 생성 조건의 결과가 섞일 수 있습니다. 전체를 현재 조건으로 다시 만들려면 선택한 단계·소스에 `--force`를 사용합니다. 기존 결과를 보존하려면 새 Run을 사용하세요.
+
+<details>
+<summary>산출물 디렉터리와 결과 확인 위치</summary>
 
 ```text
 artifacts/
-├── resized_keyframes/{content_id}/{timestamp}.png
-├── source_assets/{content_id}/
-│   ├── video_duration.json
-│   └── timestamp_fixed_30s.json
-└── runs/{RUN_ID}/
-    ├── cohort/
-    ├── extraction/
-    │   ├── description/{gemini|qwen}/{scenes|summaries}/
-    │   └── graph/{gemini|qwen}/{scenes|summaries}/
-    └── validation/
-        ├── representations/
-        ├── recommendations/{date}/seed_{seed}/{arm}/
-        └── diagnosis/diagnosis.json
+├── preparation/                         # 공유 cohort·영상 준비
+│   ├── cohort/leave_one_out/
+│   ├── resized_keyframes/<width>_<height>/
+│   └── source_assets/
+├── runs/<RUN_ID>/
+│   ├── extraction/
+│   │   ├── scenes/<source>/
+│   │   └── summaries/<source>/
+│   ├── validation/
+│   │   ├── cohort/
+│   │   ├── representations/{text,graph}/
+│   │   ├── recommendations/text/
+│   │   ├── recommendations/graph/<aggregation>/
+│   │   └── diagnosis/
+│   └── reports/
+└── shared_cache/                        # 임베딩·Graph 입력·추천 결과 캐시
 ```
 
-`scenes/{content_id}.jsonl`은 장면당 한 줄이며, Description·Graph 모두 `content_id`, `scene_idx`, 본문 세 필드만 저장합니다. Qwen·Gemini에 같은 형식을 적용합니다.
+| 확인할 내용 | Run 아래 위치 |
+| --- | --- |
+| 장면 관측·실패 | `extraction/scenes/<source>/<content_id>.jsonl` |
+| 영상 Summary | `extraction/summaries/<source>/<content_id>.json` |
+| Text 고정 특징 | `validation/representations/text/<arm>_embeddings.npz` |
+| Graph 고정 특징·역할 연결 | `validation/representations/graph/<arm>_embeddings/` |
+| 추천 학습·test | `validation/recommendations/text/seed_<seed>/<arm>/` 또는 `validation/recommendations/graph/<aggregation>/seed_<seed>/<arm>/` |
+| 진단 | `validation/diagnosis/text_diagnosis.json` 또는 `graph_<aggregation>_diagnosis.json` |
 
-```json
-{"content_id":"123","scene_idx":0,"description":"A person walks outdoors."}
-{"content_id":"123","scene_idx":0,"scene_graph":{"entities":[],"relations":[],"context":[]}}
-```
+추천 결과는 seed × Arm 단위로 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`을 저장하며 직접 Graph는 `catalog_vectors.npy`도 저장합니다. `training.json`의 epoch별 validation과 최종 test 지표는 구분합니다.
 
-장면 번호 순서로 저장하며 `.metadata`는 만들지 않습니다. Graph의 Raw Output은 `scene_graph` 문자열로 저장하고, Desc의 Raw Output은 `description`에 저장하며 같은 장면의 실패 기록으로 식별합니다. 중단·비동기 완료로 장면이 빠져 있어도 각 행의 `scene_idx`로 정확히 재개합니다.
+진단 JSON은 Arm별 최종 점수(`recommendations.means`), NDCG@10 수치 비교·신뢰구간·비교 정책·평가 계약·실행 판정을 저장합니다. 상세 분할·입력 provenance·이벤트 지표는 원래 cohort·표현·추천 파일에서 확인합니다. 진단의 pass는 실행 증거의 검증 통과이며 추천 성능 개선 판정이 아닙니다.
 
-기존 전체 필드 JSONL과 두 필드 JSONL도 읽을 수 있습니다. 두 필드 파일은 원래 `.metadata`에서 장면 번호를 읽어야 하므로 먼저 삭제하지 마세요. 추출 재실행 또는 아래 명령으로 세 필드 형식으로 변환하며, 저장이 성공한 파일의 기존 메타데이터만 삭제합니다. 메타데이터가 없거나 본문과 맞지 않는 이전 파일은 장면 번호를 추측하거나 전체 재생성하지 않고 오류를 보고합니다. 별도 변환 명령은 해당 Run의 장면 추출을 중지한 상태에서 실행합니다.
+</details>
+
+<details>
+<summary>재개·실패 재시도·캐시 규칙</summary>
+
+| 상황 | 재실행 동작 |
+| --- | --- |
+| 정상 Scene | 생성 설정이 달라도 재사용 |
+| 누락·실패·warning Scene | 현재 설정으로 한 번씩 재시도. penalty 증가·자동 추가 pass 없음 |
+| 완료 Summary | 동일 소스·요약 모델·실제 Scene 입력을 검증한 뒤 재사용. 생성 설정 차이만으로 차단하지 않음 |
+| 실패 Summary | 현재 설정으로 재시도 |
+| 생성 명령의 `--force` | 선택한 소스의 기존 출력을 제거하고 완료 결과까지 재생성 |
+| 완료 추천 조합 | 입력·모델·학습·평가 계약을 검증한 뒤 재사용 |
+| 미완료 추천 조합 | 처음부터 다시 학습. epoch 중간 재개 없음 |
+| 임베딩·추천 캐시 | 현재 Run → 공유 캐시 → 새 계산. `--force`는 해당 단계의 캐시 읽기를 우회 |
+
+Scene·Summary는 다른 Run에서 자동으로 가져오지 않습니다. 같은 추천 경로에서 재학습하면 기존 조합을 대체하며 이후 진단도 다시 생성해야 합니다. 현행 평가 계약으로 학습된 결과는 재학습 없이 재진단할 수 있습니다.
+
+Scene 디렉터리의 `generation_identity.json`은 초기 생성 설정 기록이며 폴더 내 모든 Scene의 조건이 같음을 보장하지 않습니다. 일반 재개에서는 기존 기록을 보존하고 없을 때만 생성합니다. 실제 입력·인코더·모델·학습 계약과 provenance로 호환성을 확인합니다. 자세한 저장·캐시 계약은 [실행·저장 계약](docs/runtime.md)을 참고하세요.
+
+</details>
+
+<details>
+<summary>실패·warning 확인과 결측 처리</summary>
+
+- **진행바:** `success`(정상)·`warning`(Graph 경고)·`failed`(실패)의 합이 완료 수입니다. 진행률·처리량·ETA도 같은 합으로 계산합니다. Graph의 최종 집계는 소스 디렉터리의 `generation_stats.json`에서 확인합니다.
+- **Scene 실패:** JSONL의 `error`·`raw_output`을 확인합니다. 기존 `failures/<content_id>.jsonl`은 추출 재개 시 원본 JSONL에 원자적으로 통합한 뒤 제거합니다.
+- **Summary 실패:** `summaries/<source>/failures.jsonl`을 확인합니다. 실패 Summary의 텍스트는 빈 문자열입니다.
+- **Text 결측:** 제목·Summary 중 있는 값을 사용하고 누락 성분은 projection 후 0으로 마스킹합니다. 둘 다 없으면 최종 영상 벡터는 0입니다.
+- **Graph 결측:** 유효 장면의 Entity·Action이 없으면 해당 슬롯은 0입니다. 장면 없이 제목만 있으면 제목 기반 Scene MLP 경로를 사용하고 장면 집계를 건너뜁니다. 제목·유효 장면이 모두 없으면 최종 영상 벡터는 0입니다.
+
+결측 때문에 아이템·interaction을 제거하지 않습니다. 손상 파일·잘못된 provenance는 오류로 처리하며 지원하지 않는 과거 저장 형식을 자동 변환하지 않습니다. 기존 Run·분석 파일은 보존합니다.
+
+</details>
+
+<details>
+<summary>Qwen 생성 정책·기본값·옵션 변경 예시</summary>
+
+`qwen3vl`은 Qwen3-VL-2B-Instruct, `qwen3.5`는 Qwen3.5-2B를 사용합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 두 모델은 greedy decoding을 사용하며 greedy에서도 presence·repetition penalty는 적용됩니다.
+
+| 작업 | Presence penalty | Repetition penalty | 현재 config의 출력 토큰 한도 |
+| --- | ---: | ---: | ---: |
+| Graph 장면 추출 | 1.5 | 1.05 | 384 |
+| Description 장면 추출 | 1.5 | 1.0 | 512 |
+| Graph·Description 요약 | 2.0 | 1.0 | 512 |
+
+Decoding은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 생성 정책은 [qwen_config.py](src/extraction/qwen_config.py), 출력 토큰 한도는 `config.yaml`의 `extraction.{graph,description}.{qwen3vl,qwen3.5}`를 참고하세요. 설치 extra `qwen`과 `extraction.qwen`은 두 모델의 공용 런타임 이름이며 CLI 모델 이름은 아닙니다.
+
+| CLI 옵션 | 허용 범위 | 적용 |
+| --- | --- | --- |
+| `--presence-penalty FLOAT` | 유한한 단일 숫자 -2.0~2.0 | 해당 실행의 presence penalty. `0`은 비활성화 |
+| `--repetition-penalty FLOAT` | 유한한 단일 숫자 1.0~2.0 | 해당 실행의 생성 토큰 전용 repetition penalty |
+
+두 옵션은 Qwen의 Scene 추출·요약에만 지정할 수 있으며 생략하면 위 기본값을 사용합니다. Repetition penalty는 vLLM 기본 penalty와 중복 적용하지 않습니다. 다음은 기본 presence penalty를 끄는 **옵션 변경 예시**입니다.
 
 ```bash
-python -m extraction migrate-scene-schema --run-id "$RUN_ID"
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5 --presence-penalty 0
 ```
 
-공유 프레임과 영상 길이·장면 timestamp는 `artifacts_root` 바로 아래의 `resized_keyframes`, `source_assets`에 저장하며 Run 간 재사용합니다. 최초 준비나 필요한 파일이 없는 경우 `prepare-input-data`를 실행합니다. 공유 timestamp와 프레임이 준비되어 있으면 새 Run에서도 `prepare-cohort` 후 바로 추출할 수 있습니다. 장면 추출은 `prepare-input-data`가 정상 완료됐다고 가정합니다. 이미지·asset 존재 검사, 폴더 스캔, duration·샘플링 재검증 및 이미지 내용 해시 계산을 하지 않습니다. timestamp JSON으로 scene 수와 재사용 여부를 확인하고, 추론 입력을 공급할 때 필요한 경로를 준비 단계의 PNG 파일명 규칙으로 구성합니다. 이미지는 실제 추론 시 읽으며, 필요한 파일이 없으면 해당 입력을 읽는 시점에 실패합니다. 자동 준비 호출은 하지 않습니다.
+옵션은 새로 생성하는 결과에 적용됩니다. 기존 정상 결과의 재사용·전체 재생성은 위 재개 규칙을 따릅니다. 이 정책의 형식 준수율·추천 성능 효과는 별도의 비교 실험으로 확인해야 합니다.
 
-장면 추출은 추론 전에 timestamp와 저장 결과를 확인해 처리할 전체 scene 수를 계산합니다. 추론용 task와 이미지는 요청을 공급하면서 읽습니다. Gemini는 제한된 수의 scene을 미리 공급하고 빈 worker가 영상 경계 없이 다음 scene을 바로 처리합니다. 처리 속도와 ETA는 추론 단계의 완료 건수와 경과 시간을 기준으로 표시합니다.
-
-기본 6개 keyframe 정책은 `timestamp_fixed_{scene_duration}s.json`, 다른 개수는 `timestamp_fixed_{scene_duration}s_{num_keyframes}kf.json`을 사용하므로 서로 다른 정책이 공유 timestamp를 덮어쓰지 않습니다. 콘텐츠별 잠금과 원자적 저장으로 동시 준비를 보호합니다. `--force`도 정상 이미지를 덮어쓰지 않습니다. `prepare-input-data`를 명시적으로 실행할 때는 공유 duration의 원본 식별 정보가 달라지면 재사용을 거부하므로 변경된 영상은 별도 `artifacts_root`로 분리합니다.
-
-`prepare-input-data`의 `Prepare visual evidence` 진행률은 영상별 준비·검증 건수입니다. `reused_frames`는 재사용 이미지 수, `new_frames`는 실제 신규 추출 이미지 수입니다. 누락된 이미지를 추출할 때만 `[KEYFRAMES] extracting ...`과 누락 timestamp를 출력합니다. 공유 duration과 timestamp가 유효하면 영상 길이를 재확인하거나 timestamp를 다시 만들지 않습니다. 준비 실패 보고서는 각 Run의 `cohort/preparation_failures.jsonl`에 저장합니다.
-
-기존 Run은 `artifacts/runs/{RUN_ID}/`로, 기존 준비 정보는 `artifacts/source_assets/`로 직접 배치해야 합니다. 자동 Run 이동·삭제는 수행하지 않습니다.
-
-Qwen Desc·Graph와 모든 Summary는 설정된 repetition penalty별로 전체 pass를 완료하고 실패 항목만 다음 pass에서 재생성합니다. 기본 순서는 `1.00 → 1.05 → 1.10 → 1.15 → 1.20`이며 성공 항목은 제외합니다. Vertex Gemini의 `429 RESOURCE_EXHAUSTED`만 30초 뒤 한 번 재시도하며, Summary 교정 및 `.recovery`, `.pending`, `.checkpoints`, 콘텐츠 진행 cursor를 저장하지 않습니다. 장면 번호는 본문 파일의 `scene_idx`에, 요약의 생성 당시 provenance는 요약 문서에 남깁니다.
-
-장면 실패는 `scenes/failures/{content_id}.jsonl`에 `content_id`, `scene_idx`, `error`, `raw_output`을 저장합니다. Summary 생성 실패는 `summaries/failures.jsonl`에 `content_id`, `error`, `raw_output`, `repetition_penalty`를 저장합니다. `raw_output`은 공백·줄바꿈까지 보존하며 응답이 없으면 빈 문자열입니다. 장면 생성은 재실행 시 첫 penalty부터 실패 항목을 처리합니다. Summary는 아직 처리하지 않은 콘텐츠를 먼저 초기 penalty로 처리한 뒤, 실패별 마지막 penalty보다 큰 다음 설정값부터 이어갑니다. 마지막 penalty까지 완료했거나 penalty 필드가 없는 기존 실패는 재생성 없이 콘텐츠별 `.json`의 `text`로 복구합니다. 원문이 비어 있으면 Scene 관측 내용을 대신 저장하고 provenance에 `summary_fallback=scene_observations`를 기록합니다. 최종 실패 기록은 유지하며 `--force`로 전체 재생성을 요청할 수 있습니다. 재시도 성공 결과를 저장한 뒤 해당 실패 행을 제거하고, 남은 실패가 없으면 파일도 삭제합니다. 실행 시작 시 이전 실패 파일을 현재 형식으로 옮기며 기존 penalty와 원문을 보존합니다.
-
-```json
-{"content_id":"123","scene_idx":2,"error":"model produced an empty description","raw_output":""}
-{"content_id":"123","error":"max_tokens","raw_output":"Truncated output...","repetition_penalty":1.2}
-```
-
-진행률의 `success`와 `failed`는 현재 패스에서 완료된 성공·실패 수이고, `raw`는 그중 fallback 결과를 보존한 수입니다. Qwen 재시도는 실패 항목만 다음 패스로 넘기며, 매 패스 시작 시 분모를 실제 처리 대상 수로 바꾸고 완료 건수·경과 시간을 초기화합니다. `pass=N/M`은 설정된 penalty 순서를 나타내며, `scene/s`와 `summary/s` 및 ETA는 현재 패스 기준입니다. 재사용 결과는 집계에서 제외하고 전체 최종 결과는 단계 종료 로그에 표시합니다. Qwen·Gemini Graph와 Qwen Summary의 토큰 한도 종료는 실패로 기록합니다.
-
-각 추천 조합의 `training.json`, `per_event_metrics.jsonl`, `complete.json`, **최종 `sasrec.pt`**를 보존합니다. 기존 run이나 수동 보관한 archive는 자동 삭제하지 않습니다.
-
-## 생성 정책과 재사용
-
-- 기본 장면 상한은 1,024 tokens, 요약 상한은 512 tokens입니다.
-- 화면 텍스트는 의미 해석의 단서로만 사용하며 문구 전사·인용·번역 출력은 금지하도록 지시합니다. 근거 있는 장르·목적·배경지식 해석을 허용하고 불확실성을 보존합니다.
-- Qwen Graph·Description·Summary는 repetition penalty 목록 순서로 실패 항목만 재생성합니다. 마지막까지 실패하면 최종 원문을 Raw로 사용하며, 빈 장면 원문은 실패 기록만 남기며, 빈 Summary 원문은 Scene 관측 내용으로 대체합니다. 성공한 항목은 재생성하지 않습니다.
-- Graph는 `entities`, `relations`, `context`입니다. `name`은 자유 어휘 **개체 종류**이고 실명이나 고유 신원이 아닙니다. 중복 `name`은 허용하며 고유한 장면 내부 `id`와 외형·상태·활동 `attributes`로 구분합니다. 현재 E2E 실행에서는 ID 중복·관계 참조 일치 여부를 검증하지 않으며, 생성된 ID와 관계를 그대로 저장합니다. 필수 필드·타입·빈 문자열 등 JSON 구조 검증은 유지합니다. 객체 추적기는 없으며 장면 사이 ID를 연결하지 않습니다.
-- Graph 생성에는 JSON Schema를 강제하지 않습니다. `graph_scene_v3.md`의 줄 단위 출력을 두 모델의 공통 파서가 기존 JSON 구조로 변환합니다. 화살표·하이픈 구분자, 헤더, bullet 등 명확한 형식 변형은 Repair하고, 누락·모호한 행·토큰 잘림은 원문과 실패 기록을 보존합니다. 완전한 JSON 응답도 지원하며, 잘린 내용을 추측해서 채우지 않습니다. 상세 규칙은 [Qwen 실행 가이드](docs/qwen_vllm.md)에 있습니다.
-- 신규 Summary는 문단·목록·마크업·구조화 필드를 허용하며 줄바꿈을 보존합니다. 단어 수는 기록만 하고 실패 조건으로 사용하지 않습니다. 빈 출력과 `finish_reason=length`만 실패로 기록하고 다음 penalty에서 재생성합니다. 마지막 실패 원문은 `raw_fallback`으로 저장하며, 원문이 비어 있으면 프롬프트 지시문을 제외한 Scene 관측 내용을 저장합니다. 유효한 Scene 입력이 없으면 명시적인 입력 오류로 보고합니다.
-- Qwen·Gemini Graph·Desc 및 모든 Summary는 설정·프롬프트·경로가 달라도 기존 성공 결과를 그대로 재사용합니다. 일반 실행은 결과가 없는 항목과 재시도가 남은 실패만 생성합니다. 장면을 갱신해도 이미 성공한 Summary는 보존하며, 성공 결과까지 다시 만들려면 해당 단계에 `--force`를 지정합니다. 실패 기록은 재생성 성공 후 제거합니다. 다른 run ID의 결과를 자동으로 가져오지는 않습니다.
-- Gemini Summary **파일이 없을 때만** 같은 Run·표현의 Qwen Summary로 fallback합니다. Raw Gemini가 있으면 우선 사용합니다. 손상된 일반 파일은 오류이며 Qwen 요약 누락을 영벡터로 대체하지 않습니다. 실제 사용 경로를 기록하고 Gemini 결과가 추가되면 embedding·추천 캐시를 갱신합니다.
-- BGE 입력 상한은 512 tokens이고 실제 truncation 건수를 기록합니다. 빈 Metadata title만 영벡터를 사용합니다.
-
-## 평가와 검증
-
-기본 데이터는 사용자 100,000명·interaction 719,405건·아이템 19,738개입니다. 같은 사건·후보 catalog에서 날짜별 독립 selection → refit → test를 실행합니다. 5개 Arm은 **7일 × 3 seeds × 5 = 105개 조합**입니다.
-
-NDCG@10을 주 지표로 사용자 단위 paired bootstrap 10,000회, seed 평균 후 날짜 균등 평균을 적용합니다. Metadata 대비 4개, 표현 방식 2개, 모델 2개 비교군에 각각 α=0.05와 Bonferroni 양측 신뢰구간을 적용합니다. 부분 target에서도 보정 분모 4·2·2은 유지합니다. Graph 개선 폭의 모델 간 차이는 탐색적으로 보고합니다. Description·Graph의 기존 coverage 기준을 유지합니다. 자세한 규칙은 [전체 실험 가이드](docs/full_rolling.md)에 있습니다.
-
-```bash
-python -m pytest -q
-ruff check --config pyproject.toml src tests benchmarks
-```
-
-v5 mock 전체 흐름, 작은 CPU 학습, backend·분할·통계·실패 처리 회귀 테스트를 사용합니다. 전체 MicroLens 추론·학습과 실제 GPU/API 출력 품질 평가는 별도 실험 실행 단계입니다.
+</details>

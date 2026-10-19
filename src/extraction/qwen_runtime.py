@@ -1,13 +1,6 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from uuid import uuid4
-
-
-def result_hash(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                     separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 class QwenRuntime:
@@ -25,5 +18,8 @@ class QwenRuntime:
         if self.current_result is None:
             return None
         event = self.current_result
-        return {"execution_id": self.execution_id, "result": event,
-                "engine": self.engines[event["worker_index"]]}
+        return {
+            "execution_id": self.execution_id,
+            "result": event,
+            "engine": self.engines[event["worker_index"]],
+        }

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from extraction.recovery import fingerprint
+from artifact_io import fingerprint
 
 
 def local_model_identity(path: Path) -> dict:
@@ -30,3 +30,35 @@ def local_model_identity(path: Path) -> dict:
         "files_signature": fingerprint(files),
         "signature_policy": "config/tokenizer text hashes; weight filenames, sizes and mtimes",
     }
+
+
+def canonical(value):
+    if isinstance(value, dict):
+        return {
+            k: canonical(v)
+            for k, v in value.items()
+            if k
+            not in {
+                "run_id",
+                "source_run_id",
+                "prompt_path",
+                "source_path",
+                "scene_path",
+                "path",
+                "created_at",
+                "generated_at",
+                "reused_from",
+            }
+        }
+    if isinstance(value, (list, tuple)):
+        return [canonical(v) for v in value]
+    return value
+
+
+def without_provenance_arm(value):
+    """Remove the retired duplicate identity, including nested Scene provenance."""
+    if isinstance(value, dict):
+        return {key: without_provenance_arm(child) for key, child in value.items() if key != "arm"}
+    if isinstance(value, list):
+        return [without_provenance_arm(child) for child in value]
+    return value

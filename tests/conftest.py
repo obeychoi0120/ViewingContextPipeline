@@ -1,132 +1,80 @@
-"""Shared v5 fixtures. Generation and encoding fakes never load remote/local models."""
+"""Every regression runs offline on CPU and writes only into its temporary tree."""
 
-from contextlib import contextmanager
+import builtins
+import io
+import os
 from pathlib import Path
-import shutil
-from types import SimpleNamespace
+import random
+import socket
+import subprocess
+import tempfile
 
 import numpy as np
-from PIL import Image
 import pytest
-import yaml
+import torch
 
-from pipeline_runtime import RunContext
-from validation.rolling_data import DAY
-
-ROOT = Path(__file__).resolve().parents[1]
-GRAPH = {
-    "entities": [
-        {"id": "person1", "name": "person", "attributes": ["red jacket"]},
-        {"id": "person2", "name": "person", "attributes": ["blue shirt"]},
-    ],
-    "relations": [
-        {"subject_id": "person1", "predicate": "looking at", "object_id": "person2"},
-        {"subject_id": "person2", "predicate": "waving to", "object_id": "person1"},
-    ],
-    "context": ["possibly a casual greeting"],
-}
-PROSE = "A person in a red jacket looks at a person in a blue shirt, who waves back. The interaction appears to be a casual greeting."
-GRAPH_TEXT = """[Entities]
-person1: person; red jacket
-person2: person; blue shirt
-[Relations]
-person1 -> looking at -> person2
-person2 -> waving to -> person1
-[Context]
-possibly a casual greeting
-[End]"""
+from helpers import make_context
 
 
-@pytest.fixture
-def v5_context(tmp_path):
-    config = yaml.safe_load((ROOT / "config.yaml").read_text())
-    config["artifacts_root"] = "artifacts"
-    config["data"].pop("titles_supplement_csv", None)
-    for key in config["data"]:
-        config["data"][key] = str(tmp_path / key)
-    videos = Path(config["data"]["videos_dir"])
-    videos.mkdir()
-    for item in range(1, 5):
-        (videos / f"{item}.mp4").write_bytes(f"video {item}".encode())
-    Path(config["data"]["titles_csv"]).write_text(
-        "1,First title\n2, \n3,Third title\n4,Fourth title\n"
-    )
-    origin = 1661990400000
-    rows = [(u, i % 4 + 1, origin + i * DAY // 2) for u in range(1, 4) for i in range(24)]
-    Path(config["data"]["pairs_csv"]).write_text(
-        "user,item,timestamp\n" + "".join(f"{u},{i},{t}\n" for u, i, t in rows)
-    )
-    config["validation"]["cohort"].update(user_count=3, interaction_count=72, item_count=4)
-    config["validation"]["model"].update(max_epochs=1, patience=1)
-    config["validation"]["evaluation"]["bootstrap_samples"] = 100
-    config["extraction"]["visual_evidence"]["image_resolution"] = [16, 8]
-    for model in ("qwen", "bge"):
-        config["models"][model] = str(tmp_path / model)
-        Path(config["models"][model]).mkdir()
-    (tmp_path / "config.yaml").write_text(yaml.safe_dump(config))
-    shutil.copytree(ROOT / "prompts", tmp_path / "prompts")
-    return RunContext.load("test_run", root=tmp_path)
+@pytest.fixture(autouse=True)
+def isolated_runtime(tmp_path, monkeypatch):
+    python_rng, numpy_rng = random.getstate(), np.random.get_state()
+    torch_rng = torch.get_rng_state()
+    threads = torch.get_num_threads()
+    deterministic = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    torch.set_num_threads(1)
+    torch.manual_seed(7)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
+    temporary = tmp_path / "temp"
+    temporary.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temporary))
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
 
+    def forbidden(*args, **kwargs):
+        raise AssertionError("external network or subprocess attempted during offline regression")
 
-@pytest.fixture
-def ready_context(v5_context, monkeypatch):
-    from preparation.steps import prepare_cohort_step
-    from preparation.input_data import prepare_input_data
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
 
-    prepare_cohort_step(v5_context)
-    monkeypatch.setattr("extraction.data_preparation.media.probe_duration", lambda _: 10.0)
+    def check_write(file):
+        if not isinstance(file, int):
+            path = Path(file).resolve()
+            if not path.is_relative_to(tmp_path.resolve()):
+                raise AssertionError(f"write outside the test temporary tree: {path}")
 
-    def ffmpeg(args, **kwargs):
-        assert args[0] == "ffmpeg"
-        Image.new("RGB", (16, 8)).save(args[-1])
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    def wrap_open(original):
+        def guarded(file, mode="r", *args, **kwargs):
+            if any(flag in mode for flag in "wax+"):
+                check_write(file)
+            return original(file, mode, *args, **kwargs)
 
-    monkeypatch.setattr("extraction.data_preparation.video_processor.subprocess.run", ffmpeg)
-    prepare_input_data(v5_context)
-    return v5_context
+        return guarded
+
+    original_os_open = os.open
+
+    def guarded_os_open(path, flags, *args, **kwargs):
+        if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
+            check_write(path)
+        return original_os_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", wrap_open(builtins.open))
+    monkeypatch.setattr(io, "open", wrap_open(io.open))
+    monkeypatch.setattr(os, "open", guarded_os_open)
+    try:
+        yield
+    finally:
+        random.setstate(python_rng)
+        np.random.set_state(numpy_rng)
+        torch.set_rng_state(torch_rng)
+        torch.set_num_threads(threads)
+        torch.use_deterministic_algorithms(deterministic, warn_only=warn_only)
 
 
 @pytest.fixture
-def fake_models(monkeypatch):
-    calls = []
-
-    @contextmanager
-    def generator(**kwargs):
-        def generate(tasks, callback):
-            tasks = list(tasks)
-            calls.append(tasks)
-            for task in tasks:
-                callback(task.task_id, GRAPH_TEXT if "[Entities]" in task.prompt else PROSE)
-            return {}
-
-        yield generate
-
-    class Gemini:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def generate(self, tasks, callback, **kwargs):
-            tasks = list(tasks)
-            calls.append(tasks)
-            for task in tasks:
-                callback(
-                    SimpleNamespace(
-                        task_id=task.task_id,
-                        error=None,
-                        response_diagnostics=None,
-                        text=GRAPH_TEXT if "[Entities]" in task.prompt else PROSE,
-                    )
-                )
-
-    class Encoder:
-        def __init__(self, config):
-            self.last_truncation = None
-
-        def encode(self, texts):
-            self.last_truncation = {"text_count": len(texts), "truncated_count": 0}
-            return np.ones((len(texts), 1024), dtype=np.float32)
-
-    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    monkeypatch.setattr("extraction.steps.GeminiWorkerPool", Gemini)
-    monkeypatch.setattr("validation.features.BGETextEncoder", Encoder)
-    return calls
+def context(tmp_path):
+    return make_context(tmp_path / "repo")

@@ -1,0 +1,308 @@
+"""Streaming leave-one-out validation and paired user-mean statistics."""
+
+from __future__ import annotations
+import numpy as np
+from artifact_io import read_json
+from validation.diagnosis_support import write_diagnosis
+from validation.diagnosis_scenes import _scene_coverage
+from validation.metrics import metrics_from_rank
+from validation.recommendation_contracts import (
+    DIAGNOSIS_ARCHITECTURE_VERSIONS,
+    EVALUATION_CONTRACT,
+    resolve_target_arms,
+)
+from arm_registry import registry
+from validation.representation_checks import verify_representations
+from validation.leave_one_out_data import EventTable, PROTOCOL
+from preparation.cohort import iter_jsonl
+from validation.selection import load_validation_cohort, training_signature
+from validation.leave_one_out_recommendation import combination_complete, combination_dir, phase_ids
+
+MEMORY_LIMIT = 128 * 1024**2
+
+
+def weighted_user_mean(sums, counts, weights):
+    if np.any(counts != 1):
+        raise ValueError("leave-one-out requires one test event per user")
+    return weights @ sums / weights.sum(axis=1, keepdims=True)
+
+
+def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIMIT):
+    """sums[user,arm] contains each user's seed-averaged test metric."""
+    sums = np.asarray(sums, dtype=np.float64)
+    counts = np.asarray(counts, dtype=np.float64)
+    if sums.ndim != 2 or not len(sums) or not np.isfinite(sums).all():
+        raise ValueError("invalid user aggregates")
+    users, arms = sums.shape
+    if counts.shape != (users,) or np.any(counts != 1) or samples < 1:
+        raise ValueError("leave-one-out requires one test event per user and positive samples")
+    fixed = sums.nbytes + counts.nbytes + samples * arms * 8 + users * 8 + 8 * 1024**2
+    per_draw = users * 16 + arms * 24
+    batch = min(64, (memory_limit - fixed) // per_draw)
+    if batch < 1:
+        raise ValueError("bootstrap input and one draw exceed the working memory limit")
+    observed = sums.mean(axis=0)
+    rng = np.random.default_rng(seed)
+    probabilities = np.full(users, 1 / users)
+    draws = np.empty((samples, arms))
+    for start in range(0, samples, batch):
+        size = min(batch, samples - start)
+        weights = rng.multinomial(users, probabilities, size=size).astype(np.float64)
+        draws[start:start + size] = weighted_user_mean(sums, counts, weights)
+        del weights
+    return observed, draws, {
+        "unit": "user", "seed": seed, "samples": samples,
+        "batch_size": int(batch),
+        "working_bytes_upper_bound": int(fixed + batch * per_draw),
+        "memory_limit_bytes": memory_limit,
+        "aggregation": "seed mean then equal user mean",
+    }
+
+
+def comparisons(observed, draws, settings, *, arms=None, config=None):
+    from validation.diagnosis_statistics import comparison_families
+    from validation.recommendation_contracts import DEFAULT_PROTOCOL
+
+    configured = registry(config or DEFAULT_PROTOCOL)
+    names = list(configured if arms is None else arms)
+    indices = {name: index for index, name in enumerate(names)}
+    if len(observed) != len(names) or draws.shape[1] != len(names):
+        raise ValueError("arm/metric dimension mismatch")
+    result = {}
+    for family, pairs in comparison_families(config, names).items():
+        if not pairs:
+            continue
+        alpha = settings.familywise_alpha / len(pairs)
+        for left, right in pairs:
+            if left not in indices or right not in indices:
+                continue
+            a, b = (indices[left], indices[right])
+            delta = draws[:, a] - draws[:, b]
+            lo, hi = np.quantile(delta, [alpha / 2, 1 - alpha / 2])
+            result[f"{left}-{right}"] = {
+                "family": family,
+                "role": "confirmatory",
+                "family_size": len(pairs),
+                "difference": float(observed[a] - observed[b]),
+                "ci_low": float(lo),
+                "ci_high": float(hi),
+                "confidence_level": 1 - alpha,
+                "superior": bool(lo > 0),
+                "inferior": bool(hi < 0),
+                "relative_difference": float((observed[a] - observed[b]) / observed[b])
+                if observed[b] > 0
+                else None,
+            }
+    return result
+
+
+def diagnosis_training(directory, identity, expected_count, *, architecture_version=None):
+    """Validate completed results for the selected text or graph architecture."""
+    training = read_json(directory / "training.json")
+    recorded = training.get("architecture_version")
+    if recorded not in DIAGNOSIS_ARCHITECTURE_VERSIONS:
+        raise ValueError(f"unsupported diagnosis architecture {recorded!r}: {directory}")
+    if architecture_version is not None and recorded != architecture_version:
+        raise ValueError(
+            f"mixed recommendation architectures: expected {architecture_version}, found {recorded}: {directory}"
+        )
+    if training.get("evaluation_contract") != EVALUATION_CONTRACT:
+        raise ValueError(f"unsupported evaluation contract; rerun run-recommendation: {directory}")
+    if not combination_complete(directory, identity, expected_count, architecture_version=recorded):
+        raise ValueError(f"incomplete/corrupt combination: {directory}")
+    return training
+
+
+def collect_metrics(context, config, cohort, *, arms=None):
+    selected = registry(context.config) if arms is None else arms
+    cohort = load_validation_cohort(context)
+    table = EventTable(cohort["events"])
+    training_input_hash = training_signature(context, cohort, config)
+    users = {user: i for i, user in enumerate(table.users)}
+    splits = cohort["plan"]["splits"]
+    if (len(table.users), len(table.rows), len(table.items)) != (
+        cohort["plan"]["user_count"],
+        cohort["plan"]["interaction_count"],
+        cohort["plan"]["item_count"],
+    ) or splits != table.splits():
+        raise ValueError("validation cohort cardinality or leave-one-out split manifest mismatch")
+    arms = list(selected)
+    verify_representations(context, cohort, arms=selected)
+    sums = np.zeros((len(users), len(arms)))
+    counts = np.zeros(len(users))
+    metrics = list(metrics_from_rank(1, config.evaluation.cutoffs))
+    per_seed = []
+    total = 0
+    architecture_version = None
+    for split in splits:
+        ids = phase_ids(table, split, "test")
+        expected = set(ids.tolist())
+        for event in ids:
+            counts[users[table.rows[event]["user_id"]]] += 1
+        raw_train = np.asarray(split["phases"]["train"]["event_ids"], dtype=np.int64)
+        frequencies = np.bincount(table.targets[raw_train], minlength=len(table.items) + 1)
+        for seed in config.model.seeds:
+            for index, arm in enumerate(arms):
+                identity = {
+                    "run_id": context.run_id,
+                    "protocol": PROTOCOL,
+                    "evaluation_contract": dict(EVALUATION_CONTRACT),
+                    "split_hash": split["split_hash"],
+                    "seed": seed,
+                    "arm": arm,
+                    "training_input_hash": training_input_hash,
+                    "deterministic": config.model.deterministic,
+                }
+                from validation.representation_provenance import recommendation_identity
+
+                identity.update(recommendation_identity(context, selected[arm]))
+                directory = combination_dir(context, seed, arm)
+                training = diagnosis_training(
+                    directory, identity, len(ids), architecture_version=architecture_version
+                )
+                architecture_version = training["architecture_version"]
+                best = training["best_epoch"]
+                if training["split"] != split or best not in [row["epoch"] for row in training["train"]]:
+                    raise ValueError("training split/checkpoint epoch mismatch")
+                count = split["phases"]["train"]["eligible_count"]
+                for row in training["train"]:
+                    if (
+                        row["positive_count"] != count
+                        or row["optimizer_updates"]
+                        != (count + config.model.batch_size - 1) // config.model.batch_size
+                    ):
+                        raise ValueError("training transition/update count mismatch")
+                seen = set()
+                totals = dict.fromkeys(metrics, 0.0)
+                for row in iter_jsonl(directory / "per_event_metrics.jsonl"):
+                    event = row["event_id"]
+                    if type(event) is not int or event not in expected or event in seen:
+                        raise ValueError("duplicate or unexpected test event")
+                    seen.add(event)
+                    source = table.rows[event]
+                    if any((row.get(k) != v for k, v in {**source, **identity}.items())):
+                        raise ValueError("event identity mismatch")
+                    rank = row["rank"]
+                    if type(rank) is not int or not 1 <= rank <= len(table.items):
+                        raise ValueError("invalid event rank")
+                    if row["candidate_count"] != len(table.items):
+                        raise ValueError("candidate catalog mismatch")
+                    if row["train_item_frequency"] != int(frequencies[table.targets[event]]):
+                        raise ValueError("train target frequency mismatch")
+                    calculated = metrics_from_rank(rank, config.evaluation.cutoffs)
+                    if any(
+                        (
+                            not np.isfinite(row[m]) or abs(row[m] - calculated[m]) > 1e-12
+                            for m in metrics
+                        )
+                    ):
+                        raise ValueError("event metric/rank mismatch")
+                    for metric in metrics:
+                        totals[metric] += row[metric]
+                    sums[users[source["user_id"]], index] += row["NDCG@10"] / len(
+                        config.model.seeds
+                    )
+                    total += 1
+                if seen != expected:
+                    raise ValueError("missing eligible test events")
+                per_seed.append(
+                    {
+                        "protocol": PROTOCOL,
+                        "split_hash": split["split_hash"],
+                        "seed": seed,
+                        "arm": arm,
+                        "event_count": len(ids),
+                        **{k: v / len(ids) for k, v in totals.items()},
+                    }
+                )
+    expected_total = cohort["plan"]["eligible_test_count"] * len(arms) * len(config.model.seeds)
+    if total != expected_total:
+        raise ValueError("event grid cardinality mismatch")
+    means = {
+        arm: {m: float(np.mean([r[m] for r in per_seed if r["arm"] == arm])) for m in metrics}
+        for arm in arms
+    }
+    return (
+        sums,
+        counts,
+        {
+            "evaluation_contract": dict(EVALUATION_CONTRACT),
+            "architecture_version": architecture_version,
+            "expected_event_count": expected_total,
+            "actual_event_count": total,
+            "combination_count": len(per_seed),
+            "per_seed": per_seed,
+            "means": means,
+        },
+    )
+
+
+def diagnose(context, *, target=None, compare_run_id=None):
+    from validation.steps import validation_config
+
+    arms = resolve_target_arms(target, config=context.config)
+    context.initialize()
+    config = validation_config(context)
+    errors = []
+    from validation.diagnosis_statistics import comparison_contract
+
+    contract = comparison_contract(context.config, arms)
+    document = {
+        "run_id": context.run_id,
+        "representation_mode": "text",
+        "statistics": {"status": "not_computed", **contract},
+    }
+    try:
+        cohort = load_validation_cohort(context)
+        from validation.metadata import verify_missing_metadata
+
+        if any((name in arms for name in ("meta", "metadata"))):
+            verify_missing_metadata(context, cohort)
+        _scene_coverage(
+            context.run_root,
+            [r["content_id"] for r in cohort["catalog"]],
+            errors,
+            context.config["extraction"]["visual_evidence"]["scene_duration"],
+            config.evaluation.model_dump(),
+            True,
+            True,
+            branches=set(arms.values()),
+            config=context.config,
+            excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
+            source_assets_dir=context.source_assets_dir,
+            informational=True,
+        )
+        from extraction.recovery_report import recovery_report
+
+        recovery_report(
+            context, branches=arms, content_ids=[r["content_id"] for r in cohort["catalog"]]
+        )
+        from validation.diagnosis_representations import representation_report
+
+        representation_report(context, arms)
+        sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
+        document["recommendations"] = report
+        if not errors:
+            observed, draws, _ = cluster_bootstrap(
+                sums, counts, samples=config.evaluation.bootstrap_samples
+            )
+            document["statistics"] = {
+                "status": "computed",
+                **contract,
+                "comparisons": comparisons(
+                    observed, draws, config.evaluation, arms=arms, config=context.config
+                ),
+            }
+            if compare_run_id is not None:
+                from validation.run_comparison import compare_graph_runs
+
+                document["run_comparison"] = compare_graph_runs(
+                    context, compare_run_id, target=arms
+                )
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
+        errors.append({"code": "invalid_leave_one_out_evidence", "message": str(exc)})
+    document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
+    write_diagnosis(context.diagnosis_path, document)
+    if errors or document["statistics"]["status"] != "computed":
+        raise RuntimeError(f"leave-one-out diagnosis failed; see {context.diagnosis_path}")
+    return {"stage": "run-diagnosis", "status": "pass"}

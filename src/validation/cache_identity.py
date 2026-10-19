@@ -1,0 +1,87 @@
+"""Semantic identities exclude locations and run bookkeeping, never model settings."""
+
+from model_provenance import canonical, without_provenance_arm
+from artifact_io import fingerprint
+
+REPRESENTATION_VERSION = "shared-scenes-representation/v4"
+
+
+def generation_identity(provenance):
+    keys = (
+        "representation",
+        "prompt_hash",
+        "model",
+        "settings",
+        "summary_model",
+        "schema_contract",
+        "uses_title",
+        "scene_arm",
+        "scene_provenance",
+        "english_title",
+        "scene_input_hash",
+    )
+    return canonical(without_provenance_arm({k: provenance[k] for k in keys if k in provenance}))
+
+
+def verified_generation(prov):
+    return (
+        isinstance(prov, dict)
+        and bool(prov.get("prompt_hash"))
+        and bool(prov.get("model"))
+        and bool(prov.get("settings"))
+    )
+
+
+def shareable_document(doc):
+    from validation.text_features import COMPOSITION_POLICY
+
+    if doc.get("composition_policy") == COMPOSITION_POLICY and not doc.get("summary_used"):
+        # Missing/failed visual inputs have a deterministic metadata-only or zero representation.
+        return doc.get("summary_status") in {"missing", "failed", "not_applicable"}
+    prov = doc.get("source_provenance", {})
+    if not verified_generation(prov):
+        return False
+    # Compact scenes omit generation metadata. Their content fingerprint still
+    # binds the Summary to its actual input, and semantic_documents also hashes
+    # the actual Summary text and its recorded generation settings. Never infer
+    # historical Scene prompts from the current configuration.
+    scene_hash = prov.get("scene_input_hash")
+    if (
+        isinstance(scene_hash, str)
+        and len(scene_hash) == 64
+        and all(char in "0123456789abcdef" for char in scene_hash)
+    ):
+        return True
+    scenes = prov.get("scene_provenance")
+    return isinstance(scenes, list) and bool(scenes) and all(verified_generation(p) for p in scenes)
+
+
+def semantic_documents(docs):
+    return [
+        {
+            "content_id": d["content_id"],
+            "title_text": d.get("title_text", ""),
+            "video_text": d.get("video_text", d["text"]),
+            "generation": generation_identity(d.get("source_provenance", {})),
+            **(
+                {
+                    "composition": {
+                        k: d.get(k)
+                        for k in (
+                            "composition_policy",
+                            "components",
+                            "summary_source",
+                            "summary_status",
+                        )
+                    }
+                }
+                if "composition_policy" in d
+                else {}
+            ),
+        }
+        for d in docs
+    ]
+
+
+def semantic_document_hash(doc):
+    return fingerprint(semantic_documents([doc])[0])

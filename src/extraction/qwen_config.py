@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+
 from typing import Any
 
 
@@ -39,5 +40,68 @@ def qwen_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
         raise ValueError("extraction.qwen.async_scheduling must be null, true or false")
     if not result["enable_chunked_prefill"] and length != "auto":
         if result["max_num_batched_tokens"] < length:
-            raise ValueError("without chunked prefill max_num_batched_tokens must cover max_model_len")
+            raise ValueError(
+                "without chunked prefill max_num_batched_tokens must cover max_model_len"
+            )
     return result
+
+
+def penalty_schedule(value):
+    values = value if isinstance(value, list) else [value]
+    if not values or any(
+        type(x) not in (int, float) or not math.isfinite(x) or not 1 <= x <= 2 for x in values
+    ):
+        raise ValueError("repetition penalty must be a number or non-empty list in [1, 2]")
+    return [float(x) for x in values]
+
+
+QWEN_MODELS = ("qwen3vl", "qwen3.5")
+
+
+def validate_presence_penalty(value: float) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value) or not -2 <= value <= 2:
+        raise ValueError("presence penalty must be a finite number in [-2, 2]")
+    return float(value)
+
+
+def generation_settings(
+    model: str, *, representation: str, summary: bool = False,
+    repetition_penalty: float | None = None,
+    presence_penalty: float | None = None,
+) -> dict[str, Any]:
+    """Greedy generation with optional presence and generated-token repetition penalties."""
+    if model not in QWEN_MODELS:
+        raise ValueError(f"unsupported Qwen model: {model}")
+    if representation not in ("graph", "description"):
+        raise ValueError(f"unsupported representation: {representation}")
+    penalty = 1.05 if representation == "graph" and not summary else 1.0
+    if repetition_penalty is not None:
+        penalty = penalty_schedule([repetition_penalty])[0]
+    return {
+        "do_sample": False,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 0,
+        "min_p": 0.0,
+        "presence_penalty": (
+            validate_presence_penalty(presence_penalty)
+            if presence_penalty is not None else (2.0 if summary else 1.5)
+        ),
+        "repetition_penalty": penalty,
+        "enable_thinking": False if model == "qwen3.5" else None,
+        "model": model,
+    }
+
+
+def validate_checkpoint(model: str, config: dict) -> None:
+    expected = {
+        "qwen3vl": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),
+        "qwen3.5": ("qwen3_5", "Qwen3_5ForConditionalGeneration"),
+    }
+    if model not in expected:
+        raise ValueError(f"unsupported Qwen model: {model}")
+    model_type, architecture = expected[model]
+    if config.get("model_type") != model_type or architecture not in config.get("architectures", []):
+        raise ValueError(f"checkpoint does not match requested {model}: expected {model_type}/{architecture}")
+    if model == "qwen3vl" and config.get("_name_or_path") and "Thinking" in config["_name_or_path"]:
+        raise ValueError("qwen3vl requires the Instruct checkpoint")
