@@ -1,2 +1,0 @@
-class ExtractionStepError(RuntimeError):
-    pass
