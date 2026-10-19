@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import queue
+import threading
+import time
+from typing import Any, Callable, Iterable
+
+from extraction.backends.base import VLMBackend
+from extraction.backends.gemini import GeminiBackend, GeminiEmptyResponseError
+from extraction.backends.qwen_workers import QwenGenerationTask
+from extraction.evidence import load_images
+from extraction.progress import RecentThroughput
+
+
+@dataclass(frozen=True)
+class GeminiGenerationOutcome:
+    task_id: str
+    text: str
+    error: str | None = None
+    response_diagnostics: dict[str, Any] | None = None
+
+
+class GeminiWorkerPool:
+    """Concurrent Vertex calls that stop waiting immediately on Ctrl+C."""
+
+    def __init__(
+        self,
+        concurrency: int,
+        *,
+        project_id: str,
+        location: str,
+        model_id: str,
+        temperature: float = 0.0,
+        max_output_tokens: int | None = None,
+        thinking_level: str | None = None,
+        media_resolution: str | None = None,
+        backend_factory: Callable[[], VLMBackend] | None = None,
+    ) -> None:
+        if concurrency <= 0:
+            raise ValueError("Gemini concurrency must be a positive integer")
+        if max_output_tokens is not None and max_output_tokens <= 0:
+            raise ValueError("Gemini max_output_tokens must be a positive integer")
+        self.concurrency = concurrency
+        self.max_output_tokens = max_output_tokens
+        self._backend_factory = backend_factory or (
+            lambda: GeminiBackend.vertex(
+                project_id=project_id,
+                location=location,
+                model_id=model_id,
+                temperature=temperature,
+                thinking_level=thinking_level,
+                media_resolution=media_resolution,
+            )
+        )
+
+    def generate(
+        self,
+        tasks: Iterable[QwenGenerationTask],
+        on_task_complete: Callable[[GeminiGenerationOutcome], None] | None = None,
+        *,
+        on_progress: Callable[[dict], None] | None = None,
+    ) -> dict[str, GeminiGenerationOutcome]:
+        source = iter(tasks)
+        task_ids: set[str] = set()
+        exhausted = False
+        task_queue: queue.Queue[QwenGenerationTask] = queue.Queue()
+        result_queue: queue.Queue[GeminiGenerationOutcome] = queue.Queue()
+        stop = threading.Event()
+        workers = [
+            threading.Thread(
+                target=self._worker,
+                args=(task_queue, result_queue, stop),
+                name=f"gemini-worker-{index}",
+                daemon=True,
+            )
+            for index in range(self.concurrency)
+        ]
+        for worker in workers:
+            worker.start()
+
+        outcomes: dict[str, GeminiGenerationOutcome] = {}
+        throughput = RecentThroughput()
+        throughput.start()
+        last_progress = time.monotonic()
+
+        def report():
+            if on_progress:
+                stats = throughput.snapshot()
+                stats.pop("output_tokens_per_second")
+                on_progress({**stats, "completed": len(outcomes),
+                             "inflight": min(len(workers), len(task_ids) - len(outcomes))})
+
+        try:
+            report()
+            while True:
+                # Bound read-ahead while keeping workers supplied across content boundaries.
+                while not exhausted and len(task_ids) - len(outcomes) < 2 * self.concurrency:
+                    try:
+                        task = next(source)
+                    except StopIteration:
+                        exhausted = True
+                        break
+                    if task.task_id in task_ids:
+                        raise ValueError("Gemini generation task ids must be unique")
+                    task_ids.add(task.task_id)
+                    task_queue.put(task)
+                if exhausted and len(outcomes) == len(task_ids):
+                    break
+                try:
+                    outcome = result_queue.get(timeout=0.1)
+                except queue.Empty:
+                    if not any(worker.is_alive() for worker in workers):
+                        missing = sorted(task_ids - outcomes.keys())
+                        raise RuntimeError(
+                            f"Gemini workers stopped before completing tasks: {missing}"
+                        )
+                else:
+                    outcomes[outcome.task_id] = outcome
+                    throughput.complete()
+                    if on_task_complete is not None:
+                        on_task_complete(outcome)
+                if time.monotonic() - last_progress >= 30:
+                    report()
+                    last_progress = time.monotonic()
+            report()
+        finally:
+            stop.set()
+            self._discard_pending(task_queue)
+            # Interrupted HTTP requests run in daemon threads; never block on them.
+            if exhausted and len(outcomes) == len(task_ids):
+                for worker in workers:
+                    worker.join()
+        return outcomes
+
+    def _worker(
+        self,
+        task_queue: queue.Queue[QwenGenerationTask],
+        result_queue: queue.Queue[GeminiGenerationOutcome],
+        stop: threading.Event,
+    ) -> None:
+        backend: VLMBackend | None = None
+        while not stop.is_set():
+            try:
+                task = task_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if stop.is_set():
+                return
+            try:
+                if backend is None:
+                    backend = self._backend_factory()
+                text = backend.generate(
+                    load_images(list(task.image_paths)),
+                    task.prompt,
+                    task.max_new_tokens,
+                )
+                outcome = GeminiGenerationOutcome(
+                    task.task_id, text,
+                    response_diagnostics=getattr(backend, "last_response_diagnostics", None))
+            except Exception as exc:  # SDK errors are persisted per scene by the caller.
+                outcome = GeminiGenerationOutcome(
+                    task.task_id,
+                    "",
+                    f"{type(exc).__name__}: {exc}",
+                    exc.diagnostics if isinstance(exc, GeminiEmptyResponseError) else None,
+                )
+            result_queue.put(outcome)
+
+    @staticmethod
+    def _discard_pending(task_queue: queue.Queue[QwenGenerationTask]) -> None:
+        while True:
+            try:
+                task_queue.get_nowait()
+            except queue.Empty:
+                return
