@@ -40,7 +40,7 @@ def generate_penalty_passes(generate, tasks, penalties, complete, log=None, on_p
         if on_pass:
             on_pass(index + 1, len(schedule), None if index == 0 else len(tasks))
         if log:
-            log(f"[Qwen] repetition_penalty={penalty:.2f} pass={index + 1}/{len(schedule)}")
+            log(f"[vLLM] repetition_penalty={penalty:.2f} pass={index + 1}/{len(schedule)}")
 
         def requests():
             for task in tasks:

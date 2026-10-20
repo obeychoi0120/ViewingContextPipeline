@@ -28,6 +28,30 @@ export RUN_ID="new_run_id"
 
 먼저 [config.yaml](config.yaml)의 데이터·모델 경로와 Vertex 프로젝트 설정을 실행 환경에 맞게 바꾸세요. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
 
+MiniCPM Graph 추출은 아래 전용 설치·실행 방법을 사용합니다. MiniCPM은 생성 설정이 바뀌면 재사용을 거부합니다.
+
+<details>
+<summary>MiniCPM-V-4.7-1B: vLLM으로 Scene Graph 추출</summary>
+
+```bash
+python -m pip install -e ".[minicpm,dev]"
+python -m pip check
+export RUN_ID="new_minicpm_run"
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model minicpm
+```
+
+먼저 공통 cohort·키프레임 준비를 완료해야 합니다. `models.minicpm`은 `~/workspace/models/MiniCPM-V-4.7-1B`의 로컬 비양자화 BF16 체크포인트를 가리킵니다. 다른 환경에서는 경로를 수정하세요. Linux/CUDA가 필요하며, 전용 extra는 `transformers>=5.18.0`과 `vllm==0.32.0`을 설치합니다. 이 vLLM 릴리스에는 [MiniCPM 4.7 지원 PR #58674](https://github.com/vllm-project/vllm/pull/58674)가 포함되어 있습니다.
+
+`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 장면 추출만 지원하며 요약·Description·추천 평가 소스로는 선택할 수 없습니다. 기존 v6 설정은 그대로 읽을 수 있습니다. MiniCPM을 활성화하려면 `models.minicpm`, `protocol.graph_extractors` 마지막의 `minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 세 설정을 함께 추가해야 합니다. 기본 config에는 세 항목이 포함되어 있습니다.
+
+입력은 기존 키프레임을 순서대로 사용하며, 16x 시각 토큰 압축과 processor 기본 slicing을 적용합니다. Thinking은 끄고 greedy decoding으로 생성합니다. 기본값은 출력 상한 384토큰, presence penalty 1.5, 생성 토큰 대상 repetition penalty 1.05이며 `--presence-penalty`와 `--repetition-penalty`로 변경할 수 있습니다. GPU 선택은 `CUDA_VISIBLE_DEVICES`, 엔진 자원 설정은 공용 `extraction.qwen`을 사용합니다. 컨텍스트 길이를 초과하면 입력·출력 한도를 자동으로 줄이지 않고 오류를 보고합니다.
+
+결과는 `artifacts/runs/<RUN_ID>/extraction/scenes/graph_minicpm/<content_id>.jsonl`, 수정하지 않은 응답은 같은 디렉터리의 `raw_responses/<content_id>.jsonl`에 저장합니다. 원본을 먼저 저장한 뒤, 코드·인용 문자열·수식의 이스케이프를 보존하면서 일반 텍스트 개행을 복원하여 기존 v9 파서에 전달합니다. 원본 파일은 각 장면의 최근 응답을 보존하며 재시도 시 해당 장면을 교체합니다.
+
+일반 재실행은 정상 결과를 재사용하고 warning·failed 장면을 다시 생성합니다. 체크포인트·프롬프트·생성·processor·정규화 설정이 달라지면 `--force` 또는 새 Run ID가 필요합니다. `--force`는 해당 소스의 기존 결과와 원본 응답을 지우고 다시 생성합니다. 추론 실행과 Graph 파싱 성공은 시각적 정확도나 추천 성능 개선을 입증하지 않습니다.
+
+</details>
+
 <details>
 <summary>환경별 설치와 확인할 설정</summary>
 
@@ -529,7 +553,7 @@ Decoding은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p
 | `--presence-penalty FLOAT` | 유한한 단일 숫자 -2.0~2.0 | 해당 실행의 presence penalty. `0`은 비활성화 |
 | `--repetition-penalty FLOAT` | 유한한 단일 숫자 1.0~2.0 | 해당 실행의 생성 토큰 전용 repetition penalty |
 
-두 옵션은 Qwen의 Scene 추출·요약에만 지정할 수 있으며 생략하면 위 기본값을 사용합니다. Repetition penalty는 vLLM 기본 penalty와 중복 적용하지 않습니다. 다음은 기본 presence penalty를 끄는 **옵션 변경 예시**입니다.
+두 옵션은 Qwen의 Scene 추출·요약과 MiniCPM Graph 장면 추출에 지정할 수 있으며 생략하면 위 기본값을 사용합니다. Repetition penalty는 vLLM 기본 penalty와 중복 적용하지 않습니다. 다음은 기본 presence penalty를 끄는 **옵션 변경 예시**입니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5 --presence-penalty 0

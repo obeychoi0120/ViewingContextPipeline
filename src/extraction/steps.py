@@ -7,7 +7,11 @@ from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
-from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
+from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings
+from extraction.minicpm_config import (
+    NORMALIZATION_VERSION, PROCESSOR_SETTINGS, minicpm_generation_settings,
+    validate_local_checkpoint,
+)
 from extraction.graph_warnings import WARNING_TAGS
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -25,7 +29,8 @@ from extraction.summary_executor import run_summary_stage, qwen_generator
 from extraction.scene_storage import read_scene_records, migrate_scene_failures
 from pipeline_logging import log_step_start
 
-GRAPH_SOURCES = (*QWEN_MODELS, "gemini")
+LOCAL_MODELS = (*QWEN_MODELS, "minicpm")
+GRAPH_SOURCES = (*QWEN_MODELS, "gemini", "minicpm")
 
 
 def prompt_provenance(
@@ -33,17 +38,19 @@ def prompt_provenance(
 ):
     path = context.prompt_path(schema)
     source = model if summary else arm.model
-    if repetition_penalty is not None and source not in QWEN_MODELS:
-        raise ValueError("repetition penalty is supported only for Qwen models")
-    if presence_penalty is not None and source not in QWEN_MODELS:
-        raise ValueError("presence penalty is supported only for Qwen models")
-    if source in QWEN_MODELS:
+    if source == "minicpm" and (summary or arm.representation != "graph"):
+        raise ValueError("MiniCPM supports only Graph scene extraction")
+    if repetition_penalty is not None and source not in LOCAL_MODELS:
+        raise ValueError("repetition penalty is supported only for local vLLM models")
+    if presence_penalty is not None and source not in LOCAL_MODELS:
+        raise ValueError("presence penalty is supported only for local vLLM models")
+    if source in LOCAL_MODELS:
         import json
         checkpoint = context.path("models", source)
-        validate_checkpoint(source, json.loads((checkpoint / "config.json").read_text()))
+        validate_local_checkpoint(source, json.loads((checkpoint / "config.json").read_text()))
     model = (
         local_model_identity(context.path("models", source))
-        if source in QWEN_MODELS
+        if source in LOCAL_MODELS
         else context.config["models"][source]
     )
     extraction = context.config["extraction"]
@@ -53,8 +60,10 @@ def prompt_provenance(
             "summary_max_new_tokens" if summary else "scene_max_new_tokens"
         ]
     }
-    if source in QWEN_MODELS:
-        generation = generation_settings(
+    if source in LOCAL_MODELS:
+        generation = minicpm_generation_settings(
+            repetition_penalty=repetition_penalty, presence_penalty=presence_penalty,
+        ) if source == "minicpm" else generation_settings(
             source, representation=kind, summary=summary, repetition_penalty=repetition_penalty,
             presence_penalty=presence_penalty,
         )
@@ -64,6 +73,15 @@ def prompt_provenance(
             generation=generation,
             repetition_penalty=[generation["repetition_penalty"]],
         )
+        if source == "minicpm":
+            settings["processor"] = {
+                **PROCESSOR_SETTINGS, "max_slice_nums": "processor_default",
+                "chat_template_hash": (
+                    file_fingerprint(checkpoint / "chat_template.jinja")
+                    if (checkpoint / "chat_template.jinja").is_file() else None
+                ),
+            }
+            settings["output_normalization"] = NORMALIZATION_VERSION
     else:
         settings["backend"] = "gemini"
     if not summary:
@@ -141,6 +159,11 @@ def _extract(
     context, *, representation, model, schema, force=False, arm=None,
     repetition_penalty=None, presence_penalty=None,
 ):
+    if model == "minicpm":
+        if representation != "graph":
+            raise ValueError("MiniCPM supports only Graph scene extraction")
+        if arm is None:
+            arm = "graph_minicpm"
     if arm is None:
         raise ValueError("extraction requires --arm")
     arm = resolve_generation_arm(context.config, arm, representation, model)
@@ -162,7 +185,7 @@ def _extract(
     scene_dir = context.extraction_dir(arm.representation, model, "scenes")
     from extraction.scene_storage import ensure_generation_identity
 
-    ensure_generation_identity(scene_dir, provenance, force=force)
+    ensure_generation_identity(scene_dir, provenance, force=force, strict=model == "minicpm")
     if representation == "graph":
         (scene_dir / "generation_stats.json").unlink(missing_ok=True)
     migrate_scene_failures(scene_dir)
@@ -200,7 +223,7 @@ def _extract(
         unit="scene",
         progress_factory=tqdm,
     ) as progress:
-        if model in QWEN_MODELS:
+        if model in LOCAL_MODELS:
             run_qwen_scenes(
                 pending_contents(),
                 provenance=provenance,
@@ -258,7 +281,7 @@ def _summarize(
     context, *, representation, model, schema, force=False, arm=None,
     repetition_penalty=None, presence_penalty=None,
 ):
-    if model not in GRAPH_SOURCES:
+    if model not in (*QWEN_MODELS, "gemini"):
         raise ValueError("summary model must be qwen3vl, qwen3.5 or gemini")
     if arm is None:
         raise ValueError("summarization requires --arm")

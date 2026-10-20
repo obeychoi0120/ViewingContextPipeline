@@ -345,7 +345,7 @@ def qwen_generator(
             runtime.engine_ready(event)
         if log:
             log(
-                f"[Qwen] GPU {event['gpu_id']} ready | {event['gpu_name']} | settings={event['settings']}"
+                f"[vLLM] GPU {event['gpu_id']} ready | {event.get('model_family', 'Qwen')} | {event['gpu_name']} | settings={event['settings']}"
             )
 
     with ExitStack() as resources:
@@ -355,7 +355,7 @@ def qwen_generator(
             nonlocal pool
             if pool is None:
                 if log:
-                    log("[Qwen] starting vLLM GPU workers")
+                    log("[vLLM] starting GPU workers")
                 pool = resources.enter_context(
                     QwenWorkerPool(
                         str(model_path),

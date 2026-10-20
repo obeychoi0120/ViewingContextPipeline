@@ -117,8 +117,10 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen3vl", "qwen3.5", "gemini"} or phase not in {"scenes", "summaries"}:
+        if model not in {"qwen3vl", "qwen3.5", "gemini", "minicpm"} or phase not in {"scenes", "summaries"}:
             raise ValueError("invalid extraction model or phase")
+        if model == "minicpm" and (representation != "graph" or phase != "scenes"):
+            raise ValueError("MiniCPM supports only Graph scene extraction")
         from arm_registry import generated_arm
 
         if phase == "scenes":
@@ -208,6 +210,8 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "graph_extractors": ["qwen3vl", "qwen3.5", "gemini"],
         "description_extractors": ["qwen3vl", "qwen3.5", "gemini"],
     }
+    if "minicpm" in value.get("models", {}):
+        expected["graph_extractors"] = [*expected["graph_extractors"], "minicpm"]
     if set(protocol) != set(expected):
         raise ConfigError("invalid protocol keys")
     for key, setting in expected.items():
@@ -255,15 +259,19 @@ def _validate_extraction(value: dict[str, Any]) -> None:
     generation_keys = {"scene_max_new_tokens", "summary_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
-        if set(models) != {"qwen3vl", "qwen3.5", "gemini"}:
-            raise ConfigError(f"extraction.{arm} must contain exactly qwen3vl, qwen3.5 and gemini")
-        for model in ("qwen3vl", "qwen3.5", "gemini"):
+        expected_models = {"qwen3vl", "qwen3.5", "gemini"}
+        if arm == "graph" and "minicpm" in value.get("models", {}):
+            expected_models.add("minicpm")
+        if set(models) != expected_models:
+            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
+        for model in sorted(expected_models):
             settings = _require_mapping(models, model)
-            if set(settings) != generation_keys:
+            keys = {"scene_max_new_tokens"} if model == "minicpm" else generation_keys
+            if set(settings) != keys:
                 raise ConfigError(
-                    f"extraction.{arm}.{model} must contain exactly {sorted(generation_keys)}"
+                    f"extraction.{arm}.{model} must contain exactly {sorted(keys)}"
                 )
-            for key in generation_keys:
+            for key in keys:
                 setting = settings.get(key)
                 if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
                     raise ConfigError(f"extraction.{arm}.{model}.{key} must be a positive integer")
@@ -289,9 +297,13 @@ def _validate_models(value: dict[str, Any]) -> None:
         or not data["titles_supplement_csv"].strip()
     ):
         raise ConfigError("data.titles_supplement_csv must be a non-empty path")
-    if set(models) != {"qwen3vl", "qwen3.5", "bge", "gemini"}:
-        raise ConfigError("models must contain exactly qwen3vl, qwen3.5, bge, and gemini")
-    for key in ("qwen3vl", "qwen3.5", "bge"):
+    required = {"qwen3vl", "qwen3.5", "bge", "gemini"}
+    if not required <= set(models) or set(models) - required - {"minicpm"}:
+        raise ConfigError("models must contain qwen3vl, qwen3.5, bge, gemini and optional minicpm")
+    local_models = ["qwen3vl", "qwen3.5", "bge"]
+    if "minicpm" in models:
+        local_models.append("minicpm")
+    for key in local_models:
         if not isinstance(models[key], str) or not models[key].strip():
             raise ConfigError(f"models.{key} must be a non-empty local checkpoint path")
     gemini = _require_mapping(models, "gemini")
