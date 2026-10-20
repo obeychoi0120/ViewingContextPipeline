@@ -189,19 +189,21 @@ def test_minicpm_generation_identity(minicpm_context):
         return prompt_provenance(context, "prompts/scene_graph_v9.md", arm)
     initial = provenance()
     directory = context.scene_arm_dir(arm.name)
-    ensure_generation_identity(directory, initial, strict=True)
-    ensure_generation_identity(directory, initial, strict=True)
+    ensure_generation_identity(directory, initial)
+    ensure_generation_identity(directory, initial)
+    initial_identity = read_json(directory / "generation_identity.json")
     assert initial["settings"]["processor"]["downsample_mode"] == "16x"
     for change in ("generation", "processor", "output_normalization"):
         changed = deepcopy(initial)
         changed["settings"][change] = "changed"
-        with pytest.raises(ValueError, match="identity changed"):
-            ensure_generation_identity(directory, changed, strict=True)
+        ensure_generation_identity(directory, changed)
+        assert read_json(directory / "generation_identity.json") == initial_identity
     (context.path("models", "minicpm") / "chat_template.jinja").write_text("changed template")
-    with pytest.raises(ValueError, match="identity changed"):
-        ensure_generation_identity(directory, provenance(), strict=True)
+    ensure_generation_identity(directory, provenance())
+    assert read_json(directory / "generation_identity.json") == initial_identity
     write_json(directory / "raw_responses" / "old.jsonl", {})
-    ensure_generation_identity(directory, provenance(), strict=True, force=True)
+    ensure_generation_identity(directory, provenance(), force=True)
+    assert read_json(directory / "generation_identity.json") != initial_identity
     assert not (directory / "raw_responses" / "old.jsonl").exists()
 
 
@@ -238,8 +240,16 @@ def test_minicpm_extract_store_resume_and_retry(minicpm_context, monkeypatch):
     extract_graph_scenes(context, **options)
     assert len(factory.tasks) == count + 2
     assert all(not row["warning"] for row in read_jsonl(output))
-    with pytest.raises(ValueError, match="identity changed"):
-        extract_graph_scenes(context, **options, presence_penalty=0)
+    count = len(factory.tasks)
+    before = output.read_bytes()
+    extract_graph_scenes(context, **options, presence_penalty=0)
+    assert len(factory.tasks) == count and output.read_bytes() == before
+    saved = read_jsonl(output)
+    saved[0]["warning"] = [PARSE_FAILED]
+    write_scene_records(output, saved)
+    extract_graph_scenes(context, **options, presence_penalty=0)
+    assert len(factory.tasks) == count + 1
+    assert factory.tasks[-1].presence_penalty == 0
     assert read_json(directory / "generation_stats.json")["failed"] == 0
     truncated = FakeGenerator(raw, finish_reason="length")
     monkeypatch.setattr("extraction.steps.qwen_generator", truncated)

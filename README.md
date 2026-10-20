@@ -28,7 +28,7 @@ export RUN_ID="new_run_id"
 
 먼저 [config.yaml](config.yaml)의 데이터·모델 경로와 Vertex 프로젝트 설정을 실행 환경에 맞게 바꾸세요. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
 
-MiniCPM Graph 추출은 아래 전용 설치·실행 방법을 사용합니다. MiniCPM은 생성 설정이 바뀌면 재사용을 거부합니다.
+MiniCPM Graph 추출은 아래 전용 설치·실행 방법을 사용합니다.
 
 <details>
 <summary>MiniCPM-V-4.7-1B: vLLM으로 Scene Graph 추출</summary>
@@ -48,7 +48,7 @@ python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/sc
 
 결과는 `artifacts/runs/<RUN_ID>/extraction/scenes/graph_minicpm/<content_id>.jsonl`, 수정하지 않은 응답은 같은 디렉터리의 `raw_responses/<content_id>.jsonl`에 저장합니다. 원본을 먼저 저장한 뒤, 코드·인용 문자열·수식의 이스케이프를 보존하면서 일반 텍스트 개행을 복원하여 기존 v9 파서에 전달합니다. 원본 파일은 각 장면의 최근 응답을 보존하며 재시도 시 해당 장면을 교체합니다.
 
-일반 재실행은 정상 결과를 재사용하고 warning·failed 장면을 다시 생성합니다. 체크포인트·프롬프트·생성·processor·정규화 설정이 달라지면 `--force` 또는 새 Run ID가 필요합니다. `--force`는 해당 소스의 기존 결과와 원본 응답을 지우고 다시 생성합니다. 추론 실행과 Graph 파싱 성공은 시각적 정확도나 추천 성능 개선을 입증하지 않습니다.
+일반 재실행은 설정 변경 여부와 관계없이 정상 결과를 재사용하고 warning·failed 장면을 다시 생성합니다. 변경한 설정은 새로 생성하는 장면에만 적용되며, `generation_identity.json`은 최초 생성 설정을 보존합니다. 전체 결과에 변경한 설정을 적용하려면 `--force` 또는 새 Run ID를 사용합니다. `--force`는 해당 소스의 기존 결과와 원본 응답을 지우고 다시 생성합니다. 추론 실행과 Graph 파싱 성공은 시각적 정확도나 추천 성능 개선을 입증하지 않습니다.
 
 </details>
 
