@@ -63,14 +63,17 @@ def select_arms(config, target=None):
 
 
 def generation_registry(config):
-    return {arm.name: arm for arm in SOURCES}
+    sources = {arm.name: arm for arm in SOURCES}
+    if "minicpm" in config.get("models", {}):
+        sources["graph_minicpm"] = Arm("graph_minicpm", "graph", "minicpm", False, "graph_minicpm")
+    return sources
 
 
 def generated_arm(config, representation, model):
-    if model not in {"gemini", "qwen3vl", "qwen3.5"}:
-        raise ValueError("model/source must be qwen3vl, qwen3.5 or gemini")
+    if model not in {"gemini", "qwen3vl", "qwen3.5", "minicpm"}:
+        raise ValueError("model/source must be qwen3vl, qwen3.5, gemini or minicpm")
     source = next(
-        (arm for arm in SOURCES if arm.representation == representation and arm.model == model),
+        (arm for arm in generation_registry(config).values() if arm.representation == representation and arm.model == model),
         None,
     )
     if source is None:
@@ -86,6 +89,8 @@ def resolve_generation_arm(config, name, representation, model, *, summary=False
         raise ValueError(f"invalid generation source: {name}{hint}")
     if arm.representation != representation:
         raise ValueError(f"invalid {representation} generation arm: {name}")
+    if summary and arm.model == "minicpm":
+        raise ValueError("MiniCPM supports only Graph scene extraction, not summarization")
     if not summary and arm.model != model:
         raise ValueError(
             "Scene arm must identify the requested extraction model and representation"

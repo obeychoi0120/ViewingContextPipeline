@@ -24,12 +24,30 @@ class QwenOutput:
 
 @dataclass
 class QwenBackend:
+    label = "Qwen"
+    dependency_extra = "qwen"
     engine: Any
     processor: Any
     model_id: str
     executor: ThreadPoolExecutor
     stop_token_ids: list[int]
     runtime_info: dict[str, Any]
+
+    @classmethod
+    def checkpoint_model(cls, config):
+        family = {"qwen3_vl": "qwen3vl", "qwen3_5": "qwen3.5"}.get(config.get("model_type"))
+        validate_checkpoint(family, config)
+        return family
+
+    @classmethod
+    def engine_options(cls):
+        return {}
+
+    def validate_task(self, task, config):
+        validate_checkpoint(task.model, config)
+
+    def template_options(self, task):
+        return {"enable_thinking": task.enable_thinking} if task.enable_thinking is not None else {}
 
     @classmethod
     def from_pretrained(cls, model_path: str, *, settings=None, image_limit=6):
@@ -40,17 +58,15 @@ class QwenBackend:
             from vllm.v1.engine.async_llm import AsyncLLM
         except ImportError as exc:
             raise RuntimeError(
-                "Qwen requires Linux/CUDA and the 'qwen' dependencies (vllm>=0.28.0)"
+                f"{cls.label} requires Linux/CUDA and the '{cls.dependency_extra}' optional dependencies"
             ) from exc
         model_dir = Path(model_path)
         if not model_dir.is_dir():
-            raise ValueError(f"Qwen local checkpoint directory is missing: {model_path}")
+            raise ValueError(f"{cls.label} local checkpoint directory is missing: {model_path}")
         config = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
         if config.get("quantization_config"):
-            raise ValueError("Qwen vLLM pipeline requires a non-quantized BF16 checkpoint")
-        model_type = config.get("model_type")
-        family = {"qwen3_vl": "qwen3vl", "qwen3_5": "qwen3.5"}.get(model_type)
-        validate_checkpoint(family, config)
+            raise ValueError(f"{cls.label} vLLM pipeline requires a non-quantized BF16 checkpoint")
+        family = cls.checkpoint_model(config)
         resolved = qwen_settings(settings)
         processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
         generation_path = model_dir / "generation_config.json"
@@ -74,13 +90,14 @@ class QwenBackend:
             "structured_outputs_config": {"backend": "xgrammar"},
             "enable_log_requests": False,
             "disable_log_stats": True,
+            **cls.engine_options(),
         }
         if arguments["max_model_len"] == "auto":
             arguments["max_model_len"] = -1
         engine = AsyncLLM.from_engine_args(AsyncEngineArgs(**arguments))
         try:
             if not callable(getattr(engine.renderer, "render_cmpl_async", None)):
-                raise RuntimeError("vLLM renderer API is incompatible with the Qwen backend")
+                raise RuntimeError(f"vLLM renderer API is incompatible with the {cls.label} backend")
             actual = {
                 **resolved,
                 "max_model_len": engine.model_config.max_model_len,
@@ -94,9 +111,11 @@ class QwenBackend:
                 "generation_config": "vllm",
                 "logits_processors": arguments["logits_processors"],
                 "structured_outputs_config": arguments["structured_outputs_config"],
+                **cls.engine_options(),
             }
             info = {
                 "backend": "vllm",
+                "model_family": family,
                 "versions": {name: version(name) for name in ("vllm", "torch", "transformers")},
                 "cuda_version": torch.version.cuda,
                 "gpu_name": torch.cuda.get_device_name(0),
@@ -122,11 +141,8 @@ class QwenBackend:
             content.append({"type": "text", "text": task.prompt})
             if task.model is not None:
                 import json
-                validate_checkpoint(task.model, json.loads((Path(self.model_id) / "config.json").read_text()))
-            template_options = (
-                {"enable_thinking": task.enable_thinking}
-                if task.enable_thinking is not None else {}
-            )
+                self.validate_task(task, json.loads((Path(self.model_id) / "config.json").read_text()))
+            template_options = self.template_options(task)
             prompt = self.processor.apply_chat_template(
                 [{"role": "user", "content": content}],
                 tokenize=False,
@@ -223,7 +239,7 @@ class QwenBackend:
                 getattr(result, "stop_reason", None),
             )
         except Exception as exc:
-            raise RuntimeError(f"Qwen task {task.task_id}: {exc}") from exc
+            raise RuntimeError(f"{self.label} task {task.task_id}: {exc}") from exc
         finally:
             for image in images:
                 image.close()

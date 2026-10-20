@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 qwen = ["torch", "transformers>=5.2.0", "vllm>=0.28.0; sys_platform == 'linux'"]
+minicpm = ["torch", "transformers>=5.18.0", "vllm==0.32.0; sys_platform == 'linux'"]
 train = ["torch"]
 embedding = ["torch", "transformers"]
 gemini = ["google-genai"]

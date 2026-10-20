@@ -389,8 +389,13 @@ def _worker_main(
 
     async def run():
         from extraction.backends.qwen import QwenBackend
+        from extraction.backends.minicpm import MiniCPMBackend
+        from pathlib import Path
+        import json
 
-        backend = QwenBackend.from_pretrained(
+        config = json.loads((Path(model_path) / "config.json").read_text())
+        backend_type = MiniCPMBackend if config.get("model_type") == "minicpmv4_7" else QwenBackend
+        backend = backend_type.from_pretrained(
             model_path, settings=settings, image_limit=image_limit
         )
         try:
