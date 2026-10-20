@@ -33,6 +33,8 @@ def test_arm_sources_and_title_policy(context):
         "graph_gemini_meta": ("graph_gemini", True),
         "desc_qwen3vl_meta": ("desc_qwen3vl", True),
         "desc_gemini_meta": ("desc_gemini", True),
+        "graph_minicpm": ("graph_minicpm", False),
+        "graph_minicpm_meta": ("graph_minicpm", True),
     }
     assert {name: (arm.scene_arm, arm.uses_title) for name, arm in arms.items()} == expected
     sources = generation_registry(context.config)

@@ -3,8 +3,11 @@
 from dataclasses import dataclass
 
 from pipeline_runtime import RunContext
+from arm_registry import ARMS, GRAPH_ONLY_ARMS
 
-GRAPH_ARMS = frozenset({"meta", "graph_qwen3vl", "graph_qwen3vl_meta", "graph_gemini_meta", "graph_qwen3.5", "graph_qwen3.5_meta"})
+GRAPH_ARMS = frozenset({"meta"} | {
+    arm.name for arm in (*ARMS, *GRAPH_ONLY_ARMS) if arm.representation == "graph"
+})
 GRAPH_ARCHITECTURE = "sasrec-role-graph/v9"
 GRAPH_MODEL = {
     "hidden_dim": 128,
@@ -171,6 +174,8 @@ def validate_mode(mode, aggregation, step, targets):
         raise ValueError("--representation-mode text|graph is required")
     if mode == "graph" and set(targets or ()) - GRAPH_ARMS:
         raise ValueError("graph mode supports: " + ", ".join(sorted(GRAPH_ARMS)))
+    if mode == "text" and set(targets or ()) & {arm.name for arm in GRAPH_ONLY_ARMS}:
+        raise ValueError("MiniCPM arms require --representation-mode graph")
     needs_pool = mode == "graph" and step != "embed-representations"
     if needs_pool and aggregation not in SCENE_AGGREGATIONS:
         raise ValueError(

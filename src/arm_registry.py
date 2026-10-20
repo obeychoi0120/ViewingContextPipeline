@@ -27,6 +27,11 @@ ARMS = (
     Arm("desc_qwen3vl_meta", "description", "qwen3vl", True, "desc_qwen3vl"),
     Arm("desc_gemini_meta", "description", "gemini", True, "desc_gemini"),
 )
+# Direct Graph extensions do not change the existing Text concatenation contract.
+GRAPH_ONLY_ARMS = (
+    Arm("graph_minicpm", "graph", "minicpm", False, "graph_minicpm"),
+    Arm("graph_minicpm_meta", "graph", "minicpm", True, "graph_minicpm"),
+)
 SOURCES = tuple(
     Arm(name, kind, model, False, name)
     for name, kind, model in (
@@ -45,7 +50,11 @@ def arm_contract(config):
 
 
 def registry(config):
-    return {arm.name: arm for arm in ARMS}
+    arms = {arm.name: arm for arm in ARMS}
+    # Without a model configuration, expose the complete supported Arm catalog.
+    if "models" not in config or "minicpm" in config["models"]:
+        arms.update((arm.name, arm) for arm in GRAPH_ONLY_ARMS)
+    return arms
 
 
 def active_arms(config):

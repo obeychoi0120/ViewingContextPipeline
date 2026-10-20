@@ -42,7 +42,15 @@ python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/sc
 
 먼저 공통 cohort·키프레임 준비를 완료해야 합니다. `models.minicpm`은 `~/workspace/models/MiniCPM-V-4.7-1B`의 로컬 비양자화 BF16 체크포인트를 가리킵니다. 다른 환경에서는 경로를 수정하세요. Linux/CUDA가 필요하며, 전용 extra는 `transformers>=5.18.0`과 `vllm==0.32.0`을 설치합니다. 이 vLLM 릴리스에는 [MiniCPM 4.7 지원 PR #58674](https://github.com/vllm-project/vllm/pull/58674)가 포함되어 있습니다.
 
-`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 장면 추출만 지원하며 요약·Description·추천 평가 소스로는 선택할 수 없습니다. 기존 v6 설정은 그대로 읽을 수 있습니다. MiniCPM을 활성화하려면 `models.minicpm`, `protocol.graph_extractors` 마지막의 `minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 세 설정을 함께 추가해야 합니다. 기본 config에는 세 항목이 포함되어 있습니다.
+`--arm` 생략 시 `graph_minicpm`을 사용합니다. 추출한 Scene Graph는 직접 Graph 모드의 임베딩·추천·진단에서 `graph_minicpm`과 `graph_minicpm_meta`로 사용할 수 있습니다. 두 Arm은 같은 `graph_minicpm` 장면 파일을 읽으며 `_meta`에만 영문 제목을 추가합니다. Text 모드·요약·Description은 지원하지 않습니다. 기존 v6 설정과 Run을 그대로 사용할 수 있습니다. MiniCPM을 활성화하려면 `models.minicpm`, `protocol.graph_extractors` 마지막의 `minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 세 설정을 함께 추가해야 합니다. 기본 config에는 세 항목이 포함되어 있습니다.
+
+```bash
+python -m validation embed-representations --run-id "$RUN_ID" --representation-mode graph --target meta graph_minicpm graph_minicpm_meta
+python -m validation run-recommendation --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_minicpm graph_minicpm_meta
+python -m validation run-diagnosis --run-id "$RUN_ID" --representation-mode graph --scene-aggregation mean --target meta graph_minicpm graph_minicpm_meta
+```
+
+Graph 모드에서는 정상 구조화된 Scene만 사용하고 warning·raw·failed Scene은 기존 규칙대로 제외합니다.
 
 입력은 기존 키프레임을 순서대로 사용하며, 16x 시각 토큰 압축과 processor 기본 slicing을 적용합니다. Thinking은 끄고 greedy decoding으로 생성합니다. 기본값은 출력 상한 384토큰, presence penalty 1.5, 생성 토큰 대상 repetition penalty 1.05이며 `--presence-penalty`와 `--repetition-penalty`로 변경할 수 있습니다. GPU 선택은 `CUDA_VISIBLE_DEVICES`, 엔진 자원 설정은 공용 `extraction.qwen`을 사용합니다. 컨텍스트 길이를 초과하면 입력·출력 한도를 자동으로 줄이지 않고 오류를 보고합니다.
 
@@ -428,6 +436,8 @@ Description 행은 `extraction/scenes/<source>/<content_id>.jsonl`에 `content_i
 | `graph_qwen3vl_meta` | 제목 + Qwen3-VL Graph Summary | 제목 + Qwen3-VL Scene Graph |
 | `graph_qwen3.5` | Qwen3.5 Graph Summary | Qwen3.5 Scene Graph |
 | `graph_qwen3.5_meta` | 제목 + Qwen3.5 Graph Summary | 제목 + Qwen3.5 Scene Graph |
+| `graph_minicpm` | 미지원 | MiniCPM Scene Graph |
+| `graph_minicpm_meta` | 미지원 | 제목 + MiniCPM Scene Graph |
 | `desc_qwen3.5_meta` | 제목 + Qwen3.5 Description Summary | 미지원 |
 | `graph_gemini_meta` | 제목 + Gemini Graph Summary | 제목 + Gemini Scene Graph |
 | `desc_qwen3vl_meta` | 제목 + Qwen3-VL Description Summary | 미지원 |
