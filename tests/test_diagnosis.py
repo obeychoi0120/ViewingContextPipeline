@@ -69,7 +69,7 @@ def test_selected_pairs_use_bonferroni(context):
 
 
 @pytest.mark.torch
-def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch):
+def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
     train_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
     config = validation_config(context)
@@ -89,10 +89,11 @@ def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch):
     assert report["runtime_decision"]["status"] == "fail"
     assert report["statistics"]["status"] == "not_computed"
     assert "metric/rank mismatch" in report["runtime_decision"]["errors"][0]["message"]
+    assert "[Diagnosis] Arm별 최종 test 지표" not in capsys.readouterr().out
 
 
 @pytest.mark.torch
-def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch):
+def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch, capsys):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT
     from validation.graph_inputs import GraphStore
     from validation.representation_provenance import recommendation_identity
@@ -125,9 +126,16 @@ def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch):
     before = {str(p): p.read_bytes() for p in context.recommendations_dir.rglob("complete.json")}
     assert run_recommendation(context, target=["a1", "a2", "a3"])["completed"] == 9
     assert all(Path(path).read_bytes() == content for path, content in before.items())
+    capsys.readouterr()
     assert run_diagnosis(context, target=list(reversed(all_arms)))["status"] == "pass"
+    console = capsys.readouterr().out.strip().splitlines()
     full_path = context.validation_dir / "diagnosis" / "base_d0_d1_g0_g1_a1_a2_a3" / "diagnosis.json"
     full = read_json(full_path)
+    assert console[-9].split() == ["Arm", "NDCG@10", "HR@10"]
+    for line, arm in zip(console[-8:], all_arms, strict=True):
+        label = "Base" if arm == "base" else arm.upper()
+        means = full["recommendations"]["means"][arm]
+        assert line.split() == [label, f"{means['NDCG@10']:.6f}", f"{means['HR@10']:.6f}"]
     assert full["statistics"]["comparison_count"] == len(full["statistics"]["comparisons"]) == 28
     assert full["recommendations"]["actual_event_count"] == 72
     assert full["recommendations"]["base_relative_changes"]["base"]["NDCG@10"] in (0.0, None)

@@ -306,7 +306,17 @@ def diagnose(context, *, target=None, compare_run_id=None):
     atomic_write_json(destination, document, durable=True)
     if errors:
         raise RuntimeError(f"leave-one-out diagnosis failed; see {destination}")
-    from validation.experiment_report import write_report
+    from validation.experiment_report import display_arm, write_report
 
     write_report(context, selected, document)
+    cutoff = config.evaluation.primary_cutoff
+    metrics = (f"NDCG@{cutoff}", f"HR@{cutoff}")
+    print("\n[Diagnosis] Arm별 최종 test 지표 (seed 평균)", flush=True)
+    print(f"{'Arm':<6} {metrics[0]:>12} {metrics[1]:>12}", flush=True)
+    for arm in arms:
+        values = document["recommendations"]["means"][arm]
+        print(
+            f"{display_arm(arm):<6} {values[metrics[0]]:>12.6f} {values[metrics[1]]:>12.6f}",
+            flush=True,
+        )
     return {"stage": "run-diagnosis", "status": "pass", "path": str(destination)}

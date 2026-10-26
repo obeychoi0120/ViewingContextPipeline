@@ -332,6 +332,8 @@ SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마�
 
 보고서에는 NDCG@10·HR@10의 seed별 값·평균·표본 표준편차, Base 대비 변화율, 입력 확보율과 Ablation 통계를 포함합니다. Base가 선택되지 않으면 상대 변화율을 생략합니다. 사용자·이벤트·분할·seed·평가 계약이 다른 결과는 혼합하지 않습니다. `run-diagnosis --compare-run-id <참조_Run>`으로 같은 Arm의 Run 간 paired 비교도 할 수 있습니다.
 
+`run-diagnosis`가 성공하면 마지막 콘솔에 선택한 Arm별 NDCG@10·HR@10의 seed 평균을 등록 순서대로 소수점 6자리까지 출력합니다.
+
 CPU·오프라인 회귀 테스트는 `python -m pytest -q tests`로 실행합니다. 이는 실제 VLM/BGE 품질·CUDA 처리량·전체 데이터 추천 성능을 검증하지 않습니다.
 
 ## 산출물과 재현
