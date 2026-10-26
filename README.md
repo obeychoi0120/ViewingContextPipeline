@@ -16,50 +16,27 @@ MicroLens-100K 영상에서 시청 맥락을 추출하고, **영문 제목에 �
 
 ## 시작하기
 
-저장소 루트에서 실행합니다. Ubuntu/Bash·Python 3.11 이상과 `ffmpeg`·`ffprobe`가 필요하며, 데이터와 로컬 모델 가중치는 미리 준비합니다. Qwen은 Linux/CUDA와 비양자화 BF16 체크포인트를 사용하고, Gemini는 Vertex ADC 인증과 호출 권한이 필요합니다.
+기본 실행 순서는 **데이터·키프레임 준비 → Qwen3-VL-2B-Instruct의 Graph·Description 추출 → BGE 특징 준비 → Basic 학습·진단 → 필요한 Ablation 추가 실행**입니다. 저장소 루트에서 실행하며 Ubuntu/Bash·Python 3.11 이상과 `ffmpeg`·`ffprobe`가 필요합니다. 데이터와 Qwen·BGE 로컬 가중치를 미리 준비하고, Qwen 추출에는 Linux/CUDA와 비양자화 BF16 체크포인트를 사용합니다.
 
 ```bash
-python -m pip install -e ".[qwen,gemini,train,embedding,dev]"
+python -m pip install -e ".[qwen,train,embedding,dev]"
 python -m pip check
 export RUN_ID="new_run_id"
 ```
 
-먼저 [config.yaml](config.yaml)의 데이터·모델 경로와 Vertex 프로젝트 설정을 실행 환경에 맞게 바꾸세요. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
-
-MiniCPM Graph 추출은 아래 전용 설치·실행 방법을 사용합니다.
-
-<details>
-<summary>MiniCPM-V-4.7-1B: vLLM으로 Scene Graph 추출</summary>
-
-```bash
-python -m pip install -e ".[minicpm,dev]"
-python -m pip check
-export RUN_ID="new_minicpm_run"
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model minicpm
-```
-
-먼저 공통 cohort·키프레임 준비를 완료해야 합니다. `models.minicpm`은 `~/workspace/models/MiniCPM-V-4.7-1B`의 로컬 비양자화 BF16 체크포인트를 가리킵니다. 다른 환경에서는 경로를 수정하세요. Linux/CUDA가 필요하며, 전용 extra는 `transformers>=5.18.0`과 `vllm==0.32.0`을 설치합니다. 이 vLLM 릴리스에는 [MiniCPM 4.7 지원 PR #58674](https://github.com/vllm-project/vllm/pull/58674)가 포함되어 있습니다.
-
-`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 추출 전용 소스이며 현재 8개 추천 Arm에는 포함되지 않습니다. 기존 v6 설정과 Run을 사용할 수 있습니다. 활성화에는 `models.minicpm`, `protocol.graph_extractors`의 `minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 세 설정이 필요합니다.
-
-입력은 기존 키프레임을 순서대로 사용하며, 16x 시각 토큰 압축과 processor 기본 slicing을 적용합니다. Thinking은 끄고 greedy decoding으로 생성합니다. 기본값은 출력 상한 384토큰, presence penalty 1.5, 생성 토큰 대상 repetition penalty 1.05이며 `--presence-penalty`와 `--repetition-penalty`로 변경할 수 있습니다. GPU 선택은 `CUDA_VISIBLE_DEVICES`, 엔진 자원 설정은 공용 `extraction.qwen`을 사용합니다. 컨텍스트 길이를 초과하면 입력·출력 한도를 자동으로 줄이지 않고 오류를 보고합니다.
-
-결과는 `artifacts/runs/<RUN_ID>/extraction/scenes/graph_minicpm/<content_id>.jsonl`, 수정하지 않은 응답은 같은 디렉터리의 `raw_responses/<content_id>.jsonl`에 저장합니다. 원본을 먼저 저장한 뒤, 코드·인용 문자열·수식의 이스케이프를 보존하면서 일반 텍스트 개행을 복원하여 기존 v9 파서에 전달합니다. 원본 파일은 각 장면의 최근 응답을 보존하며 재시도 시 해당 장면을 교체합니다.
-
-일반 재실행은 설정 변경 여부와 관계없이 정상 결과를 재사용하고 warning·failed 장면을 다시 생성합니다. 변경한 설정은 새로 생성하는 장면에만 적용되며, `generation_identity.json`은 최초 생성 설정을 보존합니다. 전체 결과에 변경한 설정을 적용하려면 `--force` 또는 새 Run ID를 사용합니다. `--force`는 해당 소스의 기존 결과와 원본 응답을 지우고 다시 생성합니다. 추론 실행과 Graph 파싱 성공은 시각적 정확도나 추천 성능 개선을 입증하지 않습니다.
-
-</details>
+먼저 [config.yaml](config.yaml)의 `data`, `models.qwen3vl`, `models.bge` 경로를 실행 환경에 맞게 바꾸세요. Gemini·MiniCPM 추출과 Summary 생성은 아래 선택 기능에서 설명합니다. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
 
 <details>
 <summary>환경별 설치와 확인할 설정</summary>
 
-Gemini 생성 환경은 `.[gemini,dev]`, 임베딩·추천 환경은 `.[train,embedding,dev]`로 나누어 설치할 수 있습니다. Qwen·임베딩·추천의 GPU는 `CUDA_VISIBLE_DEVICES`로 선택합니다. Qwen은 GPU당 하나의 엔진을 실행하고, 추천의 `--workers-per-gpu`는 GPU당 독립 학습 작업 수입니다(기본 1).
+Qwen 추출 환경은 `.[qwen,dev]`, 임베딩·추천 환경은 `.[train,embedding,dev]`로 나누어 설치할 수 있습니다. Qwen·임베딩·추천의 GPU는 `CUDA_VISIBLE_DEVICES`로 선택합니다. Qwen은 GPU당 하나의 엔진을 실행하고, 추천의 `--workers-per-gpu`는 GPU당 독립 학습 작업 수입니다(기본 1).
 
 | config.yaml 항목 | 확인할 내용 |
 | --- | --- |
 | `data` | interaction CSV·검증용 TSV, 영상 디렉터리, 제목·보완 제목 CSV의 경로 |
-| `models.qwen3vl`, `models.qwen3.5`, `models.bge` | 로컬 모델 디렉터리 |
-| `models.gemini` | Vertex 프로젝트·위치·모델·생성 설정 |
+| `models.qwen3vl`, `models.bge` | 기본 추천 실험에 사용하는 Qwen3-VL-2B-Instruct·BGE Large 로컬 디렉터리 |
+| `models.qwen3.5`, `models.minicpm` | 추가 추출 모델의 로컬 디렉터리 |
+| `models.gemini` | Gemini 호출 시 확인할 Vertex 프로젝트·위치·모델·생성 설정 |
 | `extraction.visual_evidence` | 시간 창·키프레임 수·해상도 |
 | `extraction.qwen`, `extraction.gemini` | 추론 엔진·동시 실행 설정 |
 | `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}` | Scene·Summary 출력 토큰 한도 |
@@ -88,35 +65,16 @@ Run별 leave-one-out 분할·평가 catalog는 이후 `embed-representations`에
 </details>
 
 <details>
-<summary>Scene 추출과 선택적인 Summary 생성</summary>
+<summary>3단계: Qwen3-VL-2B-Instruct로 Graph·Description 추출</summary>
 
-생성 명령에는 `--model`, `--arm`, Markdown 프롬프트 경로인 `--schema`를 지정합니다. `--arm`은 생성 소스이며 추천용 `d0`, `g1` 등의 이름을 지정하지 않습니다. 상대 경로는 저장소 루트 기준입니다.
-
-| 모델 (`--model`) | Graph 소스 (`--arm`) | Description 소스 (`--arm`) |
-| --- | --- | --- |
-| `qwen3vl` | `graph_qwen3vl` | `desc_qwen3vl` |
-| `qwen3.5` | `graph_qwen3.5` | `desc_qwen3.5` |
-| `gemini` | `graph_gemini` | `desc_gemini` |
-
-아래는 Qwen3-VL·Gemini의 두 관측 형식을 준비하는 예시입니다. Qwen3.5는 위 표에 맞추어 모델·소스를 바꾸면 됩니다.
+생성 명령에는 `--model qwen3vl`, 생성 소스인 `--arm`, Markdown 프롬프트 경로인 `--schema`를 지정합니다. `--arm`은 추천용 `d0`, `g1` 등의 이름과 구분합니다. 상대 경로는 저장소 루트 기준입니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model gemini --arm graph_gemini
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model qwen3vl --arm desc_qwen3vl
-python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
 
-Summary 생성 기능은 별도로 유지하지만 현재 추천 Arm은 이 결과를 읽지 않습니다. 아래는 네 소스 모두 Gemini로 요약하는 예시입니다. 요약 모델을 Qwen으로 선택하려면 `--model qwen3vl` 또는 `--model qwen3.5`를 사용합니다. 소스 이름은 Scene을 생성한 모델을 유지합니다.
-
-```bash
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_qwen3vl
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_gemini
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen3vl
-python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
-```
-
-같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 해당 소스의 `summarize --force`가 필요합니다.
+D0·D1은 `desc_qwen3vl`, G0·G1·A1·A2·A3는 `graph_qwen3vl`을 읽습니다. 두 추출 소스를 준비한 뒤 아래 특징 준비·학습·진단 명령을 실행합니다.
 
 </details>
 
@@ -137,6 +95,68 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --target "${BASIC[@]}" a1 
 `--target`은 필수이며 입력 순서와 무관하게 등록 순서로 처리합니다. Arm마다 입력·집계 방식이 고정되어 `--representation-mode`, `--scene-aggregation`, `--step basic/ablation`은 받지 않습니다. Ablation 실행에 성능 조건은 없습니다. 추천 명령은 추출·임베딩·진단을 자동 실행하지 않습니다.
 
 D0·D1은 Description 특징을, G0·G1·A1·A2·A3는 Graph 특징을 공유하므로 Ablation 추가 실행에 새 BGE 인코딩이 필요하지 않습니다. GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-every 100` 및 선택적인 `--profile-operators`로 지정합니다.
+
+</details>
+
+<details>
+<summary>선택 기능: Gemini·Qwen3.5 추출과 영상 Summary 생성</summary>
+
+기본 추천 실험의 시각 입력은 Qwen3-VL 장면 소스를 사용합니다. 아래 추가 모델의 추출 결과와 영상 Summary는 현재 추천 Arm에 자동 연결되지 않습니다.
+
+Gemini를 호출할 때는 전용 패키지를 설치하고 `models.gemini`의 Vertex 프로젝트·위치·모델 설정, ADC 인증과 호출 권한을 확인합니다. Gemini 생성 환경은 기본 Qwen 환경과 분리할 수 있습니다.
+
+```bash
+python -m pip install -e ".[gemini,dev]"
+python -m pip check
+```
+
+추가 추출에도 `--model`, 생성 소스인 `--arm`, Markdown 프롬프트 경로인 `--schema`를 지정합니다.
+
+| 모델 (`--model`) | Graph 소스 (`--arm`) | Description 소스 (`--arm`) |
+| --- | --- | --- |
+| `qwen3vl` | `graph_qwen3vl` | `desc_qwen3vl` |
+| `qwen3.5` | `graph_qwen3.5` | `desc_qwen3.5` |
+| `gemini` | `graph_gemini` | `desc_gemini` |
+
+아래는 Gemini로 두 관측 형식을 추출하는 예시입니다. Qwen3.5를 사용하려면 `models.qwen3.5` 경로를 확인하고 위 표에 맞춰 모델·소스를 바꿉니다. Qwen3.5는 기본 Qwen 설치의 공용 vLLM 런타임을 사용합니다.
+
+```bash
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model gemini --arm graph_gemini
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
+```
+
+Summary 생성 기능은 별도로 유지하지만 현재 추천 Arm은 이 결과를 읽지 않습니다. 아래는 네 소스 모두 Gemini로 요약하는 예시입니다. 요약 모델을 Qwen으로 선택하려면 `--model qwen3vl` 또는 `--model qwen3.5`를 사용합니다. 소스 이름은 Scene을 생성한 모델을 유지합니다.
+
+```bash
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_qwen3vl
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_graph_v9.md --model gemini --arm graph_gemini
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen3vl
+python -m extraction summarize --run-id "$RUN_ID" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
+```
+
+같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 해당 소스의 `summarize --force`가 필요합니다.
+
+</details>
+
+<details>
+<summary>선택 기능: MiniCPM-V-4.7-1B로 Scene Graph 추출</summary>
+
+```bash
+python -m pip install -e ".[minicpm,dev]"
+python -m pip check
+export RUN_ID="new_minicpm_run"
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model minicpm
+```
+
+먼저 공통 cohort·키프레임 준비를 완료해야 합니다. `models.minicpm`은 `/home_nvme/shared/models/MiniCPM-V-4.7-1B`의 로컬 비양자화 BF16 체크포인트를 가리킵니다. 다른 환경에서는 경로를 수정하세요. Linux/CUDA가 필요하며, 전용 extra는 `transformers>=5.18.0`과 `vllm==0.32.0`을 설치합니다. 이 vLLM 릴리스에는 [MiniCPM 4.7 지원 PR #58674](https://github.com/vllm-project/vllm/pull/58674)가 포함되어 있습니다.
+
+`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 추출 전용 소스이며 현재 8개 추천 Arm에는 포함되지 않습니다. 기존 v6 설정과 Run을 사용할 수 있습니다. 활성화에는 `models.minicpm`, `protocol.graph_extractors`의 `minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 세 설정이 필요합니다.
+
+입력은 기존 키프레임을 순서대로 사용하며, 16x 시각 토큰 압축과 processor 기본 slicing을 적용합니다. Thinking은 끄고 greedy decoding으로 생성합니다. 기본값은 출력 상한 384토큰, presence penalty 1.5, 생성 토큰 대상 repetition penalty 1.05이며 `--presence-penalty`와 `--repetition-penalty`로 변경할 수 있습니다. GPU 선택은 `CUDA_VISIBLE_DEVICES`, 엔진 자원 설정은 공용 `extraction.qwen`을 사용합니다. 컨텍스트 길이를 초과하면 입력·출력 한도를 자동으로 줄이지 않고 오류를 보고합니다.
+
+결과는 `artifacts/runs/<RUN_ID>/extraction/scenes/graph_minicpm/<content_id>.jsonl`, 수정하지 않은 응답은 같은 디렉터리의 `raw_responses/<content_id>.jsonl`에 저장합니다. 원본을 먼저 저장한 뒤, 코드·인용 문자열·수식의 이스케이프를 보존하면서 일반 텍스트 개행을 복원하여 기존 v9 파서에 전달합니다. 원본 파일은 각 장면의 최근 응답을 보존하며 재시도 시 해당 장면을 교체합니다.
+
+일반 재실행은 설정 변경 여부와 관계없이 정상 결과를 재사용하고 warning·failed 장면을 다시 생성합니다. 변경한 설정은 새로 생성하는 장면에만 적용되며, `generation_identity.json`은 최초 생성 설정을 보존합니다. 전체 결과에 변경한 설정을 적용하려면 `--force` 또는 새 Run ID를 사용합니다. `--force`는 해당 소스의 기존 결과와 원본 응답을 지우고 다시 생성합니다. 추론 실행과 Graph 파싱 성공은 시각적 정확도나 추천 성능 개선을 입증하지 않습니다.
 
 </details>
 
@@ -231,7 +251,7 @@ Graph는 `extraction/scenes/<source>/<content_id>.jsonl`에 `content_id`·`scene
 | 장면 간 동일 개체 | 장면별 독립 ID 사용. 장면 간 추적 없음 | 어떤 시각 근거로 동일 개체를 연결할 것인가? |
 | 사건 간 관계 | 명시적 연속·인과 관계 저장 없음 | 어떤 관계를 관측으로 인정하고 스키마에 기록할 것인가? |
 
-위 질문은 후속 설계 검토 범위입니다. 현재 GNN·Transformer가 벡터 사이에서 수행하는 정보 전달은 모듈 3에서 다룹니다. 모듈 1은 관계의 의미·표현 규칙을, 모듈 3은 관계나 벡터 유사도를 이용한 집계 연산을 설명합니다.
+위 질문은 후속 설계 검토 범위입니다. 현재 8개 Arm의 장면 간 Attention 기반 GNN이 수행하는 정보 전달은 모듈 3에서 다룹니다. 모듈 1은 관계의 의미·표현 규칙을, 모듈 3은 장면 특징에서 학습한 전달 가중치를 이용한 집계 연산을 설명합니다.
 
 </details>
 
@@ -271,7 +291,11 @@ SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마�
 추천 점수 = 사용자 벡터 · 후보 영상 벡터
 ```
 
-모듈 2·3의 학습 가능한 영상 encoder와 SASRec은 추천 loss로 함께 갱신하며 seed·Arm·Graph 집계 방식별로 별도 학습합니다. 고정 BGE 특징과 학습된 Scene·Video vectors를 구분하고, 장면 encoder나 집계를 독립적으로 사전 학습한 것으로 해석하지 않습니다.
+모듈 2·3의 학습 가능한 영상 encoder와 SASRec은 추천 loss로 함께 갱신하며 **seed × Arm별로 독립 학습**합니다. 집계 방식은 각 Arm에 고정되어 있습니다. 고정 BGE 특징과 학습된 Scene·Video vectors를 구분하고, 장면 encoder나 집계를 독립적으로 사전 학습한 것으로 해석하지 않습니다.
+
+학습 손실은 인기도 보정을 적용한 인배치 Cross-Entropy입니다. 같은 배치의 정답 아이템들을 후보로 사용하고, 내적 점수에서 `log Q(item)`을 뺍니다. `Q`는 학습 전이의 정답 빈도를 정규화한 확률이며 validation/test 이벤트는 빈도 계산에서 제외합니다. 자신의 정답 열은 유지하고, 같은 정답의 중복 열이나 최대 10개 입력 이력에 포함된 후보는 negative로 사용하지 않도록 마스킹합니다.
+
+최적화는 AdamW(`weight_decay=0.1`)를 사용하고 gradient norm을 5.0으로 제한합니다. 현재 설정은 learning rate `0.0001`, batch size `128`, 최대 `50` epoch, early-stopping patience `5`, seed `42·43·44`입니다. 학습·손실 구현은 [추천 학습](src/validation/leave_one_out_recommendation.py), optimizer는 [공통 최적화 설정](src/validation/recommendation.py)을 참고하세요.
 
 </details>
 
@@ -435,7 +459,7 @@ Decoding은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p
 두 옵션은 Qwen의 Scene 추출·요약과 MiniCPM Graph 장면 추출에 지정할 수 있으며 생략하면 위 기본값을 사용합니다. Repetition penalty는 vLLM 기본 penalty와 중복 적용하지 않습니다. 다음은 기본 presence penalty를 끄는 **옵션 변경 예시**입니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3.5 --arm graph_qwen3.5 --presence-penalty 0
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl --presence-penalty 0
 ```
 
 옵션은 새로 생성하는 결과에 적용됩니다. 기존 정상 결과의 재사용·전체 재생성은 위 재개 규칙을 따릅니다. 이 정책의 형식 준수율·추천 성능 효과는 별도의 비교 실험으로 확인해야 합니다.
