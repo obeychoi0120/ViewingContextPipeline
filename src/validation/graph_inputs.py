@@ -10,16 +10,15 @@ import tempfile
 
 import numpy as np
 
-from arm_registry import select_arms
+from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, select_arms
 from artifact_io import fingerprint
 from extraction.structured_output import validate_graph_structure, OutputValidationError
 from extraction.scene_storage import read_scene_records, validate_scene_payload, recover_scene_graph
 from model_provenance import local_model_identity
 from artifact_io import read_json, write_json
-from validation.graph_context import GRAPH_ARMS
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "role-graph-inputs/v8"
+VERSION = "scene-bge-inputs/v1"
 ROLES = ("actor", "target", "tool", "receiver", "place")
 # Keep the receiver tensor slot for model/checkpoint shape compatibility.
 # Current receiver-free input always supplies the absent state.
@@ -35,6 +34,8 @@ ARRAYS = (
     "missing",
     "missing_offsets",
     "titles",
+    "scene_keys",
+    "node_keys",
 )
 
 
@@ -61,6 +62,7 @@ def source_identity(context, cohort, arm):
     return fingerprint(
         {
             "version": VERSION,
+            "arm_contract": RECOMMENDATION_ARM_CONTRACT,
             "source": arm.scene_arm,
             "files": sources,
             "generation_identity": generation_identity,
@@ -144,6 +146,18 @@ def build_input(context, cohort, arm):
             if "error" in row:
                 reject("failed", row["error"])
                 continue
+            expected = "description" if arm.representation == "description" else "scene_graph"
+            if expected not in row:
+                raise ValueError(f"scene representation mismatch: expected {expected}: {path}")
+            if arm.representation == "description":
+                data["contexts"].append(text_id(row["description"]))
+                data["scene_keys"].append(json.dumps([str(cid), row["scene_idx"]]))
+                for name, values in (("scene_offsets", "nodes"),
+                                     ("edge_offsets", "edges"),
+                                     ("missing_offsets", "missing")):
+                    data[name].append(len(data[values]))
+                report["valid_scenes"] += 1
+                continue
             g, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
             if not isinstance(g, dict):
                 reject("raw")
@@ -169,10 +183,12 @@ def build_input(context, cohort, arm):
                 )
                 data["nodes"].append(text_id(text))
                 data["types"].append(0)
-            for action in g["actions"]:
+                data["node_keys"].append(entity["id"])
+            for action_index, action in enumerate(g["actions"]):
                 node = len(data["nodes"])
                 data["nodes"].append(text_id(action["action"]))
                 data["types"].append(1)
+                data["node_keys"].append(f"action_{action_index}")
                 states = [node]
                 for role, name in enumerate(ROLES):
                     value = None if name == "receiver" else action[name]
@@ -190,6 +206,7 @@ def build_input(context, cohort, arm):
                 f"Topics: {', '.join(sorted(g['topics']))}"
             )
             data["contexts"].append(text_id(context_text))
+            data["scene_keys"].append(json.dumps([str(cid), row["scene_idx"]]))
             data["scene_offsets"].append(len(data["nodes"]))
             data["edge_offsets"].append(len(data["edges"]))
             data["missing_offsets"].append(len(data["missing"]))
@@ -199,10 +216,16 @@ def build_input(context, cohort, arm):
         report["empty_video"] = int(not report["valid_scenes"] and not report["title_used"])
         stats.update(report)
         videos.append({"content_id": cid, **dict(report)})
-    arrays = {name: np.asarray(value, dtype=np.int64) for name, value in data.items()}
+    arrays = {
+        name: np.asarray(value, dtype=np.str_ if name.endswith("_keys") else np.int64)
+        for name, value in data.items()
+    }
     arrays["edges"] = arrays["edges"].reshape(-1, 3)
     arrays["missing"] = arrays["missing"].reshape(-1, 6)
-    return texts, arrays, {"counts": dict(stats), "videos": videos, "excluded_scenes": excluded}
+    return texts, arrays, {
+        "counts": dict(stats), "videos": videos, "excluded_scenes": excluded,
+        "scene_coverage": stats["valid_scenes"] / stats["scene_count"] if stats["scene_count"] else None,
+    }
 
 
 def _encode_shard(settings, texts, device, destination):
@@ -249,6 +272,7 @@ def bundle_valid(directory, signature, embedding_dim):
         return (
             manifest["input_hash"] == signature
             and manifest["version"] == VERSION
+            and manifest.get("arm_contract") == RECOMMENDATION_ARM_CONTRACT
             and features.shape == (manifest["feature_count"], embedding_dim)
             and features.dtype == np.float32
             and set(manifest["checksums"]) == {f"{n}.npy" for n in ARRAYS} | {"statistics.json"}
@@ -264,16 +288,16 @@ def prepare(context, *, target, force=False):
     from validation.steps import validation_config
     from validation.selection import prepare_validation_cohort
 
-    if set(target) - GRAPH_ARMS:
-        raise ValueError("unsupported graph arm")
     context.initialize()
     cohort = prepare_validation_cohort(context)
     settings = validation_config(context).encoder
     pending, reused = [], []
-    for name, arm in select_arms(context.config, target).items():
+    arms = select_arms(context.config, target)
+    sources = {feature_source(arm): arm for arm in arms.values()}
+    for name, arm in sources.items():
         signature = source_identity(context, cohort, arm)
-        destination = context.representations_dir / f"{name}_embeddings"
-        cache = SharedCache(context, "graph_inputs", signature)
+        destination = context.representations_dir / name
+        cache = SharedCache(context, "scene_inputs", signature)
         if not force and bundle_valid(destination, signature, settings.embedding_dim):
             reused.append(name)
             continue
@@ -299,10 +323,10 @@ def prepare(context, *, target, force=False):
         raise ValueError("invalid graph BGE features")
     lookup = {t: i for i, t in enumerate(unique)}
     for name, signature, texts, arrays, stats in pending:
-        arm = select_arms(context.config, [name])[name]
+        arm = sources[name]
         if source_identity(context, cohort, arm) != signature:
             raise ValueError(f"Graph inputs changed during preparation: {name}; rerun preparation")
-        destination = context.representations_dir / f"{name}_embeddings"
+        destination = context.representations_dir / name
         destination.mkdir(parents=True, exist_ok=True)
         (destination / "manifest.json").unlink(missing_ok=True)
         with tempfile.TemporaryDirectory(dir=destination) as temp:
@@ -323,8 +347,9 @@ def prepare(context, *, target, force=False):
             write_json(temp / "statistics.json", stats)
             manifest = {
                 "version": VERSION,
+                "arm_contract": RECOMMENDATION_ARM_CONTRACT,
                 "input_hash": signature,
-                "arm": name,
+                "source": name,
                 "catalog": cohort["catalog"],
                 "feature_count": len(texts),
                 "checksums": {p.name: checksum(p) for p in temp.iterdir()},
@@ -334,7 +359,7 @@ def prepare(context, *, target, force=False):
                 if p.name != "manifest.json":
                     p.replace(destination / p.name)
             (temp / "manifest.json").replace(destination / "manifest.json")
-        SharedCache(context, "graph_inputs", signature).publish(
+        SharedCache(context, "scene_inputs", signature).publish(
             destination,
             [f"{n}.npy" for n in ARRAYS] + ["manifest.json", "statistics.json"],
             origin={"run_id": context.run_id},
@@ -342,16 +367,18 @@ def prepare(context, *, target, force=False):
         )
     return {
         "stage": "embed-representations",
-        "representation_mode": "graph",
-        "generated_arms": [p[0] for p in pending],
-        "reused_arms": reused,
+        "arm_contract": RECOMMENDATION_ARM_CONTRACT,
+        "selected_arms": list(arms),
+        "generated_sources": [p[0] for p in pending],
+        "reused_sources": reused,
     }
 
 
 def verify(context, cohort, arms):
-    for name, arm in select_arms(context.config, list(arms)).items():
+    selected = select_arms(context.config, list(arms))
+    for name, arm in {feature_source(a): a for a in selected.values()}.items():
         signature = source_identity(context, cohort, arm)
-        path = context.representations_dir / f"{name}_embeddings"
+        path = context.representations_dir / name
         if not bundle_valid(path, signature, context.config["validation"]["encoder"]["embedding_dim"]):
             raise ValueError(
                 f"missing/stale/corrupt graph inputs: {name}; rerun embed-representations"

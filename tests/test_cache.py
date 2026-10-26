@@ -5,15 +5,14 @@ import pytest
 
 from artifact_io import read_json, write_json, write_jsonl
 from helpers import (
-    prepare_text,
+    prepare_inputs,
     refresh_checksums,
     result_identity,
     selected_table,
-    train_text,
+    train_inputs,
 )
 from validation.leave_one_out_recommendation import combination_complete
 from validation.representation_checks import verify_representations
-from validation.representation_provenance import begin_write
 from validation.selection import training_signature
 from validation.shared_cache import SharedCache
 from validation.steps import validation_config
@@ -22,7 +21,7 @@ from validation.steps import validation_config
 def test_training_identity_invalidates_changed_inputs(context, monkeypatch):
     from validation.recommendation_contracts import EVALUATION_CONTRACT
 
-    prepare_text(context, monkeypatch)
+    prepare_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
     config = validation_config(context)
     original = training_signature(context, cohort, config)
@@ -38,10 +37,10 @@ def test_training_identity_invalidates_changed_inputs(context, monkeypatch):
 
 @pytest.mark.torch
 def test_completion_requires_valid_bundle(context, monkeypatch):
-    train_text(context, monkeypatch)
+    train_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
     identity = result_identity(context, cohort)
-    directory = context.recommendations_dir / "seed_42" / "meta"
+    directory = context.recommendations_dir / "seed_42" / "base"
     assert combination_complete(directory, identity, 3)
     assert not combination_complete(directory, {**identity, "seed": 999}, 3)
     assert not combination_complete(directory, identity, 2)
@@ -91,19 +90,49 @@ def test_shared_cache_roundtrip_and_corruption(context):
 
 
 def test_unfinished_embeddings_are_rejected(context, monkeypatch):
-    prepare_text(context, monkeypatch)
+    prepare_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
-    verify_representations(context, cohort, arms=["meta"])
-    begin_write(context, "meta", "previous")
-    with pytest.raises(RuntimeError, match="unfinished"):
-        verify_representations(context, cohort, arms=["meta"])
-    from validation.representation_provenance import pending_write
+    verify_representations(context, cohort, arms=["base"])
+    root = context.representations_dir / "metadata"
+    manifest = (root / "manifest.json").read_bytes()
+    (root / "manifest.json").unlink()
+    with pytest.raises(ValueError, match="missing/stale/corrupt"):
+        verify_representations(context, cohort, arms=["base"])
 
-    pending_write(context, "meta").unlink()
-    path = context.representations_dir / "meta_embeddings.npz"
-    with np.load(path) as archive:
-        arrays = {key: archive[key] for key in archive.files}
-    arrays["title_values"][0, 0] += 1
-    np.savez_compressed(path, **arrays)
-    with pytest.raises(RuntimeError, match="values changed"):
-        verify_representations(context, cohort, arms=["meta"])
+    (root / "manifest.json").write_bytes(manifest)
+    path = root / "features.npy"
+    values = np.load(path)
+    values[1, 0] += 1
+    np.save(path, values)
+    with pytest.raises(ValueError, match="missing/stale/corrupt"):
+        verify_representations(context, cohort, arms=["base"])
+
+
+@pytest.mark.torch
+def test_cross_run_cache_and_paired_comparison(context, monkeypatch):
+    from pipeline_runtime import RunContext
+    from validation.run_comparison import compare_runs
+    from validation.steps import run_recommendation, run_diagnosis
+
+    train_inputs(context, monkeypatch)
+    reference = RunContext.load("reference", root=context.root)
+    prepare_inputs(reference, monkeypatch)
+    reused = run_recommendation(reference, target=["base", "g0"])
+    assert reused["completed"] == 0 and reused["skipped"] == 6
+    cohort, _, _ = selected_table(reference)
+    for seed in (42, 43, 44):
+        for arm in ("base", "g0"):
+            directory = reference.recommendations_dir / f"seed_{seed}" / arm
+            assert combination_complete(directory, result_identity(reference, cohort, seed, arm), 3)
+            assert read_json(directory / "training.json")["reused_from"]["source_run_id"] == context.run_id
+    compared = compare_runs(context, reference.run_id, target=["g0", "base"])
+    assert compared["targets"] == ["base", "g0"]
+    assert all(row["difference"] == 0 for row in compared["comparisons"].values())
+    assert run_diagnosis(context, target=["base", "g0"], compare_run_id=reference.run_id)["status"] == "pass"
+    reference.config["validation"]["model"]["seeds"] = [42, 43, 45]
+    import yaml
+
+    # A changed seed contract must not be mixed with the previously trained grid.
+    (reference.root / "config.yaml").write_text(yaml.safe_dump(reference.config))
+    with pytest.raises(ValueError, match="identical model seeds"):
+        compare_runs(context, reference.run_id, target=["base"])

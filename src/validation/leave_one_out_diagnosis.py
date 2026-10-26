@@ -3,8 +3,6 @@
 from __future__ import annotations
 import numpy as np
 from artifact_io import read_json
-from validation.diagnosis_support import write_diagnosis
-from validation.diagnosis_scenes import _scene_coverage
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import (
     DIAGNOSIS_ARCHITECTURE_VERSIONS,
@@ -134,6 +132,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
     per_seed = []
     total = 0
     architecture_version = None
+    model_reports = {}
     for split in splits:
         ids = phase_ids(table, split, "test")
         expected = set(ids.tolist())
@@ -161,6 +160,10 @@ def collect_metrics(context, config, cohort, *, arms=None):
                     directory, identity, len(ids), architecture_version=architecture_version
                 )
                 architecture_version = training["architecture_version"]
+                model_reports[arm] = {
+                    "parameters": training.get("parameters", {}),
+                    "role_corruption": training.get("role_corruption_report"),
+                }
                 best = training["best_epoch"]
                 if training["split"] != split or best not in [row["epoch"] for row in training["train"]]:
                     raise ValueError("training split/checkpoint epoch mismatch")
@@ -222,6 +225,16 @@ def collect_metrics(context, config, cohort, *, arms=None):
         arm: {m: float(np.mean([r[m] for r in per_seed if r["arm"] == arm])) for m in metrics}
         for arm in arms
     }
+    standard_deviations = {
+        arm: {metric: float(np.std([r[metric] for r in per_seed if r["arm"] == arm], ddof=1))
+              if len(config.model.seeds) > 1 else 0.0 for metric in metrics}
+        for arm in arms
+    }
+    relative = {
+        arm: {metric: (means[arm][metric] / means["base"][metric] - 1)
+              if means["base"][metric] > 0 else None for metric in metrics}
+        for arm in arms
+    } if "base" in arms else None
     return (
         sums,
         counts,
@@ -233,76 +246,67 @@ def collect_metrics(context, config, cohort, *, arms=None):
             "combination_count": len(per_seed),
             "per_seed": per_seed,
             "means": means,
+            "standard_deviations": standard_deviations,
+            "base_relative_changes": relative,
+            "model_reports": model_reports,
         },
     )
 
 
 def diagnose(context, *, target=None, compare_run_id=None):
+    from arm_registry import RECOMMENDATION_ARM_CONTRACT, target_set
+    from artifact_io import atomic_write_json
     from validation.steps import validation_config
+    from validation.diagnosis_statistics import comparison_contract
+    from validation.representation_provenance import read_state
 
     arms = resolve_target_arms(target, config=context.config)
     context.initialize()
     config = validation_config(context)
-    errors = []
-    from validation.diagnosis_statistics import comparison_contract
-
     contract = comparison_contract(context.config, arms)
+    selected = target_set(context.config, arms)
+    destination = context.diagnosis_path(arms)
     document = {
+        "schema_version": "leave-one-out-diagnosis/v5",
+        "arm_contract": RECOMMENDATION_ARM_CONTRACT,
+        "evaluation_contract": dict(EVALUATION_CONTRACT),
         "run_id": context.run_id,
-        "representation_mode": "text",
+        "targets": list(arms),
         "statistics": {"status": "not_computed", **contract},
     }
+    errors = []
     try:
         cohort = load_validation_cohort(context)
-        from validation.metadata import verify_missing_metadata
-
-        if any((name in arms for name in ("meta", "metadata"))):
-            verify_missing_metadata(context, cohort)
-        _scene_coverage(
-            context.run_root,
-            [r["content_id"] for r in cohort["catalog"]],
-            errors,
-            context.config["extraction"]["visual_evidence"]["scene_duration"],
-            config.evaluation.model_dump(),
-            True,
-            True,
-            branches=set(arms.values()),
-            config=context.config,
-            excluded_content_ids=[r["content_id"] for r in cohort["excluded"]],
-            source_assets_dir=context.source_assets_dir,
-            informational=True,
-        )
-        from extraction.recovery_report import recovery_report
-
-        recovery_report(
-            context, branches=arms, content_ids=[r["content_id"] for r in cohort["catalog"]]
-        )
-        from validation.diagnosis_representations import representation_report
-
-        representation_report(context, arms)
         sums, counts, report = collect_metrics(context, config, cohort, arms=arms)
         document["recommendations"] = report
-        if not errors:
-            observed, draws, _ = cluster_bootstrap(
-                sums, counts, samples=config.evaluation.bootstrap_samples
-            )
-            document["statistics"] = {
-                "status": "computed",
-                **contract,
-                "comparisons": comparisons(
-                    observed, draws, config.evaluation, arms=arms, config=context.config
-                ),
+        document["representations"] = {}
+        for name in arms:
+            state = read_state(context, name)
+            document["representations"][name] = {
+                "sources": state["sources"],
+                "recommendation_hash": state["recommendation_hash"],
+                "statistics": {key: state["statistics"][key]
+                               for key in ("counts", "scene_coverage")},
             }
-            if compare_run_id is not None:
-                from validation.run_comparison import compare_graph_runs
+        observed, draws, bootstrap = cluster_bootstrap(
+            sums, counts, samples=config.evaluation.bootstrap_samples
+        )
+        document["statistics"] = {
+            "status": "computed", **contract, "bootstrap": bootstrap,
+            "comparisons": comparisons(observed, draws, config.evaluation,
+                                       arms=arms, config=context.config),
+        }
+        if compare_run_id is not None:
+            from validation.run_comparison import compare_runs
 
-                document["run_comparison"] = compare_graph_runs(
-                    context, compare_run_id, target=arms
-                )
+            document["run_comparison"] = compare_runs(context, compare_run_id, target=arms)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:
         errors.append({"code": "invalid_leave_one_out_evidence", "message": str(exc)})
     document["runtime_decision"] = {"status": "fail" if errors else "pass", "errors": errors}
-    write_diagnosis(context.diagnosis_path, document)
-    if errors or document["statistics"]["status"] != "computed":
-        raise RuntimeError(f"leave-one-out diagnosis failed; see {context.diagnosis_path}")
-    return {"stage": "run-diagnosis", "status": "pass"}
+    atomic_write_json(destination, document, durable=True)
+    if errors:
+        raise RuntimeError(f"leave-one-out diagnosis failed; see {destination}")
+    from validation.experiment_report import write_report
+
+    write_report(context, selected, document)
+    return {"stage": "run-diagnosis", "status": "pass", "path": str(destination)}

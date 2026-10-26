@@ -52,35 +52,33 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 현재 Run의 기존 Description Summary에는 다른 Run에서 생성된 provenance가 들어 있을 수 있습니다. 원래 모델·프롬프트·입력 해시는 유지하고, 경로가 과거 Run을 가리킨다는 이유만으로 재생성하지 않습니다.
 
-## Text 표현과 공유 캐시
+## 장면별 BGE와 공유 캐시
 
-`meta`는 제목을, `graph_qwen3vl`은 제목 없는 Summary를 사용합니다. 결합 Arm은 양쪽 공백을 제거한 제목과 Summary를 빈 줄 하나로 합칩니다. 하나만 있으면 해당 값만 사용하고, 둘 다 없으면 영벡터입니다. BGE 최대 길이는 `validation.encoder.max_length`이며 truncation 수를 기록합니다.
+추천 Arm은 `base d0 d1 g0 g1 a1 a2 a3`이며 모든 Arm에 제목을 포함합니다. D0·D1은 `desc_qwen3vl`, G0·G1·A1·A2·A3는 `graph_qwen3vl` 장면 자료를 직접 사용합니다. Summary는 추천 입력에 포함되지 않습니다. BGE는 고정된 1024차원 특징을 생성합니다.
 
-공유 캐시는 `<artifacts_root>/shared_cache/{embeddings,graph_inputs,recommendations}/`입니다. 로컬 결과를 먼저 검증하고, 공유 캐시를 확인한 뒤 필요한 계산만 수행합니다. 키별 파일 잠금·체크섬·원자적 게시로 완료 결과를 보호합니다. `--force`는 읽기를 우회하며 정상적인 기존 공유 엔트리를 덮어쓰지 않습니다.
+Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다. A2는 공유 Graph를 수정하지 않고 고정된 교란 뷰를 만듭니다.
 
-- 공통 데이터: 순서가 있는 평가 catalog, 보존된 events, 사용자별 분할.
-- Text 입력: 실제 결합 텍스트·결측 상태, BGE 식별자·설정, Arm·결합 계약, 생성 provenance.
-- 생성 provenance: 프롬프트 본문 해시, 모델, 설정, 실제 Scene 입력 해시. Run 이름·파일 경로·기록 시각은 의미 해시에서 제외합니다.
-- Graph 입력: 실제 Scene 파일 바이트·생성 조건 파일, catalog 순서, 제목, BGE 식별자·설정, 변환 계약.
-- 추천: 표현 입력·행렬 해시, 데이터·학습 계약, 프로토콜·분할 fingerprint·seed·설정. 직접 graph는 모델 구조와 pooling도 포함합니다.
+공유 캐시는 `<artifacts_root>/shared_cache/{scene_inputs,recommendations}/`입니다. 로컬 결과 검증 → 공유 캐시 → 새 계산 순서이며 키별 잠금·checksum·원자적 게시를 사용합니다. `--force`는 캐시 읽기를 우회합니다. 입력 키에는 실제 Scene 파일 바이트·생성 조건 기록, catalog 순서, 제목, BGE 모델·설정과 변환 계약을 포함합니다. 추천 키에는 추천 계약·Arm 구조·표현 해시·분할·학습 설정·seed·A2 교란 정책을 추가합니다.
 
-Summary의 생성 provenance와 `scene_input_hash`를 확인할 수 있으면 간결한 Scene 형식도 Run 간 공유할 수 있습니다. 입력 해시가 없으면 검증 가능한 Scene 생성 provenance가 필요합니다. 검증되지 않는 결과는 로컬에서만 사용하며, 현재 설정을 과거 기록에 소급하지 않습니다.
-
-추천 재사용 단위는 완료된 seed × Arm입니다. `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`을 검증하며 직접 graph에는 최적 checkpoint의 catalog 벡터도 포함됩니다. 재사용한 결과는 독립 파일로 복사하고 현재 Run metadata와 `reused_from`을 기록합니다. 모든 결과가 재사용되면 모델·학습 worker를 초기화하지 않습니다.
+추천 재사용 단위는 완료된 seed × Arm입니다. 모든 Arm에서 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `catalog_vectors.npy`, `complete.json`을 검증합니다. Run 간 재사용은 독립 파일로 복사하여 현재 Run identity와 `reused_from`을 기록합니다. 완료 조합은 모델·worker 초기화 없이 건너뜁니다. epoch 중간 재개는 지원하지 않습니다.
 
 ## 유지하는 계약과 지원 경계
 
-설정은 `experiment_config_version: v6`, validation은 `validation-config/v8`, 원본 cohort는 `microlens-full-source/v2`, 평가 cohort는 `microlens-leave-one-out/v1`, 선택은 `leave-one-out-sequence-catalog/v1`, 추천은 `sasrec-leave-one-out-combination/v2`, 이벤트 지표는 `sasrec-leave-one-out-per-event/v2`, 진단은 `leave-one-out-diagnosis/v4`입니다. 학습 구현은 `shared-scenes-leave-one-out-training/v2`, 실행은 `leave-one-out-vectorized/v2`이며 프로토콜·분할 fingerprint·평가 계약으로 과거 rolling 및 이전 leave-one-out 결과의 재사용을 차단합니다. 모델·Arm 계약은 `title-summary-nine-arms/v3`이며 신규 Run에서 구형 `qwen` 이름을 허용하지 않습니다. 장면 스키마는 `scene-graph/v8`이며 장소 필드는 `place`입니다. 구형 `location` 구조화 입력은 자동 변환 없이 거부합니다. Graph 입력은 `role-graph-inputs/v8`로 갱신하여 이전 장소 필드·파싱·의미 검사 정책의 입력 캐시를 차단합니다. 변경된 입력으로 추천 학습도 다시 수행해야 합니다. receiver 예약 텐서 슬롯과 모델 파라미터 shape는 유지합니다.
+설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v1`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
 
-주 CLI는 preparation의 두 단계, extraction의 두 Scene 추출 단계와 `summarize`, validation의 임베딩·추천·진단입니다. 과거 요약 별칭, Arm·Scene 일괄 변환 명령, 독립 제목 보완 CLI는 제거했습니다. 제목 보완은 `prepare-cohort`에서 수행합니다. 기존 Run·분석 보고서·프롬프트를 자동 이동하거나 삭제하지 않습니다.
+validation 설정 `validation-config/v8`, 학습 구현 `shared-scenes-leave-one-out-training/v2`, 평가 `microlens-leave-one-out-evaluation/v2`, 조합 `sasrec-leave-one-out-combination/v2`, 이벤트 `sasrec-leave-one-out-per-event/v2`는 유지합니다. Graph의 receiver 예약 텐서 슬롯도 유지합니다. 원본 추출·프롬프트·기존 Run 산출물은 이동·삭제하지 않습니다.
 
-## Leave-one-out 실행과 보존
+## Leave-one-out 실행과 진단
 
-공유 원본은 `<artifacts_root>/preparation/cohort/leave_one_out/`, Run별 평가 파일은 `runs/<RUN_ID>/validation/` 아래에 직접 저장합니다. 이전 `validation/leave_one_out/` 파일은 자동 이동·삭제하거나 읽지 않습니다. 기존 rolling cohort·Run·캐시는 보존하며 rolling 실행·재진단은 지원하지 않습니다. Scene·Summary·프레임 경로는 그대로이며 새 catalog와 provenance에 맞는 고정 특징만 재사용합니다.
+`embed-representations`, `run-recommendation`, `run-diagnosis`는 독립 단계이며 `--target`이 필수입니다. 각 Arm이 입력·집계 방식을 정하므로 표현 모드·집계 옵션은 받지 않습니다. Basic과 Ablation의 실행 순서는 사용자가 정하며 성능에 따른 허용·거부 로직은 없습니다. 추천 명령은 특징 준비나 진단을 자동 실행하지 않습니다.
 
-기존 명령 `prepare-cohort → embed-representations → run-recommendation → run-diagnosis`를 사용합니다. 원본 CSV가 있는 환경에서 새 공유 preparation을 먼저 완료하십시오. 날짜 대신 `seed × Arm` 조합을 실행하고 validation HR@10 최고 checkpoint를 복원하여 test를 한 번 평가합니다. 동점이면 최초 epoch를 유지하며 patience 5는 그대로입니다. Graph는 복원 후 Item/catalog 캐시를 비웁니다. `training.json`은 epoch별 `validation_hr10`, `best_epoch`, `checkpoint_policy: best_validation_hr10`과 평가 계약을, test 행은 `source_event_id`와 `train_item_frequency`를 기록합니다.
+추천 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 최적 validation HR@10의 최초 checkpoint를 복원한 뒤 test를 한 번 평가하며 refit은 없습니다. `training.json`에는 파라미터 수·A2 교란 통계·A3의 비활성 Q/K도 기록합니다.
 
-진단 JSON은 Arm별 최종 HR/NDCG(`recommendations.means`), NDCG@10 수치 비교·신뢰구간(`statistics.comparisons`), Run·모드 식별자, 작은 평가 계약과 성공/실패 판정만 저장합니다. 선택 target·비교 수·보정 정책도 기록합니다. 전체 사용자 분할·이벤트 ID·provenance·복구/재사용 내역·seed별 상세 행은 중복 저장하지 않습니다. 계산은 기존처럼 사용자별 seed 평균으로 paired bootstrap을 수행하며, 각 aggregation의 선택 target 모든 쌍을 하나의 Bonferroni 비교군으로 보정합니다. 주 비교·teacher reference 예외는 없고 부분 target의 분모는 선택된 쌍의 수입니다. Run 간 동일 Graph Arm 비교의 분모는 선택된 Graph Arm 수입니다. Run 비교는 같은 프로토콜·전처리·원본·분할·catalog·seed·평가 계약을 요구합니다. DWYS의 rolling HR@10=0.046 대비 차이 계산은 제공하지 않습니다. 전처리 수치·fingerprint·제외 이유는 Run의 `reports/leave_one_out_cohort.{json,md}`와 validation manifest에서 확인합니다.
+진단은 `validation/diagnosis/<target-set>/diagnosis.json`, 보고서는 `reports/<target-set>/report.md`에 저장합니다. target-set은 등록 순서로 연결합니다. Basic과 전체 진단은 별도 경로입니다. JSON에는 seed별·평균·표준편차·Base 상대 변화율·입력 확보율·검정 정책을 저장하고, 상세 아이템별 증거는 원래 특징·학습 파일에서 확인합니다.
+
+NDCG@10은 사용자별 seed 평균을 paired bootstrap하고 선택한 모든 Arm 쌍에 Bonferroni 보정합니다(Basic 10쌍, 전체 28쌍). HR@10은 기술통계만 보고합니다. Run 간 비교는 같은 Arm·사용자·이벤트·원본·분할·catalog·seed·평가 계약을 요구합니다. 진단 pass는 실행 증거 검증이며 성능 우위 판정과 구분합니다.
+
+아래 날짜별 항목은 이전 계약의 변경 기록입니다. 현재 실행에는 위 계약과 README를 적용합니다.
 
 ## 현재 형식 지원 정리 (2026-10-07)
 

@@ -1,13 +1,5 @@
-"""Explicit graph execution scope and mode-specific artifact layout."""
+"""Scene encoder dimensions and internal aggregation model constants."""
 
-from dataclasses import dataclass
-
-from pipeline_runtime import RunContext
-from arm_registry import ARMS, GRAPH_ONLY_ARMS
-
-GRAPH_ARMS = frozenset({"meta"} | {
-    arm.name for arm in (*ARMS, *GRAPH_ONLY_ARMS) if arm.representation == "graph"
-})
 GRAPH_ARCHITECTURE = "sasrec-role-graph/v9"
 GRAPH_MODEL = {
     "hidden_dim": 128,
@@ -61,7 +53,7 @@ ATTENTION_ARCHITECTURE = "sasrec-role-graph/v12"
 # attn_pool learns only the video readout weights (no scene exchange), and
 # gnn_attn changes only how gnn sets its neighbour weights (learned, not cosine).
 ATTENTION_AGGREGATIONS = ("attn_pool", "gnn_attn")
-SCENE_AGGREGATIONS = ("mean", "gnn", *TRANSFORMER_VARIANTS, *ATTENTION_AGGREGATIONS)
+SCENE_AGGREGATIONS = ("mean", "gnn", *TRANSFORMER_VARIANTS, *ATTENTION_AGGREGATIONS, "self_only")
 # Aggregations that pass messages between a video's scenes (S² pairwise cost).
 SCENE_EXCHANGES = frozenset({"gnn", "gnn_attn", *TRANSFORMER_VARIANTS})
 ATTENTION_POOL_MODEL = {
@@ -122,64 +114,3 @@ def transformer_model(aggregation):
             "attention_init": "xavier_normal_in_proj",
         },
     }
-
-
-def graph_contract(aggregation, branch):
-    if aggregation == "gnn":
-        return GNN_ARCHITECTURE, {**GNN_MODEL, "gcn_applied": branch != "meta"}
-    if aggregation in TRANSFORMER_VARIANTS:
-        model = {**transformer_model(aggregation), "transformer_applied": branch != "meta"}
-        return TRANSFORMER_ARCHITECTURE, model
-    if aggregation == "attn_pool":
-        model = {**ATTENTION_POOL_MODEL, "attention_pool_applied": branch != "meta"}
-        return ATTENTION_ARCHITECTURE, model
-    if aggregation == "gnn_attn":
-        return ATTENTION_ARCHITECTURE, {**GNN_ATTENTION_MODEL, "gcn_applied": branch != "meta"}
-    return GRAPH_ARCHITECTURE, GRAPH_MODEL
-
-
-@dataclass(frozen=True)
-class GraphContext(RunContext):
-    scene_aggregation: str | None = None
-
-    @property
-    def representations_dir(self):
-        return self.validation_dir / "representations" / "graph"
-
-    @property
-    def recommendations_dir(self):
-        return self.validation_dir / "recommendations" / "graph" / self.scene_aggregation
-
-    @property
-    def diagnosis_path(self):
-        return (
-            self.validation_dir
-            / "diagnosis"
-            / f"graph_{self.scene_aggregation}_diagnosis.json"
-        )
-
-
-def is_graph(context):
-    return isinstance(context, GraphContext)
-
-
-def graph_context(context, aggregation=None):
-    if aggregation not in (None, *SCENE_AGGREGATIONS):
-        raise ValueError("scene aggregation supports " + ", ".join(SCENE_AGGREGATIONS))
-    return GraphContext(context.root, context.run_id, context.config, context.run_root, aggregation)
-
-
-def validate_mode(mode, aggregation, step, targets):
-    if mode not in ("text", "graph"):
-        raise ValueError("--representation-mode text|graph is required")
-    if mode == "graph" and set(targets or ()) - GRAPH_ARMS:
-        raise ValueError("graph mode supports: " + ", ".join(sorted(GRAPH_ARMS)))
-    if mode == "text" and set(targets or ()) & {arm.name for arm in GRAPH_ONLY_ARMS}:
-        raise ValueError("MiniCPM arms require --representation-mode graph")
-    needs_pool = mode == "graph" and step != "embed-representations"
-    if needs_pool and aggregation not in SCENE_AGGREGATIONS:
-        raise ValueError(
-            "--scene-aggregation " + "|".join(SCENE_AGGREGATIONS) + " is required"
-        )
-    if not needs_pool and aggregation is not None:
-        raise ValueError("--scene-aggregation is only used for graph recommendation/diagnosis")

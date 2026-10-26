@@ -1,10 +1,11 @@
-"""Current evaluation arms and their shared, title-free generation sources."""
+"""Recommendation experiments and independent, title-free extraction sources."""
 
 from dataclasses import dataclass
 
 CONCAT_ARM_CONTRACT = "title-summary-nine-arms/v3"
 CONCAT_POLICY = "title-summary-double-newline/v1"
 EXPERIMENT_CONFIG_VERSION = "v6"
+RECOMMENDATION_ARM_CONTRACT = "gnn-attn-aggregation/v1"
 
 
 @dataclass(frozen=True)
@@ -14,23 +15,19 @@ class Arm:
     model: str | None = None
     uses_title: bool = False
     scene_arm: str | None = None
+    aggregation: str = "mean"
+    role_fusion: bool = False
 
 
 ARMS = (
-    Arm("meta", "metadata", uses_title=True),
-    Arm("graph_qwen3vl", "graph", "qwen3vl", False, "graph_qwen3vl"),
-    Arm("graph_qwen3vl_meta", "graph", "qwen3vl", True, "graph_qwen3vl"),
-    Arm("graph_qwen3.5", "graph", "qwen3.5", False, "graph_qwen3.5"),
-    Arm("graph_qwen3.5_meta", "graph", "qwen3.5", True, "graph_qwen3.5"),
-    Arm("desc_qwen3.5_meta", "description", "qwen3.5", True, "desc_qwen3.5"),
-    Arm("graph_gemini_meta", "graph", "gemini", True, "graph_gemini"),
-    Arm("desc_qwen3vl_meta", "description", "qwen3vl", True, "desc_qwen3vl"),
-    Arm("desc_gemini_meta", "description", "gemini", True, "desc_gemini"),
-)
-# Direct Graph extensions do not change the existing Text concatenation contract.
-GRAPH_ONLY_ARMS = (
-    Arm("graph_minicpm", "graph", "minicpm", False, "graph_minicpm"),
-    Arm("graph_minicpm_meta", "graph", "minicpm", True, "graph_minicpm"),
+    Arm("base", "metadata", uses_title=True),
+    Arm("d0", "description", "qwen3vl", True, "desc_qwen3vl"),
+    Arm("d1", "description", "qwen3vl", True, "desc_qwen3vl", "gnn_attn"),
+    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True),
+    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
+    Arm("a1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", False),
+    Arm("a2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
+    Arm("a3", "graph", "qwen3vl", True, "graph_qwen3vl", "self_only", True),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)
@@ -46,15 +43,19 @@ SOURCES = tuple(
 
 
 def arm_contract(config):
-    return CONCAT_ARM_CONTRACT
+    return RECOMMENDATION_ARM_CONTRACT
 
 
 def registry(config):
-    arms = {arm.name: arm for arm in ARMS}
-    # Without a model configuration, expose the complete supported Arm catalog.
-    if "models" not in config or "minicpm" in config["models"]:
-        arms.update((arm.name, arm) for arm in GRAPH_ONLY_ARMS)
-    return arms
+    return {arm.name: arm for arm in ARMS}
+
+
+def feature_source(arm):
+    return arm.scene_arm or "metadata"
+
+
+def target_set(config, target):
+    return "_".join(select_arms(config, target))
 
 
 def active_arms(config):

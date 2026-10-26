@@ -43,7 +43,7 @@ def step_settings(context, step, **options):
             "prepare-input-data": context.keyframes_dir,
             "embed-representations": context.representations_dir,
             "run-recommendation": context.recommendations_dir,
-            "run-diagnosis": context.diagnosis_path.parent,
+            "run-diagnosis": context.diagnosis_dir,
         }[step]
         if step in {"embed-representations", "run-recommendation", "run-diagnosis"}:
             values["selected_arms"] = list(select_arms(context.config, options.get("target")))

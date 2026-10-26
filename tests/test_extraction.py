@@ -177,9 +177,12 @@ def test_summary_prompt_excludes_title(context, monkeypatch):
 
 
 def test_summary_reuse_tracks_scene_content(context, monkeypatch):
-    from helpers import prepare_text
+    from extraction.steps import summarize
+    from helpers import FakeGenerator
 
-    prepare_text(context, monkeypatch)
+    extract_scenes(context, monkeypatch)
+    monkeypatch.setattr("extraction.steps.qwen_generator", FakeGenerator("A person cuts a tomato."))
+    summarize(context, model="qwen3vl", schema="prompts/summary_graph_v9.md", arm="graph_qwen3vl")
     options = summary_options(context)
     cid = options["catalog"][0]["content_id"]
     output = context.summary_arm_dir("graph_qwen3vl") / f"{cid}.json"

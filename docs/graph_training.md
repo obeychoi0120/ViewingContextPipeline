@@ -1,4 +1,27 @@
-# 직접 Graph 학습 경로
+# 장면 집계 기반 추천 학습
+
+현재 추천 계약은 **`gnn-attn-aggregation/v1`**입니다. 실행·Arm 표는 [README](../README.md#실험-조건과-결과-해석), 저장·캐시는 [실행 계약](runtime.md)을 기준으로 합니다.
+
+- Basic: `base d0 d1 g0 g1`. 모든 Arm은 제목을 사용하고 Qwen3-VL-2B-Instruct가 장면을 추출합니다.
+- D0·D1은 장면별 Description BGE, G0·G1은 같은 Graph BGE·Entity–Role Fusion을 사용합니다.
+- D0·G0는 Mean, D1·G1은 장면 간 Attention 기반 GNN 뒤 Mean을 적용합니다.
+- A1은 Fusion 제거, A2는 seed 42의 장면 내부 Entity 연결 대상 교체, A3는 동일 변환층의 자기 장면 전달입니다.
+- `--target`으로 Arm을 선택합니다. 표현 모드·집계 옵션이나 성능 조건에 따른 실행 차단은 없습니다.
+
+```bash
+python -m validation embed-representations --run-id "$RUN_ID" --target base d0 d1 g0 g1
+python -m validation run-recommendation --run-id "$RUN_ID" --target base d0 d1 g0 g1
+python -m validation run-recommendation --run-id "$RUN_ID" --target a1 a2 a3
+python -m validation run-diagnosis --run-id "$RUN_ID" --target base d0 d1 g0 g1 a1 a2 a3
+```
+
+학습 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 공유 BGE 특징과 추출 자료를 보존하고 Arm별로 독립 학습합니다. Profiling의 `--profile-every`, `--profile-operators`와 `validation.graph_execution`의 chunk·checkpoint 설정은 유지합니다.
+
+## 이전 설계·실험 기록
+
+아래는 이전 계약·Run의 기록입니다. 과거 CLI 예시와 결과 경로는 현재 실행용이 아닙니다. 과거 집계 모델을 새 8개 Arm으로 자동 변환하거나 과거 checkpoint를 재사용하지 않습니다.
+
+### 이전 직접 Graph 학습 경로
 
 현재 파이프라인은 `text`의 기존 Summary 입력과 `graph`의 원본 Entities·Actions·Context 입력을 함께 지원합니다. 모든 validation 명령에는 `--representation-mode`가 필요합니다. Graph 추천·진단은 **`--scene-aggregation mean|gnn|transformer|transformer_pos|transformer_local|attn_pool|gnn_attn`**을 필수로 받으며 `attention`은 CLI에서 거절합니다. embedding 단계와 text 모드에는 aggregation을 지정하지 않습니다.
 

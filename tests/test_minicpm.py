@@ -42,7 +42,7 @@ def test_minicpm_optional_v6_config(context):
     old["protocol"]["graph_extractors"].remove("minicpm")
     _validate_config(old)
     assert "graph_minicpm" not in generation_registry(old)
-    assert set(registry(current)) - set(registry(old)) == {"graph_minicpm", "graph_minicpm_meta"}
+    assert registry(current) == registry(old)
     assert all(registry(current)[name] == arm for name, arm in registry(old).items())
     invalid = deepcopy(current)
     del invalid["models"]["minicpm"]

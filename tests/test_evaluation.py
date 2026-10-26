@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from artifact_io import read_json
-from helpers import events, prepare_text, result_identity, selected_table, simple_model
+from helpers import events, prepare_inputs, result_identity, selected_table, simple_model
 from validation.early_stopping import EarlyStopping
 from validation.leave_one_out_data import EventTable
 from validation.leave_one_out_execution import execution_for, masked_ranks, negative_mask
@@ -134,8 +134,9 @@ def test_early_stopping_keeps_first_best_epoch():
 
 def test_best_checkpoint_is_tested_once(context, monkeypatch):
     import validation.leave_one_out_recommendation as execution
+    import validation.graph_model as graph_model
 
-    prepare_text(context, monkeypatch)
+    prepare_inputs(context, monkeypatch)
     cohort, table, split = selected_table(context)
     config = validation_config(context)
     config.model.max_epochs = 4
@@ -144,7 +145,7 @@ def test_best_checkpoint_is_tested_once(context, monkeypatch):
     real_train, real_evaluate, real_create = (
         execution.train_epoch,
         execution.evaluate,
-        execution._new_model,
+        graph_model.new_graph_model,
     )
     calls = {"create": 0, "train": 0, "test": 0}
     best_state = {}
@@ -168,7 +169,7 @@ def test_best_checkpoint_is_tested_once(context, monkeypatch):
         return real_evaluate(model, *args, **kwargs)
 
     scores = iter([0.2, 0.9, 0.9, 0.1])
-    monkeypatch.setattr(execution, "_new_model", create)
+    monkeypatch.setattr(graph_model, "new_graph_model", create)
     monkeypatch.setattr(execution, "train_epoch", train)
     monkeypatch.setattr(execution, "validation_hr10", lambda *a, **kw: next(scores))
     monkeypatch.setattr(execution, "evaluate", evaluate)
@@ -178,12 +179,12 @@ def test_best_checkpoint_is_tested_once(context, monkeypatch):
         table,
         split,
         identity,
-        "meta",
+        "base",
         prepare_split(table, split),
         torch.device("cpu"),
     )
     assert calls == {"create": 1, "train": 4, "test": 1}
-    directory = context.recommendations_dir / "seed_42" / "meta"
+    directory = context.recommendations_dir / "seed_42" / "base"
     assert read_json(directory / "training.json")["best_epoch"] == 2
     checkpoint = torch.load(directory / "sasrec.pt", map_location="cpu", weights_only=True)
     for name, tensor in checkpoint["state_dict"].items():

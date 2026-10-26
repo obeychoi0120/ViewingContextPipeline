@@ -162,15 +162,20 @@ class RunContext:
 
     @property
     def representations_dir(self) -> Path:
-        return self.validation_dir / "representations" / "text"
+        return self.validation_dir / "representations"
 
     @property
     def recommendations_dir(self) -> Path:
-        return self.validation_dir / "recommendations" / "text"
+        return self.validation_dir / "recommendations"
 
     @property
-    def diagnosis_path(self) -> Path:
-        return self.validation_dir / "diagnosis" / "text_diagnosis.json"
+    def diagnosis_dir(self) -> Path:
+        return self.validation_dir / "diagnosis"
+
+    def diagnosis_path(self, target) -> Path:
+        from arm_registry import target_set
+
+        return self.diagnosis_dir / target_set(self.config, target) / "diagnosis.json"
 
     def path(self, section: str, key: str) -> Path:
         values = _require_mapping(self.config, section)

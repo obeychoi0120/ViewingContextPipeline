@@ -17,7 +17,8 @@ from validation.metrics import metrics_from_rank
 from validation.early_stopping import EarlyStopping
 from validation.model import require_torch, save_checkpoint, seed_everything, torch
 from validation.representation_checks import verify_representations
-from validation.recommendation import _new_model, _optimizer
+from validation.recommendation import _optimizer
+from arm_registry import RECOMMENDATION_ARM_CONTRACT
 from validation.recommendation_contracts import ARCHITECTURE_VERSION, EVALUATION_CONTRACT, resolve_target_arms
 from validation.leave_one_out_data import EventTable, PROTOCOL
 from preparation.cohort import iter_jsonl
@@ -162,18 +163,17 @@ def combination_dir(context, seed, arm):
 
 
 def result_files(identity):
-    names = ["sasrec.pt", "training.json", "per_event_metrics.jsonl"]
-    if identity.get("representation_mode") == "graph":
-        names.append("catalog_vectors.npy")
-    return names
+    return ["sasrec.pt", "training.json", "per_event_metrics.jsonl", "catalog_vectors.npy"]
 
 
 def combination_complete(directory, identity, expected_count, *, architecture_version=None):
-    if (identity.get("protocol") != PROTOCOL or not identity.get("split_hash")
+    if (identity.get("arm_contract") != RECOMMENDATION_ARM_CONTRACT
+            or identity.get("architecture_version") != ARCHITECTURE_VERSION
+            or identity.get("protocol") != PROTOCOL or not identity.get("split_hash")
             or identity.get("evaluation_contract") != EVALUATION_CONTRACT):
         return False
     if architecture_version is None:
-        architecture_version = identity.get("graph_architecture", ARCHITECTURE_VERSION)
+        architecture_version = identity["architecture_version"]
     try:
         complete = read_json(directory / "complete.json")
         schema = complete.get("schema_version")
@@ -265,23 +265,10 @@ def run_combination(
                 probabilities["train"], table.targets[ids["train"]], device, torch.float32
             )
     timings["preparation"] = time.monotonic() - started
-    from validation.graph_context import is_graph
-
-    features = None
-    if not is_graph(context):
-        with sampled(profiler, "feature_load", kind="stage"):
-            with span("feature_load", cuda=False):
-                with np.load(context.representations_dir / f"{branch}_embeddings.npz") as data:
-                    features = {key: data[key] for key in data.files}
-
     def create_model():
-        if is_graph(context):
-            from validation.graph_model import new_graph_model
+        from validation.graph_model import new_graph_model
 
-            return new_graph_model(context, config, branch, device)
-        return _new_model(
-            config, item_count=len(table.items), branch=branch, features=features, device=device
-        )
+        return new_graph_model(context, config, branch, device)
 
     seed_everything(seed, deterministic=config.model.deterministic)
     rng = np.random.default_rng(seed)
@@ -330,7 +317,7 @@ def run_combination(
         if stopping.best_epoch != previous_best:
             save_checkpoint(
                 directory / "sasrec.pt", model,
-                {**identity, "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
+                {**identity, "architecture_version": identity["architecture_version"],
                  "best_epoch": epoch, "catalog_size": len(table.items),
                  "checkpoint_policy": "best_validation_hr10"},
             )
@@ -366,7 +353,7 @@ def run_combination(
     print(f"[Leave-one-out] {arm} seed={seed} test={timings['test']:.2f}s", flush=True)
     metadata = {
         **identity,
-        "architecture_version": identity.get("graph_architecture", ARCHITECTURE_VERSION),
+        "architecture_version": identity["architecture_version"],
         "best_epoch": best_epoch,
         "checkpoint_policy": "best_validation_hr10",
         "catalog_size": len(table.items),
@@ -378,14 +365,15 @@ def run_combination(
             "min_delta": getattr(config.model, "min_delta", 0.0),
         },
     }
+    from validation.graph_model import parameter_report
+
+    metadata["parameters"] = parameter_report(model, branch)
+    if branch == "a2":
+        metadata["role_corruption_report"] = model.store.report
     with sampled(profiler, "export", kind="stage"):
         with span("catalog_and_checkpoint_save"):
-            if is_graph(context):
-                # evaluate() already left a frozen catalog cache on graph models.
-                with torch.no_grad():
-                    np.save(
-                        directory / "catalog_vectors.npy", model.catalog_vectors().cpu().numpy()
-                    )
+            with torch.no_grad():
+                np.save(directory / "catalog_vectors.npy", model.catalog_vectors().cpu().numpy())
             save_checkpoint(directory / "sasrec.pt", model, metadata)
     write_json(
         directory / "training.json",

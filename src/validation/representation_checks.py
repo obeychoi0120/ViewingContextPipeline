@@ -1,60 +1,10 @@
-"""Require both actual inputs and encoded values to match recorded provenance."""
+"""Verify source files, frozen BGE features, catalog and recorded checksums."""
 
-from validation.selection import load_validation_cohort, validation_arms
-from validation.metadata import verify_missing_metadata
-from validation.representation_inputs import documents_for_arm, representation_signature
-from validation.representation_provenance import matrix_hash, pending_write, read_state
+from validation.graph_inputs import verify
+from validation.selection import load_validation_cohort
 
 
 def verify_representations(context, cohort=None, *, arms=None):
-    from validation.graph_context import is_graph
-
-    if is_graph(context):
-        from validation.graph_inputs import verify
-
-        return verify(context, cohort or load_validation_cohort(context), arms)
-    from validation.steps import _representations_match_catalog
-
-    cohort = load_validation_cohort(context)
-    selected = validation_arms(context, list(arms) if arms is not None else None)
-    paths = [context.representations_dir / f"{name}_embeddings.npz" for name in selected]
-    if not _representations_match_catalog(
-        context.representations_dir / "item_index.json",
-        paths,
-        cohort["catalog"],
-        context.config["validation"]["encoder"]["embedding_dim"],
-    ):
-        raise RuntimeError("invalid/legacy Text embeddings; rerun embed-representations")
-    if any(name in selected for name in ("meta", "metadata")):
-        verify_missing_metadata(context, cohort)
-    verify_recorded_representations(context, cohort, arms=selected)
-
-
-def verify_recorded_representations(context, cohort, *, arms=None):
-    selected = validation_arms(context, list(arms) if arms is not None else None)
-    for name, arm in selected.items():
-        state = read_state(context, name)
-        if not state or pending_write(context, name).exists():
-            raise RuntimeError(f"missing/unfinished embedding provenance: {name}; rerun embedding")
-        if state.get("selection_hash") != cohort["manifest"]["selection_hash"]:
-            raise RuntimeError(f"stale representation selection: {name}; rerun embedding")
-        path = context.representations_dir / f"{name}_embeddings.npz"
-        if state.get("embedding_hash") != matrix_hash(path):
-            raise RuntimeError(f"embedding values changed without provenance: {name}")
-        docs = documents_for_arm(context, cohort, arm)
-        if state.get("input_hash") != representation_signature(
-            context,
-            cohort["catalog"],
-            arm,
-            docs,
-        ):
-            raise RuntimeError(f"stale representation inputs: {name}; rerun embedding")
-
-        import numpy as np
-
-        with np.load(path) as arrays:
-            from validation.text_features import validate_arrays
-
-            validate_arrays(
-                arrays, len(docs), context.config["validation"]["encoder"]["embedding_dim"], docs
-            )
+    if arms is None:
+        raise ValueError("explicit arms are required for representation verification")
+    return verify(context, cohort or load_validation_cohort(context), arms)

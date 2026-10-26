@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -7,15 +8,13 @@ from artifact_io import read_json, read_jsonl, write_jsonl
 from helpers import (
     TARGETS,
     assert_run_grid,
-    extract_scenes,
-    prepare_text,
+    prepare_inputs,
     refresh_checksums,
     result_identity,
     selected_table,
-    train_text,
+    train_inputs,
 )
 from validation.diagnosis_statistics import comparison_contract, comparison_families
-from validation.graph_context import graph_context
 from validation.leave_one_out_diagnosis import cluster_bootstrap, collect_metrics, comparisons
 from validation.leave_one_out_recommendation import combination_complete
 from validation.steps import (
@@ -41,13 +40,13 @@ def test_bootstrap_pairs_users_across_arms():
 
 
 def test_selected_pairs_use_bonferroni(context):
-    targets = ["graph_qwen3vl_meta", "meta", "graph_qwen3vl"]
+    targets = ["g1", "base", "g0"]
     families = comparison_families(context.config, targets)
     assert families == {
         "selected_targets": [
-            ("graph_qwen3vl", "meta"),
-            ("graph_qwen3vl_meta", "meta"),
-            ("graph_qwen3vl_meta", "graph_qwen3vl"),
+            ("g0", "base"),
+            ("g1", "base"),
+            ("g1", "g0"),
         ]
     }
     assert comparison_contract(context.config, targets)["comparison_count"] == 3
@@ -71,10 +70,10 @@ def test_selected_pairs_use_bonferroni(context):
 
 @pytest.mark.torch
 def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch):
-    train_text(context, monkeypatch)
+    train_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
     config = validation_config(context)
-    directory = context.recommendations_dir / "seed_42" / "meta"
+    directory = context.recommendations_dir / "seed_42" / "base"
     path = directory / "per_event_metrics.jsonl"
     rows = read_jsonl(path)
     rows[0]["NDCG@10"] += 0.125
@@ -86,80 +85,72 @@ def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch):
         collect_metrics(context, config, cohort, arms={name: name for name in TARGETS})
     with pytest.raises(RuntimeError, match="diagnosis failed"):
         run_diagnosis(context, target=TARGETS)
-    report = read_json(context.diagnosis_path)
+    report = read_json(context.validation_dir / "diagnosis" / "base_g0" / "diagnosis.json")
     assert report["runtime_decision"]["status"] == "fail"
     assert report["statistics"]["status"] == "not_computed"
     assert "metric/rank mismatch" in report["runtime_decision"]["errors"][0]["message"]
 
 
 @pytest.mark.torch
-def test_text_pipeline_cpu_roundtrip(context, monkeypatch):
-    scene_generator, summary_generator = prepare_text(context, monkeypatch)
-    assert len(scene_generator.tasks) == 48
-    assert len(summary_generator.tasks) == 24
-    assert all("TITLE_SECRET" not in t.prompt for t in summary_generator.tasks)
-    result = run_recommendation(context, target=TARGETS)
-    assert result["completed"] == 6 and result["skipped"] == 0
-    assert_run_grid(context)
-    assert run_diagnosis(context, target=TARGETS)["status"] == "pass"
-    report = read_json(context.diagnosis_path)
-    assert report["runtime_decision"] == {"status": "pass", "errors": []}
-    cohort, _, _ = selected_table(context)
-    _, _, collected = collect_metrics(
-        context, validation_config(context), cohort, arms={name: name for name in TARGETS}
-    )
-    assert collected["actual_event_count"] == collected["expected_event_count"] == 18
-    assert collected["combination_count"] == 6
-    assert report["recommendations"] == {"means": collected["means"]}
-    assert report["statistics"]["comparison_count"] == 1
-    before = {
-        str(p): (p.stat().st_mtime_ns, p.read_bytes())
-        for p in context.recommendations_dir.rglob("complete.json")
-    }
+def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch):
+    from arm_registry import RECOMMENDATION_ARM_CONTRACT
+    from validation.graph_inputs import GraphStore
+    from validation.representation_provenance import recommendation_identity
 
-    def forbidden_training(*args, **kwargs):
-        raise AssertionError("a completed combination was retrained")
+    graph_generator, description_generator = prepare_inputs(context, monkeypatch)
+    assert len(graph_generator.tasks) == len(description_generator.tasks) == 48
+    assert not (context.run_root / "extraction" / "summaries").exists()
+    basic = ["base", "d0", "d1", "g0", "g1"]
+    all_arms = basic + ["a1", "a2", "a3"]
+    assert embed_representations(context, target=basic)["generated_sources"] == ["desc_qwen3vl"]
+    assert recommendation_identity(context, "d0")["embedding_hash"] == recommendation_identity(context, "d1")["embedding_hash"]
+    assert len({recommendation_identity(context, name)["embedding_hash"] for name in all_arms[3:]}) == 1
+    assert len(GraphStore(context.representations_dir / "desc_qwen3vl")["contexts"]) == 48
+    run_contract = (context.run_root / "run_contract.json").read_bytes()
+    source_bytes = {str(p): p.read_bytes() for p in context.representations_dir.rglob("*.npy")}
 
-    monkeypatch.setattr(
-        "validation.leave_one_out_recommendation.run_combination", forbidden_training
-    )
-    reused = run_recommendation(context, target=TARGETS)
-    assert reused["completed"] == 0 and reused["skipped"] == 6
-    assert before == {
-        str(p): (p.stat().st_mtime_ns, p.read_bytes())
-        for p in context.recommendations_dir.rglob("complete.json")
-    }
-    assert run_diagnosis(context, target=TARGETS)["status"] == "pass"
+    def forbidden_preparation(*args, **kwargs):
+        raise AssertionError("training attempted feature preparation or extraction")
+
+    monkeypatch.setattr("validation.graph_inputs.prepare", forbidden_preparation)
+    monkeypatch.setattr("validation.features.BGETextEncoder", forbidden_preparation)
+    result = run_recommendation(context, target=basic)
+    assert result["completed"] == 15 and result["skipped"] == 0
+    assert run_diagnosis(context, target=basic)["status"] == "pass"
+    basic_path = context.validation_dir / "diagnosis" / "base_d0_d1_g0_g1" / "diagnosis.json"
+    report = read_json(basic_path)
+    assert report["statistics"]["comparison_count"] == 10
+    assert report["recommendations"]["actual_event_count"] == 45
+    assert report["arm_contract"] == RECOMMENDATION_ARM_CONTRACT
+    before = {str(p): p.read_bytes() for p in context.recommendations_dir.rglob("complete.json")}
+    assert run_recommendation(context, target=["a1", "a2", "a3"])["completed"] == 9
+    assert all(Path(path).read_bytes() == content for path, content in before.items())
+    assert run_diagnosis(context, target=list(reversed(all_arms)))["status"] == "pass"
+    full_path = context.validation_dir / "diagnosis" / "base_d0_d1_g0_g1_a1_a2_a3" / "diagnosis.json"
+    full = read_json(full_path)
+    assert full["statistics"]["comparison_count"] == len(full["statistics"]["comparisons"]) == 28
+    assert full["recommendations"]["actual_event_count"] == 72
+    assert full["recommendations"]["base_relative_changes"]["base"]["NDCG@10"] in (0.0, None)
+    assert "standard_deviations" in full["recommendations"]
+    assert full["recommendations"]["model_reports"]["a1"]["parameters"]["removed_role_fusion"] == 83072
+    a3 = full["recommendations"]["model_reports"]["a3"]["parameters"]
+    assert a3["active_trainable"] < a3["trainable"]
+    assert full["recommendations"]["model_reports"]["a2"]["role_corruption"]["changed_ratio"] == 1
+    assert read_json(basic_path) == report
+    assert (context.run_root / "reports" / "base_d0_d1_g0_g1_a1_a2_a3" / "report.md").is_file()
+    assert_run_grid(context, graph_mode=True)
+    assert run_recommendation(context, target=all_arms)["skipped"] == 24
+    assert source_bytes == {str(p): p.read_bytes() for p in context.representations_dir.rglob("*.npy")}
+    assert (context.run_root / "run_contract.json").read_bytes() == run_contract
 
 
 @pytest.mark.torch
-def test_graph_pipeline_cpu_roundtrip(context, monkeypatch):
-    extract_scenes(context, monkeypatch)
-    assert not (context.run_root / "extraction" / "summaries").exists()
-    embedded = embed_representations(context, target=TARGETS, representation_mode="graph")
-    assert set(embedded["generated_arms"]) == set(TARGETS)
-    result = run_recommendation(
-        context, target=TARGETS, representation_mode="graph", scene_aggregation="mean"
-    )
-    assert result["completed"] == 6
-    graph = graph_context(context, "mean")
-    assert_run_grid(graph, graph_mode=True)
-    assert (
-        run_diagnosis(
-            context, target=TARGETS, representation_mode="graph", scene_aggregation="mean"
-        )["status"]
-        == "pass"
-    )
-    report = read_json(graph.diagnosis_path)
-    assert report["representation_mode"] == "graph"
-    assert report["scene_aggregation"] == "mean"
-    cohort, _, _ = selected_table(graph)
-    _, _, collected = collect_metrics(
-        graph, validation_config(graph), cohort, arms={name: name for name in TARGETS}
-    )
-    assert collected["actual_event_count"] == collected["expected_event_count"] == 18
-    assert collected["combination_count"] == 6
-    assert report["recommendations"] == {"means": collected["means"]}
-    assert report["statistics"]["comparison_count"] == 1
-    assert report["runtime_decision"] == {"status": "pass", "errors": []}
-    assert not (context.run_root / "extraction" / "summaries").exists()
+def test_ablation_can_run_first(context, monkeypatch):
+    prepare_inputs(context, monkeypatch)
+    context.config["validation"]["model"].update(max_epochs=1)
+    assert run_recommendation(context, target=["a3"])["completed"] == 3
+    assert run_diagnosis(context, target=["a3"])["status"] == "pass"
+    report = read_json(context.validation_dir / "diagnosis" / "a3" / "diagnosis.json")
+    assert report["recommendations"]["base_relative_changes"] is None
+    assert report["statistics"]["comparison_count"] == 0
+    assert report["statistics"]["comparisons"] == {}

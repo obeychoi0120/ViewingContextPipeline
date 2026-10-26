@@ -71,11 +71,18 @@ class SceneAttentionGCN(SceneGCN):
 
     adjacency_span = "scene_attention"
 
-    def __init__(self, dimension, similarity_dim, key_dim):
+    def __init__(self, dimension, similarity_dim, key_dim, *, self_only=False):
         super().__init__(dimension)
+        self.self_only = self_only
         self.query = nn.Linear(similarity_dim, key_dim, bias=False)
         self.key = nn.Linear(similarity_dim, key_dim, bias=False)
         self.reset_query_key()
+
+    def forward(self, scenes, similarity_features, groups):
+        if self.self_only:
+            # A = I: keep the value transform, ReLU and residual; never evaluate Q/K.
+            return scenes + nn.functional.relu(self.projection(scenes))
+        return super().forward(scenes, similarity_features, groups)
 
     def reset_query_key(self):
         """N(0, 1/(2·fan_in)): unit-RMS inputs give query/key entries of variance 1/2 and
