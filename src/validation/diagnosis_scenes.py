@@ -25,14 +25,14 @@ def _expected_scenes(
     scene_duration: int = 30,
     num_keyframes: int = 6,
     *,
-    source_assets_dir=None,
+    source_assets_dir,
 ) -> tuple[set[tuple[str, int]], bool]:
     expected: set[tuple[str, int]] = set()
     issues: Counter[str] = Counter()
     examples: list[dict[str, Any]] = []
     for content_id in content_ids:
         path = (
-            (source_assets_dir or run_root.parent.parent / "source_assets")
+            Path(source_assets_dir)
             / content_id
             / timestamp_filename(scene_duration, num_keyframes)
         )
@@ -339,7 +339,7 @@ def _scene_coverage(
     branches=None,
     config=None,
     excluded_content_ids=(),
-    source_assets_dir=None,
+    source_assets_dir,
     informational=False,
 ):
     from validation.recommendation_contracts import DEFAULT_PROTOCOL

@@ -27,7 +27,7 @@ def prepare_catalog(
     num_keyframes: int = 6,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Prepare exactly the cohort catalog from caller-owned MicroLens MP4 files."""
+    """Prepare exactly the cohort catalog from caller-owned local MP4 files."""
 
     results: list[tuple[dict[str, Any] | None, dict[str, Any] | None]] = [
         (None, None) for _ in catalog

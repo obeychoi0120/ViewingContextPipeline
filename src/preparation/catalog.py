@@ -18,8 +18,12 @@ def normalize_item_id(value: object) -> str:
     return str(int(text))
 
 
-def content_id_for_item(item_id: str) -> str:
-    return f"microlens_100k_{int(item_id):05d}"
+def content_id_for_item(item_id: str, dataset: str = "microlens_100k") -> str:
+    from pipeline_runtime import DATASETS
+
+    if dataset not in DATASETS:
+        raise ValueError(f"unsupported dataset: {dataset}")
+    return f"{dataset}_{int(item_id):05d}"
 
 
 def load_pairs(path: Path) -> list[tuple[str, list[str]]]:
@@ -98,6 +102,8 @@ def build_item_inventory(
     referenced_items: set[str],
     videos_dir: Path,
     probe: Callable[[Path], float] | None = probe_duration,
+    *,
+    dataset: str = "microlens_100k",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     videos: dict[str, list[Path]] = {}
     for path in sorted(videos_dir.glob("*.mp4")):
@@ -136,7 +142,7 @@ def build_item_inventory(
         rows.append(
             {
                 "item_id": item_id,
-                "content_id": content_id_for_item(item_id),
+                "content_id": content_id_for_item(item_id, dataset),
                 "source_video_path": str(path.resolve()) if path else None,
                 "duration_seconds": duration,
                 "source_file_size": size,

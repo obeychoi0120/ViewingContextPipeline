@@ -7,6 +7,14 @@ from arm_registry import EXPERIMENT_CONFIG_VERSION
 from visual_sampling import validate_sampling
 
 CONFIG_PATH = Path("config.yaml")
+DATASETS = ("microlens_100k", "m3l_10m")
+
+
+def run_contract(dataset: str) -> dict[str, str]:
+    from arm_registry import CONCAT_ARM_CONTRACT
+
+    return {"experiment_config_version": EXPERIMENT_CONFIG_VERSION,
+            "arm_contract": CONCAT_ARM_CONTRACT, "dataset": dataset}
 
 
 class ConfigError(RuntimeError):
@@ -43,9 +51,11 @@ class RunContext:
     run_id: str
     config: dict[str, Any]
     run_root: Path
+    artifact_root: Path
+    dataset: str
 
     @classmethod
-    def load(cls, run_id: str, *, root: Path | None = None) -> "RunContext":
+    def load(cls, run_id: str, *, dataset: str, root: Path | None = None) -> "RunContext":
         repo_root = (root or Path(__file__).resolve().parents[1]).resolve()
         selected = str(run_id).strip()
         if (
@@ -57,10 +67,17 @@ class RunContext:
             raise ConfigError("run_id must be a single non-empty directory name")
         config = _load_yaml(repo_root / CONFIG_PATH)
         _validate_config(config)
+        if dataset not in config["protocol"]["dataset"]:
+            raise ConfigError(f"unsupported dataset: {dataset!r}; choose from {DATASETS}")
         artifact_root = _resolve(
             repo_root, config.get("artifacts_root", "artifacts"), "artifacts_root"
         )
-        run_root = artifact_root / "runs" / selected
+        run_root = artifact_root / "runs" / selected / dataset
+        if dataset == "microlens_100k" and (
+            any((run_root.parent / name).exists() for name in ("extraction", "validation", "reports", "run_contract.json"))
+            or (artifact_root / "preparation" / "cohort").exists()
+        ):
+            raise ConfigError("legacy MicroLens layout found; run python -m preparation.migrate_dataset_layout --apply first")
         for phase in ("scenes", "summaries"):
             directory = run_root / "extraction" / phase
             if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
@@ -68,19 +85,19 @@ class RunContext:
         contract_path = run_root / "run_contract.json"
         if contract_path.exists():
             from artifact_io import read_json
-            from arm_registry import CONCAT_ARM_CONTRACT
-            if read_json(contract_path) != {"experiment_config_version": EXPERIMENT_CONFIG_VERSION, "arm_contract": CONCAT_ARM_CONTRACT}:
+            if read_json(contract_path) != run_contract(dataset):
                 raise ConfigError("Run contract mismatch; use a new run_id")
-        return cls(repo_root, selected, config, run_root)
+        elif run_root.exists() and any(run_root.iterdir()):
+            raise ConfigError("missing Run contract; migrate legacy artifacts or use a new run_id")
+        return cls(repo_root, selected, config, run_root, artifact_root, dataset)
 
     def initialize(self) -> None:
         from artifact_io import atomic_write_json
-        from arm_registry import CONCAT_ARM_CONTRACT
 
         self.run_root.mkdir(parents=True, exist_ok=True)
         contract_path = self.run_root / "run_contract.json"
         if not contract_path.exists():
-            atomic_write_json(contract_path, {"experiment_config_version": EXPERIMENT_CONFIG_VERSION, "arm_contract": CONCAT_ARM_CONTRACT}, durable=True)
+            atomic_write_json(contract_path, run_contract(self.dataset), durable=True)
         for directory in (
             self.cohort_dir,
             self.run_root / "extraction",
@@ -91,11 +108,23 @@ class RunContext:
     def require_ready_cohort(self) -> dict[str, Any]:
         from preparation.cohort import load_cohort
 
-        return load_cohort(self.cohort_dir)
+        return load_cohort(self.cohort_dir, dataset=self.dataset)
+
+    @property
+    def data(self) -> dict[str, Any]:
+        return self.config["datasets"][self.dataset]["data"]
+
+    @property
+    def source_counts(self) -> dict[str, int]:
+        return self.config["datasets"][self.dataset]["source_counts"]
 
     @property
     def preparation_dir(self) -> Path:
-        return self.run_root.parent.parent / "preparation"
+        return self.artifact_root / "preparation" / self.dataset
+
+    @property
+    def shared_cache_dir(self) -> Path:
+        return self.artifact_root / "shared_cache" / self.dataset
 
     @property
     def cohort_dir(self) -> Path:
@@ -178,7 +207,7 @@ class RunContext:
         return self.diagnosis_dir / target_set(self.config, target) / "diagnosis.json"
 
     def path(self, section: str, key: str) -> Path:
-        values = _require_mapping(self.config, section)
+        values = self.data if section == "data" else _require_mapping(self.config, section)
         return _resolve(self.root, values.get(key), f"{section}.{key}")
 
 
@@ -187,7 +216,7 @@ def _validate_config(value: dict[str, Any]) -> None:
         "experiment_config_version",
         "protocol",
         "artifacts_root",
-        "data",
+        "datasets",
         "models",
         "extraction",
         "validation",
@@ -207,7 +236,7 @@ def _validate_protocol(value: dict[str, Any]) -> None:
 
     protocol = _require_mapping(value, "protocol")
     expected = {
-        "dataset": "microlens_100k",
+        "dataset": list(DATASETS),
         "modality": "visual_only",
         "sampling": "fixed_windows",
         "cohort_sampling": "leave_one_out",
@@ -289,19 +318,25 @@ def _validate_extraction(value: dict[str, Any]) -> None:
 
 
 def _validate_models(value: dict[str, Any]) -> None:
-    data = _require_mapping(value, "data")
+    datasets = _require_mapping(value, "datasets")
+    if set(datasets) != set(DATASETS):
+        raise ConfigError(f"datasets must contain exactly {DATASETS}")
+    count_keys = {"user_count", "interaction_count", "item_count"}
+    for name in DATASETS:
+        profile = _require_mapping(datasets, name)
+        if set(profile) != {"data", "source_counts"}:
+            raise ConfigError(f"datasets.{name} requires data and source_counts")
+        data = _require_mapping(profile, "data")
+        counts = _require_mapping(profile, "source_counts")
+        if set(counts) != count_keys or any(type(n) is not int or n <= 0 for n in counts.values()):
+            raise ConfigError(f"invalid datasets.{name}.source_counts")
+        required_data = {"root"} if name == "m3l_10m" else {"videos_dir", "pairs_tsv", "titles_csv", "pairs_csv"}
+        optional_data = set() if name == "m3l_10m" else {"titles_supplement_csv"}
+        if not required_data <= set(data) or set(data) - required_data - optional_data:
+            raise ConfigError(f"invalid datasets.{name}.data keys")
+        if any(not isinstance(p, str) or not p.strip() for p in data.values()):
+            raise ConfigError(f"datasets.{name}.data paths must be non-empty strings")
     models = _require_mapping(value, "models")
-    data_keys = {"videos_dir", "pairs_tsv", "titles_csv"}
-    data_keys.add("pairs_csv")
-    if not data_keys <= set(data) or set(data) - data_keys - {"titles_supplement_csv"}:
-        raise ConfigError(
-            f"data must contain {sorted(data_keys)} and optionally titles_supplement_csv"
-        )
-    if "titles_supplement_csv" in data and (
-        not isinstance(data["titles_supplement_csv"], str)
-        or not data["titles_supplement_csv"].strip()
-    ):
-        raise ConfigError("data.titles_supplement_csv must be a non-empty path")
     required = {"qwen3vl", "qwen3.5", "bge", "gemini"}
     if not required <= set(models) or set(models) - required - {"minicpm"}:
         raise ConfigError("models must contain qwen3vl, qwen3.5, bge, gemini and optional minicpm")
@@ -355,12 +390,13 @@ def _validate_validation(value: dict[str, Any]) -> None:
         from pydantic import ValidationError
         from validation.config import build_validation_config
 
-        build_validation_config(
-            run_id="config-validation",
-            dataset=value["data"],
-            settings={**validation, "encoder": _require_mapping(validation, "encoder")},
-            model_path=value["models"].get("bge"),
-            output_dir=value.get("artifacts_root"),
-        )
+        for profile in value["datasets"].values():
+            build_validation_config(
+                run_id="config-validation",
+                dataset=profile["data"],
+                settings={**validation, "encoder": _require_mapping(validation, "encoder")},
+                model_path=value["models"].get("bge"),
+                output_dir=value.get("artifacts_root"),
+            )
     except ValidationError as exc:
         raise ConfigError(f"invalid validation config: {exc}") from exc

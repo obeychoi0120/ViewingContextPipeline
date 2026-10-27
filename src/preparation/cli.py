@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from pipeline_runtime import RunContext
+from pipeline_runtime import DATASETS, RunContext
 from preparation.steps import STEP_HANDLERS
 
 
@@ -11,6 +11,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one Viewing Context preparation step.")
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--dataset", required=True, choices=DATASETS)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--plan-only",
@@ -21,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.plan_only and args.step != "prepare-cohort":
             raise ValueError("--plan-only is only supported by prepare-cohort")
-        context = RunContext.load(args.run_id)
+        context = RunContext.load(args.run_id, dataset=args.dataset)
         kwargs = {"force": args.force}
         if args.step == "prepare-cohort":
             kwargs["plan_only"] = args.plan_only

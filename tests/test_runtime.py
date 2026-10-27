@@ -12,8 +12,8 @@ def test_current_config_loads(context):
     assert settings.model.embedding_dim == 512
     assert settings.model.seeds == [42, 43, 44]
     assert settings.model.max_sequence_length == 10
-    assert context.run_root == context.root / "artifacts" / "runs" / "regression"
-    paths = [context.path("data", key) for key in context.config["data"]]
+    assert context.run_root == context.root / "artifacts" / "runs" / "regression" / "microlens_100k"
+    paths = [context.path("data", key) for key in context.data]
     paths += [context.path("models", key) for key in ("qwen3vl", "qwen3.5", "bge")]
     assert all(path.is_relative_to(context.root) for path in paths)
     assert not any(str(path).startswith("/home_nvme") for path in paths)
@@ -49,14 +49,14 @@ def test_cli_mixed_arms_and_removed_options(context, monkeypatch):
     from pipeline_runtime import RunContext
     from validation.cli import STEP_HANDLERS, main
 
-    monkeypatch.setattr(RunContext, "load", lambda run_id: context)
+    monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
     calls = []
     monkeypatch.setitem(STEP_HANDLERS, "run-recommendation", lambda ctx, **kw: calls.append(kw))
-    command = ["run-recommendation", "--run-id", context.run_id, "--target", "d1", "a3"]
+    command = ["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "d1", "a3"]
     assert main(command) == 0
     assert calls == [{"force": False, "target": ["d1", "a3"]}]
     for option in (["--representation-mode", "graph"], ["--scene-aggregation", "mean"],
                    ["--step", "ablation"]):
         with pytest.raises(SystemExit):
             main(command + option)
-    assert main(["run-recommendation", "--run-id", context.run_id, "--target", "graph_minicpm"]) == 1
+    assert main(["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "graph_minicpm"]) == 1

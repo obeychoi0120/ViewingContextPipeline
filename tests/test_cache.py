@@ -115,7 +115,7 @@ def test_cross_run_cache_and_paired_comparison(context, monkeypatch):
     from validation.steps import run_recommendation, run_diagnosis
 
     train_inputs(context, monkeypatch)
-    reference = RunContext.load("reference", root=context.root)
+    reference = RunContext.load("reference", dataset=context.dataset, root=context.root)
     prepare_inputs(reference, monkeypatch)
     reused = run_recommendation(reference, target=["base", "g0"])
     assert reused["completed"] == 0 and reused["skipped"] == 6

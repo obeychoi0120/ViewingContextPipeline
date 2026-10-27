@@ -8,7 +8,7 @@ from validation.recommendation_contracts import resolve_target_arms
 def validation_config(context):
     return build_validation_config(
         run_id=context.run_id,
-        dataset={key: context.path("data", key) for key in context.config["data"]},
+        dataset={key: context.path("data", key) for key in context.data},
         settings=context.config["validation"],
         model_path=context.path("models", "bge"),
         output_dir=context.run_root,

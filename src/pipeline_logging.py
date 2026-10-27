@@ -10,6 +10,7 @@ from pipeline_runtime import CONFIG_PATH
 def step_settings(context, step, **options):
     values = {
         "run_id": context.run_id,
+        "dataset": context.dataset,
         "config_file": context.root / CONFIG_PATH,
         "force": options.get("force", False),
     }

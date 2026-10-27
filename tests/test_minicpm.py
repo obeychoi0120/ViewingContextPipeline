@@ -65,10 +65,10 @@ def test_minicpm_optional_v6_config(context):
 @pytest.mark.parametrize("arm", [None, "graph_minicpm"])
 def test_minicpm_cli_arm_default(minicpm_context, monkeypatch, arm):
     calls = []
-    monkeypatch.setattr(RunContext, "load", lambda run_id: minicpm_context)
+    monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: minicpm_context)
     from extraction.cli import STEP_HANDLERS
     monkeypatch.setitem(STEP_HANDLERS, "extract-graph-scenes", lambda context, **kw: calls.append(kw))
-    args = ["extract-graph-scenes", "--run-id", "regression", "--schema", "prompts/scene_graph_v9.md",
+    args = ["extract-graph-scenes", "--run-id", "regression", "--dataset", "microlens_100k", "--schema", "prompts/scene_graph_v9.md",
             "--model", "minicpm", "--repetition-penalty", "1.1", "--presence-penalty", "0"]
     if arm:
         args += ["--arm", arm]
@@ -88,7 +88,7 @@ def test_minicpm_cli_rejects_unsupported(step, model, arm, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("unsupported invocation reached Run initialization")
     monkeypatch.setattr(RunContext, "load", unexpected)
-    args = [step, "--run-id", "regression", "--schema", "prompts/scene_graph_v9.md", "--model", model]
+    args = [step, "--run-id", "regression", "--dataset", "microlens_100k", "--schema", "prompts/scene_graph_v9.md", "--model", model]
     if arm:
         args += ["--arm", arm]
     assert main(args) == 1

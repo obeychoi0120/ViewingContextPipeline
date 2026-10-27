@@ -5,13 +5,14 @@ import sys
 
 from extraction.steps import GRAPH_SOURCES, LOCAL_MODELS, STEP_HANDLERS
 from extraction.qwen_config import penalty_schedule, validate_presence_penalty
-from pipeline_runtime import RunContext
+from pipeline_runtime import DATASETS, RunContext
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one Viewing Context extraction step.")
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--dataset", required=True, choices=DATASETS)
     parser.add_argument(
         "--force",
         action="store_true",
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.model not in LOCAL_MODELS:
                 raise ValueError("--presence-penalty is supported only for local vLLM models")
             options["presence_penalty"] = validate_presence_penalty(args.presence_penalty)
-        context = RunContext.load(args.run_id)
+        context = RunContext.load(args.run_id, dataset=args.dataset)
         STEP_HANDLERS[args.step](
             context,
             force=args.force,

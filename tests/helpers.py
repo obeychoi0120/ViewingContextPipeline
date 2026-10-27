@@ -119,7 +119,7 @@ def make_context(root, lengths=(5, 6, 13)):
     (data / "supplement.csv").write_text('item,title\n1,"Supplement title"\n')
     for row in rows:
         (videos / f"{row['item_id']}.mp4").write_bytes(b"decoder-double input")
-    config["data"] = {
+    config["datasets"]["microlens_100k"]["data"] = {
         "pairs_csv": str(data / "pairs.csv"),
         "pairs_tsv": str(data / "absent.tsv"),
         "titles_csv": str(data / "titles.csv"),
@@ -141,7 +141,7 @@ def make_context(root, lengths=(5, 6, 13)):
     config["models"]["gemini"].update(project_id="offline-project")
     config["artifacts_root"] = str(root / "artifacts")
     settings = config["validation"]
-    settings["cohort"].update(
+    config["datasets"]["microlens_100k"]["source_counts"].update(
         user_count=len(lengths), interaction_count=len(rows), item_count=len(rows)
     )
     settings["model"].update(max_epochs=2, batch_size=8, dropout=0.0, deterministic=True)
@@ -157,7 +157,7 @@ def make_context(root, lengths=(5, 6, 13)):
         "summary_description_v5.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
-    return RunContext.load("regression", root=root)
+    return RunContext.load("regression", dataset="microlens_100k", root=root)
 
 
 def ready_cohort(context):

@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from validation.steps import STEP_HANDLERS
-from pipeline_runtime import RunContext
+from pipeline_runtime import DATASETS, RunContext
 
 
 def _positive_int(value: str) -> int:
@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one Viewing Context validation step.")
     parser.add_argument("step", choices=tuple(STEP_HANDLERS))
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--dataset", required=True, choices=DATASETS)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--target",
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--profile-every is only supported by run-recommendation")
         if args.profile_operators and (args.step != "run-recommendation" or args.profile_every is None):
             raise ValueError("--profile-operators requires run-recommendation and --profile-every")
-        context = RunContext.load(args.run_id)
+        context = RunContext.load(args.run_id, dataset=args.dataset)
         kwargs = {"force": args.force}
         if args.compare_run_id is not None:
             kwargs["compare_run_id"] = args.compare_run_id

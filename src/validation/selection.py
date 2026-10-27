@@ -1,10 +1,16 @@
 """Run-local validation cohort shared by every configured arm."""
 
+from collections import Counter, defaultdict
+import hashlib
+import heapq
+import json
+
 from arm_registry import active_arms, select_arms
 from artifact_io import atomic_write_json, atomic_write_jsonl
 from artifact_io import fingerprint
 from artifact_io import read_json, read_jsonl
 from validation.leave_one_out_data import EventTable, PROTOCOL, SCHEMA
+from preparation.cohort import iter_jsonl
 
 POLICY = "leave-one-out-sequence-catalog/v1"
 
@@ -29,27 +35,44 @@ def data_identity(cohort):
 
 def build_selection(context):
     source = context.require_ready_cohort()
-    events = read_jsonl(context.cohort_dir / "events.jsonl")
-    raw_table = EventTable(events)
-    if [str(r["item_id"]) for r in source["catalog"]] != raw_table.items:
-        raise ValueError("catalog must match the ordered event item universe")
     settings = context.config["validation"]["cohort"]
-    retained = set()
+    # Bound retained memory by users * 13 while preserving the legacy JSON-list hash.
+    counts, histories, source_items = Counter(), defaultdict(list), set()
+    digest = hashlib.sha256(b"[")
+    raw_count = 0
+    for row in iter_jsonl(context.cohort_dir / "events.jsonl"):
+        if raw_count:
+            digest.update(b",")
+        digest.update(json.dumps(row, sort_keys=True, ensure_ascii=False,
+                                 separators=(",", ":"), allow_nan=False).encode())
+        raw_count += 1
+        user = row["user_id"]
+        counts[user] += 1
+        source_items.add(row["item_id"])
+        entry = (row["timestamp"], row.get("source_event_id", row["event_id"]), row["event_id"], row)
+        history = histories[user]
+        if len(history) < settings["retained_sequence_length"]:
+            heapq.heappush(history, entry)
+        else:
+            heapq.heappushpop(history, entry)
+    digest.update(b"]")
+    if [str(r["item_id"]) for r in source["catalog"]] != sorted(source_items, key=int):
+        raise ValueError("catalog must match the ordered event item universe")
+    retained = []
     excluded_users = []
     trimmed_events = 0
-    for user in raw_table.users:
-        ids = raw_table.by_user[user]
-        if len(ids) < settings["min_user_interactions"]:
-            excluded_users.append({"user_id": user, "reason": "short_history", "event_count": len(ids)})
+    for user in sorted(counts):
+        count = counts[user]
+        if count < settings["min_user_interactions"]:
+            excluded_users.append({"user_id": user, "reason": "short_history", "event_count": count})
             continue
-        kept = ids[-settings["retained_sequence_length"]:]
-        retained.update(kept)
-        trimmed_events += len(ids) - len(kept)
+        retained.extend(entry[-1] for entry in histories[user])
+        trimmed_events += count - len(histories[user])
     if not retained:
         raise ValueError("leave-one-out preprocessing retained no users")
     selected_events = [
-        {**events[source_id], "event_id": i, "source_event_id": source_id}
-        for i, source_id in enumerate(sorted(retained))
+        {**row, "event_id": i, "source_event_id": row["event_id"]}
+        for i, row in enumerate(sorted(retained, key=lambda row: row["event_id"]))
     ]
     table = EventTable(selected_events)
     items = set(table.items)
@@ -69,7 +92,7 @@ def build_selection(context):
             "catalog_scope": "retained_sequence_catalog",
         },
         "source_counts": {k: source["plan"][k] for k in ("user_count", "interaction_count", "item_count")},
-        "source_data_hash": fingerprint(events),
+        "source_data_hash": digest.hexdigest(),
         "user_count": len(table.users),
         "interaction_count": len(table.rows),
         "item_count": len(table.items),
@@ -103,7 +126,7 @@ def build_selection(context):
             "original_item_count": count,
             "included_item_count": len(catalog),
             "excluded_item_count": len(excluded),
-            "removed_event_count": len(events) - len(selected_events),
+            "removed_event_count": raw_count - len(selected_events),
             "excluded_user_count": len(excluded_users),
             "trimmed_event_count": trimmed_events,
             "lost_history_test_event_count": 0,
@@ -125,6 +148,7 @@ def prepare_validation_cohort(context):
     reports = context.run_root / "reports"
     report = {
         "run_id": context.run_id,
+        "dataset": context.dataset,
         "protocol": PROTOCOL,
         "source_data_hash": cohort["plan"]["source_data_hash"],
         "selection_hash": cohort["manifest"]["selection_hash"],
@@ -136,17 +160,28 @@ def prepare_validation_cohort(context):
         "split_hash": cohort["plan"]["splits"][0]["split_hash"],
         "status": "prepared_not_evaluated",
     }
-    atomic_write_json(reports / "leave_one_out_cohort.json", report, durable=True)
-
     source, selected = report["source_counts"], report["selected_counts"]
     rows = "\n".join(
         f"| {label} | {source[key]} | {selected[key]} | {source[key] - selected[key]} |"
         for label, key in (("사용자", "user_count"), ("상호작용", "interaction_count"), ("아이템", "item_count"))
     )
     report_path = reports / "leave_one_out_cohort.md"
+    semantics = ""
+    if context.dataset == "m3l_10m":
+        from preparation.m3l import INTERPRETATION
+
+        source_plan = read_json(context.cohort_dir / "cohort_plan.json")
+        report["m3l_source"] = {key: source_plan[key] for key in
+                              ("source_counts", "rating_policy", "interpretation", "sources",
+                               "excluded_item_count", "excluded_interaction_count")}
+        semantics = (f"{INTERPRETATION}. 모든 평점을 사용하며 영상 미확보 영화와 상호작용은 제외합니다. "
+                     f"영상 제외 영화: {source_plan['excluded_item_count']}; "
+                     f"제외 상호작용: {source_plan['excluded_interaction_count']}.\n\n")
+    atomic_write_json(reports / "leave_one_out_cohort.json", report, durable=True)
     temporary = report_path.with_suffix(".md.tmp")
     temporary.write_text(
-        f"# {context.run_id}: leave-one-out cohort\n\n"
+        f"# {context.run_id} / {context.dataset}: leave-one-out cohort\n\n"
+        + semantics +
         "원본 이력 5개 이상 사용자에서 최근 13개를 보존하고, 마지막 1개는 test, 직전 1개는 validation입니다.\n\n"
         f"| 대상 | 원본 | 선택 | 제외 |\n| --- | ---: | ---: | ---: |\n{rows}\n\n"
         f"짧은 이력 제외 이벤트: {report['short_history_event_count']}; 오래된 이벤트 절단: {cohort['plan']['trimmed_event_count']}.\n\n"

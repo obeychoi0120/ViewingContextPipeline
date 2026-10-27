@@ -13,7 +13,7 @@ from artifact_io import read_json, write_json
 
 class SharedCache:
     def __init__(self, context, kind, key):
-        self.root = context.run_root.parent.parent / "shared_cache" / kind
+        self.root = context.shared_cache_dir / kind
         self.key = key
         self.path = self.root / key
 

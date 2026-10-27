@@ -267,6 +267,7 @@ def diagnose(context, *, target=None, compare_run_id=None):
     selected = target_set(context.config, arms)
     destination = context.diagnosis_path(arms)
     document = {
+        "dataset": context.dataset,
         "schema_version": "leave-one-out-diagnosis/v5",
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),

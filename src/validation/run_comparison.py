@@ -14,7 +14,7 @@ def compare_runs(context, reference_run_id, *, target=None):
 
     if reference_run_id == context.run_id:
         raise ValueError("comparison requires two different run IDs")
-    reference = RunContext.load(reference_run_id, root=context.root)
+    reference = RunContext.load(reference_run_id, dataset=context.dataset, root=context.root)
     from arm_registry import select_arms
 
     names = list(select_arms(context.config, target))
@@ -65,6 +65,7 @@ def compare_runs(context, reference_run_id, *, target=None):
         for i, name in enumerate(names)
     }
     return {
+        "dataset": context.dataset,
         "run_id": context.run_id,
         "reference_run_id": reference.run_id,
         "direction": "run minus reference",

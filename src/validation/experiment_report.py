@@ -20,11 +20,15 @@ def write_report(context, selected, document):
     statistics = document["statistics"]
     relative = report["base_relative_changes"]
     lines = [
-        f"# {context.run_id}: 추천 실험", "",
+        f"# {context.run_id} / {context.dataset}: 추천 실험", "",
         f"계약: `{document['arm_contract']}`. Arm: {', '.join(document['targets'])}.", "",
         "| Arm | NDCG@10 평균 ± 표준편차 | HR@10 평균 ± 표준편차 | Base 대비 NDCG | Base 대비 HR |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
+    if context.dataset == "m3l_10m":
+        from preparation.m3l import INTERPRETATION
+
+        lines[2:2] = [f"{INTERPRETATION}. 모든 평점을 사용하며 영상 미확보 영화는 제외합니다.", ""]
     for arm, values in means.items():
         changes = [
             f"{relative[arm][metric] * 100:+.2f}%"
