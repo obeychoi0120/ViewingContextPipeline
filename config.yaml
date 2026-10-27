@@ -29,7 +29,7 @@ datasets:
       item_count: 19738
   m3l_10m:
     data:
-      root: ~/datasets/m3l-10m
+      root: /home_nvme/shared/data/m3l-10m
     source_counts:
       user_count: 69878
       interaction_count: 9409884
