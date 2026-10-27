@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-CONCAT_ARM_CONTRACT = "title-summary-nine-arms/v3"
 CONCAT_POLICY = "title-summary-double-newline/v1"
 EXPERIMENT_CONFIG_VERSION = "v6"
 RECOMMENDATION_ARM_CONTRACT = "gnn-attn-aggregation/v1"

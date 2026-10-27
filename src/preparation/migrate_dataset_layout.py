@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from artifact_io import atomic_write_json, read_json
-from pipeline_runtime import DATASETS, run_contract
+from pipeline_runtime import DATASETS
 
 
 DATASET = "microlens_100k"
@@ -31,7 +31,7 @@ def _path(root, relative):
 
 
 def _plan(root):
-    moves, contracts = [], []
+    moves = []
 
     def group(parent):
         if not parent.is_dir():
@@ -59,29 +59,9 @@ def _plan(root):
     runs = root / "runs"
     if runs.is_dir():
         for run in sorted(p for p in runs.iterdir() if p.is_dir()):
-            legacy = [p for p in run.iterdir() if p.name not in DATASETS]
-            if not legacy:
-                continue
-            contract_path = run / "run_contract.json"
-            old = read_json(contract_path) if contract_path.is_file() else None
-            expected = run_contract(DATASET)
-            compatible = old == {k: v for k, v in expected.items() if k != "dataset"}
-            compatible &= not any(
-                (run / "extraction" / phase / arm).exists()
-                for phase in ("scenes", "summaries")
-                for arm in ("graph_qwen", "desc_qwen")
-            )
-            contracts.append(
-                {
-                    "path": str((run / DATASET / "run_contract.json").relative_to(root)),
-                    "compatible": compatible,
-                    "original": old,
-                    "status": "pending",
-                }
-            )
             group(run)
     group(root / "shared_cache")
-    return {"schema_version": SCHEMA, "dataset": DATASET, "moves": moves, "contracts": contracts}
+    return {"schema_version": SCHEMA, "dataset": DATASET, "moves": moves}
 
 
 def _load_or_plan(root):
@@ -108,10 +88,13 @@ def _check(root, plan):
             and (
                 _identity(destination) == move["identity"]
                 or any(
+                    # Older journals may describe an atomically rewritten contract.
+                    # Recognize that completed move without updating the file again.
                     contract["path"] == move["destination"]
                     and contract["compatible"]
-                    and read_json(destination) == run_contract(DATASET)
-                    for contract in plan["contracts"]
+                    and isinstance(contract.get("original"), dict)
+                    and read_json(destination) == {**contract["original"], "dataset": DATASET}
+                    for contract in plan.get("contracts", [])
                 )
             )
         ):
@@ -128,13 +111,6 @@ def migrate(artifacts_root, *, apply=False):
         _check(root, plan)
         for move in plan["moves"]:
             print(f"[{move['status']}] {move['source']} -> {move['destination']}", flush=True)
-        for contract in plan["contracts"]:
-            label = (
-                "current contract: reusable after normal input verification"
-                if contract["compatible"]
-                else "historical contract: preserved, not enabled"
-            )
-            print(f"[{label}] {contract['path']}", flush=True)
         if not apply:
             print("[DRY RUN] No artifacts changed. Add --apply to move.", flush=True)
             return plan
@@ -157,17 +133,6 @@ def migrate(artifacts_root, *, apply=False):
                 # Rename only: never copy or delete a tree, and never cross filesystems.
                 source.rename(destination)
             move["status"] = "moved"
-            save()
-        for contract in plan["contracts"]:
-            if not contract["compatible"] or contract["status"] == "updated":
-                continue
-            path = _path(root, contract["path"])
-            current = read_json(path)
-            expected = run_contract(DATASET)
-            if current not in (contract["original"], expected):
-                raise ValueError(f"Run contract changed during migration: {path}")
-            atomic_write_json(path, expected, durable=True)
-            contract["status"] = "updated"
             save()
         print(f"[MIGRATION] Complete. Journal: {root / JOURNAL}", flush=True)
         return plan

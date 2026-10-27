@@ -20,6 +20,41 @@ def test_current_config_loads(context):
     assert Path(settings.dataset.pairs_csv).is_file()
 
 
+def test_empty_run_directories_can_be_initialized(context):
+    from pipeline_runtime import RunContext
+
+    directory = context.artifact_root / "runs" / "empty-run" / context.dataset
+    (directory / "extraction" / "scenes").mkdir(parents=True)
+    (directory / "validation").mkdir()
+    fresh = RunContext.load("empty-run", dataset=context.dataset, root=context.root)
+    fresh.initialize()
+    assert not (directory / "run_contract.json").exists()
+
+
+def test_existing_results_without_contract_are_preserved(context):
+    from pipeline_runtime import RunContext
+
+    directory = context.artifact_root / "runs" / "261027_v14" / context.dataset
+    (directory / "extraction").mkdir(parents=True)
+    result = directory / "extraction" / "result.json"
+    result.write_text('{"historical": true}')
+    selected = RunContext.load("261027_v14", dataset=context.dataset, root=context.root)
+    selected.initialize()
+    assert result.read_text() == '{"historical": true}'
+    assert not (directory / "run_contract.json").exists()
+
+
+def test_legacy_run_contract_is_ignored_and_preserved(context):
+    from pipeline_runtime import RunContext
+
+    context.run_root.mkdir(parents=True)
+    path = context.run_root / "run_contract.json"
+    path.write_text("historical metadata; not read by the pipeline")
+    selected = RunContext.load(context.run_id, dataset=context.dataset, root=context.root)
+    selected.initialize()
+    assert path.read_text() == "historical metadata; not read by the pipeline"
+
+
 def test_arm_sources_and_title_policy(context):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, target_set
 

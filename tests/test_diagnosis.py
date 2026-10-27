@@ -107,7 +107,7 @@ def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch, capsys):
     assert recommendation_identity(context, "d0")["embedding_hash"] == recommendation_identity(context, "d1")["embedding_hash"]
     assert len({recommendation_identity(context, name)["embedding_hash"] for name in all_arms[3:]}) == 1
     assert len(GraphStore(context.representations_dir / "desc_qwen3vl")["contexts"]) == 48
-    run_contract = (context.run_root / "run_contract.json").read_bytes()
+    assert not (context.run_root / "run_contract.json").exists()
     source_bytes = {str(p): p.read_bytes() for p in context.representations_dir.rglob("*.npy")}
 
     def forbidden_preparation(*args, **kwargs):
@@ -149,7 +149,7 @@ def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch, capsys):
     assert_run_grid(context, graph_mode=True)
     assert run_recommendation(context, target=all_arms)["skipped"] == 24
     assert source_bytes == {str(p): p.read_bytes() for p in context.representations_dir.rglob("*.npy")}
-    assert (context.run_root / "run_contract.json").read_bytes() == run_contract
+    assert not (context.run_root / "run_contract.json").exists()
 
 
 @pytest.mark.torch

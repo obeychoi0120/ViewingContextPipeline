@@ -389,6 +389,8 @@ CPU·오프라인 회귀 테스트는 `python -m pytest -q tests`로 실행합�
 
 준비 결과는 데이터셋 안에서 공유하고 추출·표현·추천·진단은 Run·데이터셋별로 저장합니다. **Run별 분석 코드·보고서·표·이미지는 `artifacts/runs/<RUN_ID>/<dataset>/reports/`에 보관합니다.**
 
+파이프라인 실행에서는 `run_contract.json`을 생성하거나 요구하지 않습니다. 기존 파일이 있어도 읽거나 수정하지 않으며, `extraction/`만 있는 Run에서도 후속 단계를 실행할 수 있습니다. 산출물의 유효성은 각 단계의 스키마·입력 fingerprint·학습 및 평가 계약으로 검증합니다.
+
 **재실행은 정상 Scene·완료 Summary를 재사용합니다.** 생성 설정을 바꾸어도 자동 갱신하지 않으며, 같은 Run에 서로 다른 생성 조건의 결과가 섞일 수 있습니다. 전체를 현재 조건으로 다시 만들려면 선택한 단계·소스에 `--force`를 사용합니다. 기존 결과를 보존하려면 새 Run을 사용하세요.
 
 <details>
@@ -401,7 +403,7 @@ python -m preparation.migrate_dataset_layout --artifacts-root artifacts
 python -m preparation.migrate_dataset_layout --artifacts-root artifacts --apply
 ```
 
-기존 preparation·각 Run의 산출물·공유 캐시는 `microlens_100k` 하위로 디렉터리 이동합니다. 원본 영상·모델 경로와 content ID·이벤트·분할·특징·체크포인트의 해시는 유지합니다. 현재 Run 계약과 호환되는 결과만 dataset 식별을 추가하며 기존 검증을 통과하면 재사용합니다. 과거 계약은 보고서와 함께 보존하고 현재 형식으로 강제 변환하지 않습니다.
+기존 preparation·각 Run의 산출물·공유 캐시는 `microlens_100k` 하위로 디렉터리 이동합니다. 원본 영상·모델 경로와 content ID·이벤트·분할·특징·체크포인트의 해시는 유지합니다. 기존 `run_contract.json`도 내용 수정 없이 옮기며 새로 만들지 않습니다. 재사용 가능 여부는 각 단계에서 산출물 자체를 검증하여 판단합니다.
 
 대상이 이미 존재하면 병합하거나 덮어쓰지 않습니다. `dataset_layout_migration.json`에 진행 상황을 기록하므로 중단 후 같은 명령으로 재개할 수 있습니다. 이전 기록은 보관하세요. 과거 보고서 안의 경로는 당시 기록으로 남습니다.
 

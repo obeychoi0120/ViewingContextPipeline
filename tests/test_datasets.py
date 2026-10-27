@@ -14,7 +14,7 @@ from artifact_io import (
     write_jsonl,
 )
 from helpers import ready_cohort, result_identity, train_inputs
-from pipeline_runtime import ConfigError, RunContext, run_contract
+from pipeline_runtime import ConfigError, RunContext
 from preparation.cohort import load_cohort, prepare_full_cohort
 from preparation.migrate_dataset_layout import JOURNAL, migrate
 from validation.selection import (
@@ -76,7 +76,7 @@ def test_dataset_paths_contract_and_cache_are_isolated(context, monkeypatch):
         assert ctx.run_root == ctx.artifact_root / "runs" / ctx.run_id / ctx.dataset
         assert ctx.preparation_dir == ctx.artifact_root / "preparation" / ctx.dataset
         assert ctx.cohort_dir.is_relative_to(ctx.preparation_dir)
-        assert read_json(ctx.run_root / "run_contract.json")["dataset"] == ctx.dataset
+        assert not (ctx.run_root / "run_contract.json").exists()
     assert context.keyframes_dir != m3l.keyframes_dir
     assert context.source_assets_dir != m3l.source_assets_dir
     assert context.scene_arm_dir("graph_qwen3vl") != m3l.scene_arm_dir("graph_qwen3vl")
@@ -88,9 +88,6 @@ def test_dataset_paths_contract_and_cache_are_isolated(context, monkeypatch):
     left.publish(source, ["x"], origin={"run_id": context.run_id})
     assert not right.valid()
     assert right.restore(context.root / "wrong-cache") is None
-    write_json(m3l.run_root / "run_contract.json", run_contract("microlens_100k"))
-    with pytest.raises(ConfigError, match="contract mismatch"):
-        RunContext.load(context.run_id, dataset=m3l.dataset, root=context.root)
     with pytest.raises(ConfigError, match="unsupported dataset"):
         RunContext.load(context.run_id, dataset="../escape", root=context.root)
 
@@ -273,8 +270,6 @@ def _make_legacy(context):
             for path in list(namespace.iterdir()):
                 path.rename(parent / path.name)
             namespace.rmdir()
-    contract = context.artifact_root / "runs" / context.run_id / "run_contract.json"
-    write_json(contract, {k: v for k, v in run_contract(context.dataset).items() if k != "dataset"})
 
 
 @pytest.mark.torch
@@ -318,7 +313,8 @@ def test_migration_preserves_selection_features_and_completed_training(context, 
     assert not generator.tasks
     reused = run_recommendation(migrated, target=["base", "g0"])
     assert reused["completed"] == 0 and reused["skipped"] == 6
-    # Repeating the migration is safe even though the Run contract was rewritten atomically.
+    assert not (migrated.run_root / "run_contract.json").exists()
+    # Repeating the migration preserves the moved artifacts.
     migrate(context.artifact_root, apply=True)
 
 
@@ -361,8 +357,35 @@ def test_migration_conflicts_resume_and_historical_runs(context, monkeypatch):
     assert (
         historical / context.dataset / "reports" / "original.md"
     ).read_text() == "original report"
-    with pytest.raises(ConfigError, match="contract mismatch"):
-        RunContext.load("historical", dataset=context.dataset, root=context.root)
+    restored = RunContext.load("historical", dataset=context.dataset, root=context.root)
+    restored.initialize()
+    assert read_json(historical / context.dataset / "run_contract.json") == old_contract
+
+
+def test_previous_migration_journal_does_not_rewrite_contract(context):
+    from preparation.migrate_dataset_layout import SCHEMA
+
+    path = context.run_root / "run_contract.json"
+    path.parent.mkdir(parents=True)
+    old = {"experiment_config_version": "v6", "arm_contract": "title-summary-nine-arms/v3"}
+    write_json(path, {**old, "dataset": context.dataset})
+    before = path.read_bytes()
+    # The previous migration used atomic replacement, so the original inode was lost.
+    stat = path.stat()
+    plan = {
+        "schema_version": SCHEMA, "dataset": context.dataset,
+        "moves": [{
+            "source": str((path.parent.parent / path.name).relative_to(context.artifact_root)),
+            "destination": str(path.relative_to(context.artifact_root)),
+            "identity": [stat.st_dev, -1], "status": "moved",
+        }],
+        "contracts": [{"path": str(path.relative_to(context.artifact_root)),
+                       "compatible": True, "original": old, "status": "pending"}],
+    }
+    write_json(context.artifact_root / JOURNAL, plan)
+    migrate(context.artifact_root, apply=True)
+    assert path.read_bytes() == before
+    assert path.stat().st_ino == stat.st_ino
 
 
 @pytest.mark.parametrize(

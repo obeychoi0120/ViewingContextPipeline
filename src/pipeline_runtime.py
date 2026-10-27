@@ -10,13 +10,6 @@ CONFIG_PATH = Path("config.yaml")
 DATASETS = ("microlens_100k", "m3l_10m")
 
 
-def run_contract(dataset: str) -> dict[str, str]:
-    from arm_registry import CONCAT_ARM_CONTRACT
-
-    return {"experiment_config_version": EXPERIMENT_CONFIG_VERSION,
-            "arm_contract": CONCAT_ARM_CONTRACT, "dataset": dataset}
-
-
 class ConfigError(RuntimeError):
     pass
 
@@ -74,30 +67,18 @@ class RunContext:
         )
         run_root = artifact_root / "runs" / selected / dataset
         if dataset == "microlens_100k" and (
-            any((run_root.parent / name).exists() for name in ("extraction", "validation", "reports", "run_contract.json"))
+            any((run_root.parent / name).exists() for name in ("extraction", "validation", "reports"))
             or (artifact_root / "preparation" / "cohort").exists()
         ):
             raise ConfigError("legacy MicroLens layout found; run python -m preparation.migrate_dataset_layout --apply first")
         for phase in ("scenes", "summaries"):
             directory = run_root / "extraction" / phase
             if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
-                raise ConfigError("legacy qwen Run contract is unsupported; use a new run_id (no automatic migration)")
-        contract_path = run_root / "run_contract.json"
-        if contract_path.exists():
-            from artifact_io import read_json
-            if read_json(contract_path) != run_contract(dataset):
-                raise ConfigError("Run contract mismatch; use a new run_id")
-        elif run_root.exists() and any(run_root.iterdir()):
-            raise ConfigError("missing Run contract; migrate legacy artifacts or use a new run_id")
+                raise ConfigError("legacy qwen extraction layout is unsupported; use a new run_id (no automatic migration)")
         return cls(repo_root, selected, config, run_root, artifact_root, dataset)
 
     def initialize(self) -> None:
-        from artifact_io import atomic_write_json
-
         self.run_root.mkdir(parents=True, exist_ok=True)
-        contract_path = self.run_root / "run_contract.json"
-        if not contract_path.exists():
-            atomic_write_json(contract_path, run_contract(self.dataset), durable=True)
         for directory in (
             self.cohort_dir,
             self.run_root / "extraction",
