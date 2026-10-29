@@ -185,7 +185,7 @@ def _extract(
     scene_dir = context.extraction_dir(arm.representation, model, "scenes")
     from extraction.scene_storage import ensure_generation_identity
 
-    ensure_generation_identity(scene_dir, provenance, force=force, strict=model == "minicpm")
+    ensure_generation_identity(scene_dir, provenance, force=force)
     if representation == "graph":
         (scene_dir / "generation_stats.json").unlink(missing_ok=True)
     migrate_scene_failures(scene_dir)

@@ -22,7 +22,7 @@ from validation.leave_one_out_data import EventTable
 from visual_sampling import timestamp_stem
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = ["meta", "graph_qwen3vl_meta"]
+TARGETS = ["base", "g0"]
 GRAPH_TEXT = """[Context]
 medium: live_action
 format: demonstration
@@ -119,7 +119,7 @@ def make_context(root, lengths=(5, 6, 13)):
     (data / "supplement.csv").write_text('item,title\n1,"Supplement title"\n')
     for row in rows:
         (videos / f"{row['item_id']}.mp4").write_bytes(b"decoder-double input")
-    config["data"] = {
+    config["datasets"]["microlens_100k"]["data"] = {
         "pairs_csv": str(data / "pairs.csv"),
         "pairs_tsv": str(data / "absent.tsv"),
         "titles_csv": str(data / "titles.csv"),
@@ -141,7 +141,7 @@ def make_context(root, lengths=(5, 6, 13)):
     config["models"]["gemini"].update(project_id="offline-project")
     config["artifacts_root"] = str(root / "artifacts")
     settings = config["validation"]
-    settings["cohort"].update(
+    config["datasets"]["microlens_100k"]["source_counts"].update(
         user_count=len(lengths), interaction_count=len(rows), item_count=len(rows)
     )
     settings["model"].update(max_epochs=2, batch_size=8, dropout=0.0, deterministic=True)
@@ -157,7 +157,7 @@ def make_context(root, lengths=(5, 6, 13)):
         "summary_description_v5.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
-    return RunContext.load("regression", root=root)
+    return RunContext.load("regression", dataset="microlens_100k", root=root)
 
 
 def ready_cohort(context):
@@ -243,22 +243,23 @@ def extract_scenes(context, monkeypatch):
     return generator
 
 
-def prepare_text(context, monkeypatch):
-    from extraction.steps import summarize
+def prepare_inputs(context, monkeypatch):
+    from extraction.steps import extract_description_scenes
     from validation.steps import embed_representations
 
     generator = extract_scenes(context, monkeypatch)
-    summary = FakeGenerator("A person cuts a tomato with a knife in a kitchen.")
-    monkeypatch.setattr("extraction.steps.qwen_generator", summary)
-    summarize(context, model="qwen3vl", schema="prompts/summary_graph_v9.md", arm="graph_qwen3vl")
+    description = FakeGenerator("A person cuts a tomato with a knife in a kitchen.")
+    monkeypatch.setattr("extraction.steps.qwen_generator", description)
+    extract_description_scenes(context, model="qwen3vl", schema="prompts/scene_description_v3.md",
+                               arm="desc_qwen3vl")
     embed_representations(context, target=TARGETS)
-    return generator, summary
+    return generator, description
 
 
-def train_text(context, monkeypatch):
+def train_inputs(context, monkeypatch):
     from validation.steps import run_recommendation
 
-    prepare_text(context, monkeypatch)
+    prepare_inputs(context, monkeypatch)
     return run_recommendation(context, target=TARGETS)
 
 
@@ -282,7 +283,7 @@ def summary_options(context, catalog=None):
     )
 
 
-def graph_store(context, *, counts=(2, 1), arm_name="graph_qwen3vl_meta"):
+def graph_store(context, *, counts=(2, 1), arm_name="g0"):
     from arm_registry import registry
     from validation.graph_inputs import build_input
 
@@ -323,7 +324,7 @@ def selected_table(context):
     return cohort, EventTable(cohort["events"]), cohort["plan"]["splits"][0]
 
 
-def result_identity(context, cohort, seed=42, arm="meta"):
+def result_identity(context, cohort, seed=42, arm="base"):
     from validation.representation_provenance import recommendation_identity
     from validation.selection import training_signature
     from validation.steps import validation_config

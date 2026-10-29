@@ -20,6 +20,10 @@ class LeaveOneOutDatasetConfig(DatasetConfig):
     pairs_csv: Path
 
 
+class M3LDatasetConfig(StrictModel):
+    root: Path
+
+
 class EncoderConfig(StrictModel):
     model_path: Path
     embedding_dim: Literal[1024]
@@ -71,9 +75,6 @@ class EvaluationConfig(StrictModel):
 class FullCohortConfig(StrictModel):
     mode: Literal["leave_one_out"]
     metadata_missing_policy: Literal["zero_vector"]
-    user_count: int = Field(gt=0)
-    interaction_count: int = Field(gt=0)
-    item_count: int = Field(gt=0)
     timezone: Literal["UTC"]
     min_user_interactions: Literal[5]
     retained_sequence_length: Literal[13]
@@ -89,9 +90,9 @@ class GraphExecutionConfig(StrictModel):
 
 
 class ValidationConfig(StrictModel):
-    schema_version: Literal["validation-config/v8"]
+    schema_version: Literal["validation-config/v9"]
     run_id: str
-    dataset: LeaveOneOutDatasetConfig
+    dataset: LeaveOneOutDatasetConfig | M3LDatasetConfig
     cohort: FullCohortConfig
     encoder: EncoderConfig
     model: ModelConfig
@@ -106,7 +107,7 @@ def build_validation_config(
     """Assemble the shared contract after the caller resolves its own paths."""
     return ValidationConfig.model_validate(
         {
-            "schema_version": "validation-config/v8",
+            "schema_version": "validation-config/v9",
             "run_id": run_id,
             "dataset": dataset,
             "cohort": settings.get("cohort"),

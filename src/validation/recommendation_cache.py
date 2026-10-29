@@ -10,7 +10,6 @@ from artifact_io import fingerprint
 from artifact_io import read_json, write_json
 from validation.model import torch
 from validation.recommendation_contracts import (
-    ARCHITECTURE_VERSION,
     TRAINING_IMPLEMENTATION_VERSION,
 )
 from validation.representation_provenance import read_state
@@ -27,7 +26,7 @@ def cache_for(context, identity):
         {
             "identity": {k: v for k, v in identity.items() if k != "run_id"},
             "implementation": TRAINING_IMPLEMENTATION_VERSION,
-            "architecture": identity.get("graph_architecture", ARCHITECTURE_VERSION),
+            "architecture": identity["architecture_version"],
         }
     )
     return SharedCache(context, "recommendations", key)
@@ -59,7 +58,7 @@ def valid_bundle(directory, identity, table, split):
             not expected
             and bool(checkpoint["state_dict"])
             and metadata.get("architecture_version")
-            == identity.get("graph_architecture", ARCHITECTURE_VERSION)
+            == identity["architecture_version"]
             and metadata.get("catalog_size") == len(table.items)
             and metadata.get("best_epoch") == training.get("best_epoch")
             and metadata.get("checkpoint_policy") == "best_validation_hr10"

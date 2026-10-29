@@ -1,4 +1,4 @@
-"""Compare graph results from two runs with matched users, events, partitions and seeds."""
+"""Compare Arm results from two runs with matched users, events, partitions and seeds."""
 
 from __future__ import annotations
 import numpy as np
@@ -8,26 +8,18 @@ from validation.selection import load_validation_cohort
 from validation.representation_provenance import read_state
 
 
-def compare_graph_runs(context, reference_run_id, *, target=None):
+def compare_runs(context, reference_run_id, *, target=None):
     from validation.leave_one_out_diagnosis import cluster_bootstrap, collect_metrics
     from validation.steps import validation_config
 
     if reference_run_id == context.run_id:
         raise ValueError("comparison requires two different run IDs")
-    reference = RunContext.load(reference_run_id, root=context.root)
-    from validation.graph_context import is_graph, graph_context
+    reference = RunContext.load(reference_run_id, dataset=context.dataset, root=context.root)
+    from arm_registry import select_arms
 
-    if is_graph(context):
-        reference = graph_context(reference, context.scene_aggregation)
-    from arm_registry import registry
-
-    names = [
-        name
-        for name, arm in registry(context.config).items()
-        if arm.representation == "graph" and (target is None or name in target)
-    ]
+    names = list(select_arms(context.config, target))
     if not names:
-        raise ValueError("run comparison requires at least one Graph target")
+        raise ValueError("run comparison requires at least one target")
     arms = {name: name for name in names}
     cohorts = [load_validation_cohort(ctx) for ctx in (context, reference)]
     for key in ("protocol", "preprocessing", "source_data_hash"):
@@ -39,6 +31,8 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
     if cohorts[0]["plan"]["splits"] != cohorts[1]["plan"]["splits"]:
         raise ValueError("run comparison requires identical evaluation partitions")
     configs = [validation_config(ctx) for ctx in (context, reference)]
+    if sorted(configs[0].model.seeds) != sorted(configs[1].model.seeds):
+        raise ValueError("run comparison requires identical model seeds")
     aggregates = [
         collect_metrics(ctx, config, cohort, arms=arms)
         for ctx, config, cohort in zip((context, reference), configs, cohorts, strict=True)
@@ -51,7 +45,7 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
            for report in (left_report, right_report)):
         raise ValueError("run comparison requires identical current evaluation contracts")
     grids = [
-        [(r["split_hash"], r["seed"], r["arm"]) for r in report["per_seed"]]
+        {(r["split_hash"], r["seed"], r["arm"]) for r in report["per_seed"]}
         for report in (left_report, right_report)
     ]
     if grids[0] != grids[1] or not np.array_equal(counts, other_counts):
@@ -70,9 +64,8 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         }
         for i, name in enumerate(names)
     }
-    interactions = {}
-    interaction = None
     return {
+        "dataset": context.dataset,
         "run_id": context.run_id,
         "reference_run_id": reference.run_id,
         "direction": "run minus reference",
@@ -82,16 +75,7 @@ def compare_graph_runs(context, reference_run_id, *, target=None):
         "family_size": len(names),
         "targets": names,
         "comparisons": results,
-        "model_interaction": interaction,
-        **{"model_interactions": interactions},
-        "interpretation": "Includes extraction and direct-graph training differences; identical pooling mode required."
-        if is_graph(context)
-        else "Includes differences in extraction, summary prompts, models and fallback; inspect provenance.",
-        **(
-            {"representation_mode": "graph", "scene_aggregation": context.scene_aggregation}
-            if is_graph(context)
-            else {}
-        ),
+        "interpretation": "동일 Arm·분할·seed 비교이며 추출·학습 조건 차이는 provenance를 확인해야 합니다.",
         "sources": {
             ctx.run_id: {name: read_state(ctx, name).get("sources", []) for name in names}
             for ctx in (context, reference)

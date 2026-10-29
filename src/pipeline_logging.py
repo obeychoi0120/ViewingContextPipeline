@@ -10,6 +10,7 @@ from pipeline_runtime import CONFIG_PATH
 def step_settings(context, step, **options):
     values = {
         "run_id": context.run_id,
+        "dataset": context.dataset,
         "config_file": context.root / CONFIG_PATH,
         "force": options.get("force", False),
     }
@@ -43,7 +44,7 @@ def step_settings(context, step, **options):
             "prepare-input-data": context.keyframes_dir,
             "embed-representations": context.representations_dir,
             "run-recommendation": context.recommendations_dir,
-            "run-diagnosis": context.diagnosis_path.parent,
+            "run-diagnosis": context.diagnosis_dir,
         }[step]
         if step in {"embed-representations", "run-recommendation", "run-diagnosis"}:
             values["selected_arms"] = list(select_arms(context.config, options.get("target")))

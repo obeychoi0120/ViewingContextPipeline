@@ -33,7 +33,7 @@ class SceneRoleEncoder(nn.Module):
     ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, place; receiver is ignored.
 
     def __init__(self, feature_dim=1024, hidden=GRAPH_MODEL["hidden_dim"], aggregation="mean",
-                 dropout=0.0):
+                 dropout=0.0, role_fusion=True):
         super().__init__()
         if aggregation not in SCENE_AGGREGATIONS:
             raise ValueError(
@@ -46,9 +46,10 @@ class SceneRoleEncoder(nn.Module):
         self.entity_projection = nn.Linear(feature_dim, hidden)
         self.action_projection = nn.Linear(feature_dim, hidden)
         self.context_projection = nn.Linear(feature_dim, hidden)
-        self.role_fusion = nn.Linear(hidden * 5, hidden)
-        self.role_states = nn.Parameter(torch.empty(4, 2, hidden))
-        nn.init.normal_(self.role_states, std=0.02)
+        self.role_fusion = nn.Linear(hidden * 5, hidden) if role_fusion else None
+        if role_fusion:
+            self.role_states = nn.Parameter(torch.empty(4, 2, hidden))
+            nn.init.normal_(self.role_states, std=0.02)
         self.scene_mlp = SingleLayerResidualMLP(self.output_dim)
         if aggregation == "gnn":
             self.gcn = SceneGCN(self.output_dim)
@@ -57,9 +58,11 @@ class SceneRoleEncoder(nn.Module):
                 self.output_dim, dropout=dropout,
                 **SCENE_TRANSFORMER, **TRANSFORMER_VARIANTS[aggregation],
             )
-        elif aggregation == "gnn_attn":
+        elif aggregation in ("gnn_attn", "self_only"):
             # Same attribute as gnn: the checkpoints differ only by gcn.query/gcn.key.
-            self.gcn = SceneAttentionGCN(self.output_dim, hidden * 3, hidden)
+            self.gcn = SceneAttentionGCN(
+                self.output_dim, hidden * 3, hidden, self_only=aggregation == "self_only"
+            )
         elif aggregation == "attn_pool":
             self.attention_pool = SceneAttentionPool(self.output_dim, hidden)
 
@@ -96,7 +99,7 @@ class SceneRoleEncoder(nn.Module):
                 entities = self.entity_projection(batch["features"][entity_ids])
             with span("action_projection", cuda=True):
                 actions = self.action_projection(batch["features"][action_ids])
-            if len(action_ids):
+            if len(action_ids) and self.role_fusion is not None:
                 with span("role_fusion", cuda=True):
                     role_entities, role_states = self._role_inputs(batch, action_ids)
                     # Node IDs are local to the batch; compact Entity rows differ.
@@ -121,11 +124,11 @@ class SceneRoleEncoder(nn.Module):
                 with span("context_projection", cuda=True):
                     context = self.context_projection(batch["contexts"])
                 scenes = torch.cat([title[batch["scene_videos"]], entity_mean, action_mean, context], dim=-1)
-                if self.aggregation in ("gnn", "gnn_attn"):
+                if self.aggregation in ("gnn", "gnn_attn", "self_only"):
                     similarity_features = torch.cat([entity_mean, action_mean, context], dim=-1)
             with span("scene_mlp", cuda=True):
                 scenes = self.scene_mlp(scenes)
-            if self.aggregation in SCENE_EXCHANGES:
+            if self.aggregation in SCENE_EXCHANGES or self.aggregation == "self_only":
                 groups = [value for key, value in batch.items() if key.startswith("scene_group_")]
                 if not groups:
                     groups = [torch.as_tensor(value, device=scenes.device)
@@ -144,6 +147,40 @@ class SceneRoleEncoder(nn.Module):
         if missing:
             ids = torch.as_tensor(missing, device=title.device)
             fallback = torch.cat([title[ids], title.new_zeros((len(ids), self.hidden_dim * 3))], dim=-1)
+            output = output.index_copy(0, ids, self.scene_mlp(fallback))
+        return output.masked_fill(~batch["available"].bool()[:, None], 0.0)
+
+
+class DescriptionSceneEncoder(nn.Module):
+    """Direct scene Description BGE, title concatenation, optional inter-scene transfer."""
+
+    def __init__(self, feature_dim, hidden=128, aggregation="mean"):
+        super().__init__()
+        self.hidden_dim = hidden
+        self.aggregation = aggregation
+        self.title_projection = nn.Linear(feature_dim, hidden)
+        self.description_projection = nn.Linear(feature_dim, hidden * 3)
+        self.scene_mlp = SingleLayerResidualMLP(hidden * 4)
+        if aggregation == "gnn_attn":
+            self.gcn = SceneAttentionGCN(hidden * 4, hidden * 3, hidden)
+
+    def forward(self, batch):
+        count = len(batch["offsets"]) - 1
+        title = self.title_projection(batch["titles"])
+        title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
+        description = self.description_projection(batch["contexts"])
+        scenes = self.scene_mlp(torch.cat([title[batch["scene_videos"]], description], dim=-1))
+        if self.aggregation == "gnn_attn" and len(scenes):
+            groups = [value for key, value in batch.items() if key.startswith("scene_group_")]
+            if not groups:
+                groups = [torch.as_tensor(value, device=scenes.device)
+                          for value in scene_groups(batch["offsets"]).values()]
+            scenes = self.gcn(scenes, description, groups)
+        output = segment_mean(scenes, batch["scene_videos"], count)
+        missing = [i for i in range(count) if batch["offsets"][i] == batch["offsets"][i + 1]]
+        if missing:
+            ids = torch.as_tensor(missing, device=title.device)
+            fallback = torch.cat([title[ids], title.new_zeros((len(ids), self.hidden_dim * 3))], -1)
             output = output.index_copy(0, ids, self.scene_mlp(fallback))
         return output.masked_fill(~batch["available"].bool()[:, None], 0.0)
 
@@ -167,6 +204,8 @@ class GraphSASRec(SASRec):
         dropout,
         arm,
         execution=None,
+        representation="graph",
+        role_fusion=True,
     ):
         super().__init__(
             item_count,
@@ -187,17 +226,22 @@ class GraphSASRec(SASRec):
             raise ValueError("Graph recommendation dimension must be divisible by 4")
         self.store = store
         self.title_dim = embedding_dim // 4
-        self.graph_encoder = SceneRoleEncoder(
-            store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation,
-            dropout=dropout,
-        )
+        if representation == "description":
+            self.graph_encoder = DescriptionSceneEncoder(
+                store["features"].shape[1], self.title_dim, aggregation
+            )
+        else:
+            self.graph_encoder = SceneRoleEncoder(
+                store["features"].shape[1], hidden=self.title_dim, aggregation=aggregation,
+                dropout=dropout, role_fusion=role_fusion,
+            )
         self.graph_encoder.apply(self._reset_parameters)
         self._reset_attention(self.graph_encoder)
         # Undo the shared Linear reset where attention needs its own start.
         if aggregation == "attn_pool":
             # Uniform scene weights start exactly as mean pooling.
             self.graph_encoder.attention_pool.start_uniform()
-        elif aggregation == "gnn_attn":
+        elif aggregation in ("gnn_attn", "self_only"):
             self.graph_encoder.gcn.reset_query_key()
         self._vectors = self._indices = None
         self.embedding_dim = embedding_dim
@@ -360,6 +404,10 @@ class GraphSASRec(SASRec):
                 self.store["features"].nbytes if self.packed.feature_cache is not None else 0
             ),
         }
+        if hasattr(self.store, "report"):
+            report["role_corruption"] = self.store.report
+        if self.aggregation == "self_only":
+            report["attention_query_key_active"] = False
         if self.aggregation in TRANSFORMER_VARIANTS:
             # Learned [attention, FFN] scales per layer; 0 means that sublayer stayed unused.
             report["scene_transformer_residual_scales"] = (
@@ -387,8 +435,31 @@ class GraphSASRec(SASRec):
         return summary
 
 
+def parameter_report(model, branch):
+    total = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    inactive = 0
+    if branch == "a3":
+        inactive = sum(p.numel() for module in (model.graph_encoder.gcn.query,
+                                              model.graph_encoder.gcn.key)
+                       for p in module.parameters())
+    hidden = model.graph_encoder.hidden_dim if branch != "base" else 0
+    return {
+        "trainable": total,
+        "active_trainable": total - inactive,
+        "inactive_query_key": inactive,
+        "removed_role_fusion": 5 * hidden ** 2 + 9 * hidden if branch == "a1" else 0,
+    }
+
+
 def new_graph_model(context, config, branch, device):
-    store = GraphStore(context.representations_dir / f"{branch}_embeddings")
+    from arm_registry import feature_source, registry
+
+    arm = registry(context.config)[branch]
+    store = GraphStore(context.representations_dir / feature_source(arm))
+    if branch == "a2":
+        from validation.role_corruption import CorruptedGraphStore
+
+        store = CorruptedGraphStore(store)
     if store["features"].shape[1] != config.encoder.embedding_dim:
         raise ValueError("graph feature dimension mismatch; rerun embed-representations")
     kwargs = dict(
@@ -399,7 +470,7 @@ def new_graph_model(context, config, branch, device):
         num_heads=config.model.num_heads,
         dropout=config.model.dropout,
     )
-    if branch == "meta":
+    if branch == "base":
         features = np.array(store["features"][store["titles"]], copy=True)
         return SASRec(
             **kwargs,
@@ -414,7 +485,9 @@ def new_graph_model(context, config, branch, device):
     return GraphSASRec(
         **kwargs,
         store=store,
-        aggregation=context.scene_aggregation,
-        arm="graph",
+        aggregation=arm.aggregation,
+        arm=branch,
         execution=config.graph_execution,
+        representation=arm.representation,
+        role_fusion=arm.role_fusion,
     ).to(device)

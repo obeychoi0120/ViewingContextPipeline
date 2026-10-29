@@ -7,62 +7,55 @@ import torch
 from arm_registry import registry
 from artifact_io import write_jsonl
 from extraction.graph_warnings import PARSE_FAILED
-from extraction.summary_executor import prepare_summary_batch
 from helpers import (
     FakeEncoder,
     failure_row,
     graph_store,
-    prepare_text,
+    prepare_inputs,
     ready_cohort,
     scene_row,
-    summary_options,
 )
 from validation.graph_batching import PackedGraphStore
 from validation.graph_inputs import build_input
-from validation.representation_inputs import documents_for_arm
 from validation.selection import prepare_validation_cohort
 from validation.text_features import encode_components, validate_arrays
 
 
-def test_text_components_follow_arm_policy(context, monkeypatch):
-    prepare_text(context, monkeypatch)
-    cohort = prepare_validation_cohort(context)
-    arms = registry(context.config)
-    for name, title_present, video_present in (
-        ("meta", True, False),
-        ("graph_qwen3vl", False, True),
-        ("graph_qwen3vl_meta", True, True),
-    ):
-        docs = documents_for_arm(context, cohort, arms[name])
-        assert len(docs) == 24
-        for index, doc in enumerate(docs, 1):
-            assert doc["title_text"] == (f"TITLE_SECRET_{index}" if title_present else "")
-            assert bool(doc["video_text"]) is video_present
-            assert doc["title_used"] is title_present
-            assert doc["summary_used"] is video_present
-            assert doc["text"] == "\n\n".join(
-                part for part in (doc["title_text"], doc["video_text"]) if part
-            )
+def test_scene_sources_and_shared_features(context, monkeypatch):
+    from artifact_io import read_json
+    from validation.graph_inputs import GraphStore
+    from validation.steps import embed_representations
+
+    prepare_inputs(context, monkeypatch)
+    result = embed_representations(context, target=["d0", "d1", "g0", "g1", "a1", "a2", "a3"])
+    assert result["generated_sources"] == ["desc_qwen3vl"]
+    assert result["reused_sources"] == ["graph_qwen3vl"]
+    root = context.representations_dir
+    assert {p.name for p in root.iterdir()} == {"metadata", "desc_qwen3vl", "graph_qwen3vl"}
+    description = GraphStore(root / "desc_qwen3vl")
+    assert len(description["contexts"]) == 48  # two independent scenes per video
+    assert len(description["types"]) == 0
+    assert description["video_offsets"].tolist() == list(range(0, 49, 2))
+    assert not (context.run_root / "extraction" / "summaries").exists()
+    assert read_json(root / "desc_qwen3vl" / "manifest.json")["source"] == "desc_qwen3vl"
 
 
-def test_missing_summary_preserves_catalog(context):
-    # Item 2 has neither a title nor a generated summary; item 1 has a failed summary.
+def test_missing_description_preserves_catalog(context):
+    from extraction.scene_storage import write_scene_records
+
     path = context.path("data", "titles_csv")
     path.write_text(path.read_text().replace("2,TITLE_SECRET_2\n", "2,\n"))
     ready_cohort(context)
     cohort = prepare_validation_cohort(context)
-    options = summary_options(context, catalog=cohort["catalog"][:1])
-    prepare_summary_batch(context, **options)
-    docs = documents_for_arm(context, cohort, registry(context.config)["graph_qwen3vl_meta"])
-    arrays, _ = encode_components(docs, 1024, FakeEncoder(), {})
-    assert len(docs) == len(cohort["catalog"]) == 24
-    assert docs[0]["summary_status"] == "failed" and docs[0]["components"] == "title_only"
-    assert docs[1]["summary_status"] == "missing" and docs[1]["components"] == "neither"
-    assert not arrays["video_available"].any()
-    assert not arrays["video_values"].any()
-    assert arrays["title_available"][0] and not arrays["title_available"][1]
-    assert np.any(arrays["title_values"][0] != 0)
-    assert not arrays["title_values"][1].any()
+    cid = cohort["catalog"][0]["content_id"]
+    write_scene_records(context.scene_arm_dir("desc_qwen3vl") / f"{cid}.jsonl", [failure_row(cid)])
+    texts, arrays, stats = build_input(context, cohort, registry(context.config)["d0"])
+    assert len(arrays["titles"]) == len(cohort["catalog"]) == 24
+    assert arrays["titles"][0] != 0 and arrays["titles"][1] == 0
+    assert arrays["video_offsets"].tolist() == [0] * 25
+    assert stats["counts"]["failed"] == 1
+    assert stats["counts"]["zero_scene_video"] == 24
+    assert texts[0] == ""
 
 
 def test_text_arrays_reject_invalid_values():
@@ -110,7 +103,7 @@ def test_graph_exclusions_preserve_items(context):
         failure_row(cid, 3),
     ]
     write_jsonl(context.scene_arm_dir("graph_qwen3vl") / f"{cid}.jsonl", rows)
-    _, arrays, stats = build_input(context, cohort, registry(context.config)["graph_qwen3vl_meta"])
+    _, arrays, stats = build_input(context, cohort, registry(context.config)["g0"])
     assert arrays["video_offsets"].tolist() == [0, 1, 1]
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 2
     assert stats["counts"]["valid_scenes"] == 1

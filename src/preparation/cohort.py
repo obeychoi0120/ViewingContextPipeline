@@ -5,7 +5,7 @@ from pathlib import Path
 import csv
 import json
 import numpy as np
-from artifact_io import read_json, read_jsonl, write_json, write_jsonl
+from artifact_io import file_fingerprint, read_json, read_jsonl, write_json, write_jsonl
 from preparation.catalog import (
     _positive_finite,
     build_item_inventory,
@@ -56,6 +56,10 @@ def load_csv(path):
 
 
 def prepare_full_cohort(context, *, plan_only=False):
+    if context.dataset == "m3l_10m":
+        from preparation.m3l import prepare_m3l_cohort
+
+        return prepare_m3l_cohort(context, plan_only=plan_only)
     settings = context.config["validation"]["cohort"]
     source = context.path("data", "pairs_csv")
     print("[COHORT] Loading interaction CSV and checking source counts...", flush=True)
@@ -65,7 +69,7 @@ def prepare_full_cohort(context, *, plan_only=False):
         "interaction_count": len(table.rows),
         "item_count": len(table.items),
     }
-    if any(observed[key] != settings[key] for key in observed):
+    if observed != context.source_counts:
         raise ValueError(f"full source cardinality mismatch: {observed}")
     tsv = context.path("data", "pairs_tsv")
     if tsv.is_file():
@@ -138,7 +142,7 @@ def prepare_full_cohort(context, *, plan_only=False):
             row["duration_seconds"] = old["duration_seconds"]
     print("[COHORT] Checking metadata titles...", flush=True)
     titles_path = context.path("data", "titles_csv")
-    if "titles_supplement_csv" in context.config["data"]:
+    if "titles_supplement_csv" in context.data:
         from preparation.titles import resolve_required_titles
 
         titles, _, completion = resolve_required_titles(
@@ -199,12 +203,13 @@ def prepare_full_cohort(context, *, plan_only=False):
     return {**result, "status": "ready"}
 
 
-def load_cohort(directory):
+def load_cohort(directory, *, dataset="microlens_100k"):
+    schema = SCHEMA if dataset == "microlens_100k" else "m3l-full-source/v1"
     eligibility = read_json(directory / "eligibility.json")
     if (
         eligibility.get("schema_version"),
         eligibility.get("status"),
-    ) != (SCHEMA, "ready"):
+    ) != (schema, "ready"):
         raise RuntimeError("full source cohort is not ready")
     cohort = {
         "eligibility": eligibility,
@@ -219,7 +224,8 @@ def load_cohort(directory):
     plan, catalog = cohort["plan"], cohort["catalog"]
     expected = [{"item_id": r["item_id"], "content_id": r["content_id"]} for r in catalog]
     if (
-        len(catalog) != plan["item_count"]
+        any(row["content_id"] != content_id_for_item(row["item_id"], dataset) for row in catalog)
+        or len(catalog) != plan["item_count"]
         or len({r["item_id"] for r in catalog}) != len(catalog)
         or cohort["required_items"] != expected
         or not metadata_titles_match_catalog(
@@ -246,4 +252,6 @@ def load_cohort(directory):
         or items != {r["item_id"] for r in catalog}
     ):
         raise RuntimeError("full cohort cardinality mismatch")
+    if dataset == "m3l_10m" and file_fingerprint(directory / "events.jsonl") != plan.get("events_sha256"):
+        raise RuntimeError("M3L prepared interactions changed; rerun prepare-cohort")
     return cohort

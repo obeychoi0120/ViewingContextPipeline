@@ -1,146 +1,59 @@
-"""Bind regenerated embeddings and recommendation combinations to their actual inputs."""
+"""Bind source-level frozen features and Arm-specific models to recommendation results."""
 
-from __future__ import annotations
-
-import hashlib
-import json
-
-import numpy as np
-
-from artifact_io import atomic_write_json
 from artifact_io import fingerprint
 
 
-def state_path(context, branch):
-    return context.representations_dir / ".inputs" / f"{branch}.json"
-
-
 def read_state(context, branch):
-    from validation.graph_context import is_graph
+    from arm_registry import feature_source, registry
+    from artifact_io import read_json
 
-    if is_graph(context):
-        from artifact_io import read_json
-        from artifact_io import fingerprint
-
-        root = context.representations_dir / f"{branch}_embeddings"
-        manifest = read_json(root / "manifest.json")
-        return {
-            "input_hash": manifest["input_hash"],
-            "shareable": True,
-            "recommendation_hash": fingerprint(manifest),
-            "sources": [
-                {
-                    "arm": branch,
-                    "input_hash": manifest["input_hash"],
-                    "version": manifest["version"],
-                }
-            ],
-            "statistics": read_json(root / "statistics.json"),
-        }
-    path = state_path(context, branch)
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-
-
-def matrix_hash(path):
-    with np.load(path) as arrays:
-        digest = hashlib.sha256()
-        for name in sorted(arrays.files):
-            value = np.ascontiguousarray(arrays[name])
-            digest.update(f"{name}:{value.dtype}:{value.shape}".encode())
-            digest.update(value.tobytes())
-    return digest.hexdigest()
-
-
-def pending_write(context, branch):
-    return state_path(context, branch).with_suffix(".pending")
-
-
-def begin_write(context, branch, previous_hash):
-    path = pending_write(context, branch)
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))["previous_hash"]
-    atomic_write_json(path, {"previous_hash": previous_hash}, durable=True)
-    return previous_hash
-
-
-def finish_write(
-    context,
-    branch,
-    signature,
-    previous_hash,
-    *,
-    sources=None,
-    truncation=None,
-    selection_hash=None,
-    cache=None,
-    shareable=False,
-):
-    from validation.cache_identity import REPRESENTATION_VERSION
-    from validation.text_features import COMPOSITION_POLICY
-
-    current = matrix_hash(context.representations_dir / f"{branch}_embeddings.npz")
-    atomic_write_json(
-        state_path(context, branch),
-        {
-            "representation_version": REPRESENTATION_VERSION,
-            "composition_policy": COMPOSITION_POLICY,
-            "input_hash": signature,
-            "embedding_hash": current,
-            "selection_hash": selection_hash,
-            "recommendation_hash": fingerprint(
-                {"input_hash": signature, "embedding_hash": current}
-            ),
-            "sources": sources or [],
-            "truncation": truncation,
-            "cache": cache,
-            "shareable": shareable,
-            "zero_vector_count": sum(bool(row.get("empty")) for row in (sources or [])),
-        },
-        durable=True,
-    )
-    pending_write(context, branch).unlink(missing_ok=True)
+    source = feature_source(registry(context.config)[branch])
+    root = context.representations_dir / source
+    manifest = read_json(root / "manifest.json")
+    return {
+        "input_hash": manifest["input_hash"],
+        "shareable": True,
+        "recommendation_hash": fingerprint(manifest),
+        "sources": [{"source": source, "input_hash": manifest["input_hash"],
+                     "version": manifest["version"]}],
+        "statistics": read_json(root / "statistics.json"),
+    }
 
 
 def recommendation_identity(context, branch):
     value = read_state(context, branch).get("recommendation_hash")
     if value is None:
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
-    from validation.graph_context import is_graph, graph_contract
-
+    from dataclasses import asdict
+    from arm_registry import RECOMMENDATION_ARM_CONTRACT, registry
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION, EVALUATION_CONTRACT
     from model_provenance import canonical, local_model_identity
+    from validation.role_corruption import CORRUPTION
 
-    encoder = {
-        "embedding_dim": context.config["validation"]["encoder"]["embedding_dim"],
-        "model_name": context.path("models", "bge").name,
-        "model": canonical(local_model_identity(context.path("models", "bge"))),
-    }
-
-    item_model = {**ITEM_MODEL, "kind": "baseline" if branch == "meta" else "split"}
-    item_model["video_transform"] = (
-        "none" if branch == "meta" else "graph_encoder" if is_graph(context) else "linear"
-    )
-
-    if is_graph(context):
-        architecture, graph_model = graph_contract(context.scene_aggregation, branch)
-        if branch != "meta":
-            item_model.update(kind="scene_role", item_mlp=False, scene_mlp=True)
-            item_model["video_transform"] = "scene_role_encoder"
-        return {
-            "evaluation_contract": dict(EVALUATION_CONTRACT),
-            "encoder": encoder,
-            "item_model": item_model,
-            "embedding_hash": value,
-            "representation_mode": "graph",
-            "scene_aggregation": context.scene_aggregation,
-            "graph_model": graph_model,
-            "graph_architecture": architecture,
-        }
+    arm = registry(context.config)[branch]
     return {
+        "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
-        "encoder": encoder,
+        "architecture_version": ARCHITECTURE_VERSION,
+        "encoder": {
+            **context.config["validation"]["encoder"],
+            "model": canonical(local_model_identity(context.path("models", "bge"))),
+        },
+        "item_model": {
+            **ITEM_MODEL,
+            "kind": arm.representation,
+            "scene_mlp": branch != "base",
+            "item_mlp": branch == "base",
+            "description_projection_dim": 384 if arm.representation == "description" else None,
+            "attention": {"query_key_input_dim": 384, "query_key_dim": 128,
+                          "normalization": "unit_rms_then_scaled_dot_product_row_softmax",
+                          "layers": 1, "value_dim": 512,
+                          "residual": True, "activation": "relu", "pooling": "mean"}
+            if arm.aggregation != "mean" else None,
+        },
+        "experiment_arm": asdict(arm),
         "embedding_hash": value,
-        "item_model": item_model,
-        "representation_mode": "text",
-        "text_architecture": ARCHITECTURE_VERSION,
+        "representation_mode": arm.representation,
+        "scene_aggregation": arm.aggregation if branch != "base" else None,
+        "role_corruption": dict(CORRUPTION) if branch == "a2" else None,
     }

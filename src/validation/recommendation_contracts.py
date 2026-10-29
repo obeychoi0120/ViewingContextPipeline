@@ -1,12 +1,8 @@
 from __future__ import annotations
 from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms
 
-ARCHITECTURE_VERSION = "sasrec-content-v8"
-# Current text and direct-graph architectures.
-DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({
-    "sasrec-content-v8", "sasrec-role-graph/v9", "sasrec-role-graph/v10", "sasrec-role-graph/v11",
-    "sasrec-role-graph/v12",
-})
+ARCHITECTURE_VERSION = "sasrec-scene-content/v1"
+DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({ARCHITECTURE_VERSION})
 ITEM_MODEL = {
     "baseline_dim": 512,
     "title_dim": 128,

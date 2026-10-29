@@ -177,27 +177,20 @@ def write_scene_records(path, records):
         path.unlink(missing_ok=True)
 
 
-def ensure_generation_identity(directory, provenance, *, force=False, strict=False):
-    """Record initial settings, with an opt-in exact identity check for resume."""
-    from artifact_io import atomic_write_json, read_json
+def ensure_generation_identity(directory, provenance, *, force=False):
+    """Record initial settings without blocking resume after policy changes."""
+    from artifact_io import atomic_write_json
     from model_provenance import canonical
 
     directory = Path(directory)
     identity_path = directory / "generation_identity.json"
     identity = canonical(provenance)
     directory.mkdir(parents=True, exist_ok=True)
-    if strict and not force:
-        if identity_path.is_file():
-            if read_json(identity_path).get("identity") != identity:
-                raise ValueError("MiniCPM generation identity changed; use --force or a new run_id")
-        elif any(directory.glob("*.jsonl")) or any((directory / "raw_responses").glob("*.jsonl")):
-            raise ValueError("MiniCPM outputs have no generation identity; use --force or a new run_id")
     if force:
         # A new identity must never label old outputs after an interrupted regeneration.
         for path in [*directory.glob("*.jsonl"), *(directory / "failures").glob("*.jsonl")]:
             path.unlink()
-        if strict:
-            for path in (directory / "raw_responses").glob("*.jsonl"):
-                path.unlink()
+        for path in (directory / "raw_responses").glob("*.jsonl"):
+            path.unlink()
     if force or not identity_path.exists():
         atomic_write_json(identity_path, {"identity": identity}, durable=True)
