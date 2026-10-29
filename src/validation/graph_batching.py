@@ -25,6 +25,7 @@ class PackedGraphStore:
         self.feature_cache = None
         self.cache_device = None
         self.cache_attempted = False
+        self.segment_bounds = None
         self.video_scenes = np.asarray(store["video_offsets"])
         self.video_nodes = np.asarray(store["scene_offsets"][self.video_scenes])
         self.video_edges = np.asarray(store["edge_offsets"][self.video_scenes])
@@ -82,7 +83,7 @@ class PackedGraphStore:
             return torch.as_tensor(values, device=device)
 
     @timed("graph_batch")
-    def batch(self, item_ids, device, *, prepared=True, group_scenes=False):
+    def batch(self, item_ids, device, *, prepared=True, group_scenes=False, scene_segments=False):
         with span("cpu_pack", cuda=False):
             items = np.asarray(item_ids, dtype=np.int64)
             nodes, node_videos, node_offsets = ranges(
@@ -99,6 +100,14 @@ class PackedGraphStore:
                 "node_scenes": self.node_scenes[nodes] + scene_shift[node_videos],
                 "scene_videos": scene_videos,
             }
+            if scene_segments:
+                # Pairs are sorted by scene row: one ragged gather; segment ids become dense batch-local ids.
+                pairs = self.store.scene_segments
+                if self.segment_bounds is None:
+                    self.segment_bounds = np.searchsorted(pairs[:, 0], np.arange(len(self.store["contexts"]) + 1))
+                indices, owners, _ = ranges(self.segment_bounds[scenes], self.segment_bounds[scenes + 1])
+                arrays["segment_scenes"] = owners
+                arrays["segment_ids"] = np.unique(np.asarray(pairs[indices, 1]), return_inverse=True)[1].reshape(-1)
             if group_scenes:
                 arrays.update(scene_groups(offsets))
             if prepared:

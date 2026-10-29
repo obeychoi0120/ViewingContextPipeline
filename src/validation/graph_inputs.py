@@ -387,6 +387,85 @@ def verify(context, cohort, arms):
             raise ValueError("graph catalog mismatch")
 
 
+
+def scene_segments_paths(directory, variant="true"):
+    """(array, metadata) paths of a scene_segments sidecar variant ("true" or "shuffled")."""
+    if variant not in ("true", "shuffled"):
+        raise ValueError("scene segment variant must be true or shuffled")
+    stem = "scene_segments" if variant == "true" else f"scene_segments_{variant}"
+    directory = Path(directory)
+    return directory / f"{stem}.npy", directory / f"{stem}.json"
+
+
+def write_scene_segments(directory, pairs, statistics=None, variant="true"):
+    """Attach a scene-segment incidence, [bundle scene row, segment id] pairs, to a valid bundle.
+
+    Pairs are stored sorted by scene row; a segment holds >= 1 scenes of one video, each scene at most once.
+    """
+    from validation.graph_context import SCENE_SEGMENTS_VERSION
+
+    directory = Path(directory)
+    array_path, meta_path = scene_segments_paths(directory, variant)
+    manifest = read_json(directory / "manifest.json")
+    video_offsets = np.load(directory / "video_offsets.npy", allow_pickle=False)
+    scene_count = int(video_offsets[-1])
+    pairs = np.asarray(pairs, dtype=np.int64).reshape(-1, 2)
+    if (pairs < 0).any() or (pairs[:, 0] >= scene_count).any():
+        raise ValueError("scene segments must pair existing bundle scene rows with segment ids >= 0")
+    if len(np.unique(pairs, axis=0)) != len(pairs):
+        raise ValueError("a scene may belong to a segment only once")
+    scene_videos = np.repeat(np.arange(len(video_offsets) - 1), np.diff(video_offsets))
+    ids, where = np.unique(pairs[:, 1], return_inverse=True)
+    lows = np.full(len(ids), np.iinfo(np.int64).max)
+    highs = np.full(len(ids), -1)
+    np.minimum.at(lows, where, scene_videos[pairs[:, 0]])
+    np.maximum.at(highs, where, scene_videos[pairs[:, 0]])
+    if (lows != highs).any():
+        raise ValueError("a segment must stay within one video")
+    pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
+    np.save(array_path, pairs)
+    write_json(
+        meta_path,
+        {
+            "version": SCENE_SEGMENTS_VERSION,
+            "variant": variant,
+            "input_hash": manifest["input_hash"],
+            "pairs": int(len(pairs)),
+            "segments": int(len(ids)),
+            "statistics": statistics,
+            "checksum": checksum(array_path),
+        },
+    )
+
+
+def scene_segments_identity(directory, variant="true"):
+    """Validated sidecar metadata; raises if missing, stale or corrupt."""
+    from validation.graph_context import SCENE_SEGMENTS_VERSION
+
+    directory = Path(directory)
+    array_path, meta_path = scene_segments_paths(directory, variant)
+    if not meta_path.is_file():
+        raise ValueError(f"missing scene segments ({variant}): {directory}; run python -m validation.scene_segments")
+    meta = read_json(meta_path)
+    manifest = read_json(directory / "manifest.json")
+    if (
+        meta.get("version") != SCENE_SEGMENTS_VERSION
+        or meta.get("input_hash") != manifest["input_hash"]
+        or checksum(array_path) != meta.get("checksum")
+    ):
+        raise ValueError(f"stale scene segments ({variant}): {directory}; run python -m validation.scene_segments")
+    return meta
+
+
+def load_scene_segments(directory, variant="true"):
+    """The validated [scene row, segment] pairs of a bundle, sorted by scene row."""
+    scene_segments_identity(directory, variant)
+    pairs = np.load(scene_segments_paths(directory, variant)[0], allow_pickle=False)
+    contexts = np.load(Path(directory) / "contexts.npy", mmap_mode="r", allow_pickle=False)
+    if pairs.ndim != 2 or pairs.shape[1] != 2 or (len(pairs) and pairs[:, 0].max() >= len(contexts)):
+        raise ValueError(f"scene segments do not match bundle scenes: {directory}")
+    return pairs
+
 class GraphStore:
     def __init__(self, directory):
         self.directory = Path(directory)
