@@ -115,11 +115,15 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --tar
 # 결과를 확인한 뒤 필요할 때 직접 실행합니다.
 python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target a1 a2 a3
 python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}" a1 a2 a3
+
+# gnn_attn 확장 Arm: 구간 Arm은 학습 전에 Graph 소스 bundle에 구간 sidecar를 붙입니다.
+python -m validation.scene_segments --run-id "$RUN_ID" --dataset "$DATASET" --target g3 g3s
+python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target g2 g3 g3s g4
 ```
 
 `--target`은 필수이며 입력 순서와 무관하게 등록 순서로 처리합니다. Arm마다 입력·집계 방식이 고정되어 `--representation-mode`, `--scene-aggregation`, `--step basic/ablation`은 받지 않습니다. Ablation 실행에 성능 조건은 없습니다. 추천 명령은 추출·임베딩·진단을 자동 실행하지 않습니다.
 
-D0·D1은 Description 특징을, G0·G1·A1·A2·A3는 Graph 특징을 공유하므로 Ablation 추가 실행에 새 BGE 인코딩이 필요하지 않습니다. GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-every 100` 및 선택적인 `--profile-operators`로 지정합니다.
+D0·D1은 Description 특징을, G0·G1·A1·A2·A3·G2·G3·G3s·G4는 Graph 특징을 공유하므로 Ablation 추가 실행에 새 BGE 인코딩이 필요하지 않습니다. GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-every 100` 및 선택적인 `--profile-operators`로 지정합니다.
 
 </details>
 
@@ -374,6 +378,12 @@ SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마�
 | `a1` | G1에서 Fusion 제거 | Attention GNN → Mean |
 | `a2` | G1에서 연결 Entity 교체 | Attention GNN → Mean |
 | `a3` | G1과 동일 | 자기 장면만 전달 → Mean |
+| `g2` | G1과 동일 (제목은 장면이 아닌 영상 노드로) | Attention GNN → 영상 노드(장면→영상→장면→영상) |
+| `g3` | G1 + 활동 구간 sidecar | Attention GNN → 장면–구간 hypergraph → Mean + 구간 평균 |
+| `g3s` | G3에서 구간 소속을 영상 안에서 무작위로 이동 | G3와 동일 |
+| `g4` | G2 + G3 | Attention GNN → 장면–구간 hypergraph → 영상 노드 + 구간 평균 |
+
+G2–G4는 G1에 `gnn_attn` 확장(`video_node`, `segments`)을 더한 Arm입니다. 확장의 새 경로는 0 게이트 또는 별도 경로로 시작하며, 확장이 없는 Arm의 계산과 결과 identity는 바뀌지 않습니다. 구간 확장은 G3–G3s(올바른 구간 소속)와 G3–G1(구간 단계 전체)로 비교합니다. 확장 Arm은 아래 Basic·전체 조합 수에 포함하지 않으며 필요할 때 별도로 실행합니다.
 
 주요 비교는 G1–D1(관측·인코더 파이프라인), G1–A1(Fusion 모듈), G1–A2(추출된 연결 유지), G1–A3(장면 간 전달), A3–G0(추가 장면별 변환층), G1–G0(전체 집계 모듈)입니다. A1에는 모델 용량 변화가 포함되며 A2의 원본 연결을 정답으로 가정하지 않습니다. 효과를 단순 합산하지 않으며 장면 확보율도 함께 해석합니다.
 

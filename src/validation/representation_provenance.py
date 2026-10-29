@@ -25,13 +25,18 @@ def recommendation_identity(context, branch):
     if value is None:
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
     from dataclasses import asdict
-    from arm_registry import RECOMMENDATION_ARM_CONTRACT, registry
+    from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION, EVALUATION_CONTRACT
     from model_provenance import canonical, local_model_identity
     from validation.role_corruption import CORRUPTION
 
     arm = registry(context.config)[branch]
-    return {
+    experiment_arm = asdict(arm)
+    if not arm.extensions:
+        # Arms without extensions keep their earlier identity (and reusable results).
+        experiment_arm.pop("extensions")
+        experiment_arm.pop("segments")
+    identity = {
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
         "architecture_version": ARCHITECTURE_VERSION,
@@ -51,9 +56,20 @@ def recommendation_identity(context, branch):
                           "residual": True, "activation": "relu", "pooling": "mean"}
             if arm.aggregation != "mean" else None,
         },
-        "experiment_arm": asdict(arm),
+        "experiment_arm": experiment_arm,
         "embedding_hash": value,
         "representation_mode": arm.representation,
         "scene_aggregation": arm.aggregation if branch != "base" else None,
         "role_corruption": dict(CORRUPTION) if branch == "a2" else None,
     }
+    if arm.extensions:
+        from validation.graph_context import EXTENSION_MODELS
+
+        identity["item_model"]["extensions"] = {e: EXTENSION_MODELS[e] for e in sorted(arm.extensions)}
+    if "segments" in arm.extensions:
+        from validation.graph_inputs import scene_segments_identity
+
+        identity["scene_segments"] = scene_segments_identity(
+            context.representations_dir / feature_source(arm), arm.segments
+        )
+    return identity

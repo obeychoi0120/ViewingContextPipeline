@@ -16,6 +16,10 @@ class Arm:
     scene_arm: str | None = None
     aggregation: str = "mean"
     role_fusion: bool = False
+    # Optional gnn_attn stages (validation.graph_context.EXTENSION_MODELS); with "segments",
+    # the scene_segments sidecar variant of the source bundle ("true" or "shuffled").
+    extensions: tuple[str, ...] = ()
+    segments: str = "true"
 
 
 ARMS = (
@@ -27,6 +31,11 @@ ARMS = (
     Arm("a1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", False),
     Arm("a2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
     Arm("a3", "graph", "qwen3vl", True, "graph_qwen3vl", "self_only", True),
+    # G1 plus gnn_attn extensions: video node (A), activity segments (B), their shuffled control, both.
+    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("video_node",)),
+    Arm("g3", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",)),
+    Arm("g3s", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",), "shuffled"),
+    Arm("g4", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments", "video_node")),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)

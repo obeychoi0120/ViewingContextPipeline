@@ -188,3 +188,215 @@ v3는 배경, 주요 인물·사물, 대표 행동, 관계, 분위기, 가시적
 
 고정된 범주별 배분을 완화하여, 영상에서 중요한 내용을 자연스럽게 통합할 수 있게 한 변경입니다.
 
+
+## scene_hypergraph_subject
+
+대상(최신순): [v5.2](../prompts/scene_hypergraph_subject_v5_2.md) → [v5.1](../prompts/scene_hypergraph_subject_v5_1.md) → [v5](../prompts/scene_hypergraph_subject_v5.md) → [v4](../prompts/scene_hypergraph_subject_v4.md) → [v3](../prompts/scene_hypergraph_subject_v3.md) → [v2](../prompts/scene_hypergraph_subject_v2.md) → [v1](../prompts/scene_hypergraph_subject_v1.md)
+
+### v5 → v5.1 / v5.2: 감사 기반 술어 수정(v5.1)과 목록 축소(v5.2)
+
+2026-10-21 추가. 두 파일을 함께 만들어 같은 조건에서 비교했습니다.
+
+- **v5.1** ([scene_hypergraph_subject_v5_1.md](../prompts/scene_hypergraph_subject_v5_1.md)): v5 엣지 감사에서 틀린 술어를 고쳤습니다. 행동 48 + 공간 5 = 53개입니다.
+  - 제거: `looking_at`(정밀도 23~33%), `hitting`(1/4)
+  - 정의 강화: `playing_instrument`는 보이는 악기만, `talking_to`는 같은 키프레임에서 마주 볼 때만, `sitting_on`은 물체가 사람 아래에 있을 때만(책상 앞은 `next_to`)
+  - 관계 규칙 두 개 추가: "두 사람·동물은 같은 키프레임에 함께 보이고 실제로 상호작용할 때만 연결", "자막·UI·신체 부위는 대상으로 쓰지 않음"
+- **v5.2** ([scene_hypergraph_subject_v5_2.md](../prompts/scene_hypergraph_subject_v5_2.md)): 사용자 가설("종류가 많아 틀린다")을 시험하려고, v5.1과 규칙은 같게 두고 행동을 20개로 묶었습니다. 예: `cooking`, `moving`, `fighting`, `helping`. 공간 5개는 같고 총 25개입니다. v5.1과는 목록 3줄과 방향 예시 1줄만 다릅니다.
+- **schema**: 둘 다 v5 schema에서 predicate enum만 각 목록으로 바꿨습니다.
+
+**파이프라인 연동:** 파이프라인에는 연결하지 않았습니다. 파일럿 실행기 ARMS에 `hyper_subject_v5_1_qwen_vllm`과 `hyper_subject_v5_2_qwen_vllm`을 추가했고, parser는 v4와 같습니다.
+
+**검증 범위:** 같은 171장면에서 각 1회 추출했습니다(171/171 첫 시도 성공). 버전을 숨긴 2차 엣지 감사(무작위 50개씩 + 1차 항목 20개 재감사, 일치 19/20)를 했습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/predicate_vocab_round2_report.md)).
+
+- **전체 정밀도(확인)**: v4 55.1%, v5 55.3%, v5.1 54.2%, v5.2 58.3%. 목록 크기와 무관하게 표본 오차(±14pp) 안입니다. 술어만 틀린 오답은 v5.1·v5.2 모두 7건입니다.
+- **행동 엣지(확인)**: v4 52% → v5.1 65% → v5.2 74%. v5.1과 v5.2의 차이는 유의하지 않습니다.
+- **공간 엣지(확인)**: v5.1 41%, v5.2 44%. `on`은 1/8, 2/7입니다.
+- **사후 필터**: 행동 엣지와 environment로 가는 `in`만 남기면 69~73%입니다. 감사 표본으로 계산한 값입니다.
+- **자동 지표**
+  - 행동 엔트로피: v5.1 4.32, v5.2 3.59 bit
+  - `holding`: 18.9%, 20.3%
+  - self-loop: 23, 14 (v5 37)
+  - attr 자리표시: 54, 55 (v5 79)
+- **남은 문제**: v5.1도 MOBA에서 `playing_instrument`를 5건 지어냈습니다. 다른 컷의 인물을 연결하는 오류도 규칙을 넣고 남았습니다.
+- **미검증 가설·후속 과제**: v5.2에서 `cooking`을 세부 동작으로 다시 나눈 목록, 공간 엣지 사후 필터의 추천 성능 영향은 실행하지 않았습니다.
+
+### v4 → v5: 술어 어휘 55개를 프롬프트 본문에 명시하고 schema enum과 동기화
+
+2026-10-21 추가. v4의 행동 술어가 `holding`(33%)과 일반 동사에 몰려 있었습니다. 그래서 행동 50개 + 공간 5개의 선별 어휘([predicate_vocabulary_draft.md](../artifacts/runs/261020_hypergraph_subject_pilot/reports/predicate_vocabulary_draft.md))를 유형별로 엣지 규칙에 적었습니다. 근거는 다음과 같습니다.
+
+- v4에서는 enum에만 있고 본문에 없는 술어가 거의 쓰이지 않았습니다. 본문 예시 10개가 엣지의 93.5%를 차지했습니다. 모델에게 schema enum은 보이지 않고 본문 목록만 보인다는 뜻입니다.
+- enum 없는 실행 세 건의 목록 밖 동사 186건 중 86.6%를 이 어휘가 덮습니다.
+
+v4와의 차이는 다음과 같습니다.
+
+- **노드 규칙(1번 섹션)**: v4와 글자까지 같습니다.
+- **엣지 규칙(2번 섹션)**: v4의 방향 예시 4개 대신 술어 목록을 유형별로 적었습니다(조작·신체·사회·공연/게임·공간). 다음 규칙을 함께 적었습니다.
+  - 주체가 source입니다.
+  - `giving`·`feeding`은 받는 쪽을 가리킵니다.
+  - `looking_at`·`talking_to`는 사람·동물에게만 씁니다.
+  - 행동이 보이지 않으면 공간 관계만 씁니다.
+  - 목록을 채우려고 행동을 지어내지 않습니다.
+- **schema** ([scene_graph_v5_schema.py](../artifacts/runs/261020_hypergraph_subject_pilot/reports/scene_graph_v5_schema.py)): predicate enum을 위 55개로 바꿨고, 나머지는 v4와 같습니다. 프롬프트 목록과 enum이 일치함을 코드로 확인했습니다.
+
+**파이프라인 연동:** 파이프라인에는 연결하지 않았습니다. 파일럿 실행기 ARMS에 v5를 추가했습니다(arm `hyper_subject_v5_qwen_vllm`, parser는 v4와 같은 `parse_valid_scene_graph`). `--no-structured-output`으로 enum 없는 실행(arm `hyper_subject_v5_noschema_qwen_vllm`)도 가능합니다.
+
+**검증 범위:** v4와 같은 171장면에서 한 번 추출했고, Claude 서브에이전트 4개가 버전을 모른 채 엣지 159개를 키프레임으로 감사했습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/predicate_vocab_report.md)).
+
+- **확인된 개선**
+  - 행동 술어 종류 14 → 45, 엔트로피 2.67 → 4.02 bit
+  - `holding` 비중 33% → 15%
+  - 물체·사람을 가리키는 `in` 302 → 69 (environment 노드가 있는 장면 68 → 100)
+  - enum 없는 실행에서 목록 밖 0.1%
+- **변하지 않음**: 무작위 엣지 정밀도 v4 55.1% vs v5 55.3%(95% 구간 ±14pp). 노드 6개 채우기와 attr 자리표시도 그대로입니다.
+- **확인된 문제**
+  - `looking_at`이 8 → 140건으로 늘었고 정밀도는 23~33%입니다. 다른 컷의 인물을 연결하거나, 카메라를 보는 사람을 연결했습니다.
+  - `in_front_of`가 0 → 120건으로 늘었습니다.
+  - 술어별로 갈립니다: `playing_instrument` 0/5(MOBA에서 controller를 지어냄), `hitting` 1/4, `sitting_on` 3/8은 틀렸고, `shooting` 9/9, `applying` 5/6, `hugging` 3/3은 맞았습니다.
+- **미검증 가설·후속 과제**: v5.1(`looking_at`·`hitting` 제거, `playing_instrument`·`talking_to`·`sitting_on` 정의 강화)의 정밀도 개선은 아직 실행하지 않았습니다. 노드 단위 정답·tracker 지표와 추천 성능은 v5에서 다시 재지 않았습니다.
+
+### v3 → v4: 규칙 간소화, 단일 인물 장면 규칙 추가, JSON schema 제약 디코딩과 구조 parser 도입
+
+2026-10-21 추가. 사용자가 v3 결과를 보고 준 프롬프트, JSON schema, parser를 그대로 저장했습니다. v3에서 확인된 문제는 다음과 같습니다.
+
+- 첫 시도 잘림 16장면
+- 노드 수 위반 45장면. 1인 장면에서 노드 1개만 냈습니다.
+- self-loop 33개
+- 목록 밖 술어 51개
+- 펜스 171/171
+- 예시 단어 `wok`의 누출
+
+v3와의 주요 차이는 다음과 같습니다.
+
+- **프롬프트**
+  - 시스템 프롬프트에서 "without markdown"과 "factual"을 뺐습니다.
+  - "SINGLE-PERSON SCENES"를 추가했습니다. 대상이 1명·1마리뿐이어도 물체(손에 든 도구·휴대폰·안경·옷가지)나 배경(방·무대·거리·마당)을 하나 이상 넣어 노드를 2개 이상 만들게 합니다.
+  - label 예시를 일반 명사(man·woman·child·dog·car·phone·sword·bowl·room·stage)로 바꿔 wok·soybeans·puppy를 뺐습니다.
+  - 엣지를 1~8개로 제한했습니다.
+  - 타입 쌍별 술어 목록을 방향 원칙 네 가지로 줄였습니다: 행동 주체가 source, `in`은 환경, `next_to`는 물체, `contains`는 용기→내용물.
+  - 사람 간 술어 목록에서 `looking_at`을 뺐습니다.
+  - 여러 단계 행동 규칙과 JSON 스키마 예시 블록을 없앴습니다.
+- **디코딩**: 사용자 `SCENE_GRAPH_JSON_SCHEMA`를 vLLM structured outputs(xgrammar)로 강제합니다. 위치는 `artifacts/runs/261020_hypergraph_subject_pilot/reports/scene_graph_v4_schema.py`입니다. 강제 내용은 다음과 같습니다.
+  - nodes 2~6개, id n1~n6, type 4종
+  - label 1~30자, attr 1~80자
+  - edges 1~8개, 각 엣지는 [id, 술어 21종, id]
+  - 추가 키 금지
+- **parser**: 사용자 `parse_valid_scene_graph`(같은 폴더 `scene_graph_v4_parser.py`)입니다. 단어 치환이나 순서 변경 없이 다음을 제외합니다.
+  - 중복 노드 id
+  - 길이가 3이 아닌 엣지, 없는 id를 가리키는 엣지
+  - self-loop, 중복 엣지
+
+**파이프라인 연동:** 파이프라인에는 연결하지 않았습니다. 파일럿 실행기 ARMS에 v4를 추가했습니다. 행에 structured_output과 후처리를 넣었고, 디코딩 결과는 `raw_graph`, parser 결과는 `graph`로 저장합니다. `src/`의 `QwenGenerationTask.structured_output` 경로를 그대로 썼으며 `src/`는 수정하지 않았습니다. v1~v3 실행 경로는 그대로입니다. 실행 전에 xgrammar 0.2.8로 schema를 컴파일해 노드 수·id·술어·길이·펜스 위반이 거부되고 self-loop는 통과함을 확인했습니다.
+
+**검증 범위:** v1~v3와 같은 30편·171장면에서 한 번 추출했습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/hypergraph_v4_report.md)).
+
+- **형식(확인)**
+  - 첫 시도 성공 171/171, 순수 JSON 171/171, 잘림 0
+  - parser가 self-loop 36개와 중복 엣지 46개를 제거했습니다.
+- **내용(확인된 변화)**
+  - 158/171장면이 노드를 6개로 채웠습니다.
+  - attr 자리표시(`color, material` 등)가 77개 생겼습니다.
+  - 엣지의 40%가 `in`이고, 그중 301개가 물체·사람을 가리킵니다.
+  - 제목 화면 사람 생성이 1/3 → 2/3으로 늘었습니다.
+  - person→person 중 talking_to·looking_at은 82% → 53%로 줄었습니다.
+  - `wok` 누출은 사라졌습니다.
+- **원인 분리(2026-10-21 추가 실행, 확인)**: 같은 v4 프롬프트와 parser를 schema 없이 같은 171장면에 돌렸습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/hypergraph_v4_noschema_report.md)). 실행기 옵션은 `--no-structured-output`, arm은 `hyper_subject_v4_noschema_qwen_vllm`입니다.
+  - **v4 프롬프트에는 출력 예시가 없어서 schema가 필수입니다.** schema 없이는 노드 697/1,103에 id가 없고, 엣지가 label을 가리켰습니다. 그래서 parser 결과가 112장면에서 노드 0개가 됐고, 첫 시도 잘림 37·펜스 171도 다시 나왔습니다.
+  - **원출력 기준으로 프롬프트에서 오는 문제**: 노드 6개 이상 채우기(140/171, 6 초과 58), attr 자리표시(98), 제목 화면 사람 생성(2/3)은 schema 없이도 나왔습니다.
+  - **`in` → 물체·사람(v4 314/444)은 environment 노드가 없는 장면에서만 생겼습니다.** schema 실행에서 environment 노드가 있는 장면은 68/171로, schema 없이(101)보다 적었습니다. schema가 environment 노드를 줄이는 이유는 확인하지 않았습니다.
+- **미검증 가설·후속 과제**: 다음 프롬프트 수정의 효과는 실행하지 않았습니다. 추천 성능 평가도 하지 않았습니다.
+  - environment 노드 1개 필수화
+  - attr 괄호 문구 교체
+  - 노드 수 규칙 완화
+
+### v2 → v3: hyperedge 제거, 노드 병합과 엣지 타입·방향 규칙 추가
+
+2026-10-21 추가. 사용자가 v2 결과를 보고 만든 프롬프트를 문구 그대로 저장했습니다. v2 파일럿에서 확인된 문제에 대응하는 변경입니다.
+
+- 엣지 품질이 낮았습니다. person→person이 대부분 talking_to·looking_at이었고, `on_top_of`가 남용됐으며, self-loop가 있었습니다.
+- hyperedge가 엣지를 반복했습니다.
+- attr에 행동·자세가 섞였습니다.
+
+v2와의 주요 차이는 다음과 같습니다.
+
+- **hyperedge 제거**: 출력은 `nodes`와 `edges`만 남습니다.
+- **노드 병합**: 시스템 프롬프트에 "6장 키프레임 = 같은 30초 구간"을 명시했습니다. 여러 프레임에 나오는 같은 대상과 반복 UI 아이콘은 노드 하나로 합치게 했습니다.
+- **attr**: 정적 외형(옷·머리·색·재질)만 허용하고 행동·자세를 금지했습니다.
+- **엣지 규칙**: self-loop를 금지했습니다. 타입 쌍별 술어 목록을 두었습니다.
+  - 사람→사람: talking_to·fighting·helping·looking_at·chasing만 허용
+  - 사람·동물→물체: holding·using·stirring 등 13개
+  - 공간 관계: contains·next_to·in·on의 방향 규칙과 예시
+  - 사람을 작은 물체 위·안에 두는 것을 금지
+- **여러 단계 행동**: 시간 순서대로 엣지를 여러 개 출력하게 했습니다.
+
+**파이프라인 연동:** 파이프라인에는 연결하지 않았습니다. 파일럿 실행기 ARMS에 v3를 추가했습니다(arm `hyper_subject_v3_qwen_vllm`, 저장 필드 `graph`). 파서에 `parse_graph_v3`를 추가했고, v2와 같은 노드·엣지 검사를 하되 hyperedge를 요구하지 않습니다. 기존 v2 출력을 다시 파싱해 결과가 변하지 않는 것을 확인했습니다.
+
+**검증 범위:** v1·v2와 같은 30편·171장면에서 같은 조건(max_new_tokens 768)으로 한 번 추출했습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/hypergraph_v3_report.md)).
+
+- **좋아진 점(확인)**
+  - attr의 행동·자세 단어: 34% → 5%
+  - `on_top_of`: 87 → 1
+  - 보이는 대상 수를 넘는 사람·동물: 37 → 21
+  - 보이는 대상이 1명인 장면에서 2개 이상: 11/57 → 8/57
+- **나빠진 점(확인)**
+  - 첫 시도 잘림: 0 → 16장면. 같은 물체 노드를 n15~n22까지 반복했고, 1건은 self-loop 반복입니다. penalty 1.1 재시도로 모두 회복했습니다.
+  - 노드 수 2~6 위반: 8 → 45장면. 1개짜리가 3 → 31로 늘었는데, 1인 장면에서 물체·배경을 생략한 경우입니다.
+  - self-loop: 8 → 33
+  - GT 대비 사람·동물 커버리지: 84.1% → 76.9%
+  - 예시 단어 `wok`의 출처 영상 밖 사용: 4 → 12. 키프레임상 웍이 없는 장면이 포함됩니다.
+- **그대로(확인)**: person→person 엣지 중 talking_to·looking_at 비율 82%, ```` ```json ```` 펜스 171/171
+- **규칙 위반(확인)**: 목록 밖 술어 51, 사람 전용 술어를 사람 아닌 대상에 씀 23, 사람을 물체 안·위에 둠 26, 방향 역전 11
+- **미검증 가설·후속 과제**: 구조화 출력(JSON schema 제약 디코딩)으로 노드 수·type·술어 목록·펜스를 강제하면 형식 문제가 사라진다는 가설, 예시 단어 교체의 효과는 아직 실행하지 않았습니다. 추천 성능 평가도 하지 않았습니다.
+
+### v1 → v2: 주체 목록에서 노드·엣지·hyperedge 그래프로 전환
+
+2026-10-20 추가. 사용자가 제시한 새 프롬프트를 문구 그대로 저장했습니다. v1 파일럿에서 다음 문제가 확인된 뒤의 변경입니다.
+
+- "최대 3개"가 "항상 3개"로 동작해 같은 대상이 행동별로 중복됐습니다.
+- 예시 문구가 화면과 무관하게 복사됐습니다.
+- 사람이 없는 화면에서 사람을 지어냈습니다.
+
+v2는 출력을 한 장면의 그래프로 바꿉니다.
+
+- **`nodes`**: 2~6개. `id`(n1…), `type`(person·animal·object·environment 중 하나), `label`(짧은 표준 명사), `attr`(외형·상태)를 갖습니다.
+- **`edges`**: `[source_id, predicate, target_id]` 방향 삼항입니다. 술어는 1~2단어 원자 관계입니다.
+- **`hyperedges`**: 1~2개. `event`(집단 상황 구절)와 참여 노드 id 목록을 갖습니다.
+
+v1과의 주요 차이는 다음과 같습니다.
+
+- 물체·배경이 주체 안의 문자열이 아니라 독립 노드가 되고, 관계는 노드 id로 연결합니다.
+- "distinct entities"와 "NEVER invent people"(사람이 없으면 물체·동물·배경만)을 명시합니다.
+- 주체별 `macro_action`이 없어지고, 행동은 엣지 술어와 hyperedge `event`로 표현합니다.
+- 출력이 JSON 리스트에서 JSON 객체로 바뀌고, 스키마가 여러 줄 예시로 주어집니다.
+
+**파이프라인 연동:** v1과 마찬가지로 파이프라인에는 연결하지 않았습니다. 파일럿 실행기 `run_subject_vllm.py`의 ARMS에 v2를 추가했고(arm `hyper_subject_v2_qwen_vllm`, 저장 필드 `graph`), v1 실행 경로는 그대로입니다. 파서 `hypergraph_parser.py`는 출력을 고치지 않고 JSON 객체 형태와 다음 스키마 위반을 기록합니다.
+
+- 노드 수·type, 알 수 없는 id, 자기 자신을 가리키는 엣지
+- hyperedge 수·크기
+
+**검증 범위:** v1과 같은 30편·171장면, 같은 조건(max_new_tokens만 768)으로 한 번 추출했습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/hypergraph_v2_report.md)).
+
+- **형식(확인)**: 171/171에서 JSON 객체를 추출했습니다. 다만 모두 ```` ```json ```` 펜스로 감싸 "without markdown" 지시를 어겼습니다. 스키마 위반은 14장면이고 평균 283토큰입니다.
+- **노드(확인)**: GT의 보이는 대상 수를 넘는 사람·동물이 120 → 37로 줄었습니다. 보이는 대상이 1명인 장면에서 2개 이상을 낸 비율은 72% → 19%, 제목 화면에서 사람을 지어낸 장면은 3/3 → 1/3입니다. 다른 영상으로의 예시 문구 복사는 attr·event에서 0건입니다.
+- **엣지·hyperedge(확인된 문제)**: self-loop를 뺀 person→person 엣지 225개 중 82%가 talking_to·looking_at입니다(처음 기록한 79%는 분모를 self-loop 포함 233개로 잡은 값이라 2026-10-21 정정). 예시 술어 on_top_of가 87개(15%)이며 `man on_top_of man`처럼 잘못 쓰였습니다. hyperedge 181개 중 57%가 2노드이고, 그중 100/104는 기존 엣지와 같은 쌍입니다.
+- **주의**: 예시 일부(soybeans·striped shirt, towel on neck·otter·jail cell interrogation 등)가 파일럿 영상에서 따온 것이라, 해당 영상의 결과는 낙관적일 수 있습니다.
+- **미검증 가설·후속 과제**: 엣지·hyperedge를 후처리로 구성하는 편이 낫다는 판단, 그리고 on_top_of 제거·예시 교체·한 줄 스키마의 효과는 아직 실행하지 않았습니다. 추천 성능 평가도 하지 않았습니다.
+
+### v1: 주체 중심 Hypergraph 추출 파일럿 프롬프트 신규 추가
+
+2026-10-20 추가. 기존 평가 framework 위에 새 Hypergraph를 만들기 위한 첫 단계로, 사용자가 제시한 프롬프트를 문구 그대로 저장했습니다. 장면마다 주요 활동 주체(사람 또는 핵심 물체)를 최대 3개 뽑고, 주체마다 `entity_type`(일반 범주)·`appearance`(변하지 않는 외형)·`macro_action`(진행 중인 활동, 동사구)·`context_objects`(주변 물체·배경 2~5개)를 JSON 리스트로 출력하게 합니다. 주체 하나와 그 주변 물체 묶음을 hyperedge 후보로 삼으려는 설계입니다.
+
+- scene_graph v8(`[Context]`·`[Entities]`·`[Actions]` 텍스트 섹션)과 달리 Context(medium·format·topics), 엔티티 ID, 행동별 target·tool·location이 없습니다. 물체는 주체별 목록 안의 문자열이며 ID나 주체 간 공유 표시가 없습니다.
+- 파일은 `[System Prompt]`와 `[User Prompt]` 두 섹션으로 되어 있고, 시스템 프롬프트를 system 메시지로 보내는 것을 전제로 합니다.
+
+**파이프라인 연동:** 파이프라인 파서·저장·검증·Summary·GNN에는 연결하지 않았습니다. 현재 `QwenBackend`는 user 메시지 하나만 보내므로 파일럿 실행기 `artifacts/runs/261020_hypergraph_subject_pilot/reports/run_subject_vllm.py`가 백엔드를 상속해 system 메시지를 앞에 붙입니다(`src/`는 변경하지 않음). 파일럿 파서 `subject_parser.py`는 출력을 고치지 않고 JSON 리스트의 형태(strict/fenced/embedded)와 스키마 위반만 기록합니다.
+
+**검증 범위:** 1단계 장르 다양 30편·171장면에서 Qwen3-VL-2B(vLLM 0.28.0, greedy, penalty 1.05)로 한 번 추출했습니다([보고서](../artifacts/runs/261020_hypergraph_subject_pilot/reports/subject_pilot_report.md)).
+
+- **형식(확인)**: 첫 시도 순수 JSON 171/171, 스키마 위반 1건(context_objects 6개), 평균 168토큰.
+- **내용(확인된 문제)**:
+  - 152/171장면이 주체를 3개 냈고, 보이는 대상이 1명인 장면도 75%가 3개였습니다.
+  - GT의 보이는 대상 수를 넘는 주체가 120개였습니다. 같은 대상을 행동·컷별로 반복한 경우, 없는 인물, 예시 복사가 섞여 있습니다.
+  - 예시 문구 `man in black apron and glasses`가 화면과 무관하게 5번 나왔습니다.
+  - entity_type의 92%가 `person`이었습니다.
+  - 사람이 없는 제목 화면 3장면 모두에서 사람 주체를 지어냈습니다.
+- **미검증 가설·후속 과제**: "서로 다른 대상만 한 번씩, 적으면 적게"를 명시하고 예시 값을 중립 자리표시로 바꾸면 중복·예시 복사가 줄어든다는 가설은 아직 실행하지 않았습니다. 추천 성능 평가도 하지 않았습니다.

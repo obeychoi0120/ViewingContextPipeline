@@ -114,3 +114,52 @@ def transformer_model(aggregation):
             "attention_init": "xavier_normal_in_proj",
         },
     }
+
+
+SCENE_SEGMENTS_VERSION = "scene-segments/v1"
+# Optional stages after gnn_attn's scene exchange, chosen per Arm (arm_registry.Arm.extensions):
+#   segments    scene-segment hypergraph (scene_segments sidecar of the source bundle): scenes pass to their
+#               segments and back, and the video readout adds a per-segment mean; both gates start at 0.
+#   video_node  the title leaves the scene vectors and starts a video node that gathers from the scenes,
+#               returns to them and gathers again; the video node is the item vector.
+# With both, the video node gathers from the segment-updated scenes and the segment readout is added to it.
+EXTENSION_MODELS = {
+    "segments": {
+        "version": "segments-v1",
+        "source": "scene_segments sidecar of the source bundle ([scene row, segment] incidence)",
+        "sidecar_version": SCENE_SEGMENTS_VERSION,
+        "segment": "u_k = relu(W_u [mean_{s in k} h_s; log|k|; |k| / scenes in video])",
+        "scene": "h_s = h_s + g_s relu(W_s [h_s; mean_{k contains s} u_k]) for scenes in a segment",
+        "video": "z = z + g_v W_v mean_{k in video} u_k (each segment weighted equally)",
+        "gates": "learned_scalars_init_0",
+        "weight_init": "xavier_normal_private_generator_seeded_by_torch_initial_seed",
+        "bias_init": "zeros",
+        "applied_after": "attention_gcn",
+    },
+    "video_node": {
+        "version": "video-node-v1",
+        "scene_readout": "zero_title_entity_action_context_concat",
+        "init": "v0 = scene_mlp([title, 0, 0, 0]) (the title-only fallback vector)",
+        "steps": [
+            "v1 = v0 + relu(W_up [v0; mean_s h_s])",
+            "h_s' = h_s + relu(W_down [h_s; v1])",
+            "v2 = v1 + relu(W_up [v1; mean_s h_s'])",
+        ],
+        "shared": "W_up used in steps 1 and 3",
+        "linear": "1024_to_512_with_bias",
+        "readout": "v2",
+        "videos_without_scenes": "v0",
+        "applied_after": "scene_exchange_and_earlier_extensions",
+    },
+}
+
+
+def check_extensions(extensions, aggregation):
+    """Extensions are gnn_attn-only stages; returns them as a frozenset."""
+    extensions = frozenset(extensions)
+    if extensions - EXTENSION_MODELS.keys():
+        raise ValueError("unknown scene extension: " + ", ".join(sorted(extensions - EXTENSION_MODELS.keys())))
+    if extensions and aggregation != "gnn_attn":
+        raise ValueError("scene extensions require the gnn_attn aggregation")
+    return extensions
+
