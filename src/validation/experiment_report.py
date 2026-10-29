@@ -2,16 +2,16 @@
 
 PRIORITY_COMPARISONS = (
     ("g1", "d1", "Graph와 Description 파이프라인"),
-    ("g1", "a1", "Entity–Role Fusion 모듈"),
-    ("g1", "a2", "추출된 역할 연결 유지"),
-    ("g1", "a3", "학습된 장면 간 정보 전달"),
-    ("a3", "g0", "장면별 추가 변환층"),
+    ("g1", "g1a", "Entity–Role Fusion 모듈"),
+    ("g1", "g1b", "추출된 역할 연결 유지"),
+    ("g1", "g1c", "학습된 장면 간 정보 전달"),
+    ("g1c", "g0", "장면별 추가 변환층"),
     ("g1", "g0", "전체 장면 집계 모듈"),
 )
 
 
 def display_arm(name):
-    return "Base" if name == "base" else name.upper()
+    return "Base" if name == "base" else name[0].upper() + name[1:]
 
 
 def write_report(context, selected, document):
@@ -61,7 +61,7 @@ def write_report(context, selected, document):
             delta, low, high = -delta, -high, -low
         interpretation = "우위 근거 확보" if low > 0 else "열위 근거 확보" if high < 0 else "차이 불확실"
         lines.append(
-            f"| {left.upper()} − {right.upper()} | {purpose} | {delta:+.6f} "
+            f"| {display_arm(left)} − {display_arm(right)} | {purpose} | {delta:+.6f} "
             f"| [{low:+.6f}, {high:+.6f}] ({value['confidence_level']:.4%}) "
             f"| {interpretation} |"
         )
@@ -80,14 +80,14 @@ def write_report(context, selected, document):
         )
         corruption = report["model_reports"][arm]["role_corruption"]
         if corruption:
-            corruption_lines += ["", f"A2: 연결 {corruption['total_links']}개 중 "
+            corruption_lines += ["", f"{display_arm(arm)}: 연결 {corruption['total_links']}개 중 "
                                  f"{corruption['changed_links']}개 변경 ({corruption['changed_ratio']:.2%}), "
                                  f"대체 Entity가 없는 연결 {corruption['impossible_links']}개. 교란 seed는 42입니다."]
     lines += corruption_lines
     lines += [
-        "", "A1 비교에는 Fusion 제거에 따른 모델 용량 변화가 포함됩니다. "
-        "A2는 추출된 연결을 유지하는 효과이며 원본 연결의 정답 여부를 보장하지 않습니다. "
-        "A3의 Q/K는 forward와 gradient에 관여하지 않습니다. 각 효과를 단순 합산하지 않습니다.",
+        "", "G1a 비교에는 Fusion 제거에 따른 모델 용량 변화가 포함됩니다. "
+        "G1b는 추출된 연결을 유지하는 효과이며 원본 연결의 정답 여부를 보장하지 않습니다. "
+        "G1c의 Q/K는 forward와 gradient에 관여하지 않습니다. 각 효과를 단순 합산하지 않습니다.",
         "Description과 Graph는 각각의 유효 장면을 사용하므로 장면 확보율도 함께 해석해야 합니다.",
         "", "| Arm | seed | NDCG@10 | HR@10 |", "| --- | ---: | ---: | ---: |",
     ]

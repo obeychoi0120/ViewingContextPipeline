@@ -28,14 +28,15 @@ ARMS = (
     Arm("d1", "description", "qwen3vl", True, "desc_qwen3vl", "gnn_attn"),
     Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True),
     Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
-    Arm("a1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", False),
-    Arm("a2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
-    Arm("a3", "graph", "qwen3vl", True, "graph_qwen3vl", "self_only", True),
-    # G1 plus gnn_attn extensions: video node (A), activity segments (B), their shuffled control, both.
+    # G1 plus gnn_attn extensions: video node, activity segments, both.
     Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("video_node",)),
     Arm("g3", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",)),
-    Arm("g3s", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",), "shuffled"),
     Arm("g4", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments", "video_node")),
+    # Ablations: G1 without Fusion, corrupted role links, self-only exchange; G3 with shuffled segments.
+    Arm("g1a", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", False),
+    Arm("g1b", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
+    Arm("g1c", "graph", "qwen3vl", True, "graph_qwen3vl", "self_only", True),
+    Arm("g3a", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",), "shuffled"),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)

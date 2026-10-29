@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,7 +17,6 @@ from validation.diagnosis_statistics import comparison_contract, comparison_fami
 from validation.leave_one_out_diagnosis import cluster_bootstrap, collect_metrics, comparisons
 from validation.leave_one_out_recommendation import combination_complete
 from validation.steps import (
-    embed_representations,
     run_diagnosis,
     run_recommendation,
     validation_config,
@@ -95,60 +93,82 @@ def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
 @pytest.mark.torch
 def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch, capsys):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT
+    from pipeline_runtime import RunContext
+    from validation.cli import main
     from validation.graph_inputs import GraphStore
     from validation.representation_provenance import recommendation_identity
 
     graph_generator, description_generator = prepare_inputs(context, monkeypatch)
     assert len(graph_generator.tasks) == len(description_generator.tasks) == 48
     assert not (context.run_root / "extraction" / "summaries").exists()
-    basic = ["base", "d0", "d1", "g0", "g1"]
-    all_arms = basic + ["a1", "a2", "a3"]
-    assert embed_representations(context, target=basic)["generated_sources"] == ["desc_qwen3vl"]
-    assert recommendation_identity(context, "d0")["embedding_hash"] == recommendation_identity(context, "d1")["embedding_hash"]
-    assert len({recommendation_identity(context, name)["embedding_hash"] for name in all_arms[3:]}) == 1
+    basic = ["base", "d0", "d1", "g0", "g1", "g2", "g3", "g4"]
+    ablation = ["g1a", "g1b", "g1c", "g3a"]
+    all_arms = basic + ablation
+    monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
+
+    def command(step, target):
+        return main([step, "--run-id", context.run_id, "--dataset", context.dataset,
+                     "--target", *target])
+
+    assert command("embed-representations", basic) == 0
+    assert command("prepare-module", ["g3"]) == 0
+    assert recommendation_identity(context, "d0")["embedding_hash"] == (
+        recommendation_identity(context, "d1")["embedding_hash"]
+    )
+    graph_arms = basic[3:] + ablation[:3]
+    assert len({recommendation_identity(context, name)["embedding_hash"] for name in graph_arms}) == 1
     assert len(GraphStore(context.representations_dir / "desc_qwen3vl")["contexts"]) == 48
-    assert not (context.run_root / "run_contract.json").exists()
-    source_bytes = {str(p): p.read_bytes() for p in context.representations_dir.rglob("*.npy")}
+    source_bytes = {p: p.read_bytes() for p in context.representations_dir.rglob("*") if p.is_file()}
 
     def forbidden_preparation(*args, **kwargs):
         raise AssertionError("training attempted feature preparation or extraction")
 
     monkeypatch.setattr("validation.graph_inputs.prepare", forbidden_preparation)
     monkeypatch.setattr("validation.features.BGETextEncoder", forbidden_preparation)
-    result = run_recommendation(context, target=basic)
-    assert result["completed"] == 15 and result["skipped"] == 0
-    assert run_diagnosis(context, target=basic)["status"] == "pass"
-    basic_path = context.validation_dir / "diagnosis" / "base_d0_d1_g0_g1" / "diagnosis.json"
+    assert command("run-recommendation", basic) == 0
+    assert len(list(context.recommendations_dir.rglob("complete.json"))) == 24
+    assert command("run-diagnosis", basic) == 0
+    basic_set = "_".join(basic)
+    basic_path = context.validation_dir / "diagnosis" / basic_set / "diagnosis.json"
     report = read_json(basic_path)
-    assert report["statistics"]["comparison_count"] == 10
-    assert report["recommendations"]["actual_event_count"] == 45
+    assert report["targets"] == basic
+    assert report["statistics"]["comparison_count"] == 28
+    assert report["recommendations"]["actual_event_count"] == 72
     assert report["arm_contract"] == RECOMMENDATION_ARM_CONTRACT
-    before = {str(p): p.read_bytes() for p in context.recommendations_dir.rglob("complete.json")}
-    assert run_recommendation(context, target=["a1", "a2", "a3"])["completed"] == 9
-    assert all(Path(path).read_bytes() == content for path, content in before.items())
+    before = {p: p.read_bytes() for p in context.recommendations_dir.rglob("complete.json")}
+    assert command("prepare-module", ["g3a"]) == 0
+    assert all(path.read_bytes() == content for path, content in source_bytes.items())
+    assert recommendation_identity(context, "g3a")["embedding_hash"] == (
+        recommendation_identity(context, "g3")["embedding_hash"]
+    )
+    assert command("run-recommendation", ablation) == 0
+    assert len(list(context.recommendations_dir.rglob("complete.json"))) == 36
+    assert all(path.read_bytes() == content for path, content in before.items())
     capsys.readouterr()
-    assert run_diagnosis(context, target=list(reversed(all_arms)))["status"] == "pass"
+    assert command("run-diagnosis", ablation) == 0
     console = capsys.readouterr().out.strip().splitlines()
-    full_path = context.validation_dir / "diagnosis" / "base_d0_d1_g0_g1_a1_a2_a3" / "diagnosis.json"
-    full = read_json(full_path)
-    assert console[-9].split() == ["Arm", "NDCG@10", "HR@10"]
-    for line, arm in zip(console[-8:], all_arms, strict=True):
-        label = "Base" if arm == "base" else arm.upper()
-        means = full["recommendations"]["means"][arm]
+    ablation_set = "_".join(ablation)
+    document = read_json(context.validation_dir / "diagnosis" / ablation_set / "diagnosis.json")
+    assert document["targets"] == ablation
+    assert console[-5].split() == ["Arm", "NDCG@10", "HR@10"]
+    for line, arm, label in zip(console[-4:], ablation, ["G1a", "G1b", "G1c", "G3a"], strict=True):
+        means = document["recommendations"]["means"][arm]
         assert line.split() == [label, f"{means['NDCG@10']:.6f}", f"{means['HR@10']:.6f}"]
-    assert full["statistics"]["comparison_count"] == len(full["statistics"]["comparisons"]) == 28
-    assert full["recommendations"]["actual_event_count"] == 72
-    assert full["recommendations"]["base_relative_changes"]["base"]["NDCG@10"] in (0.0, None)
-    assert "standard_deviations" in full["recommendations"]
-    assert full["recommendations"]["model_reports"]["a1"]["parameters"]["removed_role_fusion"] == 83072
-    a3 = full["recommendations"]["model_reports"]["a3"]["parameters"]
-    assert a3["active_trainable"] < a3["trainable"]
-    assert full["recommendations"]["model_reports"]["a2"]["role_corruption"]["changed_ratio"] == 1
+    assert document["statistics"]["comparison_count"] == len(document["statistics"]["comparisons"]) == 6
+    recommendations = document["recommendations"]
+    assert recommendations["actual_event_count"] == 36
+    assert recommendations["base_relative_changes"] is None
+    assert "standard_deviations" in recommendations
+    assert recommendations["model_reports"]["g1a"]["parameters"]["removed_role_fusion"] == 83072
+    parameters = recommendations["model_reports"]["g1c"]["parameters"]
+    assert parameters["active_trainable"] < parameters["trainable"]
+    assert recommendations["model_reports"]["g1b"]["role_corruption"]["changed_ratio"] == 1
     assert read_json(basic_path) == report
-    assert (context.run_root / "reports" / "base_d0_d1_g0_g1_a1_a2_a3" / "report.md").is_file()
+    assert (context.run_root / "reports" / basic_set / "report.md").is_file()
+    assert (context.run_root / "reports" / ablation_set / "report.md").is_file()
     assert_run_grid(context, graph_mode=True)
-    assert run_recommendation(context, target=all_arms)["skipped"] == 24
-    assert source_bytes == {str(p): p.read_bytes() for p in context.representations_dir.rglob("*.npy")}
+    assert run_recommendation(context, target=all_arms)["skipped"] == 36
+    assert all(path.read_bytes() == content for path, content in source_bytes.items())
     assert not (context.run_root / "run_contract.json").exists()
 
 
@@ -156,9 +176,9 @@ def test_basic_then_ablation_cpu_roundtrip(context, monkeypatch, capsys):
 def test_ablation_can_run_first(context, monkeypatch):
     prepare_inputs(context, monkeypatch)
     context.config["validation"]["model"].update(max_epochs=1)
-    assert run_recommendation(context, target=["a3"])["completed"] == 3
-    assert run_diagnosis(context, target=["a3"])["status"] == "pass"
-    report = read_json(context.validation_dir / "diagnosis" / "a3" / "diagnosis.json")
+    assert run_recommendation(context, target=["g1c"])["completed"] == 3
+    assert run_diagnosis(context, target=["g1c"])["status"] == "pass"
+    report = read_json(context.validation_dir / "diagnosis" / "g1c" / "diagnosis.json")
     assert report["recommendations"]["base_relative_changes"] is None
     assert report["statistics"]["comparison_count"] == 0
     assert report["statistics"]["comparisons"] == {}

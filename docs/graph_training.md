@@ -2,24 +2,36 @@
 
 현재 추천 계약은 **`gnn-attn-aggregation/v1`**입니다. 실행·Arm 표는 [README](../README.md#실험-조건과-결과-해석), 저장·캐시는 [실행 계약](runtime.md)을 기준으로 합니다.
 
-- Basic: `base d0 d1 g0 g1`. 모든 Arm은 제목을 사용하고 Qwen3-VL-2B-Instruct가 장면을 추출합니다.
-- D0·D1은 장면별 Description BGE, G0·G1은 같은 Graph BGE·Entity–Role Fusion을 사용합니다.
+- Basic: `base d0 d1 g0 g1 g2 g3 g4`. Ablation: `g1a g1b g1c g3a`. 모든 Arm은 제목을 사용하고 장면을 사용하는 Arm은 Qwen3-VL-2B-Instruct의 추출 결과를 공유합니다.
+- D0·D1은 장면별 Description BGE, G0·G1·G2·G3·G4는 같은 Graph BGE·Entity–Role Fusion을 사용합니다.
 - D0·G0는 Mean, D1·G1은 장면 간 Attention 기반 GNN 뒤 Mean을 적용합니다.
-- A1은 Fusion 제거, A2는 seed 42의 장면 내부 Entity 연결 대상 교체, A3는 동일 변환층의 자기 장면 전달입니다.
+- G2는 제목을 별도 영상 노드에 넣고 장면→영상→장면→영상으로 전달합니다. G3는 장면–활동 구간 전달과 구간 평균을 추가하며, G3a는 구간 크기를 유지한 채 영상 내부에서 소속 장면을 섞습니다. G4는 영상 노드와 활동 구간을 함께 사용합니다.
+- G1a는 Fusion 제거, G1b는 seed 42의 장면 내부 Entity 연결 대상 교체, G1c는 동일 변환층의 자기 장면 전달입니다.
 - `--target`으로 Arm을 선택합니다. 표현 모드·집계 옵션이나 성능 조건에 따른 실행 차단은 없습니다.
 
 ```bash
-python -m validation embed-representations --run-id "$RUN_ID" --target base d0 d1 g0 g1
-python -m validation run-recommendation --run-id "$RUN_ID" --target base d0 d1 g0 g1
-python -m validation run-recommendation --run-id "$RUN_ID" --target a1 a2 a3
-python -m validation run-diagnosis --run-id "$RUN_ID" --target base d0 d1 g0 g1 a1 a2 a3
+BASIC=(base d0 d1 g0 g1 g2 g3 g4)
+python -m validation embed-representations --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}"
+python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3
+python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}"
+python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}"
+
+# 필요한 Ablation을 추가 실행합니다.
+ABLATION=(g1a g1b g1c g3a)
+python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3a
+python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target "${ABLATION[@]}"
+python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${ABLATION[@]}"
 ```
+
+`prepare-module` Step은 Graph BGE 특징 준비 뒤 G3·G4·G3a 학습 전에 필요한 구간 파일을 만듭니다. Basic은 `--target g3`로 G3·G4가 공유하는 `scene_segments` 파일을 준비하고, Ablation은 `--target g3a`로 별도 `scene_segments_shuffled` 파일을 준비합니다. G3a 준비는 Basic의 구간 파일을 변경하지 않으며 VLM·BGE 재추론도 하지 않습니다. Graph bundle을 다시 만들거나 구간 생성 규칙을 바꾸면 이 단계도 다시 실행합니다.
+
+3개 seed 기준 Basic은 24조합·진단 28쌍, Ablation은 12조합·진단 6쌍, 전체는 36조합·진단 66쌍입니다. Ablation만 진단하면 Base 상대 변화율과 G1·G3 대비 비교는 계산하지 않습니다. 기준 Arm과 비교하려면 진단의 `--target`에 해당 Arm도 함께 넣습니다.
 
 학습 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 공유 BGE 특징과 추출 자료를 보존하고 Arm별로 독립 학습합니다. Profiling의 `--profile-every`, `--profile-operators`와 `validation.graph_execution`의 chunk·checkpoint 설정은 유지합니다.
 
 ## 이전 설계·실험 기록
 
-아래는 이전 계약·Run의 기록입니다. 과거 CLI 예시와 결과 경로는 현재 실행용이 아닙니다. 과거 집계 모델을 새 8개 Arm으로 자동 변환하거나 과거 checkpoint를 재사용하지 않습니다.
+아래는 이전 계약·Run의 기록입니다. 과거 CLI 예시와 결과 경로는 현재 실행용이 아닙니다. 과거 집계 모델을 현재 Arm으로 자동 변환하거나 과거 checkpoint를 재사용하지 않습니다.
 
 ### 이전 직접 Graph 학습 경로
 

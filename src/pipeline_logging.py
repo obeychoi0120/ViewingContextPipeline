@@ -43,10 +43,11 @@ def step_settings(context, step, **options):
             "prepare-cohort": context.cohort_dir,
             "prepare-input-data": context.keyframes_dir,
             "embed-representations": context.representations_dir,
+            "prepare-module": context.representations_dir,
             "run-recommendation": context.recommendations_dir,
             "run-diagnosis": context.diagnosis_dir,
         }[step]
-        if step in {"embed-representations", "run-recommendation", "run-diagnosis"}:
+        if step in {"embed-representations", "prepare-module", "run-recommendation", "run-diagnosis"}:
             values["selected_arms"] = list(select_arms(context.config, options.get("target")))
     values.update({key: value for key, value in options.items() if key not in values})
     return values

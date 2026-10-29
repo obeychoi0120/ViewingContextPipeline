@@ -25,7 +25,7 @@ class ArrayStore:
         return len(self["titles"])
 
 
-def test_a1_ignores_roles_but_keeps_entity_action_and_context(context):
+def test_g1a_ignores_roles_but_keeps_entity_action_and_context(context):
     arrays, _, _, _ = graph_store(context)
     batch = PackedGraphStore(arrays).batch([0, 1], "cpu")
     encoder = SceneRoleEncoder(hidden=4, aggregation="gnn_attn", role_fusion=False)
@@ -42,7 +42,7 @@ def test_a1_ignores_roles_but_keeps_entity_action_and_context(context):
     assert batch["contexts"].grad.abs().sum() > 0
 
 
-def test_a2_corruption_is_fixed_local_and_preserves_missing(context):
+def test_g1b_corruption_is_fixed_local_and_preserves_missing(context):
     arrays, cohort, _, _ = graph_store(context, counts=(2, 1, 0))
     one = graph()
     one["entities"] = [one["entities"][0]]
@@ -82,20 +82,20 @@ def test_a2_corruption_is_fixed_local_and_preserves_missing(context):
     torch.testing.assert_close(reordered, together[[2, 0, 1]], rtol=1e-5, atol=1e-6)
 
 
-def test_a2_policy_changes_recommendation_identity(context, monkeypatch):
+def test_g1b_policy_changes_recommendation_identity(context, monkeypatch):
     from helpers import prepare_inputs
     from validation.representation_provenance import recommendation_identity
 
     prepare_inputs(context, monkeypatch)
-    original = recommendation_identity(context, "a2")
+    original = recommendation_identity(context, "g1b")
     g1 = recommendation_identity(context, "g1")
     monkeypatch.setitem(CORRUPTION, "seed", 43)
-    changed = recommendation_identity(context, "a2")
+    changed = recommendation_identity(context, "g1b")
     assert original != changed and original["embedding_hash"] == changed["embedding_hash"]
     assert recommendation_identity(context, "g1") == g1
 
 
-def test_a3_matches_self_transform_and_blocks_exchange():
+def test_g1c_matches_self_transform_and_blocks_exchange():
     global_module = SceneAttentionGCN(4, 3, 2)
     local = SceneAttentionGCN(4, 3, 2, self_only=True)
     local.load_state_dict(global_module.state_dict())
@@ -116,13 +116,13 @@ def test_a3_matches_self_transform_and_blocks_exchange():
     assert local.query.weight.grad is local.key.weight.grad is None
 
 
-def test_a3_single_scene_matches_g1(context):
+def test_g1c_single_scene_matches_g1(context):
     arrays, _, _, _ = graph_store(context, counts=(1,))
     batch = PackedGraphStore(arrays).batch([0], "cpu")
     g1 = SceneRoleEncoder(hidden=4, aggregation="gnn_attn")
-    a3 = SceneRoleEncoder(hidden=4, aggregation="self_only")
-    a3.load_state_dict(g1.state_dict())
-    torch.testing.assert_close(g1(batch), a3(batch), rtol=0, atol=0)
+    g1c = SceneRoleEncoder(hidden=4, aggregation="self_only")
+    g1c.load_state_dict(g1.state_dict())
+    torch.testing.assert_close(g1(batch), g1c(batch), rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("aggregation", ["mean", "gnn_attn"])
@@ -164,7 +164,7 @@ def test_worker_consumes_mixed_arm_jobs(context, monkeypatch):
     worker_context = pickle.loads(pickle.dumps(context))
     cohort, _, split = selected_table(context)
     jobs, results = Queue(), Queue()
-    for seed, arm in ((42, "d1"), (43, "a3")):
+    for seed, arm in ((42, "d1"), (43, "g1c")):
         jobs.put((split, result_identity(context, cohort, seed, arm), arm))
     jobs.put(None)
     _consume_combinations(worker_context, "cpu", jobs, results)

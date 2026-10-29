@@ -36,6 +36,9 @@ def recommendation_identity(context, branch):
         # Arms without extensions keep their earlier identity (and reusable results).
         experiment_arm.pop("extensions")
         experiment_arm.pop("segments")
+    else:
+        # Match the JSON form used by completion manifests and diagnosis.
+        experiment_arm["extensions"] = list(arm.extensions)
     identity = {
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
@@ -60,7 +63,7 @@ def recommendation_identity(context, branch):
         "embedding_hash": value,
         "representation_mode": arm.representation,
         "scene_aggregation": arm.aggregation if branch != "base" else None,
-        "role_corruption": dict(CORRUPTION) if branch == "a2" else None,
+        "role_corruption": dict(CORRUPTION) if branch == "g1b" else None,
     }
     if arm.extensions:
         from validation.graph_context import EXTENSION_MODELS

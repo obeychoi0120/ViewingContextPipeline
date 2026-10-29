@@ -368,7 +368,7 @@ def run_combination(
     from validation.graph_model import parameter_report
 
     metadata["parameters"] = parameter_report(model, branch)
-    if branch == "a2":
+    if branch == "g1b":
         metadata["role_corruption_report"] = model.store.report
     with sampled(profiler, "export", kind="stage"):
         with span("catalog_and_checkpoint_save"):

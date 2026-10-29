@@ -405,6 +405,7 @@ def test_previous_migration_journal_does_not_rewrite_contract(context):
             ],
         ),
         ("validation.cli", ["run-recommendation", "--target", "base"]),
+        ("validation.cli", ["prepare-module", "--target", "g3"]),
     ],
 )
 def test_cli_requires_dataset(module, command, capsys):

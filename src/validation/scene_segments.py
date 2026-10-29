@@ -7,15 +7,13 @@ k activities belongs to k segments. The "shuffled" control keeps every segment's
 the membership through one fixed permutation of each video's scenes. An Arm with the segments extension
 reads the variant named by Arm.segments from its source bundle.
 
-  python -m validation.scene_segments --run-id <RUN> --dataset <DATASET> --target g3 g3s
+  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g3
+  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g3a
 """
 
-import argparse
 import hashlib
-import json
 import random
 import re
-import sys
 from collections import Counter
 from pathlib import Path
 
@@ -147,21 +145,3 @@ def attach(context, arm_name):
     write_scene_segments(directory, np.asarray(pairs, dtype=np.int64).reshape(-1, 2), statistics=statistics,
                          variant=variant)
     return statistics
-
-
-def main(argv=None):
-    from pipeline_runtime import DATASETS, RunContext
-
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--dataset", required=True, choices=DATASETS)
-    parser.add_argument("--target", nargs="+", required=True, help="Arms with the segments extension")
-    args = parser.parse_args(argv)
-    context = RunContext.load(args.run_id, dataset=args.dataset)
-    for arm in args.target:
-        print(json.dumps(attach(context, arm), indent=1))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

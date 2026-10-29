@@ -27,7 +27,7 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     from validation.steps import embed_representations
 
     prepare_inputs(context, monkeypatch)
-    result = embed_representations(context, target=["d0", "d1", "g0", "g1", "a1", "a2", "a3"])
+    result = embed_representations(context, target=["d0", "d1", "g0", "g1", "g1a", "g1b", "g1c"])
     assert result["generated_sources"] == ["desc_qwen3vl"]
     assert result["reused_sources"] == ["graph_qwen3vl"]
     root = context.representations_dir

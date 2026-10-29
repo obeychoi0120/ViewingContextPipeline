@@ -54,11 +54,11 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 ## 장면별 BGE와 공유 캐시
 
-추천 Arm은 `base d0 d1 g0 g1 a1 a2 a3`이며 모든 Arm에 제목을 포함합니다. D0·D1은 `desc_qwen3vl`, G0·G1·A1·A2·A3는 `graph_qwen3vl` 장면 자료를 직접 사용합니다. Summary는 추천 입력에 포함되지 않습니다. BGE는 고정된 1024차원 특징을 생성합니다.
+Basic 추천 Arm은 `base d0 d1 g0 g1 g2 g3 g4`이며 Ablation은 `g1a g1b g1c g3a`입니다. 모든 Arm에 제목을 포함합니다. D0·D1은 `desc_qwen3vl`, G0·G1·G2·G3·G4·G1a·G1b·G1c·G3a는 `graph_qwen3vl` 장면 자료를 직접 사용합니다. Summary는 추천 입력에 포함되지 않습니다. BGE는 고정된 1024차원 특징을 생성합니다.
 
-Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다. A2는 공유 Graph를 수정하지 않고 고정된 교란 뷰를 만듭니다.
+Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다. G1b는 공유 Graph를 수정하지 않고 고정된 교란 뷰를 만듭니다.
 
-공유 캐시는 `<artifacts_root>/shared_cache/{scene_inputs,recommendations}/`입니다. 로컬 결과 검증 → 공유 캐시 → 새 계산 순서이며 키별 잠금·checksum·원자적 게시를 사용합니다. `--force`는 캐시 읽기를 우회합니다. 입력 키에는 실제 Scene 파일 바이트·생성 조건 기록, catalog 순서, 제목, BGE 모델·설정과 변환 계약을 포함합니다. 추천 키에는 추천 계약·Arm 구조·표현 해시·분할·학습 설정·seed·A2 교란 정책을 추가합니다.
+공유 캐시는 `<artifacts_root>/shared_cache/{scene_inputs,recommendations}/`입니다. 로컬 결과 검증 → 공유 캐시 → 새 계산 순서이며 키별 잠금·checksum·원자적 게시를 사용합니다. `--force`는 캐시 읽기를 우회합니다. 입력 키에는 실제 Scene 파일 바이트·생성 조건 기록, catalog 순서, 제목, BGE 모델·설정과 변환 계약을 포함합니다. 추천 키에는 추천 계약·Arm 구조·표현 해시·분할·학습 설정·seed·G1b 교란 정책을 추가합니다.
 
 추천 재사용 단위는 완료된 seed × Arm입니다. 모든 Arm에서 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `catalog_vectors.npy`, `complete.json`을 검증합니다. Run 간 재사용은 독립 파일로 복사하여 현재 Run identity와 `reused_from`을 기록합니다. 완료 조합은 모델·worker 초기화 없이 건너뜁니다. epoch 중간 재개는 지원하지 않습니다.
 
@@ -70,13 +70,15 @@ validation 설정 `validation-config/v8`, 학습 구현 `shared-scenes-leave-one
 
 ## Leave-one-out 실행과 진단
 
-`embed-representations`, `run-recommendation`, `run-diagnosis`는 독립 단계이며 `--target`이 필수입니다. 각 Arm이 입력·집계 방식을 정하므로 표현 모드·집계 옵션은 받지 않습니다. Basic과 Ablation의 실행 순서는 사용자가 정하며 성능에 따른 허용·거부 로직은 없습니다. 추천 명령은 특징 준비나 진단을 자동 실행하지 않습니다.
+`embed-representations`, `prepare-module`, `run-recommendation`, `run-diagnosis`는 독립 단계이며 `--target`이 필수입니다. 각 Arm이 입력·집계 방식을 정하므로 표현 모드·집계 옵션은 받지 않습니다. Basic과 Ablation의 실행 순서는 사용자가 정하며 성능에 따른 허용·거부 로직은 없습니다. 추천 명령은 특징·구간 준비나 진단을 자동 실행하지 않습니다.
 
-추천 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 최적 validation HR@10의 최초 checkpoint를 복원한 뒤 test를 한 번 평가하며 refit은 없습니다. `training.json`에는 파라미터 수·A2 교란 통계·A3의 비활성 Q/K도 기록합니다.
+G3·G4는 `embed-representations` 이후, 학습 전에 `python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3`로 공통 구간 파일을 준비합니다. 이후 G3a 학습 전에는 같은 Step의 `--target g3a`로 섞은 구간만 준비합니다. 이 Step의 `--target`은 구간 확장을 사용하는 Arm만 받습니다. G3와 G4는 Graph 소스 bundle의 `scene_segments.npy`·`scene_segments.json`을 공유하며 G3a는 별도 `scene_segments_shuffled.npy`·`scene_segments_shuffled.json`을 사용합니다. 이 단계는 실행할 때마다 선택한 구간 파일만 다시 만들며 VLM·BGE를 실행하지 않습니다. Graph bundle 재생성 또는 구간 생성 규칙 변경 후에는 구간 파일도 다시 준비합니다. 구간 파일의 버전·입력 해시·checksum을 검증하고 추천 identity에 포함하므로 파일이 없거나 현재 bundle과 맞지 않으면 학습할 수 없습니다.
+
+추천 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 최적 validation HR@10의 최초 checkpoint를 복원한 뒤 test를 한 번 평가하며 refit은 없습니다. `training.json`에는 파라미터 수·G1b 교란 통계·G1c의 비활성 Q/K도 기록합니다.
 
 진단은 `validation/diagnosis/<target-set>/diagnosis.json`, 보고서는 `reports/<target-set>/report.md`에 저장합니다. target-set은 등록 순서로 연결합니다. Basic과 전체 진단은 별도 경로입니다. JSON에는 seed별·평균·표준편차·Base 상대 변화율·입력 확보율·검정 정책을 저장하고, 상세 아이템별 증거는 원래 특징·학습 파일에서 확인합니다.
 
-NDCG@10은 사용자별 seed 평균을 paired bootstrap하고 선택한 모든 Arm 쌍에 Bonferroni 보정합니다(Basic 10쌍, 전체 28쌍). HR@10은 기술통계만 보고합니다. Run 간 비교는 같은 Arm·사용자·이벤트·원본·분할·catalog·seed·평가 계약을 요구합니다. 진단 pass는 실행 증거 검증이며 성능 우위 판정과 구분합니다.
+3개 seed 기준 Basic 8개 Arm은 24개 학습 조합, Ablation 4개 Arm은 12개 학습 조합, 전체 12개 Arm은 36개 학습 조합입니다. NDCG@10은 사용자별 seed 평균을 paired bootstrap하고 선택한 모든 Arm 쌍에 Bonferroni 보정합니다(Basic 28쌍, Ablation 6쌍, 전체 66쌍). Ablation만 선택하면 Base 상대 변화율과 G1·G3 대비 비교는 계산하지 않으며, 각 진단은 선택한 Arm 묶음별로 저장합니다. HR@10은 기술통계만 보고합니다. Run 간 비교는 같은 Arm·사용자·이벤트·원본·분할·catalog·seed·평가 계약을 요구합니다. 진단 pass는 실행 증거 검증이며 성능 우위 판정과 구분합니다.
 
 아래 날짜별 항목은 이전 계약의 변경 기록입니다. 현재 실행에는 위 계약과 README를 적용합니다.
 
