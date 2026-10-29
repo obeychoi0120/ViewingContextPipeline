@@ -329,6 +329,34 @@ Mean은 장면 벡터의 단순 평균입니다. 기본 Attention GNN은 제목�
 
 활동 키는 참여자 표식·일부 기능어를 뺀 첫 단어에 어미 제거·불규칙형 치환 규칙을 적용한 값입니다. 문법 분석이나 동의어 병합, 같은 대상·도구인지의 확인, 시각적 동일성 추적은 하지 않습니다. 구간 길이·소속을 활용하는 연산과 구현 계약은 [구간 생성](src/validation/scene_segments.py), [집계 정의](src/validation/graph_context.py), [영상 인코더](src/validation/graph_model.py)를 참고하세요.
 
+<details>
+<summary>G1 다이어그램 — 장면 간 Attention GNN → 평균 집계</summary>
+
+![G1: 장면 간 Attention GNN과 평균 집계](docs/design/recsys_diagram_g1.png)
+
+</details>
+
+<details>
+<summary>G2 다이어그램 — 제목 기반 영상 노드</summary>
+
+![G2: 장면 간 Attention GNN과 제목 기반 영상 노드](docs/design/recsys_diagram_g2.png)
+
+</details>
+
+<details>
+<summary>G3 다이어그램 — 활동 구간과 평균 집계</summary>
+
+![G3: 활동 구간 전달 후 장면 평균과 구간 기여 결합](docs/design/recsys_diagram_g3.png)
+
+</details>
+
+<details>
+<summary>G4 다이어그램 — 활동 구간과 영상 노드 결합</summary>
+
+![G4: 활동 구간으로 갱신한 장면의 영상 노드 집계와 구간 기여 결합](docs/design/recsys_diagram_g4.png)
+
+</details>
+
 G1a는 Fusion과 역할 상태 임베딩을 제거하지만 Entity·Action·Context 투영은 유지합니다. G1b는 역할을 유지한 채 같은 장면의 다른 Entity로 연결 대상을 균등 교체합니다. seed 42와 영상·장면·Action·역할 ID로 교란을 고정하여 학습 seed·epoch·배치 순서가 바뀌어도 동일하게 사용합니다. 연결 수·결측 상태는 유지하고 대체 Entity가 없으면 변경하지 않습니다. 원본 파일은 수정하지 않습니다.
 
 G1c는 전달 행렬을 I로 바꿔 `h′ = h + ReLU(Wh + b)`를 적용합니다. 변환층·활성화·잔차 연결은 유지하며 Q/K는 forward·gradient에 관여하지 않습니다. 이 사실과 파라미터 수, G1b의 변경 연결 수·비율을 학습 결과에 기록합니다.
