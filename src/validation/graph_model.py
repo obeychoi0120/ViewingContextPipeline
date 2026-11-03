@@ -34,7 +34,8 @@ class SceneRoleEncoder(nn.Module):
     """Entity→Action role gather, scene MLP, optional scene exchange, and video pooling.
 
     Exchange: cosine GCN, attention GCN or Transformer; pooling: mean or attention. gnn_attn may add
-    the segments and video_node extensions (graph_context.EXTENSION_MODELS).
+    the segments and video_node extensions (graph_context.EXTENSION_MODELS); mean may add segments, which
+    is then the only path between scenes.
     """
 
     ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, place; receiver is ignored.
@@ -525,7 +526,7 @@ class GraphSASRec(SASRec):
 def parameter_report(model, branch):
     total = sum(p.numel() for p in model.parameters() if p.requires_grad)
     inactive = 0
-    if branch == "a3":
+    if branch == "g1c":
         inactive = sum(p.numel() for module in (model.graph_encoder.gcn.query,
                                               model.graph_encoder.gcn.key)
                        for p in module.parameters())
@@ -534,7 +535,7 @@ def parameter_report(model, branch):
         "trainable": total,
         "active_trainable": total - inactive,
         "inactive_query_key": inactive,
-        "removed_role_fusion": 5 * hidden ** 2 + 9 * hidden if branch == "a1" else 0,
+        "removed_role_fusion": 5 * hidden ** 2 + 9 * hidden if branch == "g1a" else 0,
     }
 
 
@@ -547,7 +548,7 @@ def new_graph_model(context, config, branch, device):
         from validation.graph_inputs import load_scene_segments
 
         store.scene_segments = load_scene_segments(store.directory, arm.segments)
-    if branch == "a2":
+    if branch == "g1b":
         from validation.role_corruption import CorruptedGraphStore
 
         store = CorruptedGraphStore(store)

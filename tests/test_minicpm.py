@@ -67,7 +67,12 @@ def test_minicpm_cli_arm_default(minicpm_context, monkeypatch, arm):
     calls = []
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: minicpm_context)
     from extraction.cli import STEP_HANDLERS
-    monkeypatch.setitem(STEP_HANDLERS, "extract-graph-scenes", lambda context, **kw: calls.append(kw))
+
+    def extract(context, **kwargs):
+        calls.append(kwargs)
+        return {"failure_count": 0}
+
+    monkeypatch.setitem(STEP_HANDLERS, "extract-graph-scenes", extract)
     args = ["extract-graph-scenes", "--run-id", "regression", "--dataset", "microlens_100k", "--schema", "prompts/scene_graph_v9.md",
             "--model", "minicpm", "--repetition-penalty", "1.1", "--presence-penalty", "0"]
     if arm:

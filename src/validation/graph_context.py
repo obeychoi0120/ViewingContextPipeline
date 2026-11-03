@@ -117,7 +117,8 @@ def transformer_model(aggregation):
 
 
 SCENE_SEGMENTS_VERSION = "scene-segments/v1"
-# Optional stages after gnn_attn's scene exchange, chosen per Arm (arm_registry.Arm.extensions):
+# Optional stages after gnn_attn's scene exchange, chosen per Arm (arm_registry.Arm.extensions); segments also
+# runs on mean (no scene exchange, Arms g5/g5a), where the hypergraph is the only path between scenes:
 #   segments    scene-segment hypergraph (scene_segments sidecar of the source bundle): scenes pass to their
 #               segments and back, and the video readout adds a per-segment mean; both gates start at 0.
 #   video_node  the title leaves the scene vectors and starts a video node that gathers from the scenes,
@@ -154,12 +155,15 @@ EXTENSION_MODELS = {
 }
 
 
+EXTENSION_AGGREGATIONS = {"gnn_attn": frozenset(EXTENSION_MODELS), "mean": frozenset({"segments"})}
+
+
 def check_extensions(extensions, aggregation):
-    """Extensions are gnn_attn-only stages; returns them as a frozenset."""
+    """gnn_attn takes every extension and mean takes segments; returns them as a frozenset."""
     extensions = frozenset(extensions)
     if extensions - EXTENSION_MODELS.keys():
         raise ValueError("unknown scene extension: " + ", ".join(sorted(extensions - EXTENSION_MODELS.keys())))
-    if extensions and aggregation != "gnn_attn":
-        raise ValueError("scene extensions require the gnn_attn aggregation")
+    if extensions - EXTENSION_AGGREGATIONS.get(aggregation, frozenset()):
+        raise ValueError("scene extensions require the gnn_attn aggregation (segments also runs on mean)")
     return extensions
 

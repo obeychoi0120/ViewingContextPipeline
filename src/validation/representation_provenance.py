@@ -26,6 +26,7 @@ def recommendation_identity(context, branch):
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
     from dataclasses import asdict
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
+    from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION, EVALUATION_CONTRACT
     from model_provenance import canonical, local_model_identity
     from validation.role_corruption import CORRUPTION
@@ -36,6 +37,9 @@ def recommendation_identity(context, branch):
         # Arms without extensions keep their earlier identity (and reusable results).
         experiment_arm.pop("extensions")
         experiment_arm.pop("segments")
+    else:
+        # Match the JSON form used by completion manifests and diagnosis.
+        experiment_arm["extensions"] = list(arm.extensions)
     identity = {
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
@@ -60,12 +64,16 @@ def recommendation_identity(context, branch):
         "embedding_hash": value,
         "representation_mode": arm.representation,
         "scene_aggregation": arm.aggregation if branch != "base" else None,
-        "role_corruption": dict(CORRUPTION) if branch == "a2" else None,
+        "role_corruption": dict(CORRUPTION) if branch == "g1b" else None,
     }
     if arm.extensions:
         from validation.graph_context import EXTENSION_MODELS
 
         identity["item_model"]["extensions"] = {e: EXTENSION_MODELS[e] for e in sorted(arm.extensions)}
+        if arm.aggregation == "mean":
+            # Without a scene exchange the segments stage reads the scene MLP output (g3/g4 identity unchanged).
+            identity["item_model"]["extensions"]["segments"] = {
+                **EXTENSION_MODELS["segments"], "applied_after": "scene_mlp_without_scene_exchange"}
     if "segments" in arm.extensions:
         from validation.graph_inputs import scene_segments_identity
 

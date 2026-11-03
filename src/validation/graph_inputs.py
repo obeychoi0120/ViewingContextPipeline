@@ -445,7 +445,7 @@ def scene_segments_identity(directory, variant="true"):
     directory = Path(directory)
     array_path, meta_path = scene_segments_paths(directory, variant)
     if not meta_path.is_file():
-        raise ValueError(f"missing scene segments ({variant}): {directory}; run python -m validation.scene_segments")
+        raise ValueError(f"missing scene segments ({variant}): {directory}; run python -m validation prepare-module")
     meta = read_json(meta_path)
     manifest = read_json(directory / "manifest.json")
     if (
@@ -453,7 +453,7 @@ def scene_segments_identity(directory, variant="true"):
         or meta.get("input_hash") != manifest["input_hash"]
         or checksum(array_path) != meta.get("checksum")
     ):
-        raise ValueError(f"stale scene segments ({variant}): {directory}; run python -m validation.scene_segments")
+        raise ValueError(f"stale scene segments ({variant}): {directory}; run python -m validation prepare-module")
     return meta
 
 

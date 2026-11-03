@@ -22,7 +22,7 @@ from validation.leave_one_out_data import EventTable
 from visual_sampling import timestamp_stem
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = ["base", "g0"]
+TARGETS = ["base", "g1"]
 GRAPH_TEXT = """[Context]
 medium: live_action
 format: demonstration
@@ -283,7 +283,7 @@ def summary_options(context, catalog=None):
     )
 
 
-def graph_store(context, *, counts=(2, 1), arm_name="g0"):
+def graph_store(context, *, counts=(2, 1), arm_name="g1"):
     from arm_registry import registry
     from validation.graph_inputs import build_input
 

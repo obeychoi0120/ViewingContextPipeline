@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         nargs="+",
         required=True,
-        help="Explicit arms to include (required for embedding/recommendation/diagnosis; no default).",
+        help="Explicit arms to include (required for all validation steps; no default).",
     )
     parser.add_argument(
         "--workers-per-gpu",
@@ -51,11 +51,13 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--compare-run-id is only supported by run-diagnosis")
         if args.target is not None and args.step not in {
             "embed-representations",
+            "prepare-module",
             "run-recommendation",
             "run-diagnosis",
         }:
             raise ValueError(
-                "--target is only supported by embed-representations/run-recommendation/run-diagnosis"
+                "--target is only supported by embed-representations/prepare-module/"
+                "run-recommendation/run-diagnosis"
             )
         if args.workers_per_gpu is not None and args.step != "run-recommendation":
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")

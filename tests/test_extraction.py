@@ -58,6 +58,27 @@ def test_invalid_graph_preserves_raw_output():
     assert record["scene_idx"] == 7
 
 
+@pytest.mark.parametrize("failure_count, expected_exit", [(0, 0), (1, 1)])
+def test_extraction_cli_reports_incomplete_outputs(
+    context, monkeypatch, capsys, failure_count, expected_exit,
+):
+    from extraction import cli
+
+    monkeypatch.setattr(cli.RunContext, "load", lambda *args, **kwargs: context)
+    monkeypatch.setitem(
+        cli.STEP_HANDLERS,
+        "extract-graph-scenes",
+        lambda *args, **kwargs: {"content_count": 10, "failure_count": failure_count},
+    )
+    status = cli.main([
+        "extract-graph-scenes", "--run-id", context.run_id,
+        "--dataset", context.dataset, "--schema", "prompts/scene_graph_v9.md",
+        "--model", "qwen3vl", "--arm", "graph_qwen3vl",
+    ])
+    assert status == expected_exit
+    assert ("[FAILED]" in capsys.readouterr().err) == bool(failure_count)
+
+
 def test_undeclared_roles_become_unknown():
     text = GRAPH_TEXT.replace("p1 - cutting - f1; t1; l1", "p1 - cutting - absent; none; unknown")
     parsed = parse_or_repair_graph(text)
