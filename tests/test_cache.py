@@ -139,13 +139,14 @@ def test_cross_run_cache_and_paired_comparison(context, monkeypatch):
 
 
 @pytest.mark.parametrize("filename", ["identity.json", "training.json", "complete.json", "sasrec.pt"])
-def test_old_model_partial_results_cannot_be_overwritten(tmp_path, filename):
+@pytest.mark.parametrize("old_version", ["sasrec-scene-content/v1", "sasrec-scene-content/v2"])
+def test_old_model_partial_results_cannot_be_overwritten(tmp_path, filename, old_version):
     import torch
     from validation.leave_one_out_recommendation import ensure_compatible_output
 
-    current = {"arm_contract": "gnn-attn-aggregation/v1", "architecture_version": "sasrec-scene-content/v2",
+    current = {"arm_contract": "gnn-attn-aggregation/v1", "architecture_version": "sasrec-scene-content/v3",
                "experiment_arm": {"name": "g1"}, "item_model": {"scene_mlp": True}}
-    old = {**current, "architecture_version": "sasrec-scene-content/v1"}
+    old = {**current, "architecture_version": old_version}
     path = tmp_path / filename
     if filename == "sasrec.pt":
         torch.save({"metadata": old, "state_dict": {}}, path)
@@ -183,7 +184,7 @@ def test_preflight_protects_entire_grid_before_restoring_or_training(context, mo
 def test_current_partial_identity_allows_restart_but_different_arm_does_not(tmp_path):
     from validation.leave_one_out_recommendation import ensure_compatible_output
 
-    identity = {"architecture_version": "sasrec-scene-content/v2", "arm_contract": "gnn-attn-aggregation/v1",
+    identity = {"architecture_version": "sasrec-scene-content/v3", "arm_contract": "gnn-attn-aggregation/v1",
                 "experiment_arm": {"name": "g0", "role_fusion": False}, "item_model": {"scene_mlp": True}}
     write_json(tmp_path / "identity.json", identity)
     ensure_compatible_output(tmp_path, identity)

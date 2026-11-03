@@ -1,5 +1,6 @@
 from arm_registry import RECOMMENDATION_ARM_CONTRACT
 from validation.experiment_report import write_report
+from validation.recommendation_contracts import ARCHITECTURE_VERSION
 
 
 def test_report_reverses_contrast_interval_and_preserves_tables(context):
@@ -11,14 +12,16 @@ def test_report_reverses_contrast_interval_and_preserves_tables(context):
         "run_id": context.run_id, "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "targets": arms,
         "recommendations": {
+            "architecture_version": ARCHITECTURE_VERSION,
             "means": means, "standard_deviations": deviations,
             "base_relative_changes": None, "model_reports": models,
             "per_seed": [{"arm": arm, "seed": 42, **means[arm]} for arm in arms],
         },
         "statistics": {
             "comparison_count": 10,
-            "comparisons": {"d-g0": {"difference": -0.1, "ci_low": -0.15,
-                                       "ci_high": -0.05, "confidence_level": 1 - 0.05 / 10}},
+            "comparisons": {pair: {"difference": -0.1, "ci_low": -0.15,
+                                   "ci_high": -0.05, "confidence_level": 1 - 0.05 / 10}
+                            for pair in ("d-g0", "g0-g1", "g1-g2")},
         },
         "representations": {
             arm: {"sources": [{"source": "desc_qwen3vl" if arm == "d" else "graph_qwen3vl"}],
@@ -37,3 +40,6 @@ def test_report_reverses_contrast_interval_and_preserves_tables(context):
     assert "| D | desc_qwen3vl | 5 | 50.00% | 2 | 1 | 100 | 100 |" in text
     assert "G1a" not in text and "교란" not in text
     assert "추출 내용·인코더" in text
+    assert "A: Hypergraph" in text and "B: Role Fusion" in text
+    assert ARCHITECTURE_VERSION in text
+    assert "독립적인 신규 기여로 해석하지 않습니다" in text

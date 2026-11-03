@@ -16,6 +16,22 @@ GRAPH_MODEL = {
     "state_lookup": "embedding",
 }
 
+SCENE_GCN_MODEL = {
+    "version": "cosine-scene-gcn/v1",
+    "layers": 1,
+    "value_dim": 512,
+    "similarity_dim": 384,
+    "similarity_input": "title_free_content_before_scene_mlp",
+    "similarity": "nonnegative_cosine",
+    "similarity_eps": 1e-8,
+    "self_loop": "unit_diagonal",
+    "normalization": "symmetric_degree",
+    "connectivity": "all_pairs_within_video",
+    "formula": "h_plus_relu_linear_normalized_adjacency_h",
+    "detach_similarity": False,
+    "bias": True,
+}
+
 SCENE_SEGMENTS_VERSION = "scene-segments/v2"
 EXTENSION_MODELS = {
     "segments": {
@@ -28,15 +44,15 @@ EXTENSION_MODELS = {
         "gates": "learned_scalars_init_0",
         "weight_init": "xavier_normal_private_generator_seeded_by_torch_initial_seed",
         "bias_init": "zeros",
-        "applied_after": "scene_mlp_without_scene_exchange",
+        "applied_after": "cosine_gcn",
     },
 }
 
 
 def check_extensions(extensions, aggregation):
     extensions = frozenset(extensions)
-    if aggregation != "mean":
-        raise ValueError("scene aggregation must be mean")
+    if aggregation not in ("mean", "gnn"):
+        raise ValueError("scene aggregation must be mean or gnn")
     if extensions - EXTENSION_MODELS.keys():
         raise ValueError("unknown scene extension: " + ", ".join(sorted(extensions - EXTENSION_MODELS.keys())))
     return extensions

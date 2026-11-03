@@ -72,6 +72,9 @@ def test_arm_sources_and_title_policy(context):
     assert list(select_arms(context.config, ["g1", "base"])) == ["base", "g1"]
     assert target_set(context.config, ["g1", "base"]) == "base_g1"
     assert RECOMMENDATION_ARM_CONTRACT == "gnn-attn-aggregation/v1"
+    assert all(arms[name].aggregation == "gnn" for name in ("d", "g0", "g1", "g2"))
+    assert [arms[name].role_fusion for name in ("g0", "g1", "g2")] == [False, False, True]
+    assert [arms[name].extensions for name in ("g0", "g1", "g2")] == [(), ("segments",), ("segments",)]
     assert context.representations_dir == context.validation_dir / "representations"
     assert context.recommendations_dir == context.validation_dir / "recommendations"
     assert context.diagnosis_path(["g1", "base"]) == (

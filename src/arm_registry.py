@@ -16,16 +16,17 @@ class Arm:
     scene_arm: str | None = None
     aggregation: str = "mean"
     role_fusion: bool = False
-    # G2 adds activity-segment feedback and a segment contribution to the video.
+    # A: activity hypergraph (G1/G2); B: Entity→Action Role Fusion (G2).
     extensions: tuple[str, ...] = ()
 
 
 ARMS = (
     Arm("base", "metadata", uses_title=True),
-    Arm("d", "description", "qwen3vl", True, "desc_qwen3vl"),
-    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl"),
-    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True),
-    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True,
+    Arm("d", "description", "qwen3vl", True, "desc_qwen3vl", "gnn"),
+    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn"),
+    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn",
+        extensions=("segments",)),
+    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn", role_fusion=True,
         extensions=("segments",)),
 )
 SOURCES = tuple(

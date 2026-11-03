@@ -27,7 +27,7 @@ def embed_representations(context, *, force=False, target=None):
 
 
 def prepare_module(context, *, force=False, target=None):
-    from arm_registry import registry
+    from arm_registry import feature_source, registry
     from validation.scene_segments import attach
 
     selected = resolve_target_arms(target, config=context.config)
@@ -37,8 +37,12 @@ def prepare_module(context, *, force=False, target=None):
         raise ValueError("prepare-module requires Arms with the segments extension: " + ", ".join(invalid))
     log_step_start(context, "prepare-module", force=force, target=target)
     statistics = {}
+    prepared = {}
     for name in selected:
-        statistics[name] = attach(context, name)
+        source = feature_source(arms[name])
+        if source not in prepared:
+            prepared[source] = attach(context, name)
+        statistics[name] = {**prepared[source], "arm": name}
         print(json.dumps(statistics[name], indent=1))
     return {"stage": "prepare-module", "selected_arms": list(selected), "statistics": statistics}
 

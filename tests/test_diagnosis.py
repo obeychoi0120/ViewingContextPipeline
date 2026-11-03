@@ -178,7 +178,7 @@ def test_d_runs_without_graph_and_reuses_completed_results(context, monkeypatch)
     identity = recommendation_identity(context, "d")
     assert identity["representation_mode"] == "description"
     assert identity["experiment_arm"]["name"] == "d"
-    assert identity["scene_aggregation"] == "mean"
+    assert identity["scene_aggregation"] == "gnn"
     assert run_recommendation(context, target=["d"])["completed"] == 3
     assert run_diagnosis(context, target=["d"])["status"] == "pass"
     document = read_json(context.diagnosis_path(["d"]))

@@ -3,8 +3,8 @@
 Run: python docs/design/generate_graph_arm_diagrams.py
 Requires python-pptx, PyMuPDF and LibreOffice, as do the existing generators.
 Only PNGs are retained; editable slides and PDFs are temporary render inputs.
-Implemented architecture: shared Residual Scene MLP, optional Role Fusion (A),
-and activity-segment hypergraph (B). Names follow the runtime Arm registry.
+Implemented architecture: common Residual Scene MLP and cosine GCN backbone,
+activity hypergraph (A), and optional Role Fusion (B). Names follow the Arm registry.
 No model, extraction, embedding or training is executed.
 """
 
@@ -26,10 +26,10 @@ GREEN, GREEN_FILL = "28835D", "EFF8F1"
 GRAY, GRAY_FILL = "9AA7B5", "EFF2F6"
 
 ARMS = {
-    "d": "Description + Mean",
-    "g0": "Graph Encoding + Mean",
-    "g1": "Graph + Role Fusion (A) + Mean",
-    "g2": "Graph + Role Fusion (A) + Hypergraph (B)",
+    "d": "Description + GCN + Mean",
+    "g0": "Graph Encoding + GCN + Mean",
+    "g1": "G0 + Activity Hypergraph (A)",
+    "g2": "G0 + Activity Hypergraph (A) + Role Fusion (B)",
 }
 
 
@@ -72,189 +72,187 @@ def step(d, name, x, y, w, h, title, dimensions, note=None, **style):
 
 
 def scene_encoder(d, role_fusion):
-    """Graph features with optional A, followed by the common Residual Scene MLP."""
-    d.box("Scene encoder panel", 0.55, 2.0, 13.85, 5.78, TEAL_FILL, "B9DFDD")
-    heading(d, "Scene encoder heading", 0.85, 2.13, 13.1,
+    """Graph features with optional B, followed by the common Residual Scene MLP."""
+    d.box("Scene encoder panel", 0.55, 2.0, 13.85, 8.50, TEAL_FILL, "B9DFDD")
+    heading(d, "Scene encoder heading", 0.85, 2.18, 13.1,
             "1  |  GRAPH SCENE ENCODER")
     columns = (("Title", 0.95, ""), ("Entities", 4.25, "E × "),
                ("Actions", 7.55, "A × "), ("Context", 10.85, ""))
     for name, x, count in columns:
-        card(d, name, x, 2.69, 2.95, 0.43, name, size=17)
-        step(d, name + " BGE", x, 3.34, 2.95, 0.57, "BGE (frozen)", count + "1024",
-             ink=GRAY, fill=GRAY_FILL, size=15)
-        step(d, name + " projection", x, 4.13, 2.95, 0.57, "Linear Projection",
-             f"{count}1024 → {count}128", size=15, detail_size=12)
-        wire(d, name + " input", [(x + 1.475, 3.12), (x + 1.475, 3.34)], MUTED)
-        wire(d, name + " encoding", [(x + 1.475, 3.91), (x + 1.475, 4.13)])
+        card(d, name, x, 2.95, 2.95, 0.56, name, size=20)
+        step(d, name + " BGE", x, 3.86, 2.95, 0.76, "BGE (frozen)", count + "1024",
+             ink=GRAY, fill=GRAY_FILL, size=18, detail_size=16)
+        step(d, name + " projection", x, 5.00, 2.95, 0.76, "Linear Projection",
+             f"{count}1024 → {count}128", size=18, detail_size=14)
+        wire(d, name + " input", [(x + 1.475, 3.51), (x + 1.475, 3.86)], MUTED)
+        wire(d, name + " encoding", [(x + 1.475, 4.62), (x + 1.475, 5.00)])
 
     if role_fusion:
-        step(d, "Role fusion", 4.25, 4.95, 6.25, 0.72, "A | Entity → Action Role Fusion",
+        step(d, "Role fusion", 4.25, 6.14, 6.25, 0.96, "B | Entity → Action Role Fusion",
              "A × 640 → A × 128", "Residual fusion · actor / target / tool / place",
-             size=15, detail_size=12)
-        wire(d, "Entity roles", [(5.725, 4.70), (5.725, 4.95)])
-        wire(d, "Action roles", [(9.025, 4.70), (9.025, 4.95)])
-        wire(d, "Entity bypass", [(5.725, 4.82), (4.03, 4.82), (4.03, 6.06), (4.25, 6.06)])
-        d.junction("Entity fork", 5.725, 4.82, TEAL)
+             size=19, detail_size=15)
+        wire(d, "Entity roles", [(5.725, 5.76), (5.725, 6.14)])
+        wire(d, "Action roles", [(9.025, 5.76), (9.025, 6.14)])
+        wire(d, "Entity bypass", [(5.725, 5.95), (4.03, 5.95), (4.03, 7.76), (4.25, 7.76)])
+        d.junction("Entity fork", 5.725, 5.95, TEAL)
     else:
-        wire(d, "Entity to mean", [(5.725, 4.70), (5.725, 5.84)])
-        wire(d, "Action to mean", [(9.025, 4.70), (9.025, 5.84)])
-    step(d, "Entity mean", 4.25, 5.84, 2.95, 0.48, "Entity Mean", "E × 128 → 128",
-         size=14, detail_size=12)
-    step(d, "Action mean", 7.55, 5.84, 2.95, 0.48, "Action Mean", "A × 128 → 128",
-         size=14, detail_size=12)
+        wire(d, "Entity to mean", [(5.725, 5.76), (5.725, 7.43)])
+        wire(d, "Action to mean", [(9.025, 5.76), (9.025, 7.43)])
+    step(d, "Entity mean", 4.25, 7.43, 2.95, 0.66, "Entity Mean", "E × 128 → 128",
+         size=17, detail_size=14)
+    step(d, "Action mean", 7.55, 7.43, 2.95, 0.66, "Action Mean", "A × 128 → 128",
+         size=17, detail_size=14)
     if role_fusion:
-        wire(d, "Fused actions", [(9.025, 5.67), (9.025, 5.84)])
-    step(d, "Content X", 4.25, 6.48, 9.55, 0.48,
-         "Content X: Entity / Action / Context Concat", "S × 384", size=14,
-         detail_size=12)
-    for name, x, start in (("Entity", 5.725, 6.32), ("Action", 9.025, 6.32),
-                            ("Context", 12.325, 4.70)):
-        wire(d, name + " content", [(x, start), (x, 6.48)])
+        wire(d, "Fused actions", [(9.025, 7.10), (9.025, 7.43)])
+    step(d, "Content X", 4.25, 8.40, 9.55, 0.62,
+         "Content X: Entity / Action / Context Concat", "S × 384", size=18,
+         detail_size=15)
+    for name, x, start in (("Entity", 5.725, 8.09), ("Action", 9.025, 8.09),
+                            ("Context", 12.325, 5.76)):
+        wire(d, name + " content", [(x, start), (x, 8.40)])
 
-    step(d, "Scene concat", 0.95, 7.15, 6.05, 0.48,
-         "Scene Concat: Title + Content", "S × 512", size=14, detail_size=12)
-    wire(d, "Content to scene", [(5.725, 6.96), (5.725, 7.15)])
-    wire(d, "Title to scene", [(2.425, 4.70), (2.425, 7.15)])
-    step(d, "Scene MLP", 7.55, 7.15, 6.25, 0.48,
-         "Scene H: Residual Scene MLP", "S × 512 → S × 512", size=14, detail_size=12)
-    wire(d, "Scene concat to MLP", [(7.0, 7.39), (7.55, 7.39)])
+    step(d, "Scene concat", 0.95, 9.45, 6.05, 0.72,
+         "Scene Concat: Title + Content", "S × 512", size=18, detail_size=16)
+    wire(d, "Content to scene", [(5.725, 9.02), (5.725, 9.45)])
+    wire(d, "Title to scene", [(2.425, 5.76), (2.425, 9.45)])
+    scene_mlp(d)
 
 
 def description_encoder(d):
-    d.box("Scene encoder panel", 0.55, 2.0, 13.85, 5.78, TEAL_FILL, "B9DFDD")
-    heading(d, "Scene encoder heading", 0.85, 2.13, 13.1,
+    d.box("Scene encoder panel", 0.55, 2.0, 13.85, 8.50, TEAL_FILL, "B9DFDD")
+    heading(d, "Scene encoder heading", 0.85, 2.18, 13.1,
             "1  |  DESCRIPTION SCENE ENCODER")
     for name, x, width in (("Title", 1.2, 128), ("Scene Description", 8.0, 384)):
-        step(d, name + " input", x, 2.9, 4.6, 0.8, name, "one text",
-             "Each scene encoded separately" if width == 384 else "Shared across a video's scenes")
-        step(d, name + " BGE", x, 4.0, 4.6, 0.7, "BGE (frozen)", "1024",
-             ink=GRAY, fill=GRAY_FILL)
-        step(d, name + " projection", x, 5.0, 4.6, 0.7, "Linear Projection", f"1024 → {width}")
-        wire(d, name + " to BGE", [(x + 2.3, 3.7), (x + 2.3, 4.0)])
-        wire(d, name + " to projection", [(x + 2.3, 4.7), (x + 2.3, 5.0)])
-        wire(d, name + " to concat", [(x + 2.3, 5.7), (x + 2.3, 6.25)])
-    step(d, "Description concat", 1.2, 6.25, 11.4, 0.5,
-         "Scene Concat: Title + Description", "S × 512")
-    step(d, "Scene MLP", 1.2, 7.12, 11.4, 0.5,
-         "Scene H: Residual Scene MLP", "S × 512 → S × 512")
-    wire(d, "Concat to MLP", [(6.9, 6.75), (6.9, 7.12)])
+        step(d, name + " input", x, 2.95, 4.6, 0.90, name, "one text",
+             "Each scene encoded separately" if width == 384 else "Shared across a video's scenes",
+             size=20, detail_size=16)
+        step(d, name + " BGE", x, 4.35, 4.6, 0.90, "BGE (frozen)", "1024",
+             ink=GRAY, fill=GRAY_FILL, size=20, detail_size=18)
+        step(d, name + " projection", x, 5.80, 4.6, 0.90,
+             "Description X: Projection" if width == 384 else "Linear Projection", f"1024 → {width}",
+             size=20, detail_size=18)
+        wire(d, name + " to BGE", [(x + 2.3, 3.85), (x + 2.3, 4.35)])
+        wire(d, name + " to projection", [(x + 2.3, 5.25), (x + 2.3, 5.80)])
+    step(d, "Description concat", 0.95, 9.45, 6.05, 0.72,
+         "Scene Concat: Title + Description", "S × 512", size=18, detail_size=16)
+    wire(d, "Title to concat", [(3.5, 6.70), (3.5, 9.45)])
+    wire(d, "Description to concat", [(10.3, 6.70), (10.3, 8.70),
+                                      (5.725, 8.70), (5.725, 9.45)])
+    scene_mlp(d)
 
 
-def design_notes(d, arm):
-    d.box("Design panel", 14.75, 2.0, 8.70, 5.78, "F5F7FB", "BCCDDD")
-    heading(d, "Design heading", 15.05, 2.13, 8.1, "SHARED ENCODING CONTRACT", INK)
-    card(d, "Residual equation", 15.15, 2.85, 7.90, 0.9,
-         "Residual Scene MLP", "H = X + ReLU(Linear(X))", "512 → 512; applied independently per scene",
-         size=20, detail_size=16)
-    card(d, "Fallback", 15.15, 4.05, 7.90, 0.9,
-         "No valid scenes: title fallback", "SceneMLP([projected title; zeros(384)])",
-         "No title and no valid scenes: zero vector", size=18, detail_size=14)
-    modules = {"d": "A: absent   |   B: absent", "g0": "A: absent   |   B: absent",
-               "g1": "A: Role Fusion   |   B: absent", "g2": "A: Role Fusion   |   B: activity hypergraph"}
-    card(d, "Modules", 15.15, 5.25, 7.90, 0.8, "Modules in this Arm", modules[arm],
-         size=18, detail_size=15)
-    note = {"d": "D vs G0: input representation / encoding",
-            "g0": "G0 vs G1: incremental Role Fusion effect",
-            "g1": "G1 vs G2: incremental B module effect",
-            "g2": "B combines scene feedback and segment readout"}[arm]
-    card(d, "Interpretation", 15.15, 6.45, 7.90, 0.8, "Comparison", note,
-         "Shared scene MLP and SASRec in D / G0 / G1 / G2", size=18, detail_size=14)
+def scene_mlp(d):
+    step(d, "Scene MLP", 7.55, 9.45, 6.25, 0.72,
+         "Scene H: Residual Scene MLP", "S × 512 → S × 512", size=18, detail_size=16)
+    wire(d, "Scene concat to MLP", [(7.0, 9.81), (7.55, 9.81)])
 
 
-def output(d, note, *, x=19.85, y=10.04, w=3.20):
-    step(d, "Video output", x, y, w, 0.80, "Video Vector", "512", note,
-         ink=INK, fill="E8EFF6", size=15, detail_size=12)
+def output(d, note):
+    step(d, "Video output", 15.35, 9.33, 7.60, 0.96, "Video Vector", "512", note,
+         ink=INK, fill="E8EFF6", size=19, detail_size=14)
 
 
-def scene_input(d, x=0.95, y=8.83):
-    step(d, "Scene input", x, y, 4.20, 0.80,
-         "Scene H", "S × 512", "From Residual Scene MLP", ink=PURPLE,
-         fill=PURPLE_FILL, size=15, detail_size=12)
+def common_gcn(d):
+    step(d, "Common GCN", 15.35, 3.12, 7.60, 0.78,
+         "Cosine GCN | Common Backbone", "S × 512 → S × 512",
+         "Links from title-free X [S × 384] · Residual update", ink=PURPLE,
+         fill=PURPLE_FILL, size=18, detail_size=14)
+    wire(d, "Scene MLP to GCN", [(13.80, 9.81), (14.62, 9.81),
+                                        (14.62, 3.78), (15.35, 3.78)])
+
+
+def similarity_input(d, arm):
+    start = (12.60, 6.25) if arm == "d" else (13.80, 8.71)
+    wire(d, "Content X to cosine links", [start, (14.45, start[1]),
+                                         (14.45, 3.51), (15.35, 3.51)], TEAL)
 
 
 def aggregation_heading(d, title, ink, *, segments=False):
-    heading(d, "Aggregation heading", 0.85, 8.25, 16.0, "2  |  " + title, ink)
+    heading(d, "Aggregation heading", 15.15, 2.18, 8.0, "2  |  " + title, ink)
     if segments:
-        d.label("Aggregation notes", 17.0, 8.28, 6.0, 0.22,
-                "Both segment gates init: 0", 12, ink)
+        d.label("Aggregation notes", 15.35, 2.67, 7.60, 0.25,
+                "Both segment gates init: 0", 13, ink)
 
 
 def mean_readout(d):
-    aggregation_heading(d, "MEAN OVER VALID SCENES", PURPLE)
-    scene_input(d, y=9.40)
-    step(d, "Scene mean readout", 8.20, 9.40, 6.10, 0.80,
+    aggregation_heading(d, "COMMON GCN → MEAN", PURPLE)
+    common_gcn(d)
+    step(d, "Scene mean readout", 15.35, 6.10, 7.60, 1.05,
          "Mean Pooling", "S × 512 → 512", "Equal weight per valid scene",
-         ink=PURPLE, fill=PURPLE_FILL, size=18, detail_size=14)
-    wire(d, "Scenes to mean", [(5.15, 9.80), (8.20, 9.80)], PURPLE)
-    wire(d, "Mean to output", [(14.30, 9.80), (19.40, 9.80)], PURPLE)
-    output(d, "Mean over Scene MLP outputs", x=19.40, y=9.40, w=3.65)
+         ink=PURPLE, fill=PURPLE_FILL, size=22, detail_size=18)
+    wire(d, "Scenes to mean", [(19.15, 3.90), (19.15, 6.10)], PURPLE)
+    wire(d, "Mean to output", [(19.15, 7.15), (19.15, 9.33)], PURPLE)
+    output(d, "Mean over GCN-updated scenes")
 
 
 def segment_units(d):
-    scene_input(d)
-    step(d, "Prepare segments", 0.95, 10.04, 4.20, 0.80,
+    common_gcn(d)
+    step(d, "Prepare segments", 15.35, 4.26, 3.50, 0.90,
          "prepare-module", "M × 2", "Same activity key in adjacent scenes",
-         ink=GREEN, fill=GREEN_FILL, size=15, detail_size=12)
-    step(d, "Scene to segments", 5.65, 8.83, 5.0, 0.80,
+         ink=GREEN, fill=GREEN_FILL, size=16, detail_size=12)
+    step(d, "Scene to segments", 19.45, 4.26, 3.50, 0.90,
          "Scene → Segment Encoding", "K × 514 → K × 512",
          "Scene means + log(size), size / S",
-         ink=GREEN, fill=GREEN_FILL, size=15, detail_size=13)
-    wire(d, "Scenes to segment encoding", [(5.15, 9.23), (5.65, 9.23)], PURPLE)
-    wire(d, "Fixed incidence input", [(5.15, 10.44), (5.40, 10.44),
-                                         (5.40, 9.43), (5.65, 9.43)], GREEN, dashed=True)
-
-
-def segment_feedback(d, *, w=7.15):
-    step(d, "Segments to scenes", 11.15, 8.83, w, 0.80,
-         "Segment → Scene Feedback", "S × 1024 → S × 512",
-         "Gated residual update from incident segments",
          ink=GREEN, fill=GREEN_FILL, size=15, detail_size=12)
-    wire(d, "Segment feedback", [(10.65, 9.23), (11.15, 9.23)], GREEN)
+    wire(d, "Scenes to segment encoding", [(19.15, 3.90), (19.15, 4.06),
+                                           (21.20, 4.06), (21.20, 4.26)], PURPLE)
+    wire(d, "Fixed incidence input", [(18.85, 4.71), (19.45, 4.71)], GREEN, dashed=True)
+
+
+def segment_feedback(d):
+    step(d, "Segments to scenes", 15.35, 5.75, 3.50, 1.00,
+         "Segment → Scene Feedback", "S × 1024 → S × 512",
+         "Gated residual · incident segments",
+         ink=GREEN, fill=GREEN_FILL, size=15, detail_size=12)
+    wire(d, "Segment feedback", [(21.20, 5.16), (21.20, 5.45),
+                                 (17.10, 5.45), (17.10, 5.75)], GREEN)
+    wire(d, "Scene residual input", [(16.15, 3.90), (16.15, 4.06),
+                                     (15.10, 4.06), (15.10, 6.25), (15.35, 6.25)], PURPLE)
 
 
 def segment_readout(d):
-    step(d, "Segment readout", 5.65, 10.04, 5.0, 0.80,
+    step(d, "Segment readout", 19.45, 5.75, 3.50, 1.00,
          "Segment Readout", "K × 512 → 512", "Mean → Linear → learned gate",
-         ink=GREEN, fill=GREEN_FILL, size=15, detail_size=13)
-    wire(d, "Segments to readout", [(8.15, 9.63), (8.15, 10.04)], GREEN)
-    # One unobstructed skip path below the processing row carries the contribution.
-    wire(d, "Segment contribution to output", [(8.15, 10.84), (8.15, 11.09),
-                                                  (21.45, 11.09), (21.45, 10.84)], GREEN)
+         ink=GREEN, fill=GREEN_FILL, size=16, detail_size=13)
+    wire(d, "Segments to readout", [(21.20, 5.45), (21.20, 5.75)], GREEN)
+    d.junction("Segment readout fork", 21.20, 5.45, GREEN)
+    wire(d, "Segment contribution to output", [(21.20, 6.75), (21.20, 9.33)], GREEN)
 
 
 def hypergraph_readout(d):
-    aggregation_heading(d, "B | ACTIVITY HYPERGRAPH + SEGMENT CONTRIBUTION", GREEN, segments=True)
+    aggregation_heading(d, "COMMON GCN → A: HYPERGRAPH", GREEN, segments=True)
     segment_units(d)
     segment_feedback(d)
     segment_readout(d)
-    step(d, "Updated scene mean", 11.15, 10.04, 7.15, 0.80,
+    step(d, "Updated scene mean", 15.35, 7.30, 3.50, 0.90,
          "Updated Scene Mean", "S × 512 → 512", "Mean over segment-updated scenes",
-         ink=PURPLE, fill=PURPLE_FILL, size=16, detail_size=13)
-    wire(d, "Updated scenes to mean", [(14.725, 9.63), (14.725, 10.04)], GREEN)
-    wire(d, "Scene mean to output", [(18.30, 10.44), (19.85, 10.44)], PURPLE)
+         ink=PURPLE, fill=PURPLE_FILL, size=16, detail_size=12)
+    wire(d, "Updated scenes to mean", [(17.10, 6.75), (17.10, 7.30)], GREEN)
+    wire(d, "Scene mean to output", [(17.10, 8.20), (17.10, 9.33)], PURPLE)
     output(d, "Scene + segment readouts")
 
 
 def recommendation(d):
-    d.box("Recommendation panel", 0.55, 11.55, 22.90, 1.40, "F5F7FB", "BCCDDD")
-    heading(d, "Recommendation heading", 0.85, 11.65, 12.0,
+    d.box("Recommendation panel", 0.55, 10.95, 22.90, 1.95, "F5F7FB", "BCCDDD")
+    heading(d, "Recommendation heading", 0.85, 11.10, 12.0,
             "3  |  SHARED SASREC RECOMMENDER", INK)
-    d.label("Recommender inputs note", 11.80, 11.67, 6.60, 0.24,
+    d.label("Recommender inputs note", 11.80, 11.15, 6.60, 0.24,
             "History / candidate vectors: from video readout", 12, MUTED)
-    card(d, "Candidate input", 19.05, 11.65, 4.00, 0.33,
-         "Candidate Video [512]", ink=INK, fill="E8EFF6", size=13)
+    card(d, "Candidate input", 19.05, 11.15, 4.00, 0.38,
+         "Candidate Video [512]", ink=INK, fill="E8EFF6", size=15)
+    wire(d, "Video to candidate", [(21.05, 10.29), (21.05, 11.15)], INK)
     specs = ((0.95, 4.2, "History Video Vectors", "L × 512", "Chronological history; L ≤ 10"),
              (5.65, 4.2, "SASRec", "L × 512 → L × 512", "2 blocks · 2 heads"),
              (10.35, 5.5, "User Readout + MLP", "L × 512 → 512", "Last valid position · GELU + LN"),
              (19.05, 4.0, "Dot Product → Ranking", "512, 512 → 1", "One score per candidate"))
     for i, (x, width, title, dimensions, note) in enumerate(specs):
-        step(d, f"Recommendation {i}", x, 12.14, width, 0.65, title, dimensions, note,
-             ink=INK, fill="FFFFFF", size=14, detail_size=12)
+        step(d, f"Recommendation {i}", x, 11.92, width, 0.80, title, dimensions, note,
+             ink=INK, fill="FFFFFF", size=16, detail_size=14)
         if i:
             prev = specs[i - 1]
             wire(d, f"Recommendation flow {i}",
-                 [(prev[0] + prev[1], 12.465), (x, 12.465)], MUTED)
-    wire(d, "Candidate to scoring", [(21.05, 11.98), (21.05, 12.14)], INK)
+                 [(prev[0] + prev[1], 12.32), (x, 12.32)], MUTED)
+    wire(d, "Candidate to scoring", [(21.05, 11.53), (21.05, 11.92)], INK)
     d.label("Training note", 0.65, 13.08, 22.70, 0.25,
             "BGE frozen; other blocks train jointly  |  S: scenes · E / A: entities / actions per scene · "
             "K: segments · M: memberships · L: history length  |  Brackets: feature shapes / dimensions",
@@ -266,28 +264,28 @@ def build(arm):
     d.label("Diagram title", 0.60, 0.28, 22.80, 0.60,
             f"{arm.upper()}  |  {ARMS[arm]}", 32, INK, True, PP_ALIGN.LEFT)
     d.label("Diagram subtitle", 0.65, 1.01, 22.7, 0.31,
-            "FIVE-ARM EXPERIMENT  |  Residual Scene MLP retained in every scene encoder  |  "
+            "FIVE-ARM EXPERIMENT  |  Common backbone: Scene MLP + existing cosine GCN  |  "
             "Video representation [512] → SASRec", 17, MUTED, align=PP_ALIGN.LEFT)
     for name, x, width, ink, fill in (("Frozen BGE", 0.65, 2.55, GRAY, GRAY_FILL),
                                     ("Scene encoder + MLP", 3.40, 4.5, TEAL, TEAL_FILL),
-                                    ("Mean readout", 8.1, 3.2, PURPLE, PURPLE_FILL),
-                                    ("B: activity hypergraph", 11.5, 4.5, GREEN, GREEN_FILL)):
-        if name.startswith("B:") and arm != "g2":
+                                    ("Common GCN + Mean", 8.1, 3.2, PURPLE, PURPLE_FILL),
+                                    ("A: activity hypergraph", 11.5, 4.5, GREEN, GREEN_FILL)):
+        if name.startswith("A:") and arm not in ("g1", "g2"):
             continue
-        card(d, "Legend " + name, x, 1.49, width, 0.32, name, ink=ink, fill=fill, size=12)
+        card(d, "Legend " + name, x, 1.49, width, 0.36, name, ink=ink, fill=fill, size=14)
     d.label("Legend fixed rule note", 17.0, 1.49, 6.25, 0.32,
-            "Named inputs link panels; dashed: fixed incidence" if arm == "g2" else
-            "Named inputs link panels; solid: feature flow", 11, MUTED)
-    d.box("Aggregation panel", 0.55, 8.10, 22.90, 3.15, "FBFCFE", "D6E0E9")
+            "Solid: feature flow; dashed: fixed incidence" if arm in ("g1", "g2") else
+            "Solid arrows: feature flow", 12, MUTED)
+    d.box("Aggregation panel", 14.85, 2.0, 8.60, 8.50, "FBFCFE", "D6E0E9")
     if arm == "d":
         description_encoder(d)
     else:
-        scene_encoder(d, role_fusion=arm in ("g1", "g2"))
-    design_notes(d, arm)
-    if arm == "g2":
+        scene_encoder(d, role_fusion=arm == "g2")
+    if arm in ("g1", "g2"):
         hypergraph_readout(d)
     else:
         mean_readout(d)
+    similarity_input(d, arm)
     recommendation(d)
     for shape in d.slide.shapes:
         if shape.name.endswith(" panel"):

@@ -54,7 +54,7 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 ## 장면별 BGE와 공유 캐시
 
-추천 Arm은 `base d g0 g1 g2`입니다. D는 `desc_qwen3vl`, G0·G1·G2는 `graph_qwen3vl`을 읽습니다. 제목과 장면별 BGE 1024차원 특징을 사용하며 Summary는 사용하지 않습니다. D·G0·G1·G2는 공통 구조의 Residual Scene MLP를 독립적으로 학습합니다. G0는 Fusion 없이 Mean, G1은 Role Fusion(A)과 Mean, G2는 A에 Hypergraph 집계·Action 구간 기여(B)를 추가합니다.
+추천 Arm은 `base d g0 g1 g2`입니다. D는 `desc_qwen3vl`, G0·G1·G2는 `graph_qwen3vl`을 읽습니다. 제목과 장면별 BGE 1024차원 특징을 사용하며 Summary는 사용하지 않습니다. D·G0·G1·G2는 공통 구조의 Residual Scene MLP와 코사인 GCN을 독립적으로 학습합니다. G0는 Role Fusion 없이 GCN→Mean, G1은 G0에 Hypergraph·구간 기여(A), G2는 G1에 Role Fusion(B)을 추가합니다. B는 장면 인코딩에, A는 GCN 뒤에 적용합니다. GCN은 기존 방식에 기반한 공통 구성 요소이며 독립적인 신규 기여로 제시하지 않습니다.
 
 Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다.
 
@@ -64,7 +64,7 @@ Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qw
 
 ## 유지하는 계약과 지원 경계
 
-설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v2`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
+설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v3`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
 
 validation 설정 `validation-config/v9`, 학습 구현 `shared-scenes-leave-one-out-training/v2`, 평가 `microlens-leave-one-out-evaluation/v2`, 조합 `sasrec-leave-one-out-combination/v2`, 이벤트 `sasrec-leave-one-out-per-event/v2`는 유지합니다. Graph의 receiver 예약 텐서 슬롯도 유지합니다. 원본 추출·프롬프트·기존 Run 산출물은 이동·삭제하지 않습니다.
 
@@ -72,9 +72,9 @@ validation 설정 `validation-config/v9`, 학습 구현 `shared-scenes-leave-one
 
 `embed-representations`, `prepare-module`, `run-recommendation`, `run-diagnosis`는 독립 단계이며 `--target`이 필수입니다. 각 Arm이 입력·집계 방식을 정하므로 표현 모드·집계 옵션은 받지 않습니다. 선택 Arm의 실행 순서는 사용자가 정하며 성능에 따른 허용·거부 로직은 없습니다. 추천 명령은 특징·구간 준비나 진단을 자동 실행하지 않습니다.
 
-G2는 특징 준비 후 `python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g2`로 활동 구간을 준비합니다. 이 단계는 G2만 받으며 Graph bundle의 `scene_segments.npy`·`scene_segments.json`을 생성합니다. VLM·BGE를 실행하지 않습니다. 구간 계약은 `scene-segments/v2`이며 입력 해시·checksum을 추천 identity에 포함합니다. bundle이나 생성 규칙 변경 후에는 다시 준비해야 합니다.
+G1·G2는 특징 준비 후 `python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g1 g2`로 활동 구간을 한 번 준비합니다. 이 단계는 G1·G2의 단독·공통 선택을 받으며 Graph bundle의 `scene_segments.npy`·`scene_segments.json`을 생성합니다. VLM·BGE를 실행하지 않습니다. 구간 계약은 `scene-segments/v2`이며 입력 해시·checksum을 추천 identity에 포함합니다. bundle이나 생성 규칙 변경 후에는 다시 준비해야 합니다.
 
-추천 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 최적 validation HR@10의 최초 checkpoint를 복원한 뒤 test를 한 번 평가하며 refit은 없습니다. `training.json`에는 파라미터 수·G1b 교란 통계·G1c의 비활성 Q/K도 기록합니다.
+추천 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 최적 validation HR@10의 최초 checkpoint를 복원한 뒤 test를 한 번 평가하며 refit은 없습니다. `training.json`에는 파라미터 수·실행 통계·G1/G2의 Hypergraph 게이트도 기록합니다.
 
 진단은 `validation/diagnosis/<target-set>/diagnosis.json`, 보고서는 `reports/<target-set>/report.md`에 저장합니다. target-set은 등록 순서로 연결합니다. Basic과 전체 진단은 별도 경로입니다. JSON에는 seed별·평균·표준편차·Base 상대 변화율·입력 확보율·검정 정책을 저장하고, 상세 아이템별 증거는 원래 특징·학습 파일에서 확인합니다.
 

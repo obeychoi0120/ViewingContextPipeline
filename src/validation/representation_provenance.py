@@ -28,6 +28,7 @@ def recommendation_identity(context, branch):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION, EVALUATION_CONTRACT
     from model_provenance import canonical, local_model_identity
+    from validation.graph_context import SCENE_GCN_MODEL
 
     arm = registry(context.config)[branch]
     experiment_arm = asdict(arm)
@@ -47,6 +48,7 @@ def recommendation_identity(context, branch):
             "item_mlp": branch == "base",
             "description_projection_dim": 384 if arm.representation == "description" else None,
             "role_fusion": arm.role_fusion,
+            "gcn": dict(SCENE_GCN_MODEL) if arm.aggregation == "gnn" else None,
             "scene_mlp_config": {"input_dim": 512, "output_dim": 512,
                                  "formula": "x_plus_relu_linear_x"} if branch != "base" else None,
         },

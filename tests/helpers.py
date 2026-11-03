@@ -243,9 +243,9 @@ def extract_scenes(context, monkeypatch):
     return generator
 
 
-def prepare_inputs(context, monkeypatch):
+def prepare_inputs(context, monkeypatch, *, modules=True):
     from extraction.steps import extract_description_scenes
-    from validation.steps import embed_representations
+    from validation.steps import embed_representations, prepare_module
 
     generator = extract_scenes(context, monkeypatch)
     description = FakeGenerator("A person cuts a tomato with a knife in a kitchen.")
@@ -253,6 +253,8 @@ def prepare_inputs(context, monkeypatch):
     extract_description_scenes(context, model="qwen3vl", schema="prompts/scene_description_v3.md",
                                arm="desc_qwen3vl")
     embed_representations(context, target=TARGETS)
+    if modules:
+        prepare_module(context, target=["g1"])
     return generator, description
 
 

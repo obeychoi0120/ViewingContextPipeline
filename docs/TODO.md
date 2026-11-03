@@ -1,6 +1,6 @@
 # 현재 추천 실험 범위
 
-현재 지원 Arm은 `base d g0 g1 g2`이며 Residual Scene MLP를 유지합니다. G1은 Role Fusion(A), G2는 Hypergraph·Action 구간 기여(B)를 추가합니다. [현재 학습 계약](graph_training.md)을 기준으로 실행하십시오. 아래는 과거 작업 기록으로, 이전 GCN·Transformer·Attention Arm의 구현 상태·명령·후속 계획은 현재 지원 목록을 뜻하지 않습니다.
+현재 지원 Arm은 `base d g0 g1 g2`이며 D·G0·G1·G2는 Residual Scene MLP와 기존 코사인 GCN을 공통 기반 구조로 사용합니다. G1은 G0에 Hypergraph·Action 구간 기여(A), G2는 G1에 Role Fusion(B)을 추가합니다. [현재 학습 계약](graph_training.md)을 기준으로 실행하십시오. 아래는 과거 작업 기록으로, 이전 GCN·Transformer·Attention Arm의 구현 상태·명령·후속 계획은 현재 지원 목록을 뜻하지 않습니다.
 
 ---
 

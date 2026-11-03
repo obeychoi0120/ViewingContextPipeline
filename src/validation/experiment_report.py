@@ -2,8 +2,8 @@
 
 PRIORITY_COMPARISONS = (
     ("g0", "d", "Description과 구조화된 Graph 입력·인코딩"),
-    ("g1", "g0", "A: Role Fusion의 추가 효과"),
-    ("g2", "g1", "B: Hypergraph 집계·Action 구간 기여의 추가 효과"),
+    ("g1", "g0", "A: Hypergraph 집계·Action 구간 기여의 추가 효과 (Role Fusion 없음)"),
+    ("g2", "g1", "B: Role Fusion의 추가 효과 (Hypergraph 적용 상태)"),
 )
 
 def display_arm(name):
@@ -17,7 +17,8 @@ def write_report(context, selected, document):
     relative = report["base_relative_changes"]
     lines = [
         f"# {context.run_id} / {context.dataset}: 추천 실험", "",
-        f"계약: `{document['arm_contract']}`. Arm: {', '.join(document['targets'])}.", "",
+        f"계약: `{document['arm_contract']}`. 모델 구조: `{report['architecture_version']}`. "
+        f"Arm: {', '.join(document['targets'])}.", "",
         "| Arm | NDCG@10 평균 ± 표준편차 | HR@10 평균 ± 표준편차 | Base 대비 NDCG | Base 대비 HR |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
@@ -78,9 +79,11 @@ def write_report(context, selected, document):
         )
     lines += [
         "", "G0−D에는 추출 내용·인코더·장면 확보율 차이가 포함됩니다. "
-        "G1−G0는 Fusion 모듈의 추가 효과이며 파라미터 증가도 포함합니다. "
-        "G2−G1은 Hypergraph 전달과 구간 기여를 합친 B 전체의 효과입니다. "
-        "개별 경로 또는 연결 구조만의 효과를 분리하지 않으며 각 효과를 단순 합산하지 않습니다.",
+        "코사인 GCN은 D·G0·G1·G2의 공통 기반 구조이며 독립적인 신규 기여로 해석하지 않습니다. "
+        "G1−G0는 Role Fusion 없이 Hypergraph 전달과 구간 기여를 추가한 A 전체의 효과입니다. "
+        "G2−G1은 Hypergraph가 있는 상태에서 Role Fusion(B)을 추가한 효과입니다. "
+        "파라미터 증가도 포함하며 A의 개별 경로 또는 연결 구조만의 효과를 분리하지 않습니다. "
+        "각 효과를 단순 합산하지 않습니다.",
         "Description과 Graph는 각각의 유효 장면을 사용하므로 장면 확보율도 함께 해석해야 합니다.",
         "", "| Arm | seed | NDCG@10 | HR@10 |", "| --- | ---: | ---: | ---: |",
     ]

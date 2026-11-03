@@ -1,4 +1,4 @@
-"""G2 activity hypergraph: numerical behavior, batching and source sidecars."""
+"""G1/G2 activity hypergraph (A): numerical behavior, batching and source sidecars."""
 
 import json
 
@@ -77,11 +77,11 @@ def synthetic_store(videos=24, feature_dim=16, seed=3):
     return store
 
 
-def make_model(store, extensions=(), items=8, aggregation="mean"):
+def make_model(store, extensions=(), items=8, aggregation="gnn", role_fusion=True):
     torch.manual_seed(0)
     return GraphSASRec(
         store=store, aggregation=aggregation, item_count=len(store), max_length=10, embedding_dim=32,
-        num_blocks=1, num_heads=2, dropout=0.0, arm="g1", role_fusion=True, extensions=extensions,
+        num_blocks=1, num_heads=2, dropout=0.0, arm="g2", role_fusion=role_fusion, extensions=extensions,
         execution=GraphExecutionConfig(chunk_items=items, chunk_nodes=100000, chunk_scene_pairs=1048576,
                                        checkpoint="never", feature_cache_mb=0),
     ).eval()
@@ -89,11 +89,12 @@ def make_model(store, extensions=(), items=8, aggregation="mean"):
 
 
 
-def test_segments_start_as_g1_and_leave_the_rng_alone():
+@pytest.mark.parametrize("role_fusion", [False, True])
+def test_segments_start_as_matching_backbone_and_leave_the_rng_alone(role_fusion):
     store = synthetic_store()
-    reference = make_model(store)
+    reference = make_model(store, role_fusion=role_fusion)
     expected_rng = torch.rand(3)
-    model = make_model(store, ("segments",))
+    model = make_model(store, ("segments",), role_fusion=role_fusion)
     assert torch.equal(torch.rand(3), expected_rng)
     shared = reference.state_dict()
     assert all(torch.equal(value, model.state_dict()[name]) for name, value in shared.items())
@@ -147,7 +148,7 @@ def test_segment_readout_weights_each_segment_equally():
 
 
 
-@pytest.mark.parametrize("extensions,aggregation", [(("segments",), "mean")])
+@pytest.mark.parametrize("extensions,aggregation", [(("segments",), "mean"), (("segments",), "gnn")])
 def test_extensions_train_and_ignore_chunking(extensions, aggregation):
     store = synthetic_store(videos=30)
     model = make_model(store, extensions, items=30, aggregation=aggregation)
@@ -230,10 +231,14 @@ def test_attach_builds_segments_and_identity_records_them(context, monkeypatch):
     # video_0: cut [0, 1], talk [1, 2]; video_1: eat [0]  (bundle scene rows 0, 1, 2, 3)
     assert result["segments"] == 3 and sorted(map(tuple, pairs.tolist())) == [(0, 0), (1, 0), (1, 1), (2, 1), (3, 2)]
     with pytest.raises(ValueError, match="no segments extension"):
-        attach(context, "g1")
+        attach(context, "g0")
     g1, g2 = (recommendation_identity(context, name) for name in ("g1", "g2"))
-    assert g1["experiment_arm"]["extensions"] == [] and "scene_segments" not in g1
+    assert g1["experiment_arm"]["extensions"] == ["segments"]
+    assert g1["experiment_arm"]["role_fusion"] is False
+    assert g2["experiment_arm"]["role_fusion"] is True
+    assert g1["scene_segments"] == g2["scene_segments"]
     assert g2["experiment_arm"]["extensions"] == ["segments"]
     assert g2["item_model"]["extensions"]["segments"] == EXTENSION_MODELS["segments"]
-    assert g2["scene_aggregation"] == "mean"
+    assert g2["scene_aggregation"] == "gnn"
+    assert g2["item_model"]["gcn"]["similarity"] == "nonnegative_cosine"
     assert g2["item_model"]["scene_mlp"] is True

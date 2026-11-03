@@ -3,9 +3,9 @@
 A scene's activities are the consistency keys of its action phrases (below). A segment is a maximal run of a
 video's valid scenes whose extracted scene_idx increase by exactly 1 and that all contain one activity; a gap
 (an invalid scene or a re-appearance later) starts a new segment, length-1 segments are kept, and a scene with
-k activities belongs to k segments. G2 reads the source bundle's scene_segments sidecar.
+k activities belongs to k segments. G1/G2 share the source bundle's scene_segments sidecar.
 
-  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g2
+  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g1 g2
 """
 
 import hashlib

@@ -11,8 +11,9 @@ from validation.graph_inputs import load_scene_segments, scene_segments_identity
 from validation.representation_provenance import recommendation_identity
 
 
-def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys):
-    prepare_inputs(context, monkeypatch)
+@pytest.mark.parametrize("targets", [["g1"], ["g2"], ["g1", "g2"]])
+def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys, targets):
+    prepare_inputs(context, monkeypatch, modules=False)
     directory = context.representations_dir / "graph_qwen3vl"
     originals = {path: path.read_bytes() for path in directory.iterdir() if path.is_file()}
     with pytest.raises(ValueError, match="python -m validation prepare-module"):
@@ -35,13 +36,13 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     monkeypatch.setattr("validation.scene_segments.attach", tracked_attach)
     command = [
         "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", "g2",
+        "--target", *targets,
     ]
     assert main(command) == 0
-    assert calls == ["g2"]
+    assert calls == [targets[0]]
     output = capsys.readouterr().out
     assert "[STEP] prepare-module" in output
-    assert 'selected_arms: ["g2"]' in output
+    assert f"selected_arms: {json.dumps(targets)}" in output
     assert f"output_dir: {context.representations_dir}" in output
     manifest = read_json(directory / "manifest.json")
     pairs = load_scene_segments(directory)
@@ -53,6 +54,7 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     for arm in ("g0", "g1", "g2"):
         identity = recommendation_identity(context, arm)
         assert json.loads(json.dumps(identity)) == identity
+    assert recommendation_identity(context, "g1")["scene_segments"] == recommendation_identity(context, "g2")["scene_segments"]
 
     path = directory / "scene_segments.json"
     stale = read_json(path)
@@ -66,7 +68,7 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert all(path.read_bytes() == content for path, content in originals.items())
 
 
-@pytest.mark.parametrize("target", [["g2", "g1"], ["base"], ["d"], ["g2", "g2"], ["missing"]])
+@pytest.mark.parametrize("target", [["g2", "g0"], ["base"], ["d"], ["g2", "g2"], ["missing"]])
 def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monkeypatch, capsys, target):
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid targets must be rejected before preparing any Arm")
