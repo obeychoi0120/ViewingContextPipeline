@@ -230,12 +230,12 @@ def test_m3l_extraction_embedding_training_diagnosis_and_resume(context, monkeyp
     ctx = make_m3l(context, monkeypatch)
     trained = train_inputs(ctx, monkeypatch)
     assert trained["completed"] == 6
-    diagnosed = run_diagnosis(ctx, target=["base", "g0"])
+    diagnosed = run_diagnosis(ctx, target=["base", "g1"])
     assert diagnosed["status"] == "pass"
-    assert read_json(ctx.diagnosis_path(["base", "g0"]))["dataset"] == ctx.dataset
-    report = (ctx.run_root / "reports" / "base_g0" / "report.md").read_text()
+    assert read_json(ctx.diagnosis_path(["base", "g1"]))["dataset"] == ctx.dataset
+    report = (ctx.run_root / "reports" / "base_g1" / "report.md").read_text()
     assert "m3l_10m" in report and "평가한 영화 이력의 다음 영화 예측" in report
-    assert run_recommendation(ctx, target=["base", "g0"])["skipped"] == 6
+    assert run_recommendation(ctx, target=["base", "g1"])["skipped"] == 6
 
 
 def test_streaming_selection_preserves_legacy_order_and_hash(context):
@@ -311,7 +311,7 @@ def test_migration_preserves_selection_features_and_completed_training(context, 
         migrated, model="qwen3vl", schema="prompts/scene_graph_v9.md", arm="graph_qwen3vl"
     )
     assert not generator.tasks
-    reused = run_recommendation(migrated, target=["base", "g0"])
+    reused = run_recommendation(migrated, target=["base", "g1"])
     assert reused["completed"] == 0 and reused["skipped"] == 6
     assert not (migrated.run_root / "run_contract.json").exists()
     # Repeating the migration preserves the moved artifacts.

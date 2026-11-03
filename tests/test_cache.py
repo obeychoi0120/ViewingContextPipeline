@@ -117,18 +117,18 @@ def test_cross_run_cache_and_paired_comparison(context, monkeypatch):
     train_inputs(context, monkeypatch)
     reference = RunContext.load("reference", dataset=context.dataset, root=context.root)
     prepare_inputs(reference, monkeypatch)
-    reused = run_recommendation(reference, target=["base", "g0"])
+    reused = run_recommendation(reference, target=["base", "g1"])
     assert reused["completed"] == 0 and reused["skipped"] == 6
     cohort, _, _ = selected_table(reference)
     for seed in (42, 43, 44):
-        for arm in ("base", "g0"):
+        for arm in ("base", "g1"):
             directory = reference.recommendations_dir / f"seed_{seed}" / arm
             assert combination_complete(directory, result_identity(reference, cohort, seed, arm), 3)
             assert read_json(directory / "training.json")["reused_from"]["source_run_id"] == context.run_id
-    compared = compare_runs(context, reference.run_id, target=["g0", "base"])
-    assert compared["targets"] == ["base", "g0"]
+    compared = compare_runs(context, reference.run_id, target=["g1", "base"])
+    assert compared["targets"] == ["base", "g1"]
     assert all(row["difference"] == 0 for row in compared["comparisons"].values())
-    assert run_diagnosis(context, target=["base", "g0"], compare_run_id=reference.run_id)["status"] == "pass"
+    assert run_diagnosis(context, target=["base", "g1"], compare_run_id=reference.run_id)["status"] == "pass"
     reference.config["validation"]["model"]["seeds"] = [42, 43, 45]
     import yaml
 

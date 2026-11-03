@@ -1,22 +1,22 @@
 # ViewingContextPipeline
 
-MicroLens-100K 영상 또는 M³L-10M 영화 예고편에서 맥락을 추출하고, **영문 제목에 영상 관측 정보를 더했을 때 추천 성능이 어떻게 달라지는지** 비교하는 실험 파이프라인입니다. 추천 실험은 Qwen3-VL-2B-Instruct의 장면별 Description·Scene Graph를 사용하며, 동일한 사용자·후보 영상 목록(catalog)·사용자별 분할에서 Basic 8개 Arm과 선택적 Ablation 4개 Arm을 학습·평가합니다. 다른 모델의 추출 기능도 별도로 유지합니다.
+MicroLens-100K 영상 또는 M³L-10M 영화 예고편에서 맥락을 추출하고, **영문 제목에 영상 관측 정보를 더했을 때 추천 성능이 어떻게 달라지는지** 비교하는 실험 파이프라인입니다. 추천 실험은 Qwen3-VL-2B-Instruct의 장면별 Description·Scene Graph를 사용하며, 동일한 사용자·후보 영상 목록(catalog)·사용자별 분할에서 `base g1 g2 d2 g3 g4` 6개 Arm을 학습·평가합니다. 다른 모델의 추출 기능도 별도로 유지합니다.
 
 ## 전체 흐름
 
-- **Description:** 키프레임 → 장면별 Description → 고정 BGE → 장면 인코더 → D0는 Mean, D1은 장면 간 Attention 기반 GNN → Mean.
+- **Description:** 키프레임 → 장면별 Description → 고정 BGE → Description 장면 인코더 → D2의 장면 Attention GNN → 제목 기반 영상 노드.
 - **Graph:** 키프레임 → Scene Graph → 고정 BGE·역할 연결 → Arm별 Entity–Role Fusion·장면 인코더 → 평균·장면 간 Attention 기반 GNN·영상 노드·활동 구간을 조합한 집계.
 - **추천:** 과거 영상 벡터 → SASRec 사용자 벡터 → 후보 영상 벡터와 내적 → 추천 순위·평가 지표.
 
 모든 Arm은 영문 제목을 사용합니다. 제목은 장면 추출에 넣지 않고 추천 인코더에서 결합합니다. BGE는 동결하고 장면 인코더·집계 모듈·SASRec은 추천 loss로 함께 학습합니다. 영상별 Summary는 현재 추천 입력에 포함되지 않습니다.
 
-기존 [설계 그림](docs/design/main_diagram.png)은 이전 Summary·다중 집계 경로를 설명합니다. 현재 추천 Arm 12개(Basic 8개·Ablation 4개)의 정의와 실행 인터페이스는 아래 표를 기준으로 합니다.
+기존 [설계 그림](docs/design/main_diagram.png)은 이전 Summary·다중 집계 경로를 설명합니다. 현재 추천 Arm 6개의 정의와 실행 인터페이스는 아래 표를 기준으로 합니다.
 
 [시작하기](#시작하기) · [단계별 입력과 출력](#단계별-입력과-출력) · [모듈 상세](#모듈별-동작과-세부사항) · [실험 조건](#실험-조건과-결과-해석) · [산출물·재현](#산출물과-재현)
 
 ## 시작하기
 
-기본 실행 순서는 **데이터·키프레임 준비 → Qwen3-VL-2B-Instruct의 Graph·Description 추출 → BGE 특징·활동 구간 준비 → Basic 학습·진단 → 필요한 Ablation 추가 실행**입니다. 저장소 루트에서 실행하며 Ubuntu/Bash·Python 3.11 이상과 `ffmpeg`·`ffprobe`가 필요합니다. 데이터와 Qwen·BGE 로컬 가중치를 미리 준비하고, Qwen 추출에는 Linux/CUDA와 비양자화 BF16 체크포인트를 사용합니다.
+기본 실행 순서는 **데이터·키프레임 준비 → Qwen3-VL-2B-Instruct의 Graph·Description 추출 → BGE 특징·활동 구간 준비 → 6개 Arm 학습·진단**입니다. 저장소 루트에서 실행하며 Ubuntu/Bash·Python 3.11 이상과 `ffmpeg`·`ffprobe`가 필요합니다. 데이터와 Qwen·BGE 로컬 가중치를 미리 준비하고, Qwen 추출에는 Linux/CUDA와 비양자화 BF16 체크포인트를 사용합니다.
 
 ```bash
 python -m pip install -e ".[qwen,train,embedding,dev]"
@@ -92,57 +92,41 @@ Run별 leave-one-out 분할·평가 catalog는 이후 `embed-representations`에
 <details>
 <summary>3단계: Qwen3-VL-2B-Instruct로 Graph·Description 추출</summary>
 
-생성 명령에는 `--model qwen3vl`, 생성 소스인 `--arm`, Markdown 프롬프트 경로인 `--schema`를 지정합니다. `--arm`은 추천용 `d0`, `g1` 등의 이름과 구분합니다. 상대 경로는 저장소 루트 기준입니다.
+생성 명령에는 `--model qwen3vl`, 생성 소스인 `--arm`, Markdown 프롬프트 경로인 `--schema`를 지정합니다. `--arm`은 추천용 `d2`, `g1` 등의 이름과 구분합니다. 상대 경로는 저장소 루트 기준입니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_description_v3.md --model qwen3vl --arm desc_qwen3vl
 ```
 
-D0·D1은 `desc_qwen3vl`, G0·G1·G2·G3·G4·G1a·G1b·G1c·G3a는 `graph_qwen3vl`을 읽습니다. 두 추출 소스를 준비한 뒤 아래 특징 준비·학습·진단 명령을 실행합니다.
+D2는 `desc_qwen3vl`, G1·G2·G3·G4는 `graph_qwen3vl`을 읽습니다. 두 추출 소스를 준비한 뒤 아래 특징 준비·학습·진단 명령을 실행합니다.
+
+토큰 한도 초과 등으로 실패한 출력이 남으면 CLI는 종료 코드 `1`을 반환합니다. 완료된 출력은 보존되며 일반 재실행에서 실패·경고 출력만 재시도합니다. 파싱 경고는 실패와 구분해 집계하며 그 자체로 종료 코드 `1`을 반환하지 않습니다.
 
 </details>
 
 <details>
-<summary>특징·활동 구간 준비 → Basic 학습·진단 → Ablation</summary>
+<summary>6개 Arm의 특징·활동 구간 준비 → 학습 → 진단</summary>
 
 Graph·Description 추출을 마친 뒤 아래 순서로 실행합니다. 각 단계는 독립 명령이므로 앞 단계가 성공한 것을 확인한 뒤 다음 단계로 진행합니다.
 
-**Basic: 8개 Arm의 특징·실제 구간 준비 → 학습 → 진단**
-
 ```bash
-BASIC=(base d0 d1 g0 g1 g2 g3 g4)
+ARMS=(base g1 g2 d2 g3 g4)
 
-# 제목·Description·Graph의 공통 BGE 특징을 준비합니다.
-python -m validation embed-representations --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}"
-# G3·G4가 공유하는 실제 구간을 준비합니다.
-python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3
-
-python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}"
-python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${BASIC[@]}"
+python -m validation embed-representations --run-id "$RUN_ID" --dataset "$DATASET" --target "${ARMS[@]}"
+# G3·G4가 공유하는 활동 구간을 한 번 준비합니다.
+python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3 g4
+python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target "${ARMS[@]}"
+python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${ARMS[@]}"
 ```
 
-**선택적 Ablation: G3a의 섞은 구간 준비 → 4개 Arm 학습·별도 진단**
+3개 seed 기준 18개 학습 조합·15쌍 비교입니다. `--target`은 필수이며 입력 순서와 무관하게 등록 순서로 처리합니다. Arm마다 입력·집계 방식이 고정되어 `--representation-mode`, `--scene-aggregation`, `--step basic/ablation`은 받지 않습니다. 추천 명령은 추출·임베딩·구간 준비·진단을 자동 실행하지 않습니다.
 
-Basic 결과를 확인한 뒤 필요할 때 실행합니다. 앞에서 준비한 Graph BGE 특징을 공유하므로 `embed-representations`를 다시 실행할 필요가 없습니다.
+`prepare-module`은 Graph 특징 bundle을 만든 뒤 G3·G4 학습 전에 실행합니다. `--target`은 `g3`, `g4`만 받으며, 함께 선택해도 공유 `scene_segments.npy`·`scene_segments.json`은 한 번만 생성합니다. 기존 Graph의 Action 문구로 활동 구간을 만들며 VLM·BGE를 다시 실행하지 않습니다. Graph bundle이나 구간 생성 규칙을 바꾸면 다시 실행합니다.
 
-```bash
-ABLATION=(g1a g1b g1c g3a)
+D2는 `desc_qwen3vl`의 유효 장면만 사용하며 Graph 파일·장면 목록·활동 구간에 의존하지 않습니다. D2만 실행할 때는 Description 추출 뒤 `embed-representations --target d2`, `run-recommendation --target d2`, `run-diagnosis --target d2`를 실행하며 `prepare-module`은 필요 없습니다. G1·G2·G3·G4는 `graph_qwen3vl` BGE 특징을 공유합니다.
 
-# G3a 전용으로 소속 장면을 섞은 구간을 준비합니다.
-python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3a
-
-python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target "${ABLATION[@]}"
-python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${ABLATION[@]}"
-```
-
-위 명령은 Basic과 Ablation을 별도 진단합니다. 3개 seed 기준 Basic은 24개 학습 조합·28쌍 비교, Ablation은 12개 학습 조합·6쌍 비교입니다. Ablation만 진단하면 Base 상대 변화율과 G1·G3 대비 비교는 계산하지 않습니다. 기준 Arm과 비교하려면 해당 Arm도 진단의 `--target`에 함께 지정합니다.
-
-`--target`은 필수이며 입력 순서와 무관하게 등록 순서로 처리합니다. Arm마다 입력·집계 방식이 고정되어 `--representation-mode`, `--scene-aggregation`, `--step basic/ablation`은 받지 않습니다. Ablation 실행에 성능 조건은 없습니다. 추천 명령은 추출·임베딩·구간 준비·진단을 자동 실행하지 않습니다.
-
-`prepare-module`은 Graph 특징 bundle을 만든 뒤 G3·G4·G3a를 학습하기 전에 실행하는 사전 작업입니다. `--target`은 구간 확장을 사용하는 `g3`, `g4`, `g3a`만 받습니다. 기존 Graph의 행동 문구로 활동 구간을 만들며 VLM 추출이나 BGE 인코딩을 다시 하지 않습니다. G3와 G4는 `scene_segments.npy`·`scene_segments.json`을 공유하므로 Basic에는 `--target g3`만 준비하면 됩니다. Ablation의 `--target g3a`는 별도 `scene_segments_shuffled.npy`·`scene_segments_shuffled.json`을 만들며 Basic 구간 파일을 변경하지 않습니다. 실행할 때마다 선택한 구간 파일을 다시 생성하므로 Graph bundle을 다시 생성하거나 구간 생성 규칙을 바꾸면 이 단계도 다시 실행합니다.
-
-D0·D1은 Description 특징을, G0·G1·G2·G3·G4·G1a·G1b·G1c·G3a는 Graph 특징을 공유하므로 Ablation 추가 실행에 새 BGE 인코딩이 필요하지 않습니다. GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-every 100` 및 선택적인 `--profile-operators`로 지정합니다.
+GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-every 100` 및 선택적인 `--profile-operators`로 지정합니다.
 
 </details>
 
@@ -219,7 +203,7 @@ python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET
 | 3. 장면 정보 추출 | 키프레임·프롬프트 | Scene Graph 또는 Description JSONL | `extract-graph-scenes` / `extract-description-scenes` · [추출](src/extraction/steps.py) |
 | 4. 영상 요약 — 선택 기능 | 장면 관측·프롬프트 | 영상 단위 영문 Summary JSON | `summarize` · [요약](src/extraction/summary_executor.py) |
 | 5. 평가·고정 특징 준비 | 원본 이력·제목·장면별 Description 또는 Graph | 사용자별 분할·평가 catalog·1024차원 BGE 특징; Graph는 역할 연결·장면 경계 포함 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Graph 입력](src/validation/graph_inputs.py) |
-| 6. 활동 구간 준비 — G3·G4·G3a | Graph 장면 관측·고정 특징 bundle | 장면–구간 연결 파일; G3·G4는 실제 구간, G3a는 소속 장면을 섞은 구간 | `prepare-module` · [구간 생성](src/validation/scene_segments.py) |
+| 6. 활동 구간 준비 — G3·G4 | Graph 장면 관측·고정 특징 bundle | 공통 장면–구간 연결 파일 | `prepare-module` · [구간 생성](src/validation/scene_segments.py) |
 | 7. 영상 표현 학습 | 고정 특징·Graph 구조·해당 Arm의 구간 연결 | 영상당 512차원 벡터 | `run-recommendation` 내부 · [영상 인코더](src/validation/graph_model.py) |
 | 8. 사용자 표현·추천 평가 | 시청 이력·후보 영상 벡터 | checkpoint·학습 기록·이벤트별 HR/NDCG | `run-recommendation` · [학습·평가](src/validation/leave_one_out_recommendation.py) |
 | 9. 진단 | 이벤트 지표·입력·학습 기록 | 최종 점수·통계 비교·실행 판정 JSON·Markdown 보고서 | `run-diagnosis` · [공통 진단](src/validation/leave_one_out_diagnosis.py) |
@@ -298,7 +282,7 @@ Graph는 `extraction/scenes/<source>/<content_id>.jsonl`에 `content_id`·`scene
 | --- | --- | --- |
 | 장면 순서 | 유효 장면을 시간순으로 유지 | 원본 시간·장면 간 간격을 어떻게 표현할 것인가? |
 | 장면 간 동일 개체 | 장면별 독립 ID 사용. 장면 간 추적 없음 | 어떤 시각 근거로 동일 개체를 연결할 것인가? |
-| 활동 연속 구간 | G3·G4는 같은 활동 키가 연속하는 장면을 구간으로 묶음. G3a는 소속 장면을 섞음 | 대상·도구·시각 근거까지 포함해 같은 활동인지 어떻게 판단할 것인가? |
+| 활동 연속 구간 | G3·G4는 같은 활동 키가 연속하는 장면을 구간으로 묶음 | 대상·도구·시각 근거까지 포함해 같은 활동인지 어떻게 판단할 것인가? |
 | 사건 간 관계 | Scene Graph에 사건 노드·인과 엣지 없음 | 어떤 관계를 관측으로 인정하고 스키마에 기록할 것인가? |
 
 활동 구간은 Scene Graph의 사건 엣지와 별도로 저장합니다. 남은 질문은 후속 설계 검토 범위입니다. 장면 간 Attention 기반 GNN과 영상 노드·구간 확장이 수행하는 정보 전달은 모듈 3에서 다룹니다. 모듈 1은 관계의 의미·표현 규칙을, 모듈 3은 그 연결과 장면 특징을 이용한 집계 연산을 설명합니다.
@@ -312,20 +296,20 @@ BGE는 고정된 1024차원 특징을 생성합니다. Graph는 Entity 이름·�
 | 입력 | 학습 가능한 장면 인코더 |
 | --- | --- |
 | Graph — G1 기준 | 제목·Entity·Action·Context를 각각 128차원으로 투영. 역할별 Entity를 Action에 결합한 뒤 `[제목; Entity 평균; Action 평균; Context]` 512차원 구성 |
-| Description | 제목 128차원 + Description 384차원으로 512차원 구성 |
+| Description — D2 | 제목 자리 128차원은 0 + Description 투영 384차원으로 512차원 구성. 제목은 영상 노드에 입력 |
 
-Graph의 Entity–Role Fusion은 `[Action; actor; target; tool; place]` 640차원을 128차원으로 투영하고 ReLU 잔차로 Action에 더합니다. 결측 역할은 absent/unknown 상태 임베딩을 사용합니다. 장면 벡터에는 `h = x + ReLU(Linear(x))`인 1층 Scene MLP를 적용합니다. G1a는 Fusion을 생략합니다. G2·G4는 장면 벡터의 제목 슬롯을 0으로 두고, 제목은 별도 영상 노드를 초기화하는 데 사용합니다.
+Graph의 Entity–Role Fusion은 `[Action; actor; target; tool; place]` 640차원을 128차원으로 투영하고 ReLU 잔차로 Action에 더합니다. 결측 역할은 absent/unknown 상태 임베딩을 사용합니다. 장면 벡터에는 `h = x + ReLU(Linear(x))`인 1층 Scene MLP를 적용합니다. G2·D2·G4는 장면 벡터의 제목 슬롯을 0으로 두고, 제목은 별도 영상 노드를 초기화하는 데 사용합니다.
 
 실패 장면과 Graph의 warning·복구 불가능 원문·잘못된 구조는 제외합니다. catalog 아이템은 유지하며 장면이 없으면 제목 + 나머지 0을 Scene MLP에 넣습니다. 제목·유효 장면이 모두 없으면 영상 벡터는 0입니다. Description과 Graph는 각자 확보한 유효 장면을 사용합니다.
 
 ### 모듈 3. 장면 집계와 Ablation
 
-Mean은 장면 벡터의 단순 평균입니다. 기본 Attention GNN은 제목을 제외한 384차원 특징에서 unit RMS 정규화 후 128차원 Q/K를 구하고, scaled dot-product와 행별 softmax로 한 영상 내부의 전달 행렬 A를 만듭니다. 512차원 장면 벡터에 `h′ = h + ReLU(W(Ah) + b)`를 적용합니다. D1·G1·G1a·G1b는 이 전달 뒤 Mean 집계하며, G2·G3·G4·G3a는 다음 확장을 적용합니다. G1의 전달은 장면 순서·동일 개체 추적·인과 관계를 직접 모델링하지 않습니다.
+Mean은 장면 벡터의 단순 평균입니다. 기본 Attention GNN은 제목을 제외한 384차원 특징에서 unit RMS 정규화 후 128차원 Q/K를 구하고, scaled dot-product와 행별 softmax로 한 영상 내부의 전달 행렬 A를 만듭니다. 512차원 장면 벡터에 `h′ = h + ReLU(W(Ah) + b)`를 적용합니다. G1은 이 전달 뒤 Mean 집계하며, G2·D2·G3·G4는 다음 확장을 적용합니다. G1의 전달은 장면 순서·동일 개체 추적·인과 관계를 직접 모델링하지 않습니다.
 
 - **G2 — 영상 노드:** 제목으로 영상 노드를 초기화하고, 장면→영상→장면→영상 순서로 정보를 전달합니다. 최종 영상 노드가 영상 벡터이며 장면→영상의 두 단계는 같은 변환 가중치를 사용합니다.
+- **D2 — Description + 영상 노드:** Description 투영으로 장면을 인코딩한 뒤 G2와 동일한 Attention GNN·영상 노드 후단을 사용합니다. Graph 입력·활동 구간 없이 실행합니다.
 - **G3 — 활동 구간:** 기존 Graph의 행동 문구에서 동사 키를 정규화하고, 같은 키가 연속하는 장면을 구간으로 묶습니다. 장면 번호가 끊기거나 활동이 다시 등장하면 별도 구간을 만들며, 한 장면이 여러 활동 구간에 속할 수 있습니다. 구간은 장면 평균·구간 길이·영상 내 장면 비율로 표현하고, 장면→구간→장면 전달 뒤 장면 평균에 구간 평균의 기여를 더합니다. 두 경로의 학습 가능한 게이트는 0에서 시작합니다.
 - **G4 — 결합:** 구간으로 갱신한 장면에서 G2의 영상 노드를 계산하고 구간 평균의 기여도 더합니다.
-- **G3a — 구간 Ablation:** G3와 같은 구조에서 구간 수·크기는 유지하고 영상별 고정 순열로 소속 장면을 섞습니다. Basic의 실제 구간 파일은 변경하지 않습니다.
 
 활동 키는 참여자 표식·일부 기능어를 뺀 첫 단어에 어미 제거·불규칙형 치환 규칙을 적용한 값입니다. 문법 분석이나 동의어 병합, 같은 대상·도구인지의 확인, 시각적 동일성 추적은 하지 않습니다. 구간 길이·소속을 활용하는 연산과 구현 계약은 [구간 생성](src/validation/scene_segments.py), [집계 정의](src/validation/graph_context.py), [영상 인코더](src/validation/graph_model.py)를 참고하세요.
 
@@ -357,9 +341,7 @@ Mean은 장면 벡터의 단순 평균입니다. 기본 Attention GNN은 제목�
 
 </details>
 
-G1a는 Fusion과 역할 상태 임베딩을 제거하지만 Entity·Action·Context 투영은 유지합니다. G1b는 역할을 유지한 채 같은 장면의 다른 Entity로 연결 대상을 균등 교체합니다. seed 42와 영상·장면·Action·역할 ID로 교란을 고정하여 학습 seed·epoch·배치 순서가 바뀌어도 동일하게 사용합니다. 연결 수·결측 상태는 유지하고 대체 Entity가 없으면 변경하지 않습니다. 원본 파일은 수정하지 않습니다.
-
-G1c는 전달 행렬을 I로 바꿔 `h′ = h + ReLU(Wh + b)`를 적용합니다. 변환층·활성화·잔차 연결은 유지하며 Q/K는 forward·gradient에 관여하지 않습니다. 이 사실과 파라미터 수, G1b의 변경 연결 수·비율을 학습 결과에 기록합니다.
+G1·G2·G3·G4로 영상 노드·활동 구간의 개별 및 결합 효과를 분석합니다. G2−D2는 같은 후단에서 서로 다른 장면 인코딩을 비교하지만, 입력 내용·파라미터 수·각 소스의 장면 확보율 차이도 포함합니다.
 
 ### 모듈 4. Video Vector들로 추천 학습 및 평가
 
@@ -427,25 +409,21 @@ SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마�
 | CLI Arm | 입력 | 장면 집계 |
 | --- | --- | --- |
 | `base` | 영문 제목 | 기존 Metadata 인코더 |
-| `d0` | 제목 + Qwen 장면 Description | Mean |
-| `d1` | D0와 동일 | Attention GNN → Mean |
-| `g0` | 제목 + Qwen Graph + Entity–Role Fusion | Mean |
-| `g1` | G0와 동일 | Attention GNN → Mean (Ours) |
-| `g2` | G1과 동일 (제목은 장면이 아닌 영상 노드로) | Attention GNN → 영상 노드(장면→영상→장면→영상) |
-| `g3` | G1 + 활동 구간 sidecar | Attention GNN → 장면–구간 hypergraph → Mean + 구간 평균 |
-| `g4` | G2 + G3 | Attention GNN → 장면–구간 hypergraph → 영상 노드 + 구간 평균 |
-| `g1a` | G1에서 Fusion 제거 | Attention GNN → Mean |
-| `g1b` | G1에서 연결 Entity 교체 | Attention GNN → Mean |
-| `g1c` | G1과 동일 | 자기 장면만 전달 → Mean |
-| `g3a` | G3에서 구간 소속을 영상 안에서 무작위로 이동 | G3와 동일 |
+| `g1` | 제목 + Qwen Graph + Entity–Role Fusion | Attention GNN → Mean |
+| `g2` | Graph + Role Fusion; 제목은 영상 노드에 입력 | Attention GNN → 영상 노드 |
+| `d2` | Qwen Description; 제목은 영상 노드에 입력 | G2와 동일한 Attention GNN → 영상 노드 |
+| `g3` | G1 + Graph Action 기반 활동 구간 | Attention GNN → 장면–구간 hypergraph → Mean + 구간 평균 |
+| `g4` | G1 + 영상 노드 + 활동 구간 (주 모델) | Attention GNN → 장면–구간 hypergraph → 영상 노드 + 구간 평균 |
 
-Basic은 `base d0 d1 g0 g1 g2 g3 g4` 8개 Arm이며, Ablation은 `g1a g1b g1c g3a` 4개 Arm입니다. 전체는 두 묶음을 합한 12개 Arm입니다. G2–G4는 G1에 `gnn_attn` 확장(`video_node`, `segments`)을 더한 Arm입니다. 확장의 새 경로는 0 게이트 또는 별도 경로로 시작하며, 확장이 없는 Arm의 계산과 결과 identity는 바뀌지 않습니다. 구간 확장은 G3–G3a(올바른 구간 소속)와 G3–G1(구간 단계 전체)로 비교합니다.
+등록 순서는 `base g1 g2 d2 g3 g4`입니다. D2는 장면 Description의 BGE 1024차원을 384차원으로 투영하고 제목 자리의 128차원을 0으로 채워 Scene MLP에 넣습니다. Q/K 입력은 Scene MLP 이전의 Description 투영이며, G2와 동일한 장면 Attention과 제목 기반 영상 노드(장면→영상→장면→영상)를 사용합니다. 유효 장면이 없는 영상은 제목 fallback을 사용합니다. Role Fusion은 Graph 입력 인코더에만 있습니다.
 
-주요 비교는 G1–D1(관측·인코더 파이프라인), G1–G1a(Fusion 모듈), G1–G1b(추출된 연결 유지), G1–G1c(장면 간 전달), G1c–G0(추가 장면별 변환층), G1–G0(전체 집계 모듈)입니다. G1a에는 모델 용량 변화가 포함되며 G1b의 원본 연결을 정답으로 가정하지 않습니다. 효과를 단순 합산하지 않으며 장면 확보율도 함께 해석합니다.
+주요 비교는 G2−D2(공통 후단의 입력 인코딩), G4−D2(전체 모델), G4−G1(두 확장 전체), G4−G2(활동 구간 추가), G4−G3(영상 노드 모듈 추가), G4−Base(제목 대비 전체 효과)입니다. Graph와 Description은 각자의 유효 장면을 사용하므로 G2−D2에는 추출 내용·입력 인코더·파라미터 수·장면 집합과 확보율 차이가 포함됩니다. G4−G3는 제목 입력 위치와 readout 변경을 포함하는 모듈 전체의 효과입니다. 각 효과를 단순 합산하지 않습니다.
 
-학습 조합은 seed × Arm입니다. 현재 3 seed에서 Basic은 24조합, Ablation은 12조합, 전체는 36조합입니다. 진단은 사용자별 seed 평균 NDCG@10에 paired bootstrap을 적용하고, 선택한 모든 Arm 쌍을 하나의 Bonferroni 비교군으로 둡니다. Basic은 28쌍, Ablation만 선택하면 6쌍, 전체는 66쌍이며 각 진단은 별도로 저장합니다. Ablation만 진단하면 Base 상대 변화율과 G1·G3 대비 비교는 계산하지 않습니다. 기준 Arm과 비교하려면 해당 Arm도 `run-diagnosis --target`에 함께 지정합니다. 검정 방향은 등록 순서에서 뒤의 Arm − 앞의 Arm이고, 보고서의 주요 비교는 필요시 부호와 신뢰구간 방향만 뒤집어 표시합니다. 반대 방향 비교를 중복 검정하지 않습니다. HR@10은 기술통계만 보고합니다.
+D3는 현재 Graph Action 기반 구간 정의에서 제외합니다. Description 전용 활동 추출이나 Graph 구간 공유를 추가하면 구현할 수 있으나 현재 파이프라인에는 도입하지 않습니다. D4와 G4_* Arm도 포함하지 않습니다.
 
-Arm 이름은 `a1→g1a`, `a2→g1b`, `a3→g1c`, `g3s→g3a`로 변경했습니다. 이전 이름은 받지 않으며 기존 Run 산출물은 자동 변경하지 않습니다. 이름이 바뀐 Arm의 추천 결과·캐시는 새 이름으로 구분하고, Graph·Description BGE 특징은 그대로 공유합니다.
+3개 seed × 6개 Arm으로 18개 조합을 학습합니다. 진단은 사용자별 seed 평균 NDCG@10에 paired bootstrap을 적용하며, 선택한 모든 Arm 쌍을 하나의 Bonferroni 비교군으로 둡니다. 전체 6개 Arm은 15쌍입니다. 검정 방향은 등록 순서에서 뒤의 Arm − 앞의 Arm이며, 보고서의 주요 비교는 필요시 부호와 신뢰구간 방향만 뒤집습니다. HR@10은 기술통계만 보고합니다. Base를 제외하면 Base 상대 변화율은 계산하지 않습니다.
+
+기존 `d0 d1 g0 g1a g1b g1c g3a`는 별칭 없이 지원 목록에서 제거했습니다. 과거 산출물은 보존하며 D1 추천 결과·checkpoint를 D2로 재사용하지 않습니다. 기존 Base·G1–G4의 identity·checkpoint 형식과 호환되는 Graph·Description BGE 특징은 유지합니다.
 
 보고서에는 NDCG@10·HR@10의 seed별 값·평균·표본 표준편차, Base 대비 변화율, 입력 확보율과 Ablation 통계를 포함합니다. Base가 선택되지 않으면 상대 변화율을 생략합니다. 사용자·이벤트·분할·seed·평가 계약이 다른 결과는 혼합하지 않습니다. `run-diagnosis --compare-run-id <참조_Run>`으로 같은 Arm의 Run 간 paired 비교도 할 수 있습니다.
 
@@ -506,7 +484,6 @@ artifacts/
 | 제목·Description 특징 | `validation/representations/metadata/`, `validation/representations/desc_qwen3vl/` |
 | Graph 고정 특징·역할 연결 | `validation/representations/graph_qwen3vl/` |
 | G3·G4 공통 활동 구간 | Graph 특징 디렉터리의 `scene_segments.npy`, `scene_segments.json` |
-| G3a의 섞은 활동 구간 | Graph 특징 디렉터리의 `scene_segments_shuffled.npy`, `scene_segments_shuffled.json` |
 | 추천 학습·test | `validation/recommendations/seed_<seed>/<arm>/` |
 | 진단 | `validation/diagnosis/<target-set>/diagnosis.json` |
 | 자동 전처리 보고서 | `reports/leave_one_out_cohort.json`, `reports/leave_one_out_cohort.md` |
@@ -514,7 +491,7 @@ artifacts/
 
 추천 결과는 seed × Arm 단위로 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `complete.json`, `catalog_vectors.npy`를 저장합니다. `training.json`의 epoch별 validation과 최종 test 지표는 구분합니다.
 
-`<target-set>`은 선택한 Arm을 등록 순서로 연결한 이름입니다. 위 실행 예시의 Basic은 `base_d0_d1_g0_g1_g2_g3_g4`, Ablation은 `g1a_g1b_g1c_g3a`입니다. 두 진단 JSON과 Markdown 보고서는 각 묶음의 별도 경로에 저장합니다.
+`<target-set>`은 선택한 Arm을 등록 순서로 연결한 이름입니다. 전체 6개 Arm은 `base_g1_g2_d2_g3_g4`입니다. 선택한 묶음별로 진단 JSON과 Markdown 보고서를 저장합니다.
 
 진단 JSON은 Arm별 최종 점수(`recommendations.means`), NDCG@10 수치 비교·신뢰구간·비교 정책·평가 계약·실행 판정을 저장합니다. 상세 분할·입력 provenance·이벤트 지표는 원래 cohort·표현·추천 파일에서 확인합니다. 진단의 pass는 실행 증거의 검증 통과이며 추천 성능 개선 판정이 아닙니다.
 

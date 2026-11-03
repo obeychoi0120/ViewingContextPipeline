@@ -9,6 +9,7 @@ reads the variant named by Arm.segments from its source bundle.
 
   python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g3
   python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g3a
+(g5/g5a read the same sidecar files as g3/g3a; no extra prepare-module run is needed.)
 """
 
 import hashlib

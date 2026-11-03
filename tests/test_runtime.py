@@ -60,11 +60,11 @@ def test_arm_sources_and_title_policy(context):
 
     arms = registry(context.config)
     assert list(arms) == [
-        "base", "d0", "d1", "g0", "g1", "g2", "g3", "g4", "g1a", "g1b", "g1c", "g3a",
+        "base", "d0", "d1", "g0", "g1", "g2", "g3", "g4", "g1a", "g1b", "g1c", "g3a", "g5", "g5a",
     ]
     assert all(arm.uses_title for arm in arms.values())
     assert [feature_source(arm) for arm in arms.values()] == [
-        "metadata", "desc_qwen3vl", "desc_qwen3vl", *(["graph_qwen3vl"] * 9),
+        "metadata", "desc_qwen3vl", "desc_qwen3vl", *(["graph_qwen3vl"] * 11),
     ]
     sources = generation_registry(context.config)
     assert all(not arm.uses_title and arm.name == arm.scene_arm for arm in sources.values())

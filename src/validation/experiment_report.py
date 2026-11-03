@@ -7,6 +7,9 @@ PRIORITY_COMPARISONS = (
     ("g1", "g1c", "학습된 장면 간 정보 전달"),
     ("g1c", "g0", "장면별 추가 변환층"),
     ("g1", "g0", "전체 장면 집계 모듈"),
+    ("g5", "g0", "Attention 없는 장면–구간 hypergraph"),
+    ("g5", "g5a", "올바른 구간 소속 (Attention 없음)"),
+    ("g1", "g5", "장면 간 Attention 대 구간 hypergraph"),
 )
 
 

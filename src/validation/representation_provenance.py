@@ -26,6 +26,7 @@ def recommendation_identity(context, branch):
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
     from dataclasses import asdict
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
+    from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION, EVALUATION_CONTRACT
     from model_provenance import canonical, local_model_identity
     from validation.role_corruption import CORRUPTION
@@ -69,6 +70,10 @@ def recommendation_identity(context, branch):
         from validation.graph_context import EXTENSION_MODELS
 
         identity["item_model"]["extensions"] = {e: EXTENSION_MODELS[e] for e in sorted(arm.extensions)}
+        if arm.aggregation == "mean":
+            # Without a scene exchange the segments stage reads the scene MLP output (g3/g4 identity unchanged).
+            identity["item_model"]["extensions"]["segments"] = {
+                **EXTENSION_MODELS["segments"], "applied_after": "scene_mlp_without_scene_exchange"}
     if "segments" in arm.extensions:
         from validation.graph_inputs import scene_segments_identity
 

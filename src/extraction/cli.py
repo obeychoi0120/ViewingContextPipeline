@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("--presence-penalty is supported only for local vLLM models")
             options["presence_penalty"] = validate_presence_penalty(args.presence_penalty)
         context = RunContext.load(args.run_id, dataset=args.dataset)
-        STEP_HANDLERS[args.step](
+        result = STEP_HANDLERS[args.step](
             context,
             force=args.force,
             schema=context.prompt_path(args.schema),
@@ -71,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
             arm=args.arm,
             **options,
         )
+        if result.get("failure_count", 0):
+            raise RuntimeError(
+                f"{result['failure_count']} output(s) failed; completed outputs are preserved. "
+                "Rerun this step to retry incomplete outputs."
+            )
     except KeyboardInterrupt:
         print(f"[INTERRUPTED] {args.step}", file=sys.stderr)
         return 130

@@ -27,7 +27,7 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     from validation.steps import embed_representations
 
     prepare_inputs(context, monkeypatch)
-    result = embed_representations(context, target=["d0", "d1", "g0", "g1", "g1a", "g1b", "g1c"])
+    result = embed_representations(context, target=["g1", "g2", "d2", "g3", "g4"])
     assert result["generated_sources"] == ["desc_qwen3vl"]
     assert result["reused_sources"] == ["graph_qwen3vl"]
     root = context.representations_dir
@@ -40,6 +40,29 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     assert read_json(root / "desc_qwen3vl" / "manifest.json")["source"] == "desc_qwen3vl"
 
 
+def test_d2_reuses_legacy_description_features(context, monkeypatch):
+    from dataclasses import replace
+    from validation.graph_inputs import source_identity
+    from validation.selection import load_validation_cohort
+    from validation.steps import embed_representations
+
+    prepare_inputs(context, monkeypatch)
+    embed_representations(context, target=["d2"])
+    cohort = load_validation_cohort(context)
+    d2 = registry(context.config)["d2"]
+    d1 = replace(d2, name="d1", extensions=())
+    assert source_identity(context, cohort, d2) == source_identity(context, cohort, d1)
+    identity_before = {p: p.read_bytes() for p in (context.representations_dir / "desc_qwen3vl").iterdir()}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("compatible frozen Description features must not be encoded again")
+
+    monkeypatch.setattr("validation.graph_inputs.encode_texts", forbidden)
+    result = embed_representations(context, target=["d2"])
+    assert result["generated_sources"] == [] and result["reused_sources"] == ["desc_qwen3vl"]
+    assert all(p.read_bytes() == content for p, content in identity_before.items())
+
+
 def test_missing_description_preserves_catalog(context):
     from extraction.scene_storage import write_scene_records
 
@@ -49,7 +72,7 @@ def test_missing_description_preserves_catalog(context):
     cohort = prepare_validation_cohort(context)
     cid = cohort["catalog"][0]["content_id"]
     write_scene_records(context.scene_arm_dir("desc_qwen3vl") / f"{cid}.jsonl", [failure_row(cid)])
-    texts, arrays, stats = build_input(context, cohort, registry(context.config)["d0"])
+    texts, arrays, stats = build_input(context, cohort, registry(context.config)["d2"])
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 24
     assert arrays["titles"][0] != 0 and arrays["titles"][1] == 0
     assert arrays["video_offsets"].tolist() == [0] * 25
@@ -103,7 +126,7 @@ def test_graph_exclusions_preserve_items(context):
         failure_row(cid, 3),
     ]
     write_jsonl(context.scene_arm_dir("graph_qwen3vl") / f"{cid}.jsonl", rows)
-    _, arrays, stats = build_input(context, cohort, registry(context.config)["g0"])
+    _, arrays, stats = build_input(context, cohort, registry(context.config)["g1"])
     assert arrays["video_offsets"].tolist() == [0, 1, 1]
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 2
     assert stats["counts"]["valid_scenes"] == 1

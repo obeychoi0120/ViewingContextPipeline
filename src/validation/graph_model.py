@@ -34,7 +34,8 @@ class SceneRoleEncoder(nn.Module):
     """Entity→Action role gather, scene MLP, optional scene exchange, and video pooling.
 
     Exchange: cosine GCN, attention GCN or Transformer; pooling: mean or attention. gnn_attn may add
-    the segments and video_node extensions (graph_context.EXTENSION_MODELS).
+    the segments and video_node extensions (graph_context.EXTENSION_MODELS); mean may add segments, which
+    is then the only path between scenes.
     """
 
     ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, place; receiver is ignored.

@@ -28,7 +28,7 @@ def test_extraction_source_identity_remains_distinct(context):
     for source in ("graph_minicpm", "graph_qwen3vl"):
         write_scene_records(context.scene_arm_dir(source) / f"{cid}.jsonl", [scene_row(cid)])
     mini = replace(generation_registry(context.config)["graph_minicpm"], uses_title=True)
-    qwen = registry(context.config)["g0"]
+    qwen = registry(context.config)["g1"]
     _, arrays, stats = build_input(context, cohort, mini)
     assert arrays["titles"][0] != 0 and stats["counts"]["valid_scenes"] == 1
     assert source_identity(context, cohort, mini) != source_identity(context, cohort, qwen)

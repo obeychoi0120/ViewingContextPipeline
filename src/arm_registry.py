@@ -16,7 +16,7 @@ class Arm:
     scene_arm: str | None = None
     aggregation: str = "mean"
     role_fusion: bool = False
-    # Optional gnn_attn stages (validation.graph_context.EXTENSION_MODELS); with "segments",
+    # Optional stages (validation.graph_context.EXTENSION_MODELS; segments also on mean); with "segments",
     # the scene_segments sidecar variant of the source bundle ("true" or "shuffled").
     extensions: tuple[str, ...] = ()
     segments: str = "true"
@@ -37,6 +37,9 @@ ARMS = (
     Arm("g1b", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
     Arm("g1c", "graph", "qwen3vl", True, "graph_qwen3vl", "self_only", True),
     Arm("g3a", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",), "shuffled"),
+    # Attention-free hypergraph: G0 (no scene exchange) plus segments, and its shuffled-segment ablation.
+    Arm("g5", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", True, ("segments",)),
+    Arm("g5a", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", True, ("segments",), "shuffled"),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)

@@ -2,10 +2,10 @@
 
 현재 추천 계약은 **`gnn-attn-aggregation/v1`**입니다. 실행·Arm 표는 [README](../README.md#실험-조건과-결과-해석), 저장·캐시는 [실행 계약](runtime.md)을 기준으로 합니다.
 
-- Basic: `base d0 d1 g0 g1 g2 g3 g4`. Ablation: `g1a g1b g1c g3a`. 모든 Arm은 제목을 사용하고 장면을 사용하는 Arm은 Qwen3-VL-2B-Instruct의 추출 결과를 공유합니다.
+- Basic: `base d0 d1 g0 g1 g2 g3 g4`. Ablation: `g1a g1b g1c g3a`. Attention 없는 hypergraph: `g5 g5a`. 모든 Arm은 제목을 사용하고 장면을 사용하는 Arm은 Qwen3-VL-2B-Instruct의 추출 결과를 공유합니다.
 - D0·D1은 장면별 Description BGE, G0·G1·G2·G3·G4는 같은 Graph BGE·Entity–Role Fusion을 사용합니다.
 - D0·G0는 Mean, D1·G1은 장면 간 Attention 기반 GNN 뒤 Mean을 적용합니다.
-- G2는 제목을 별도 영상 노드에 넣고 장면→영상→장면→영상으로 전달합니다. G3는 장면–활동 구간 전달과 구간 평균을 추가하며, G3a는 구간 크기를 유지한 채 영상 내부에서 소속 장면을 섞습니다. G4는 영상 노드와 활동 구간을 함께 사용합니다.
+- G2는 제목을 별도 영상 노드에 넣고 장면→영상→장면→영상으로 전달합니다. G3는 장면–활동 구간 전달과 구간 평균을 추가하며, G3a는 구간 크기를 유지한 채 영상 내부에서 소속 장면을 섞습니다. G4는 영상 노드와 활동 구간을 함께 사용합니다. G5는 G0(장면 간 교환 없음)에 같은 활동 구간 단계를 더해 구간 hypergraph가 장면 사이의 유일한 정보 경로가 되며, G5a는 G3a와 같은 섞인 구간을 씁니다. G5·G5a는 G3·G3a의 구간 파일을 그대로 읽습니다.
 - G1a는 Fusion 제거, G1b는 seed 42의 장면 내부 Entity 연결 대상 교체, G1c는 동일 변환층의 자기 장면 전달입니다.
 - `--target`으로 Arm을 선택합니다. 표현 모드·집계 옵션이나 성능 조건에 따른 실행 차단은 없습니다.
 
@@ -21,6 +21,10 @@ ABLATION=(g1a g1b g1c g3a)
 python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3a
 python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target "${ABLATION[@]}"
 python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target "${ABLATION[@]}"
+
+# Attention 없는 hypergraph (G3·G3a의 구간 파일 사용, prepare-module 추가 실행 없음)
+python -m validation run-recommendation --run-id "$RUN_ID" --dataset "$DATASET" --target g5 g5a
+python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --target g0 g1 g5 g5a
 ```
 
 `prepare-module` Step은 Graph BGE 특징 준비 뒤 G3·G4·G3a 학습 전에 필요한 구간 파일을 만듭니다. Basic은 `--target g3`로 G3·G4가 공유하는 `scene_segments` 파일을 준비하고, Ablation은 `--target g3a`로 별도 `scene_segments_shuffled` 파일을 준비합니다. G3a 준비는 Basic의 구간 파일을 변경하지 않으며 VLM·BGE 재추론도 하지 않습니다. Graph bundle을 다시 만들거나 구간 생성 규칙을 바꾸면 이 단계도 다시 실행합니다.

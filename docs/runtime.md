@@ -54,7 +54,7 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 ## 장면별 BGE와 공유 캐시
 
-Basic 추천 Arm은 `base d0 d1 g0 g1 g2 g3 g4`이며 Ablation은 `g1a g1b g1c g3a`입니다. 모든 Arm에 제목을 포함합니다. D0·D1은 `desc_qwen3vl`, G0·G1·G2·G3·G4·G1a·G1b·G1c·G3a는 `graph_qwen3vl` 장면 자료를 직접 사용합니다. Summary는 추천 입력에 포함되지 않습니다. BGE는 고정된 1024차원 특징을 생성합니다.
+Basic 추천 Arm은 `base d0 d1 g0 g1 g2 g3 g4`이며 Ablation은 `g1a g1b g1c g3a`, Attention 없는 hypergraph는 `g5 g5a`입니다. 모든 Arm에 제목을 포함합니다. D0·D1은 `desc_qwen3vl`, G0·G1·G2·G3·G4·G1a·G1b·G1c·G3a·G5·G5a는 `graph_qwen3vl` 장면 자료를 직접 사용합니다. Summary는 추천 입력에 포함되지 않습니다. BGE는 고정된 1024차원 특징을 생성합니다.
 
 Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다. G1b는 공유 Graph를 수정하지 않고 고정된 교란 뷰를 만듭니다.
 

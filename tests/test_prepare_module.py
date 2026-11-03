@@ -24,17 +24,27 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     monkeypatch.setattr("validation.features.BGETextEncoder", forbidden)
     monkeypatch.setattr("extraction.steps.qwen_generator", forbidden)
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
+    from validation.scene_segments import attach
+
+    calls = []
+
+    def tracked_attach(ctx, arm):
+        calls.append(arm)
+        return attach(ctx, arm)
+
+    monkeypatch.setattr("validation.scene_segments.attach", tracked_attach)
     command = [
         "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", "g4", "g3a", "g3",
+        "--target", "g4", "g3",
     ]
     assert main(command) == 0
+    assert calls == ["g3"]
     output = capsys.readouterr().out
     assert "[STEP] prepare-module" in output
-    assert 'selected_arms: ["g3", "g4", "g3a"]' in output
+    assert 'selected_arms: ["g3", "g4"]' in output
     assert f"output_dir: {context.representations_dir}" in output
     manifest = read_json(directory / "manifest.json")
-    for variant in ("true", "shuffled"):
+    for variant in ("true",):
         pairs = load_scene_segments(directory, variant)
         assert pairs.shape == (48, 2)
         np.testing.assert_array_equal(pairs[:, 0], np.arange(48))
@@ -44,8 +54,7 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert recommendation_identity(context, "g3")["scene_segments"] == (
         recommendation_identity(context, "g4")["scene_segments"]
     )
-    assert recommendation_identity(context, "g3a")["scene_segments"]["variant"] == "shuffled"
-    for arm in ("g1", "g2", "g3", "g4", "g3a"):
+    for arm in ("g1", "g2", "g3", "g4"):
         identity = recommendation_identity(context, arm)
         assert json.loads(json.dumps(identity)) == identity
 
@@ -61,7 +70,7 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert all(path.read_bytes() == content for path, content in originals.items())
 
 
-@pytest.mark.parametrize("target", [["g3", "g1"], ["base"], ["g3", "g3"], ["missing"]])
+@pytest.mark.parametrize("target", [["g3", "g1"], ["base"], ["d2"], ["g3", "g3"], ["missing"]])
 def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monkeypatch, capsys, target):
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid targets must be rejected before preparing any Arm")
