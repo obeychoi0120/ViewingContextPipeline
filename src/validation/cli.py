@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         nargs="+",
         required=True,
-        help="Explicit arms to include (required for all validation steps; no default).",
+        help="Explicit arms: base d g0 g1 g2 (prepare-module: g2 only; required).",
     )
     parser.add_argument(
         "--workers-per-gpu",

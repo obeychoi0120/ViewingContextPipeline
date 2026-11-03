@@ -136,3 +136,58 @@ def test_cross_run_cache_and_paired_comparison(context, monkeypatch):
     (reference.root / "config.yaml").write_text(yaml.safe_dump(reference.config))
     with pytest.raises(ValueError, match="identical model seeds"):
         compare_runs(context, reference.run_id, target=["base"])
+
+
+@pytest.mark.parametrize("filename", ["identity.json", "training.json", "complete.json", "sasrec.pt"])
+def test_old_model_partial_results_cannot_be_overwritten(tmp_path, filename):
+    import torch
+    from validation.leave_one_out_recommendation import ensure_compatible_output
+
+    current = {"arm_contract": "gnn-attn-aggregation/v1", "architecture_version": "sasrec-scene-content/v2",
+               "experiment_arm": {"name": "g1"}, "item_model": {"scene_mlp": True}}
+    old = {**current, "architecture_version": "sasrec-scene-content/v1"}
+    path = tmp_path / filename
+    if filename == "sasrec.pt":
+        torch.save({"metadata": old, "state_dict": {}}, path)
+    else:
+        write_json(path, {"identity": old} if filename == "complete.json" else old)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="new Run ID"):
+        ensure_compatible_output(tmp_path, current)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_preflight_protects_entire_grid_before_restoring_or_training(context, monkeypatch, force):
+    from validation.steps import run_recommendation
+    from validation import recommendation_cache
+
+    prepare_inputs(context, monkeypatch)
+    cohort, _, _ = selected_table(context)
+    last = context.recommendations_dir / "seed_44" / "g1"
+    last.mkdir(parents=True)
+    old = {**result_identity(context, cohort, 44, "g1"), "architecture_version": "sasrec-scene-content/v1"}
+    write_json(last / "training.json", old)
+    before = {p: p.read_bytes() for p in context.recommendations_dir.rglob("*") if p.is_file()}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("must preflight every selected result before writing any combination")
+
+    monkeypatch.setattr(recommendation_cache, "restore", forbidden)
+    monkeypatch.setattr("validation.leave_one_out_recommendation.run_combination", forbidden)
+    with pytest.raises(ValueError, match="new Run ID"):
+        run_recommendation(context, target=["base", "g1"], force=force)
+    assert before == {p: p.read_bytes() for p in context.recommendations_dir.rglob("*") if p.is_file()}
+
+
+def test_current_partial_identity_allows_restart_but_different_arm_does_not(tmp_path):
+    from validation.leave_one_out_recommendation import ensure_compatible_output
+
+    identity = {"architecture_version": "sasrec-scene-content/v2", "arm_contract": "gnn-attn-aggregation/v1",
+                "experiment_arm": {"name": "g0", "role_fusion": False}, "item_model": {"scene_mlp": True}}
+    write_json(tmp_path / "identity.json", identity)
+    ensure_compatible_output(tmp_path, identity)
+    changed = deepcopy(identity)
+    changed["experiment_arm"]["role_fusion"] = True
+    with pytest.raises(ValueError, match="incompatible"):
+        ensure_compatible_output(tmp_path, changed)

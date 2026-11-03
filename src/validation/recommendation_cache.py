@@ -78,6 +78,9 @@ def valid_bundle(directory, identity, table, split):
 
 
 def restore(context, directory, identity, table, split):
+    from validation.leave_one_out_recommendation import ensure_compatible_output
+
+    ensure_compatible_output(directory, identity)
     try:
         return _restore(context, directory, identity, table, split)
     except (

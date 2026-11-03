@@ -1,3 +1,9 @@
+# 현재 추천 실험 범위
+
+현재 지원 Arm은 `base d g0 g1 g2`이며 Residual Scene MLP를 유지합니다. G1은 Role Fusion(A), G2는 Hypergraph·Action 구간 기여(B)를 추가합니다. [현재 학습 계약](graph_training.md)을 기준으로 실행하십시오. 아래는 과거 작업 기록으로, 이전 GCN·Transformer·Attention Arm의 구현 상태·명령·후속 계획은 현재 지원 목록을 뜻하지 않습니다.
+
+---
+
 # 프로젝트 구현 이정표
 
 마지막 갱신: **2026-10-07**. 현재 코드·작업 트리와 저장된 검증·진단 기록을 기준으로 정리합니다. 구현 완료, 소형 검증 완료, 전체 데이터 실험 결과를 구분합니다.
@@ -8,14 +14,14 @@ Run별 분석 코드·표·보고서는 `artifacts/runs/<RUN_ID>/reports/`에 �
 
 | 항목 | 현재 상태 | 근거·확인 범위 |
 | --- | --- | --- |
-| Text·직접 Graph 추천 경로 | 구현·소형 CPU/CUDA 검증 완료 | Graph 입력 준비, Entity→Action 역할 결합, Scene MLP, mean, SASRec 공동 학습·진단. 실제 성능은 해당 모델 계약의 Run별 결과로 확인. [모델·데이터 계약](graph_training.md#모델-및-데이터-계약) |
+| Text·직접 Graph 추천 경로 | 구현·소형 CPU/CUDA 검증 완료 | Graph 입력 준비, Entity→Action 역할 결합, Scene MLP, mean, SASRec 공동 학습·진단. 실제 성능은 해당 모델 계약의 Run별 결과로 확인. [모델·데이터 계약](graph_training.md) |
 | BGE Large·현재 영상 encoder | 구현·소형 검증 완료 | 동결 BGE 1024차원, 독립 projection·1층 Item/Scene Residual MLP, 최종 영상 512차원. Item/Scene LayerNorm은 없고 SASRec/User MLP 내부 LayerNorm은 유지. Text는 `sasrec-content-v8`, mean은 `sasrec-role-graph/v9`. 기존 2층 User MLP는 유지 |
-| 영상 Residual MLP 1층 전환 | 구현·CPU/CUDA 소형 검증 완료; 전체 시간·품질 비교 대기 | Item·Scene은 `x + ReLU(Linear(x))`; 512차원 블록 파라미터 525,312→262,656개. CPU validation 105개, L4 CUDA 14개, CLI·README 28개 통과. 입력 캐시 재사용, 추천 selection부터 재학습. [변경·재실행·검증](graph_training.md#영상-residual-mlp-1층-전환-2026-10-07) |
+| 영상 Residual MLP 1층 전환 | 구현·CPU/CUDA 소형 검증 완료; 전체 시간·품질 비교 대기 | Item·Scene은 `x + ReLU(Linear(x))`; 512차원 블록 파라미터 525,312→262,656개. CPU validation 105개, L4 CUDA 14개, CLI·README 28개 통과. 입력 캐시 재사용, 추천 selection부터 재학습. [변경·재실행·검증](graph_training.md) |
 | Graph v9 프롬프트·이름 참조·place | 구현·회귀 검증 완료 | v9 이름 참조를 내부 ID로 변환하고 place를 추출·Summary·직접 Graph에 전달. receiver 텐서 슬롯은 형태 호환성을 위해 유지. 현재 Graph 입력 계약은 `role-graph-inputs/v8`. Relations·receiver와 구형 Scene/Summary는 변환 없이 거부. 실제 추출 정확도·추천 효과는 별도 평가. [프롬프트 변경 이력](../prompts/update_note.md) |
-| DCGN 참고 장면 similarity graph·1층 residual GCN | 구현·소형 CPU/CUDA 검증 완료; 전체 데이터 비교 대기 | 제목 제외 384차원 cosine, 영상 내부 전체 장면 쌍, 512차원 전달. 현재 gnn 계약은 `sasrec-role-graph/v10`. 수학·순열·영상 격리·gradient·chunk/checkpoint·캐시·진단 검증. [GCN 구현·검증](graph_training.md#장면-gcn-aggregation-2026-10-06) |
-| 장면 Transformer 3종(`sasrec-role-graph/v11`)·attention 2종(`sasrec-role-graph/v12`) | 구현·소형 CPU/CUDA 검증 완료(rolling 기준); leave-one-out 병합 후 CPU 테스트 통과; 전체 데이터 비교 대기 | `transformer`·`transformer_pos`·`transformer_local`은 장면 간 상호작용·순서 분리용입니다. `attn_pool`(교환 없는 attention readout)과 `gnn_attn`(gnn과 조건을 맞춘 학습 attention 가중치)은 자문 A–D 비교표의 B·D입니다. Scene MLP는 1층 Residual MLP를 공유합니다. [Transformer](graph_training.md#장면-transformer-aggregation-2026-10-12) · [attention](graph_training.md#장면-attention-aggregation-2026-10-12) |
+| DCGN 참고 장면 similarity graph·1층 residual GCN | 구현·소형 CPU/CUDA 검증 완료; 전체 데이터 비교 대기 | 제목 제외 384차원 cosine, 영상 내부 전체 장면 쌍, 512차원 전달. 현재 gnn 계약은 `sasrec-role-graph/v10`. 수학·순열·영상 격리·gradient·chunk/checkpoint·캐시·진단 검증. [GCN 구현·검증](graph_training.md) |
+| 장면 Transformer 3종(`sasrec-role-graph/v11`)·attention 2종(`sasrec-role-graph/v12`) | 구현·소형 CPU/CUDA 검증 완료(rolling 기준); leave-one-out 병합 후 CPU 테스트 통과; 전체 데이터 비교 대기 | `transformer`·`transformer_pos`·`transformer_local`은 장면 간 상호작용·순서 분리용입니다. `attn_pool`(교환 없는 attention readout)과 `gnn_attn`(gnn과 조건을 맞춘 학습 attention 가중치)은 자문 A–D 비교표의 B·D입니다. Scene MLP는 1층 Residual MLP를 공유합니다. [Transformer](graph_training.md) · [attention](graph_training.md) |
 | 실행 최적화·프로파일링 | packed 입력·GPU 특징/catalog cache·chunk/checkpoint·계측 구현 완료 | 기존 Run의 일부 selection 프로파일과 소형 CPU/L4 benchmark 기록 있음. 현재 모델의 RTX 전체 시간·메모리 측정은 대기. [실행 최적화 기록](../artifacts/runs/260928_v7/reports/graph_execution_optimization.md), [프로파일 분석](../artifacts/runs/260930_v8/reports/recommendation_profile_analysis.md) |
-| MicroLens leave-one-out 전환 | 구현·CPU 전체 284개 검증 완료; 원본·전체 GPU 실험 대기 | 원본 이력 5개 이상·최근 13개·마지막 2개 보류, 최대 입력 10개, validation 최적 checkpoint·refit 없음. 사용자별 seed 평균·paired bootstrap, 프로토콜별 새 경로·기존 rolling 보존. 원본 데이터 점검은 Run `reports/`에 저장. [전환 검증](graph_training.md#leave-one-out-전환-2026-10-07) |
+| MicroLens leave-one-out 전환 | 구현·CPU 전체 284개 검증 완료; 원본·전체 GPU 실험 대기 | 원본 이력 5개 이상·최근 13개·마지막 2개 보류, 최대 입력 10개, validation 최적 checkpoint·refit 없음. 사용자별 seed 평균·paired bootstrap, 프로토콜별 새 경로·기존 rolling 보존. 원본 데이터 점검은 Run `reports/`에 저장. [전환 검증](graph_training.md) |
 | 진단 포맷·Run 간 paired 비교 | 구현·소형 검증 완료 | Text/Graph 진단은 `leave-one-out-diagnosis/v1`; 사용자 평균·seed별 결과를 집계하며 기존 rolling 산출물은 보존. 같은 경로의 Graph Arm Run 비교를 지원하며 직접 Graph는 동일 aggregation을 사용. 교차 Text/Graph·mean/gnn 비교는 후속 항목. [과거 진단 포맷 기록](../artifacts/runs/260930_v8/reports/diagnosis_format_update.md), [Run 비교 코드](../src/validation/run_comparison.py) |
 | 연구실 자문용 README·다이어그램 안내 | 재작성 완료 | 피드백 반영 범위, 8단계 입출력, 코드 연결, 11개 접기/펼치기. mean 전체 흐름과 GNN 모델 그림의 범위를 구분. 공개 명령 18개 dispatch·링크/앵커·Graph 예시 파싱 검사 완료. [README](../README.md) |
 | 핵심 시나리오 중심 테스트 정리 | 반영·정리 당시 CPU 전체 검사 완료 | 함수 233→120개, 정리 당시 272개 사례 통과. 당시 README의 GNN 명령 2개 추가 후 274개 수집 확인; leave-one-out 전환 후 현재 전체 284개 통과. 과거 v7 고정 해시 검사는 제거하고 정상 결과 재사용·원본 보존 검사는 유지. [정리 기록](test-cleanup-2026-10-06.md) |
@@ -57,7 +63,7 @@ Run 이름의 v8, 프롬프트 버전, 모델 architecture 버전은 서로 다�
 
 - `260928_v7` Graph 입력·학습 구현: [구현 검증 보고서](../artifacts/runs/260928_v7/reports/graph_implementation.md).
 - `260928_v7` 실행 최적화: [변경 사항·수치 검증·벤치마크](../artifacts/runs/260928_v7/reports/graph_execution_optimization.md).
-- Graph 모델 v3: 1층 encoder·장면 384·제목 128 결합과 추천 단계별 프로파일링 구현. 당시 실제 추천 성능·RTX 처리량 비교는 대기. [이전 모델 v3 이력](graph_training.md#이전-graph-모델-v3-1층-encoder와-128384-결합-2026-09-30) · [변경 위치·재학습 범위·검사 결과](../artifacts/runs/260928_v7/reports/graph_v3_profiling_implementation.md).
+- Graph 모델 v3: 1층 encoder·장면 384·제목 128 결합과 추천 단계별 프로파일링 구현. 당시 실제 추천 성능·RTX 처리량 비교는 대기. [이전 모델 v3 이력](graph_training.md) · [변경 위치·재학습 범위·검사 결과](../artifacts/runs/260928_v7/reports/graph_v3_profiling_implementation.md).
 - 모델 v4: Meta 제목 512 기준선, Text 제목·Summary 독립 BGE, 공통 최종 LayerNorm, 아이템 MLP 제거. 당시 전체 추천 성능 실험은 대기. [구현·검증 보고서](../artifacts/runs/260928_v7/reports/model_v4_implementation.md).
 - Small v5: BGE 384차원·학습 최적화의 과거 구현 검증. 현재 설정은 BGE Large 1024차원입니다. [당시 구현 검증](../artifacts/runs/260930_v8/reports/small_implementation_validation.md).
 - v3~v6와 Small v5 설명은 과거 이력으로 보존합니다. 2층 영상 MLP(Text/mean v7·GNN v8)는 과거 구조입니다. 현재 1층 MLP(Text v8·mean v9·gnn v10)의 구조·재실행 조건은 [직접 Graph 학습](graph_training.md)에 정리했습니다.

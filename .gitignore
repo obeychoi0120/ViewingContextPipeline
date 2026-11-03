@@ -6,4 +6,4 @@
 **/.ruff_cache/
 **/.mypy_cache/
 update_repo.sh
-run_script.sh
+run_script*.sh

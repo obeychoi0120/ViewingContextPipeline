@@ -388,16 +388,13 @@ def verify(context, cohort, arms):
 
 
 
-def scene_segments_paths(directory, variant="true"):
-    """(array, metadata) paths of a scene_segments sidecar variant ("true" or "shuffled")."""
-    if variant not in ("true", "shuffled"):
-        raise ValueError("scene segment variant must be true or shuffled")
-    stem = "scene_segments" if variant == "true" else f"scene_segments_{variant}"
+def scene_segments_paths(directory):
+    """Activity incidence and metadata paths."""
     directory = Path(directory)
-    return directory / f"{stem}.npy", directory / f"{stem}.json"
+    return directory / "scene_segments.npy", directory / "scene_segments.json"
 
 
-def write_scene_segments(directory, pairs, statistics=None, variant="true"):
+def write_scene_segments(directory, pairs, statistics=None):
     """Attach a scene-segment incidence, [bundle scene row, segment id] pairs, to a valid bundle.
 
     Pairs are stored sorted by scene row; a segment holds >= 1 scenes of one video, each scene at most once.
@@ -405,7 +402,7 @@ def write_scene_segments(directory, pairs, statistics=None, variant="true"):
     from validation.graph_context import SCENE_SEGMENTS_VERSION
 
     directory = Path(directory)
-    array_path, meta_path = scene_segments_paths(directory, variant)
+    array_path, meta_path = scene_segments_paths(directory)
     manifest = read_json(directory / "manifest.json")
     video_offsets = np.load(directory / "video_offsets.npy", allow_pickle=False)
     scene_count = int(video_offsets[-1])
@@ -428,7 +425,7 @@ def write_scene_segments(directory, pairs, statistics=None, variant="true"):
         meta_path,
         {
             "version": SCENE_SEGMENTS_VERSION,
-            "variant": variant,
+            "builder_sha256": segment_builder_hash(),
             "input_hash": manifest["input_hash"],
             "pairs": int(len(pairs)),
             "segments": int(len(ids)),
@@ -438,29 +435,36 @@ def write_scene_segments(directory, pairs, statistics=None, variant="true"):
     )
 
 
-def scene_segments_identity(directory, variant="true"):
+def segment_builder_hash():
+    from validation import scene_segments
+
+    return checksum(Path(scene_segments.__file__))
+
+
+def scene_segments_identity(directory):
     """Validated sidecar metadata; raises if missing, stale or corrupt."""
     from validation.graph_context import SCENE_SEGMENTS_VERSION
 
     directory = Path(directory)
-    array_path, meta_path = scene_segments_paths(directory, variant)
+    array_path, meta_path = scene_segments_paths(directory)
     if not meta_path.is_file():
-        raise ValueError(f"missing scene segments ({variant}): {directory}; run python -m validation prepare-module")
+        raise ValueError(f"missing scene segments: {directory}; run python -m validation prepare-module")
     meta = read_json(meta_path)
     manifest = read_json(directory / "manifest.json")
     if (
         meta.get("version") != SCENE_SEGMENTS_VERSION
+        or meta.get("builder_sha256") != segment_builder_hash()
         or meta.get("input_hash") != manifest["input_hash"]
         or checksum(array_path) != meta.get("checksum")
     ):
-        raise ValueError(f"stale scene segments ({variant}): {directory}; run python -m validation prepare-module")
+        raise ValueError(f"stale scene segments: {directory}; run python -m validation prepare-module")
     return meta
 
 
-def load_scene_segments(directory, variant="true"):
+def load_scene_segments(directory):
     """The validated [scene row, segment] pairs of a bundle, sorted by scene row."""
-    scene_segments_identity(directory, variant)
-    pairs = np.load(scene_segments_paths(directory, variant)[0], allow_pickle=False)
+    scene_segments_identity(directory)
+    pairs = np.load(scene_segments_paths(directory)[0], allow_pickle=False)
     contexts = np.load(Path(directory) / "contexts.npy", mmap_mode="r", allow_pickle=False)
     if pairs.ndim != 2 or pairs.shape[1] != 2 or (len(pairs) and pairs[:, 0].max() >= len(contexts)):
         raise ValueError(f"scene segments do not match bundle scenes: {directory}")

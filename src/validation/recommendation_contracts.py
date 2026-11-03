@@ -1,7 +1,7 @@
 from __future__ import annotations
 from arm_registry import EXPERIMENT_CONFIG_VERSION, registry, select_arms
 
-ARCHITECTURE_VERSION = "sasrec-scene-content/v1"
+ARCHITECTURE_VERSION = "sasrec-scene-content/v2"
 DIAGNOSIS_ARCHITECTURE_VERSIONS = frozenset({ARCHITECTURE_VERSION})
 ITEM_MODEL = {
     "baseline_dim": 512,

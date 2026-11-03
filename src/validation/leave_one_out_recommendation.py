@@ -166,6 +166,32 @@ def result_files(identity):
     return ["sasrec.pt", "training.json", "per_event_metrics.jsonl", "catalog_vectors.npy"]
 
 
+def ensure_compatible_output(directory, identity):
+    """Never overwrite a different Arm/model, including partial results and force runs."""
+    if not directory.exists() or not any(directory.iterdir()):
+        return
+    keys = ("arm_contract", "architecture_version", "experiment_arm", "item_model")
+    evidence = []
+    for name in ("identity.json", "complete.json", "training.json"):
+        path = directory / name
+        if path.exists():
+            try:
+                value = read_json(path)
+                evidence.append(value["identity"] if name == "complete.json" else value)
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    if not evidence and (directory / "sasrec.pt").exists():
+        try:
+            evidence.append(torch.load(directory / "sasrec.pt", map_location="cpu",
+                                       weights_only=True)["metadata"])
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, EOFError):
+            pass
+    if not evidence or any(not isinstance(old, dict) or any(old.get(k) != identity.get(k) for k in keys)
+                           for old in evidence):
+        raise ValueError(f"incompatible recommendation output: {directory}; use a new Run ID "
+                         "to preserve previous results (--force cannot overwrite another architecture)")
+
+
 def combination_complete(directory, identity, expected_count, *, architecture_version=None):
     if (identity.get("arm_contract") != RECOMMENDATION_ARM_CONTRACT
             or identity.get("architecture_version") != ARCHITECTURE_VERSION
@@ -239,10 +265,14 @@ def run_combination(
         raise ValueError("profile_operators requires profile_every")
     if identity.get("evaluation_contract") != EVALUATION_CONTRACT:
         raise ValueError("unsupported recommendation evaluation contract")
+    if identity.get("architecture_version") != ARCHITECTURE_VERSION:
+        raise ValueError("unsupported recommendation architecture")
     ids, probabilities, frequencies = prepared
     seed, arm = (identity[key] for key in ("seed", "arm"))
     directory = combination_dir(context, seed, arm)
+    ensure_compatible_output(directory, identity)
     directory.mkdir(parents=True, exist_ok=True)
+    write_json(directory / "identity.json", identity)
     (directory / "complete.json").unlink(missing_ok=True)
     print(f"[Leave-one-out] seed={seed} {arm}: train device={device}", flush=True)
     profiler = (
@@ -368,8 +398,6 @@ def run_combination(
     from validation.graph_model import parameter_report
 
     metadata["parameters"] = parameter_report(model, branch)
-    if branch == "g1b":
-        metadata["role_corruption_report"] = model.store.report
     with sampled(profiler, "export", kind="stage"):
         with span("catalog_and_checkpoint_save"):
             with torch.no_grad():
@@ -485,7 +513,6 @@ def run_leave_one_out(
     jobs = []
     combinations = []
     for split in cohort["plan"]["splits"]:
-        expected_count = len(phase_ids(table, split, "test"))
         for seed in config.model.seeds:
             for arm, branch in arms.items():
                 identity = {
@@ -501,17 +528,18 @@ def run_leave_one_out(
                 }
                 directory = combination_dir(context, seed, arm)
                 combinations.append((directory, identity, branch, split))
-                if not force and combination_complete(directory, identity, expected_count):
-                    skipped += 1
-                elif (
-                    not force
-                    and recommendation_cache.eligible(context, branch)
-                    and recommendation_cache.restore(context, directory, identity, table, split)
-                ):
-                    shared += 1
-                    skipped += 1
-                else:
-                    jobs.append((split, identity, branch))
+    for directory, identity, _, _ in combinations:
+        ensure_compatible_output(directory, identity)
+    for directory, identity, branch, split in combinations:
+        expected_count = len(phase_ids(table, split, "test"))
+        if not force and combination_complete(directory, identity, expected_count):
+            skipped += 1
+        elif (not force and recommendation_cache.eligible(context, branch)
+              and recommendation_cache.restore(context, directory, identity, table, split)):
+            shared += 1
+            skipped += 1
+        else:
+            jobs.append((split, identity, branch))
     devices = []
     if jobs:
         require_torch()

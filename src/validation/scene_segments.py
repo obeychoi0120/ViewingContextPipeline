@@ -3,24 +3,18 @@
 A scene's activities are the consistency keys of its action phrases (below). A segment is a maximal run of a
 video's valid scenes whose extracted scene_idx increase by exactly 1 and that all contain one activity; a gap
 (an invalid scene or a re-appearance later) starts a new segment, length-1 segments are kept, and a scene with
-k activities belongs to k segments. The "shuffled" control keeps every segment's activity and size but moves
-the membership through one fixed permutation of each video's scenes. An Arm with the segments extension
-reads the variant named by Arm.segments from its source bundle.
+k activities belongs to k segments. G2 reads the source bundle's scene_segments sidecar.
 
-  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g3
-  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g3a
-(g5/g5a read the same sidecar files as g3/g3a; no extra prepare-module run is needed.)
+  python -m validation prepare-module --run-id <RUN> --dataset <DATASET> --target g2
 """
 
 import hashlib
-import random
 import re
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
 
-SHUFFLE_SEED = "20261027"
 IRREGULAR = {"ran": "run", "sat": "sit", "ate": "eat", "stood": "stand", "held": "hold", "fell": "fall",
              "went": "go", "took": "take", "gave": "give", "made": "make", "threw": "throw", "drove": "drive",
              "flew": "fly", "fought": "fight", "caught": "catch", "shot": "shoot", "hit": "hit", "put": "put",
@@ -75,13 +69,6 @@ def segments(scenes):
     return out
 
 
-def shuffled(scene_count, groups, content_id):
-    """Same segments (activity, size), membership moved by one fixed permutation of the video's scenes."""
-    order = list(range(scene_count))
-    random.Random(f"{SHUFFLE_SEED}:{content_id}").shuffle(order)
-    return [(activity, sorted(order[p] for p in members)) for activity, members in groups]
-
-
 def bundle_scenes(path, excluded, content_id):
     """[(scene_idx, activity set, action count)] for the scenes graph_inputs kept, in bundle order."""
     from artifact_io import read_jsonl
@@ -108,14 +95,13 @@ def attach(context, arm_name):
     arm = registry(context.config)[arm_name]
     if "segments" not in arm.extensions:
         raise ValueError(f"Arm {arm_name} has no segments extension")
-    variant = arm.segments
     directory = context.representations_dir / feature_source(arm)
     manifest = read_json(directory / "manifest.json")
     excluded = {(e["content_id"], e["scene_idx"]) for e in read_json(directory / "statistics.json")["excluded_scenes"]}
     video_offsets = np.load(directory / "video_offsets.npy")
     scene_offsets = np.load(directory / "scene_offsets.npy")
     types = np.load(directory / "types.npy")
-    pairs, lengths, segment, moved = [], Counter(), 0, Counter()
+    pairs, lengths, segment = [], Counter(), 0
     for index, item in enumerate(manifest["catalog"]):
         cid = item["content_id"]
         scenes = bundle_scenes(context.scene_arm_dir(arm.scene_arm) / f"{cid}.jsonl", excluded, cid)
@@ -127,22 +113,15 @@ def attach(context, arm_name):
             if int((types[start:stop] == 1).sum()) != scene[2]:
                 raise ValueError(f"action count mismatch with the bundle: {cid} scene {scene[0]}")
         groups = segments(scenes)
-        if variant == "shuffled":
-            permuted = shuffled(len(scenes), groups, cid)
-            moved["segments"] += len(groups)
-            moved["changed"] += sum(a[1] != b[1] for a, b in zip(groups, permuted))
-            groups = permuted
         for _, members in groups:
             pairs.extend([first + p, segment] for p in members)
             lengths[len(members)] += 1
             segment += 1
     statistics = {
-        "variant": variant, "arm": arm_name, "source": feature_source(arm), "shuffle_seed": SHUFFLE_SEED,
+        "arm": arm_name, "source": feature_source(arm),
         "builder_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "segments": segment, "memberships": len(pairs),
         "length_distribution": {str(k): v for k, v in sorted(lengths.items())[:15]},
-        "shuffled_segments_with_changed_members": moved["changed"] / moved["segments"] if moved["segments"] else None,
     }
-    write_scene_segments(directory, np.asarray(pairs, dtype=np.int64).reshape(-1, 2), statistics=statistics,
-                         variant=variant)
+    write_scene_segments(directory, np.asarray(pairs, dtype=np.int64).reshape(-1, 2), statistics=statistics)
     return statistics

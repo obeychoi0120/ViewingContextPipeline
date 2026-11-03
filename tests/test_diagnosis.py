@@ -38,13 +38,13 @@ def test_bootstrap_pairs_users_across_arms():
 
 
 def test_selected_pairs_use_bonferroni(context):
-    targets = ["d2", "base", "g1"]
+    targets = ["d", "base", "g1"]
     families = comparison_families(context.config, targets)
     assert families == {
         "selected_targets": [
+            ("d", "base"),
             ("g1", "base"),
-            ("d2", "base"),
-            ("d2", "g1"),
+            ("g1", "d"),
         ]
     }
     assert comparison_contract(context.config, targets)["comparison_count"] == 3
@@ -91,7 +91,7 @@ def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
 
 
 @pytest.mark.torch
-def test_six_arm_cpu_roundtrip(context, monkeypatch, capsys):
+def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT
     from pipeline_runtime import RunContext
     from validation.cli import main
@@ -100,7 +100,7 @@ def test_six_arm_cpu_roundtrip(context, monkeypatch, capsys):
 
     graph_generator, description_generator = prepare_inputs(context, monkeypatch)
     assert len(graph_generator.tasks) == len(description_generator.tasks) == 48
-    arms = ["base", "g1", "g2", "d2", "g3", "g4"]
+    arms = ["base", "d", "g0", "g1", "g2"]
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
 
     def command(step, target):
@@ -108,13 +108,13 @@ def test_six_arm_cpu_roundtrip(context, monkeypatch, capsys):
                      "--target", *target])
 
     assert command("embed-representations", arms) == 0
-    assert command("prepare-module", ["g3", "g4"]) == 0
-    graph_arms = ["g1", "g2", "g3", "g4"]
+    assert command("prepare-module", ["g2"]) == 0
+    graph_arms = ["g0", "g1", "g2"]
     assert len({recommendation_identity(context, name)["embedding_hash"] for name in graph_arms}) == 1
     assert len(GraphStore(context.representations_dir / "desc_qwen3vl")["contexts"]) == 48
-    d2_identity = recommendation_identity(context, "d2")
-    assert d2_identity["item_model"]["description_scene_input"]["title"] == "video_node_initial_state"
-    assert "scene_segments" not in d2_identity
+    d_identity = recommendation_identity(context, "d")
+    assert d_identity["item_model"]["description_projection_dim"] == 384
+    assert "scene_segments" not in d_identity
     source_bytes = {p: p.read_bytes() for p in context.representations_dir.rglob("*") if p.is_file()}
 
     def forbidden_preparation(*args, **kwargs):
@@ -123,34 +123,35 @@ def test_six_arm_cpu_roundtrip(context, monkeypatch, capsys):
     monkeypatch.setattr("validation.graph_inputs.prepare", forbidden_preparation)
     monkeypatch.setattr("validation.features.BGETextEncoder", forbidden_preparation)
     assert command("run-recommendation", arms) == 0
-    assert len(list(context.recommendations_dir.rglob("complete.json"))) == 18
+    assert len(list(context.recommendations_dir.rglob("complete.json"))) == 15
     capsys.readouterr()
     assert command("run-diagnosis", arms) == 0
     console = capsys.readouterr().out.strip().splitlines()
     target_set = "_".join(arms)
     document = read_json(context.diagnosis_path(arms))
     assert document["targets"] == arms
-    assert document["statistics"]["comparison_count"] == len(document["statistics"]["comparisons"]) == 15
-    assert all(value["family_size"] == 15 for value in document["statistics"]["comparisons"].values())
-    assert document["recommendations"]["actual_event_count"] == 54
+    assert document["statistics"]["comparison_count"] == len(document["statistics"]["comparisons"]) == 10
+    assert all(value["family_size"] == 10 for value in document["statistics"]["comparisons"].values())
+    assert document["recommendations"]["actual_event_count"] == 45
     assert document["arm_contract"] == RECOMMENDATION_ARM_CONTRACT
-    assert console[-7].split() == ["Arm", "NDCG@10", "HR@10"]
-    for line, arm, label in zip(console[-6:], arms, ["Base", "G1", "G2", "D2", "G3", "G4"], strict=True):
+    assert console[-6].split() == ["Arm", "NDCG@10", "HR@10"]
+    for line, arm, label in zip(console[-5:], arms, ["Base", "D", "G0", "G1", "G2"], strict=True):
         means = document["recommendations"]["means"][arm]
-        assert line.split() == [label, f"{means['NDCG@10']:.6f}", f"{means['HR@10']:.6f}"]
+        std = document["recommendations"]["standard_deviations"][arm]
+        assert line.split() == [label, f"{means['NDCG@10']:.6f}", "±", f"{std['NDCG@10']:.6f}",
+                                f"{means['HR@10']:.6f}", "±", f"{std['HR@10']:.6f}"]
     text = (context.run_root / "reports" / target_set / "report.md").read_text()
-    for comparison in ("G2 − D2", "G4 − D2", "G4 − G1", "G4 − G2", "G4 − G3", "G4 − Base"):
+    for comparison in ("G0 − D", "G1 − G0", "G2 − G1"):
         assert comparison in text
-    assert "장면 집합과 확보율 차이" in text
-    assert "desc_qwen3vl" in text and "제목 fallback" in text
+    assert "장면 확보율" in text and "제목 fallback" in text
     assert_run_grid(context, graph_mode=True)
-    assert run_recommendation(context, target=arms)["skipped"] == 18
+    assert run_recommendation(context, target=arms)["skipped"] == 15
     assert all(path.read_bytes() == content for path, content in source_bytes.items())
     assert not (context.run_root / "run_contract.json").exists()
 
 
 @pytest.mark.torch
-def test_d2_runs_without_graph_and_reuses_completed_results(context, monkeypatch):
+def test_d_runs_without_graph_and_reuses_completed_results(context, monkeypatch):
     from extraction.scene_storage import write_scene_records
     from helpers import FakeEncoder, failure_row, ready_cohort
     from validation.graph_model import new_graph_model
@@ -170,24 +171,24 @@ def test_d2_runs_without_graph_and_reuses_completed_results(context, monkeypatch
             rows = [failure_row(cid)]
         write_scene_records(context.scene_arm_dir("desc_qwen3vl") / f"{cid}.jsonl", rows)
     monkeypatch.setattr("validation.features.BGETextEncoder", FakeEncoder)
-    embed_representations(context, target=["d2"])
+    embed_representations(context, target=["d"])
     assert not context.scene_arm_dir("graph_qwen3vl").exists()
     assert not (context.representations_dir / "graph_qwen3vl").exists()
     assert not list(context.representations_dir.rglob("scene_segments*"))
-    identity = recommendation_identity(context, "d2")
+    identity = recommendation_identity(context, "d")
     assert identity["representation_mode"] == "description"
-    assert identity["experiment_arm"]["name"] == "d2"
-    assert identity["item_model"]["attention"]["pooling"] == "video_node"
-    assert run_recommendation(context, target=["d2"])["completed"] == 3
-    assert run_diagnosis(context, target=["d2"])["status"] == "pass"
-    document = read_json(context.diagnosis_path(["d2"]))
-    counts = document["representations"]["d2"]["statistics"]["counts"]
+    assert identity["experiment_arm"]["name"] == "d"
+    assert identity["scene_aggregation"] == "mean"
+    assert run_recommendation(context, target=["d"])["completed"] == 3
+    assert run_diagnosis(context, target=["d"])["status"] == "pass"
+    document = read_json(context.diagnosis_path(["d"]))
+    counts = document["representations"]["d"]["statistics"]["counts"]
     assert counts["failed"] > 0 and counts["empty_video"] == 1 and counts["zero_scene_video"] == 2
     assert document["recommendations"]["base_relative_changes"] is None
     assert document["statistics"]["comparison_count"] == 0
     assert document["statistics"]["comparisons"] == {}
-    restored = new_graph_model(context, validation_config(context), "d2", "cpu").eval()
-    directory = context.recommendations_dir / "seed_42" / "d2"
+    restored = new_graph_model(context, validation_config(context), "d", "cpu").eval()
+    directory = context.recommendations_dir / "seed_42" / "d"
     checkpoint = torch.load(directory / "sasrec.pt", map_location="cpu", weights_only=True)
     restored.load_state_dict(checkpoint["state_dict"], strict=True)
     with torch.no_grad():
@@ -199,7 +200,7 @@ def test_d2_runs_without_graph_and_reuses_completed_results(context, monkeypatch
         raise AssertionError("completed combinations must skip model initialization")
 
     monkeypatch.setattr("validation.graph_model.new_graph_model", forbidden)
-    assert run_recommendation(context, target=["d2"])["skipped"] == 3
+    assert run_recommendation(context, target=["d"])["skipped"] == 3
     assert all(path.read_bytes() == content for path, content in before.items())
 
 
@@ -221,3 +222,17 @@ def test_arm_registration_changes_preserve_existing_cohort_and_results(context, 
     write_json(path, old)
     with pytest.raises(RuntimeError, match="selection inputs changed"):
         load_validation_cohort(context)
+
+
+def test_old_diagnosis_and_report_are_preserved(context):
+    from artifact_io import write_json
+
+    destination = context.diagnosis_path(["base", "g1"])
+    write_json(destination, {"recommendations": {"architecture_version": "sasrec-scene-content/v1"}})
+    report = context.run_root / "reports" / "base_g1" / "report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text("historical result")
+    before = destination.read_bytes()
+    with pytest.raises(ValueError, match="new Run ID"):
+        run_diagnosis(context, target=["base", "g1"], force=True)
+    assert destination.read_bytes() == before and report.read_text() == "historical result"

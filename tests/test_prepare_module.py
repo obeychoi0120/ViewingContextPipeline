@@ -35,26 +35,22 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     monkeypatch.setattr("validation.scene_segments.attach", tracked_attach)
     command = [
         "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", "g4", "g3",
+        "--target", "g2",
     ]
     assert main(command) == 0
-    assert calls == ["g3"]
+    assert calls == ["g2"]
     output = capsys.readouterr().out
     assert "[STEP] prepare-module" in output
-    assert 'selected_arms: ["g3", "g4"]' in output
+    assert 'selected_arms: ["g2"]' in output
     assert f"output_dir: {context.representations_dir}" in output
     manifest = read_json(directory / "manifest.json")
-    for variant in ("true",):
-        pairs = load_scene_segments(directory, variant)
-        assert pairs.shape == (48, 2)
-        np.testing.assert_array_equal(pairs[:, 0], np.arange(48))
-        assert len(np.unique(pairs[:, 1])) == 24
-        meta = scene_segments_identity(directory, variant)
-        assert meta["variant"] == variant and meta["input_hash"] == manifest["input_hash"]
-    assert recommendation_identity(context, "g3")["scene_segments"] == (
-        recommendation_identity(context, "g4")["scene_segments"]
-    )
-    for arm in ("g1", "g2", "g3", "g4"):
+    pairs = load_scene_segments(directory)
+    assert pairs.shape == (48, 2)
+    np.testing.assert_array_equal(pairs[:, 0], np.arange(48))
+    assert len(np.unique(pairs[:, 1])) == 24
+    meta = scene_segments_identity(directory)
+    assert meta["input_hash"] == manifest["input_hash"]
+    for arm in ("g0", "g1", "g2"):
         identity = recommendation_identity(context, arm)
         assert json.loads(json.dumps(identity)) == identity
 
@@ -70,7 +66,7 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert all(path.read_bytes() == content for path, content in originals.items())
 
 
-@pytest.mark.parametrize("target", [["g3", "g1"], ["base"], ["d2"], ["g3", "g3"], ["missing"]])
+@pytest.mark.parametrize("target", [["g2", "g1"], ["base"], ["d"], ["g2", "g2"], ["missing"]])
 def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monkeypatch, capsys, target):
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid targets must be rejected before preparing any Arm")
@@ -92,7 +88,7 @@ def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monk
 def test_prepare_module_cli_rejects_training_and_diagnosis_options(context, capsys, options):
     assert main([
         "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", "g3", *options,
+        "--target", "g2", *options,
     ]) == 1
     assert "[FAILED] prepare-module:" in capsys.readouterr().err
 
@@ -100,6 +96,6 @@ def test_prepare_module_cli_rejects_training_and_diagnosis_options(context, caps
 def test_prepare_module_cli_rejects_underscore_spelling(context):
     with pytest.raises(SystemExit) as exc:
         main(["prepare_module", "--run-id", context.run_id, "--dataset", context.dataset,
-              "--target", "g3"])
+              "--target", "g2"])
     assert exc.value.code == 2
 

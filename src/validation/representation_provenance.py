@@ -26,20 +26,12 @@ def recommendation_identity(context, branch):
         raise ValueError(f"missing embedding provenance: {branch}; run embed-representations")
     from dataclasses import asdict
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
-    from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, registry
     from validation.recommendation_contracts import ITEM_MODEL, ARCHITECTURE_VERSION, EVALUATION_CONTRACT
     from model_provenance import canonical, local_model_identity
-    from validation.role_corruption import CORRUPTION
 
     arm = registry(context.config)[branch]
     experiment_arm = asdict(arm)
-    if not arm.extensions:
-        # Arms without extensions keep their earlier identity (and reusable results).
-        experiment_arm.pop("extensions")
-        experiment_arm.pop("segments")
-    else:
-        # Match the JSON form used by completion manifests and diagnosis.
-        experiment_arm["extensions"] = list(arm.extensions)
+    experiment_arm["extensions"] = list(arm.extensions)
     identity = {
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
@@ -54,30 +46,23 @@ def recommendation_identity(context, branch):
             "scene_mlp": branch != "base",
             "item_mlp": branch == "base",
             "description_projection_dim": 384 if arm.representation == "description" else None,
-            "attention": {"query_key_input_dim": 384, "query_key_dim": 128,
-                          "normalization": "unit_rms_then_scaled_dot_product_row_softmax",
-                          "layers": 1, "value_dim": 512,
-                          "residual": True, "activation": "relu", "pooling": "mean"}
-            if arm.aggregation != "mean" else None,
+            "role_fusion": arm.role_fusion,
+            "scene_mlp_config": {"input_dim": 512, "output_dim": 512,
+                                 "formula": "x_plus_relu_linear_x"} if branch != "base" else None,
         },
         "experiment_arm": experiment_arm,
         "embedding_hash": value,
         "representation_mode": arm.representation,
         "scene_aggregation": arm.aggregation if branch != "base" else None,
-        "role_corruption": dict(CORRUPTION) if branch == "g1b" else None,
     }
     if arm.extensions:
         from validation.graph_context import EXTENSION_MODELS
 
         identity["item_model"]["extensions"] = {e: EXTENSION_MODELS[e] for e in sorted(arm.extensions)}
-        if arm.aggregation == "mean":
-            # Without a scene exchange the segments stage reads the scene MLP output (g3/g4 identity unchanged).
-            identity["item_model"]["extensions"]["segments"] = {
-                **EXTENSION_MODELS["segments"], "applied_after": "scene_mlp_without_scene_exchange"}
     if "segments" in arm.extensions:
         from validation.graph_inputs import scene_segments_identity
 
         identity["scene_segments"] = scene_segments_identity(
-            context.representations_dir / feature_source(arm), arm.segments
+            context.representations_dir / feature_source(arm)
         )
     return identity

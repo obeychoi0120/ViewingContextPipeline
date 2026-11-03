@@ -5,6 +5,7 @@ import numpy as np
 from artifact_io import read_json
 from validation.metrics import metrics_from_rank
 from validation.recommendation_contracts import (
+    ARCHITECTURE_VERSION,
     DIAGNOSIS_ARCHITECTURE_VERSIONS,
     EVALUATION_CONTRACT,
     resolve_target_arms,
@@ -162,7 +163,6 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 architecture_version = training["architecture_version"]
                 model_reports[arm] = {
                     "parameters": training.get("parameters", {}),
-                    "role_corruption": training.get("role_corruption_report"),
                 }
                 best = training["best_epoch"]
                 if training["split"] != split or best not in [row["epoch"] for row in training["train"]]:
@@ -266,9 +266,19 @@ def diagnose(context, *, target=None, compare_run_id=None):
     contract = comparison_contract(context.config, arms)
     selected = target_set(context.config, arms)
     destination = context.diagnosis_path(arms)
+    report_path = context.run_root / "reports" / selected / "report.md"
+    if destination.exists():
+        previous = read_json(destination)
+        previous_architecture = previous.get("architecture_version") or previous.get(
+            "recommendations", {}).get("architecture_version")
+        if previous_architecture != ARCHITECTURE_VERSION:
+            raise ValueError(f"incompatible diagnosis output: {destination}; use a new Run ID")
+    elif report_path.exists():
+        raise ValueError(f"report without matching diagnosis provenance: {report_path}; use a new Run ID")
     document = {
         "dataset": context.dataset,
         "schema_version": "leave-one-out-diagnosis/v5",
+        "architecture_version": ARCHITECTURE_VERSION,
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
         "run_id": context.run_id,
@@ -312,12 +322,14 @@ def diagnose(context, *, target=None, compare_run_id=None):
     write_report(context, selected, document)
     cutoff = config.evaluation.primary_cutoff
     metrics = (f"NDCG@{cutoff}", f"HR@{cutoff}")
-    print("\n[Diagnosis] Arm별 최종 test 지표 (seed 평균)", flush=True)
-    print(f"{'Arm':<6} {metrics[0]:>12} {metrics[1]:>12}", flush=True)
+    print("\n[Diagnosis] Arm별 최종 test 지표 (seed 평균 ± 표준편차)", flush=True)
+    print(f"{'Arm':<6} {metrics[0]:>23} {metrics[1]:>23}", flush=True)
     for arm in arms:
         values = document["recommendations"]["means"][arm]
+        deviations = document["recommendations"]["standard_deviations"][arm]
+        columns = [f"{values[m]:.6f} ± {deviations[m]:.6f}" for m in metrics]
         print(
-            f"{display_arm(arm):<6} {values[metrics[0]]:>12.6f} {values[metrics[1]]:>12.6f}",
+            f"{display_arm(arm):<6} {columns[0]:>23} {columns[1]:>23}",
             flush=True,
         )
     return {"stage": "run-diagnosis", "status": "pass", "path": str(destination)}

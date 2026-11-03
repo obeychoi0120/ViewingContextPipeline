@@ -1,17 +1,10 @@
 """Korean report for manually selected, matched recommendation experiments."""
 
 PRIORITY_COMPARISONS = (
-    ("g1", "d1", "Graph와 Description 파이프라인"),
-    ("g1", "g1a", "Entity–Role Fusion 모듈"),
-    ("g1", "g1b", "추출된 역할 연결 유지"),
-    ("g1", "g1c", "학습된 장면 간 정보 전달"),
-    ("g1c", "g0", "장면별 추가 변환층"),
-    ("g1", "g0", "전체 장면 집계 모듈"),
-    ("g5", "g0", "Attention 없는 장면–구간 hypergraph"),
-    ("g5", "g5a", "올바른 구간 소속 (Attention 없음)"),
-    ("g1", "g5", "장면 간 Attention 대 구간 hypergraph"),
+    ("g0", "d", "Description과 구조화된 Graph 입력·인코딩"),
+    ("g1", "g0", "A: Role Fusion의 추가 효과"),
+    ("g2", "g1", "B: Hypergraph 집계·Action 구간 기여의 추가 효과"),
 )
-
 
 def display_arm(name):
     return "Base" if name == "base" else name[0].upper() + name[1:]
@@ -68,29 +61,26 @@ def write_report(context, selected, document):
             f"| [{low:+.6f}, {high:+.6f}] ({value['confidence_level']:.4%}) "
             f"| {interpretation} |"
         )
-    lines += ["", "| Arm | 유효 장면 | 장면 성공률 | 장면 미확보 영상 | 학습 가능 파라미터 | 실제 사용 파라미터 |",
-              "| --- | ---: | ---: | ---: | ---: | ---: |"]
-    corruption_lines = []
+    lines += ["", "| Arm | 소스 | 유효 장면 | 장면 성공률 | 제목 fallback | 제목·장면 모두 없음 | 학습 가능 파라미터 | 실제 사용 파라미터 |",
+              "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for arm, state in document["representations"].items():
         counts = state["statistics"]["counts"]
         coverage = state["statistics"]["scene_coverage"]
         coverage_text = f"{coverage:.2%}" if coverage is not None else "—"
         parameters = report["model_reports"][arm]["parameters"]
+        source = ", ".join(row["source"] for row in state["sources"])
+        empty = counts.get("empty_video", 0)
+        fallback = max(0, counts.get("zero_scene_video", 0) - empty) if arm != "base" else "—"
         lines.append(
-            f"| {display_arm(arm)} | {counts.get('valid_scenes', 0)} | {coverage_text} "
-            f"| {counts.get('zero_scene_video', 0)} | {parameters.get('trainable', '—')} "
+            f"| {display_arm(arm)} | {source} | {counts.get('valid_scenes', 0)} | {coverage_text} "
+            f"| {fallback} | {empty} | {parameters.get('trainable', '—')} "
             f"| {parameters.get('active_trainable', '—')} |"
         )
-        corruption = report["model_reports"][arm]["role_corruption"]
-        if corruption:
-            corruption_lines += ["", f"{display_arm(arm)}: 연결 {corruption['total_links']}개 중 "
-                                 f"{corruption['changed_links']}개 변경 ({corruption['changed_ratio']:.2%}), "
-                                 f"대체 Entity가 없는 연결 {corruption['impossible_links']}개. 교란 seed는 42입니다."]
-    lines += corruption_lines
     lines += [
-        "", "G1a 비교에는 Fusion 제거에 따른 모델 용량 변화가 포함됩니다. "
-        "G1b는 추출된 연결을 유지하는 효과이며 원본 연결의 정답 여부를 보장하지 않습니다. "
-        "G1c의 Q/K는 forward와 gradient에 관여하지 않습니다. 각 효과를 단순 합산하지 않습니다.",
+        "", "G0−D에는 추출 내용·인코더·장면 확보율 차이가 포함됩니다. "
+        "G1−G0는 Fusion 모듈의 추가 효과이며 파라미터 증가도 포함합니다. "
+        "G2−G1은 Hypergraph 전달과 구간 기여를 합친 B 전체의 효과입니다. "
+        "개별 경로 또는 연결 구조만의 효과를 분리하지 않으며 각 효과를 단순 합산하지 않습니다.",
         "Description과 Graph는 각각의 유효 장면을 사용하므로 장면 확보율도 함께 해석해야 합니다.",
         "", "| Arm | seed | NDCG@10 | HR@10 |", "| --- | ---: | ---: | ---: |",
     ]

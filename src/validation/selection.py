@@ -137,6 +137,11 @@ def build_selection(context):
 
 
 def prepare_validation_cohort(context):
+    if (cohort_directory(context) / "manifest.json").exists():
+        try:
+            return load_validation_cohort(context)
+        except RuntimeError:
+            pass
     cohort = build_selection(context)
     directory = cohort_directory(context)
     directory.mkdir(parents=True, exist_ok=True)
@@ -219,7 +224,9 @@ def load_validation_cohort(context, *, verify_current=True):
             raise ValueError("invalid leave-one-out catalog")
         if verify_current:
             current = build_selection(context)
-            if current["manifest"] != manifest:
+            # Registered models do not change catalog, events or the selection policy.
+            if ({k: v for k, v in current["manifest"].items() if k != "arms"}
+                    != {k: v for k, v in manifest.items() if k != "arms"}):
                 raise ValueError("selection inputs changed")
         return {**cohort, "manifest": manifest}
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as exc:

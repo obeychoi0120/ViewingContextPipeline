@@ -54,35 +54,37 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 ## 장면별 BGE와 공유 캐시
 
-Basic 추천 Arm은 `base d0 d1 g0 g1 g2 g3 g4`이며 Ablation은 `g1a g1b g1c g3a`, Attention 없는 hypergraph는 `g5 g5a`입니다. 모든 Arm에 제목을 포함합니다. D0·D1은 `desc_qwen3vl`, G0·G1·G2·G3·G4·G1a·G1b·G1c·G3a·G5·G5a는 `graph_qwen3vl` 장면 자료를 직접 사용합니다. Summary는 추천 입력에 포함되지 않습니다. BGE는 고정된 1024차원 특징을 생성합니다.
+추천 Arm은 `base d g0 g1 g2`입니다. D는 `desc_qwen3vl`, G0·G1·G2는 `graph_qwen3vl`을 읽습니다. 제목과 장면별 BGE 1024차원 특징을 사용하며 Summary는 사용하지 않습니다. D·G0·G1·G2는 공통 구조의 Residual Scene MLP를 독립적으로 학습합니다. G0는 Fusion 없이 Mean, G1은 Role Fusion(A)과 Mean, G2는 A에 Hypergraph 집계·Action 구간 기여(B)를 추가합니다.
 
-Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다. G1b는 공유 Graph를 수정하지 않고 고정된 교란 뷰를 만듭니다.
+Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다.
 
-공유 캐시는 `<artifacts_root>/shared_cache/{scene_inputs,recommendations}/`입니다. 로컬 결과 검증 → 공유 캐시 → 새 계산 순서이며 키별 잠금·checksum·원자적 게시를 사용합니다. `--force`는 캐시 읽기를 우회합니다. 입력 키에는 실제 Scene 파일 바이트·생성 조건 기록, catalog 순서, 제목, BGE 모델·설정과 변환 계약을 포함합니다. 추천 키에는 추천 계약·Arm 구조·표현 해시·분할·학습 설정·seed·G1b 교란 정책을 추가합니다.
+공유 캐시는 `<artifacts_root>/shared_cache/{scene_inputs,recommendations}/`입니다. 로컬 결과 검증 → 공유 캐시 → 새 계산 순서이며 키별 잠금·checksum·원자적 게시를 사용합니다. `--force`는 캐시 읽기를 우회합니다. 입력 키에는 실제 Scene 파일 바이트·생성 조건 기록, catalog 순서, 제목, BGE 모델·설정과 변환 계약을 포함합니다. 추천 키에는 추천 계약·Arm 구조·표현 해시·분할·학습 설정·seed·활동 구간 checksum을 추가합니다.
 
 추천 재사용 단위는 완료된 seed × Arm입니다. 모든 Arm에서 `sasrec.pt`, `training.json`, `per_event_metrics.jsonl`, `catalog_vectors.npy`, `complete.json`을 검증합니다. Run 간 재사용은 독립 파일로 복사하여 현재 Run identity와 `reused_from`을 기록합니다. 완료 조합은 모델·worker 초기화 없이 건너뜁니다. epoch 중간 재개는 지원하지 않습니다.
 
 ## 유지하는 계약과 지원 경계
 
-설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v1`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
+설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v2`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
 
-validation 설정 `validation-config/v8`, 학습 구현 `shared-scenes-leave-one-out-training/v2`, 평가 `microlens-leave-one-out-evaluation/v2`, 조합 `sasrec-leave-one-out-combination/v2`, 이벤트 `sasrec-leave-one-out-per-event/v2`는 유지합니다. Graph의 receiver 예약 텐서 슬롯도 유지합니다. 원본 추출·프롬프트·기존 Run 산출물은 이동·삭제하지 않습니다.
+validation 설정 `validation-config/v9`, 학습 구현 `shared-scenes-leave-one-out-training/v2`, 평가 `microlens-leave-one-out-evaluation/v2`, 조합 `sasrec-leave-one-out-combination/v2`, 이벤트 `sasrec-leave-one-out-per-event/v2`는 유지합니다. Graph의 receiver 예약 텐서 슬롯도 유지합니다. 원본 추출·프롬프트·기존 Run 산출물은 이동·삭제하지 않습니다.
 
 ## Leave-one-out 실행과 진단
 
-`embed-representations`, `prepare-module`, `run-recommendation`, `run-diagnosis`는 독립 단계이며 `--target`이 필수입니다. 각 Arm이 입력·집계 방식을 정하므로 표현 모드·집계 옵션은 받지 않습니다. Basic과 Ablation의 실행 순서는 사용자가 정하며 성능에 따른 허용·거부 로직은 없습니다. 추천 명령은 특징·구간 준비나 진단을 자동 실행하지 않습니다.
+`embed-representations`, `prepare-module`, `run-recommendation`, `run-diagnosis`는 독립 단계이며 `--target`이 필수입니다. 각 Arm이 입력·집계 방식을 정하므로 표현 모드·집계 옵션은 받지 않습니다. 선택 Arm의 실행 순서는 사용자가 정하며 성능에 따른 허용·거부 로직은 없습니다. 추천 명령은 특징·구간 준비나 진단을 자동 실행하지 않습니다.
 
-G3·G4는 `embed-representations` 이후, 학습 전에 `python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g3`로 공통 구간 파일을 준비합니다. 이후 G3a 학습 전에는 같은 Step의 `--target g3a`로 섞은 구간만 준비합니다. 이 Step의 `--target`은 구간 확장을 사용하는 Arm만 받습니다. G3와 G4는 Graph 소스 bundle의 `scene_segments.npy`·`scene_segments.json`을 공유하며 G3a는 별도 `scene_segments_shuffled.npy`·`scene_segments_shuffled.json`을 사용합니다. 이 단계는 실행할 때마다 선택한 구간 파일만 다시 만들며 VLM·BGE를 실행하지 않습니다. Graph bundle 재생성 또는 구간 생성 규칙 변경 후에는 구간 파일도 다시 준비합니다. 구간 파일의 버전·입력 해시·checksum을 검증하고 추천 identity에 포함하므로 파일이 없거나 현재 bundle과 맞지 않으면 학습할 수 없습니다.
+G2는 특징 준비 후 `python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET" --target g2`로 활동 구간을 준비합니다. 이 단계는 G2만 받으며 Graph bundle의 `scene_segments.npy`·`scene_segments.json`을 생성합니다. VLM·BGE를 실행하지 않습니다. 구간 계약은 `scene-segments/v2`이며 입력 해시·checksum을 추천 identity에 포함합니다. bundle이나 생성 규칙 변경 후에는 다시 준비해야 합니다.
 
 추천 결과는 `validation/recommendations/seed_<seed>/<arm>/`에 저장합니다. 최적 validation HR@10의 최초 checkpoint를 복원한 뒤 test를 한 번 평가하며 refit은 없습니다. `training.json`에는 파라미터 수·G1b 교란 통계·G1c의 비활성 Q/K도 기록합니다.
 
 진단은 `validation/diagnosis/<target-set>/diagnosis.json`, 보고서는 `reports/<target-set>/report.md`에 저장합니다. target-set은 등록 순서로 연결합니다. Basic과 전체 진단은 별도 경로입니다. JSON에는 seed별·평균·표준편차·Base 상대 변화율·입력 확보율·검정 정책을 저장하고, 상세 아이템별 증거는 원래 특징·학습 파일에서 확인합니다.
 
-3개 seed 기준 Basic 8개 Arm은 24개 학습 조합, Ablation 4개 Arm은 12개 학습 조합, 전체 12개 Arm은 36개 학습 조합입니다. NDCG@10은 사용자별 seed 평균을 paired bootstrap하고 선택한 모든 Arm 쌍에 Bonferroni 보정합니다(Basic 28쌍, Ablation 6쌍, 전체 66쌍). Ablation만 선택하면 Base 상대 변화율과 G1·G3 대비 비교는 계산하지 않으며, 각 진단은 선택한 Arm 묶음별로 저장합니다. HR@10은 기술통계만 보고합니다. Run 간 비교는 같은 Arm·사용자·이벤트·원본·분할·catalog·seed·평가 계약을 요구합니다. 진단 pass는 실행 증거 검증이며 성능 우위 판정과 구분합니다.
+3개 seed × 5개 Arm은 15개 학습 조합입니다. NDCG@10은 사용자별 seed 평균을 paired bootstrap하고 선택한 모든 Arm 쌍에 Bonferroni 보정합니다(전체 10쌍). Base 미선택 시 상대 변화율을 생략합니다. HR@10은 기술통계이며 진단 pass는 실행 증거 검증입니다. Run 간 비교는 동일 Arm·사용자·이벤트·원본·분할·catalog·seed·평가 계약을 요구합니다.
 
 아래 날짜별 항목은 이전 계약의 변경 기록입니다. 현재 실행에는 위 계약과 README를 적용합니다.
 
-## 현재 형식 지원 정리 (2026-10-07)
+아래 날짜별 검증 기록은 당시 코드 기준이며 현재 5개 Arm의 검증 결과를 의미하지 않습니다.
+
+## 과거 검증 기록: 형식 지원 정리 (2026-10-07)
 
 호출이 없는 `validation/io.py`, 구형 rolling benchmark와 raw Graph 호환 모듈을 제거했습니다. 미사용 빈도·catalog scoring·구형 bootstrap·top-k·로그 헬퍼와 분할 재계산 wrapper를 제거하고 학습 전용 루프를 직접 계산으로 정리했습니다. 실제 provenance의 `selection_hash`, 사용자 단위 bootstrap·Bonferroni, Qwen의 문자열 경로 logits 모듈과 Graph 수치 참조 구현은 유지합니다. NumPy 손실 검증은 현행 `transition_loss`를 검사합니다.
 
@@ -90,7 +92,7 @@ Run 산출물·과거 보고서·프롬프트·v7 fixture는 보존합니다. �
 
 검사 결과: `vc_cloud`에서 `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 CUDA_VISIBLE_DEVICES='' python -m pytest -q` **296개 통과(72.76초)**. `python -m ruff check src tests benchmarks`, `git diff --check`, 현행 Scene GCN benchmark의 `--help`도 통과했습니다. 현재 형식의 생성·저장·재사용·임베딩·추천·진단, 비지원 입력 거부·원본 보존, 3개 seed·6개 Arm, mean/GNN 수치·gradient·최적 checkpoint·직렬/병렬·중단 복구·캐시 검증을 포함합니다.
 
-## 진단 JSON 축소 (2026-10-08)
+## 과거 검증 기록: 진단 JSON 축소 (2026-10-08)
 
 Text·Graph mean/GNN에 동일한 `leave-one-out-diagnosis/v2` 저장 정책을 적용합니다. `--compare-run-id`의 비교 결과도 참조 Run·방향·지표·수치 비교만 저장하며 sources를 복사하지 않습니다. 최종 점수와 통계 계산, 원본 증거 검증·실패 처리는 유지합니다. 상세 분할은 `validation/cohort/`, 입력 provenance는 표현 manifest·`.inputs/`, seed별 이벤트 지표·학습 기록은 추천 디렉터리에서 확인합니다. 진단 JSON만 생성하는 방식이 바뀌므로 재학습 없이 기존 `run-diagnosis` 명령을 다시 실행하면 축소 형식으로 저장됩니다. 현재 VM에는 실제 Run 데이터가 없어 기존 대형 진단 파일 자체의 축소량은 미검증입니다.
 
@@ -102,4 +104,6 @@ validation/test에서는 입력의 최대 10개 제한과 별개로 앞선 보�
 
 `validation.evaluation.checkpoint_metric: HR@10`은 고정이며, 최종 보고·paired bootstrap은 NDCG@10을 유지합니다. 평가 계약 `microlens-leave-one-out-evaluation/v2`는 마스킹·랭킹·checkpoint·보고 지표를 학습 fingerprint, 추천 identity, checkpoint, 완료 manifest, 공유 캐시에 연결합니다. 모델·손실·popularity·오른쪽 padding·학습률은 유지하고 참조 코드의 주기적 test나 조기 종료 조건은 도입하지 않습니다. 논문 전체 재현은 아닙니다.
 
-이전 평가 결과의 일반 재진단은 거부합니다. 같은 Run에서 기존 `run-recommendation`을 실행하면 선택한 seed × Arm의 구형 추천 파일을 교체하고, 새 계약에서 완료된 단위는 재사용합니다. 이어서 `run-diagnosis`를 실행해 진단을 재생성하십시오. 추출·분할·임베딩은 provenance가 일치하면 재사용하며 다른 Run·과거 보고서·구형 공유 캐시는 삭제하지 않습니다. 위 진단 축소 절의 재학습 없는 재진단은 당시 계약 또는 현재 계약 안에서만 해당합니다.
+이전 모델 구조의 결과는 새 Arm 결과로 재사용하거나 재진단하지 않습니다. 같은 추천 경로에 이전 구조 결과가 있으면 새 Run을 사용해야 하며 `--force`도 덮어쓰지 않습니다. 학습 시작 시 `identity.json`을 기록해 부분 결과도 보호합니다. 동일 구조에서 완료된 단위는 재사용하며, 입력·학습 설정 변경은 결과 identity를 무효화합니다. 추출·BGE 특징은 provenance가 일치하면 재사용합니다.
+
+진단은 선택한 Arm 전체 쌍에 Bonferroni 보정을 적용합니다. 5개 전체는 10쌍이며 NDCG@10 사용자 단위 paired bootstrap을 사용합니다. 마지막 콘솔에 NDCG@10·HR@10 평균 ± 표준편차를 출력합니다. G0−D, G1−G0, G2−G1을 우선 표시합니다.

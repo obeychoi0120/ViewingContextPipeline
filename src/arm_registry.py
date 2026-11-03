@@ -16,30 +16,17 @@ class Arm:
     scene_arm: str | None = None
     aggregation: str = "mean"
     role_fusion: bool = False
-    # Optional stages (validation.graph_context.EXTENSION_MODELS; segments also on mean); with "segments",
-    # the scene_segments sidecar variant of the source bundle ("true" or "shuffled").
+    # G2 adds activity-segment feedback and a segment contribution to the video.
     extensions: tuple[str, ...] = ()
-    segments: str = "true"
 
 
 ARMS = (
     Arm("base", "metadata", uses_title=True),
-    Arm("d0", "description", "qwen3vl", True, "desc_qwen3vl"),
-    Arm("d1", "description", "qwen3vl", True, "desc_qwen3vl", "gnn_attn"),
-    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True),
-    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
-    # G1 plus gnn_attn extensions: video node, activity segments, both.
-    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("video_node",)),
-    Arm("g3", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",)),
-    Arm("g4", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments", "video_node")),
-    # Ablations: G1 without Fusion, corrupted role links, self-only exchange; G3 with shuffled segments.
-    Arm("g1a", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", False),
-    Arm("g1b", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True),
-    Arm("g1c", "graph", "qwen3vl", True, "graph_qwen3vl", "self_only", True),
-    Arm("g3a", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn_attn", True, ("segments",), "shuffled"),
-    # Attention-free hypergraph: G0 (no scene exchange) plus segments, and its shuffled-segment ablation.
-    Arm("g5", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", True, ("segments",)),
-    Arm("g5a", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", True, ("segments",), "shuffled"),
+    Arm("d", "description", "qwen3vl", True, "desc_qwen3vl"),
+    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl"),
+    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True),
+    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", role_fusion=True,
+        extensions=("segments",)),
 )
 SOURCES = tuple(
     Arm(name, kind, model, False, name)

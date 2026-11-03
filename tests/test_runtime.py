@@ -60,11 +60,11 @@ def test_arm_sources_and_title_policy(context):
 
     arms = registry(context.config)
     assert list(arms) == [
-        "base", "d0", "d1", "g0", "g1", "g2", "g3", "g4", "g1a", "g1b", "g1c", "g3a", "g5", "g5a",
+        "base", "d", "g0", "g1", "g2",
     ]
     assert all(arm.uses_title for arm in arms.values())
     assert [feature_source(arm) for arm in arms.values()] == [
-        "metadata", "desc_qwen3vl", "desc_qwen3vl", *(["graph_qwen3vl"] * 11),
+        "metadata", "desc_qwen3vl", *(["graph_qwen3vl"] * 3),
     ]
     sources = generation_registry(context.config)
     assert all(not arm.uses_title and arm.name == arm.scene_arm for arm in sources.values())
@@ -78,7 +78,7 @@ def test_arm_sources_and_title_policy(context):
         context.validation_dir / "diagnosis" / "base_g1" / "diagnosis.json"
     )
     for targets in ([], ["base", "base"], ["meta"], ["graph_minicpm"], ["missing"],
-                    ["a1"], ["a2"], ["a3"], ["g3s"]):
+                    ["a1"], ["a2"], ["a3"], ["g3s"], ["d0"], ["d1"], ["d2"], ["g3"], ["g4"], ["g5"], ["g1a"], ["g1b"], ["g1c"], ["g3a"], ["g5a"]):
         with pytest.raises(ValueError):
             select_arms(context.config, targets)
 
@@ -90,9 +90,9 @@ def test_cli_mixed_arms_and_removed_options(context, monkeypatch):
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
     calls = []
     monkeypatch.setitem(STEP_HANDLERS, "run-recommendation", lambda ctx, **kw: calls.append(kw))
-    command = ["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "d1", "g1c"]
+    command = ["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "d", "g0"]
     assert main(command) == 0
-    assert calls == [{"force": False, "target": ["d1", "g1c"]}]
+    assert calls == [{"force": False, "target": ["d", "g0"]}]
     for option in (["--representation-mode", "graph"], ["--scene-aggregation", "mean"],
                    ["--step", "ablation"]):
         with pytest.raises(SystemExit):
