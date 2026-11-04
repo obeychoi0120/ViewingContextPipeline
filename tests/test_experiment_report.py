@@ -42,4 +42,4 @@ def test_report_reverses_contrast_interval_and_preserves_tables(context):
     assert "추출 내용·인코더" in text
     assert "A: Hypergraph" in text and "B: Role Fusion" in text
     assert ARCHITECTURE_VERSION in text
-    assert "독립적인 신규 기여로 해석하지 않습니다" in text
+    assert "GCN은 사용하지 않습니다" in text

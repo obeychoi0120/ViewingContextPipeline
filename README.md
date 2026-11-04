@@ -4,8 +4,8 @@ MicroLens-100K 영상 또는 M³L-10M 영화 예고편에서 맥락을 추출하
 
 ## 전체 흐름
 
-- **Description:** 키프레임 → 장면별 Description → 고정 BGE → 제목 결합·Residual Scene MLP → 공통 코사인 GCN → 장면 Mean.
-- **Graph:** 키프레임 → Scene Graph → 고정 BGE·역할 연결 → Arm별 Entity–Role Fusion·장면 인코더 → 공통 코사인 GCN → 장면 평균 또는 Hypergraph 집계·Action 구간 기여.
+- **Description:** 키프레임 → 장면별 Description → 고정 BGE → 제목 결합·Residual Scene MLP → 장면 Mean.
+- **Graph:** 키프레임 → Scene Graph → 고정 BGE·역할 연결 → Arm별 Entity–Role Fusion·장면 인코더 → 장면 평균 또는 Hypergraph 집계·Action 구간 기여.
 - **추천:** 과거 영상 벡터 → SASRec 사용자 벡터 → 후보 영상 벡터와 내적 → 추천 순위·평가 지표.
 
 모든 Arm은 영문 제목을 사용합니다. 제목은 장면 추출에 넣지 않고 추천 인코더에서 결합합니다. BGE는 동결하고 장면 인코더·집계 모듈·SASRec은 추천 loss로 함께 학습합니다. 영상별 Summary는 현재 추천 입력에 포함되지 않습니다.
@@ -304,36 +304,34 @@ Graph의 Entity–Role Fusion은 `[Action; actor; target; tool; place]` 640차�
 
 ### 모듈 3. 장면 집계와 모듈 비교
 
-D·G0·G1·G2는 Scene MLP 뒤에 같은 구조의 **코사인 GCN**을 사용합니다. 기존 유사도 기반 장면 전달 방식을 재사용한 공통 기반 구조이며 독립적인 신규 기여로 제시하지 않습니다. G1은 G0에 **A: Hypergraph 집계 + Action 구간 기여**를, G2는 G1에 **B: Role Fusion**을 추가합니다. A/B는 Arm의 추가 순서이며 실제 계산에서 B는 Scene MLP 앞, A는 GCN 뒤에 적용합니다. D·G0는 GCN 출력을 평균하며 SASRec의 사용자 이력 Attention도 유지합니다.
+D·G0·G1·G2는 장면별 Residual Scene MLP를 공통으로 사용합니다. D·G0는 장면 벡터를 평균하며, G1은 G0에 **A: Hypergraph 집계 + Action 구간 기여**를, G2는 G1에 **B: Role Fusion**을 추가합니다. A/B는 Arm의 추가 순서이며 실제 계산에서 B는 Scene MLP 앞, A는 Scene MLP 뒤에 적용합니다. G1·G2에서 Hypergraph가 장면 간 정보를 전달하는 유일한 경로이며 SASRec의 사용자 이력 Attention은 유지합니다.
 
-GCN은 제목을 제외한 384차원 특징으로 음이 아닌 코사인 연결을 계산하고 자기 연결·대칭 차수 정규화를 적용합니다. Graph는 Entity·Action·Context 결합, D는 투영된 Description을 사용하며 512차원 장면 값을 한 번 전달합니다. 학습형 Q/K는 없습니다.
-
-G1·G2는 Graph Action 문구의 같은 활동 키가 연속하는 장면을 구간으로 묶습니다. 장면 번호 단절이나 활동 재등장은 새 구간이며, 단일 장면 구간과 여러 구간에 속하는 장면도 허용합니다. GCN 출력에서 장면→구간→장면 전달을 수행하고 갱신된 장면 평균에 구간 기여를 더합니다. 구간 표현에는 장면 평균, 길이의 로그, 영상 내 장면 비율을 사용하며 두 학습 게이트는 0에서 시작합니다. 구간이 없으면 해당 Arm의 GCN 출력 평균을 사용합니다.
+G1·G2는 Graph Action 문구의 같은 활동 키가 연속하는 장면을 구간으로 묶습니다. 장면 번호 단절이나 활동 재등장은 새 구간이며, 단일 장면 구간과 여러 구간에 속하는 장면도 허용합니다. Scene MLP 출력에서 장면→구간→장면 전달을 수행하고 갱신된 장면 평균에 구간 기여를 더합니다. 구간 표현에는 장면 평균, 길이의 로그, 영상 내 장면 비율을 사용하며 두 학습 게이트는 0에서 시작합니다. 구간이 없으면 해당 Arm의 장면 평균을 사용합니다.
 
 활동 키는 참여자 표식·일부 기능어를 뺀 첫 단어에 어미 제거·불규칙형 치환 규칙을 적용한 값입니다. 문법 분석·동의어 병합·동일 개체 추적이나 시각적 행동 경계 검출을 수행하지 않습니다. [구간 생성](src/validation/scene_segments.py) · [집계 정의](src/validation/graph_context.py) · [영상 인코더](src/validation/graph_model.py).
 
 <details>
-<summary>D 도식 — 제목·Description → Residual Scene MLP → 공통 GCN → Mean</summary>
+<summary>D 도식 — 제목·Description → Residual Scene MLP → Mean</summary>
 
-![D: 제목·Description → Residual Scene MLP → 공통 GCN → Mean](docs/design/recsys_diagram_d.png)
+![D: 제목·Description → Residual Scene MLP → Mean](docs/design/recsys_diagram_d.png)
 
 </details>
 <details>
-<summary>G0 도식 — Graph 인코딩 → Residual Scene MLP → 공통 GCN → Mean</summary>
+<summary>G0 도식 — Graph 인코딩 → Residual Scene MLP → Mean</summary>
 
-![G0: Graph 인코딩 → Residual Scene MLP → 공통 GCN → Mean](docs/design/recsys_diagram_g0.png)
+![G0: Graph 인코딩 → Residual Scene MLP → Mean](docs/design/recsys_diagram_g0.png)
 
 </details>
 <details>
 <summary>G1 도식 — G0 + A(Hypergraph)</summary>
 
-![G1: Graph → Residual Scene MLP → 공통 GCN → Hypergraph(A)](docs/design/recsys_diagram_g1.png)
+![G1: Graph → Residual Scene MLP → Hypergraph(A)](docs/design/recsys_diagram_g1.png)
 
 </details>
 <details>
 <summary>G2 도식 — G0 + A(Hypergraph) + B(Role Fusion)</summary>
 
-![G2: Graph + Role Fusion(B) → Residual Scene MLP → 공통 GCN → Hypergraph(A)](docs/design/recsys_diagram_g2.png)
+![G2: Graph + Role Fusion(B) → Residual Scene MLP → Hypergraph(A)](docs/design/recsys_diagram_g2.png)
 
 </details>
 
@@ -391,7 +389,7 @@ SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마�
 | 자문 원문의 구분 | 이 README의 연결 모듈 | 현재 구현과 반영 범위 |
 | --- | --- | --- |
 | 자문 모듈 1: 역할 분해 Graph의 추천 활용성 | 모듈 1·2 | Context·Entities·Actions를 정의하고 역할 구조를 장면 표현에 반영 |
-| 자문 모듈 2: 장면 유사도 기반 GCN aggregation | 모듈 2·3 | D·G0·G1·G2 공통 코사인 GCN으로 기존 장면 유사도 기반 전달을 재사용. G1·G2에는 활동 구간 Hypergraph 추가 |
+| 자문 모듈 2: 장면 유사도 기반 GCN aggregation | 모듈 2·3 | 현재 장면 유사도 기반 GCN은 사용하지 않음. G1·G2는 활동 구간 Hypergraph로 장면 정보를 전달 |
 | 자문 모듈 3: 사용자·아이템의 공통 feature space | 모듈 4 | SASRec 사용자 벡터와 후보 영상 벡터를 내적으로 비교 |
 
 제목은 관측 생성에서 제외하고 추천 단계에서 결합하며 고정 BGE 특징과 학습 가능한 영상 encoder를 분리합니다. 장면 간 동일 개체·사건 관계, 영상 간 노드 공유·개체 어휘 정규화, 계층적 DCGN·UniMP·CSA, 사용자 평균·LightGCN·clustering 비교는 후속 검토 범위입니다. 구현 상태·실험 기록은 [프로젝트 이정표](docs/TODO.md)를 참고하세요.
@@ -405,18 +403,18 @@ SASRec은 과거 시청 영상 벡터와 위치 정보를 처리합니다. 마�
 | CLI Arm | 입력·장면 인코더 | 영상 집계 |
 | --- | --- | --- |
 | `base` | 영문 제목, 기존 Metadata 인코더 | 기존 동작 |
-| `d` | 제목128 + Description384 → Residual Scene MLP | 공통 GCN → Mean |
-| `g0` | 제목·Entity 평균·Action 평균·Context 각128 → Residual Scene MLP | 공통 GCN → Mean |
-| `g1` | G0와 동일 | 공통 GCN → Hypergraph(A) → Mean + 구간 기여 |
-| `g2` | G1의 장면 인코딩에 Role Fusion(B) 추가 | 공통 GCN → Hypergraph(A) → Mean + 구간 기여 |
+| `d` | 제목128 + Description384 → Residual Scene MLP | Mean |
+| `g0` | 제목·Entity 평균·Action 평균·Context 각128 → Residual Scene MLP | Mean |
+| `g1` | G0와 동일 | Hypergraph(A) → Mean + 구간 기여 |
+| `g2` | G1의 장면 인코딩에 Role Fusion(B) 추가 | Hypergraph(A) → Mean + 구간 기여 |
 
-등록 순서는 `base d g0 g1 g2`입니다. 모델 구조 계약은 `sasrec-scene-content/v3`입니다. 계약명 `gnn-attn-aggregation/v1`은 식별자로 유지하며 장면 Attention 사용을 의미하지 않습니다. 모든 Arm은 독립적으로 학습합니다.
+등록 순서는 `base d g0 g1 g2`입니다. 모델 구조 계약은 `sasrec-scene-content/v4`입니다. G2는 `clab-insight`의 `hyper-g5` 커밋 `486c541`에 있는 G5의 계산·초기화에 맞춥니다. 계약명 `gnn-attn-aggregation/v1`은 식별자로 유지하며 장면 Attention 사용을 의미하지 않습니다. 모든 Arm은 독립적으로 학습합니다.
 
-주요 비교는 G0−D(입력·인코딩), G1−G0(A), G2−G1(B 전체)입니다. G0−D에는 추출 내용·인코더·파라미터 수·유효 장면 확보율 차이가 포함됩니다. G1−G0는 Hypergraph 전달과 구간 기여의 개별 효과나 연결 구조만의 효과를 분리하지 않습니다. G2−G1은 Hypergraph가 있는 상태에서 Role Fusion을 추가한 효과입니다. 공통 GCN은 Arm마다 262,656개, A는 1,050,626개, B는 83,072개 파라미터를 추가합니다. 각 효과를 단순 합산하지 않습니다.
+주요 비교는 G0−D(입력·인코딩), G1−G0(A), G2−G1(B 전체)입니다. G0−D에는 추출 내용·인코더·파라미터 수·유효 장면 확보율 차이가 포함됩니다. G1−G0는 Hypergraph 전달과 구간 기여의 개별 효과나 연결 구조만의 효과를 분리하지 않습니다. G2−G1은 Hypergraph가 있는 상태에서 Role Fusion을 추가한 효과입니다. A는 1,050,626개, B는 83,072개 파라미터를 추가합니다. 각 효과를 단순 합산하지 않습니다.
 
 기본 3개 seed × 5개 Arm으로 15개 조합을 학습합니다. 사용자별 seed 평균 NDCG@10에 paired bootstrap을 적용하며 선택한 모든 Arm 쌍을 하나의 Bonferroni 비교군으로 둡니다. 전체는 10쌍, 가족 오류율 5%에서 쌍별 신뢰수준 99.5%입니다. HR@10은 기술통계입니다. Base 미선택 시 상대 변화율을 생략합니다.
 
-이전 Arm 이름의 별칭은 지원하지 않습니다. 과거 산출물은 보존하며 이전 추천 결과·checkpoint를 새 이름으로 재사용하지 않습니다. 같은 출력 경로에 이전 모델 결과가 있으면 새 Run을 사용해야 하며 `--force`도 이 보호를 우회하지 않습니다. 입력·checksum이 유효한 추출·BGE 특징은 재사용합니다.
+이전 Arm 이름의 별칭은 지원하지 않습니다. 과거 산출물은 보존하며 이전 추천 결과·checkpoint를 새 이름으로 재사용하지 않습니다. 같은 출력 경로에 이전 모델 결과가 있으면 새 Run ID를 사용해야 하며 `--force`도 이 보호를 우회하지 않습니다. 입력·checksum이 유효한 추출·BGE 특징은 재사용합니다.
 
 보고서에는 seed별 NDCG@10·HR@10, 평균·표본 표준편차, Base 대비 변화율, 장면 성공률·fallback 수와 파라미터 수를 기록합니다. 사용자·이벤트·분할·seed·Arm 정의·모델·평가 계약을 검증하며, `--compare-run-id`는 같은 Arm의 Run 간 paired 비교를 수행합니다.
 

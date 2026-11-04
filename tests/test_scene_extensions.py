@@ -77,7 +77,7 @@ def synthetic_store(videos=24, feature_dim=16, seed=3):
     return store
 
 
-def make_model(store, extensions=(), items=8, aggregation="gnn", role_fusion=True):
+def make_model(store, extensions=(), items=8, aggregation="mean", role_fusion=True):
     torch.manual_seed(0)
     return GraphSASRec(
         store=store, aggregation=aggregation, item_count=len(store), max_length=10, embedding_dim=32,
@@ -148,8 +148,8 @@ def test_segment_readout_weights_each_segment_equally():
 
 
 
-@pytest.mark.parametrize("extensions,aggregation", [(("segments",), "mean"), (("segments",), "gnn")])
-def test_extensions_train_and_ignore_chunking(extensions, aggregation):
+def test_extensions_train_and_ignore_chunking():
+    extensions, aggregation = ("segments",), "mean"
     store = synthetic_store(videos=30)
     model = make_model(store, extensions, items=30, aggregation=aggregation)
     if "segments" in extensions:
@@ -239,6 +239,7 @@ def test_attach_builds_segments_and_identity_records_them(context, monkeypatch):
     assert g1["scene_segments"] == g2["scene_segments"]
     assert g2["experiment_arm"]["extensions"] == ["segments"]
     assert g2["item_model"]["extensions"]["segments"] == EXTENSION_MODELS["segments"]
-    assert g2["scene_aggregation"] == "gnn"
-    assert g2["item_model"]["gcn"]["similarity"] == "nonnegative_cosine"
+    assert g2["scene_aggregation"] == "mean"
+    assert "gcn" not in g2["item_model"]
+    assert g2["item_model"]["extensions"]["segments"]["applied_after"] == "scene_mlp_without_scene_exchange"
     assert g2["item_model"]["scene_mlp"] is True

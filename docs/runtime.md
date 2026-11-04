@@ -54,7 +54,7 @@ Gemini의 `429 RESOURCE_EXHAUSTED`는 30초 후 한 번 재시도합니다. 다�
 
 ## 장면별 BGE와 공유 캐시
 
-추천 Arm은 `base d g0 g1 g2`입니다. D는 `desc_qwen3vl`, G0·G1·G2는 `graph_qwen3vl`을 읽습니다. 제목과 장면별 BGE 1024차원 특징을 사용하며 Summary는 사용하지 않습니다. D·G0·G1·G2는 공통 구조의 Residual Scene MLP와 코사인 GCN을 독립적으로 학습합니다. G0는 Role Fusion 없이 GCN→Mean, G1은 G0에 Hypergraph·구간 기여(A), G2는 G1에 Role Fusion(B)을 추가합니다. B는 장면 인코딩에, A는 GCN 뒤에 적용합니다. GCN은 기존 방식에 기반한 공통 구성 요소이며 독립적인 신규 기여로 제시하지 않습니다.
+추천 Arm은 `base d g0 g1 g2`입니다. D는 `desc_qwen3vl`, G0·G1·G2는 `graph_qwen3vl`을 읽습니다. 제목과 장면별 BGE 1024차원 특징을 사용하며 Summary는 사용하지 않습니다. D·G0·G1·G2는 장면별 Residual Scene MLP를 독립적으로 학습합니다. D·G0는 장면 평균을 사용하고, G1은 G0에 Hypergraph·구간 기여(A), G2는 G1에 Role Fusion(B)을 추가합니다. B는 장면 인코딩에, A는 Scene MLP 뒤에 적용합니다. G1·G2에서 Hypergraph가 장면 간 전달의 유일한 경로입니다. G2는 `clab-insight` G5의 계산·초기화에 맞추며 GCN은 생성하지 않습니다. `chunk_scene_pairs`는 기존 설정 호환을 위해 받되 현재 모델에서는 사용하지 않습니다.
 
 Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qwen3vl}/`에 소스별로 저장합니다. 각 디렉터리의 `manifest.json`에는 입력 해시·catalog·파일 checksum·계약을, `statistics.json`에는 장면 성공·제외·fallback 내역을 기록합니다. 변환 계약은 `scene-bge-inputs/v1`입니다.
 
@@ -64,7 +64,7 @@ Run 아래 특징은 `validation/representations/{metadata,desc_qwen3vl,graph_qw
 
 ## 유지하는 계약과 지원 경계
 
-설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v3`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
+설정·추출용 Run 계약은 `experiment_config_version: v6`와 기존 추출 계약을 유지합니다. 추천 계약 **`gnn-attn-aggregation/v1`**은 별도로 관리하며 메타데이터·캐시 검증에만 사용합니다. 계약 이름의 하위 디렉터리는 만들지 않습니다. 모델 구조는 `sasrec-scene-content/v4`, 진단은 `leave-one-out-diagnosis/v5`입니다. 기존 Qwen 장면 자료는 재사용하되 과거 추천 Arm·Summary 임베딩·checkpoint는 새 결과로 재사용하지 않습니다.
 
 validation 설정 `validation-config/v9`, 학습 구현 `shared-scenes-leave-one-out-training/v2`, 평가 `microlens-leave-one-out-evaluation/v2`, 조합 `sasrec-leave-one-out-combination/v2`, 이벤트 `sasrec-leave-one-out-per-event/v2`는 유지합니다. Graph의 receiver 예약 텐서 슬롯도 유지합니다. 원본 추출·프롬프트·기존 Run 산출물은 이동·삭제하지 않습니다.
 

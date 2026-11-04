@@ -22,11 +22,11 @@ class Arm:
 
 ARMS = (
     Arm("base", "metadata", uses_title=True),
-    Arm("d", "description", "qwen3vl", True, "desc_qwen3vl", "gnn"),
-    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn"),
-    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn",
+    Arm("d", "description", "qwen3vl", True, "desc_qwen3vl", "mean"),
+    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", "mean"),
+    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "mean",
         extensions=("segments",)),
-    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "gnn", role_fusion=True,
+    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", role_fusion=True,
         extensions=("segments",)),
 )
 SOURCES = tuple(

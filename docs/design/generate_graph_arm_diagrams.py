@@ -3,7 +3,7 @@
 Run: python docs/design/generate_graph_arm_diagrams.py
 Requires python-pptx, PyMuPDF and LibreOffice, as do the existing generators.
 Only PNGs are retained; editable slides and PDFs are temporary render inputs.
-Implemented architecture: common Residual Scene MLP and cosine GCN backbone,
+Implemented architecture: common Residual Scene MLP,
 activity hypergraph (A), and optional Role Fusion (B). Names follow the Arm registry.
 No model, extraction, embedding or training is executed.
 """
@@ -26,8 +26,8 @@ GREEN, GREEN_FILL = "28835D", "EFF8F1"
 GRAY, GRAY_FILL = "9AA7B5", "EFF2F6"
 
 ARMS = {
-    "d": "Description + GCN + Mean",
-    "g0": "Graph Encoding + GCN + Mean",
+    "d": "Description + Mean",
+    "g0": "Graph Encoding + Mean",
     "g1": "G0 + Activity Hypergraph (A)",
     "g2": "G0 + Activity Hypergraph (A) + Role Fusion (B)",
 }
@@ -152,19 +152,13 @@ def output(d, note):
          ink=INK, fill="E8EFF6", size=19, detail_size=14)
 
 
-def common_gcn(d):
-    step(d, "Common GCN", 15.35, 3.12, 7.60, 0.78,
-         "Cosine GCN | Common Backbone", "S × 512 → S × 512",
-         "Links from title-free X [S × 384] · Residual update", ink=PURPLE,
+def scene_input(d):
+    step(d, "Scene MLP output", 15.35, 3.12, 7.60, 0.78,
+         "Scene H | Residual Scene MLP Output", "S × 512",
+         "Independent scene encoding before readout", ink=PURPLE,
          fill=PURPLE_FILL, size=18, detail_size=14)
-    wire(d, "Scene MLP to GCN", [(13.80, 9.81), (14.62, 9.81),
-                                        (14.62, 3.78), (15.35, 3.78)])
-
-
-def similarity_input(d, arm):
-    start = (12.60, 6.25) if arm == "d" else (13.80, 8.71)
-    wire(d, "Content X to cosine links", [start, (14.45, start[1]),
-                                         (14.45, 3.51), (15.35, 3.51)], TEAL)
+    wire(d, "Scene MLP to aggregation", [(13.80, 9.81), (14.45, 9.81),
+                                        (14.45, 3.51), (15.35, 3.51)])
 
 
 def aggregation_heading(d, title, ink, *, segments=False):
@@ -175,18 +169,18 @@ def aggregation_heading(d, title, ink, *, segments=False):
 
 
 def mean_readout(d):
-    aggregation_heading(d, "COMMON GCN → MEAN", PURPLE)
-    common_gcn(d)
+    aggregation_heading(d, "MEAN READOUT", PURPLE)
+    scene_input(d)
     step(d, "Scene mean readout", 15.35, 6.10, 7.60, 1.05,
          "Mean Pooling", "S × 512 → 512", "Equal weight per valid scene",
          ink=PURPLE, fill=PURPLE_FILL, size=22, detail_size=18)
     wire(d, "Scenes to mean", [(19.15, 3.90), (19.15, 6.10)], PURPLE)
     wire(d, "Mean to output", [(19.15, 7.15), (19.15, 9.33)], PURPLE)
-    output(d, "Mean over GCN-updated scenes")
+    output(d, "Mean over independently encoded scenes")
 
 
 def segment_units(d):
-    common_gcn(d)
+    scene_input(d)
     step(d, "Prepare segments", 15.35, 4.26, 3.50, 0.90,
          "prepare-module", "M × 2", "Same activity key in adjacent scenes",
          ink=GREEN, fill=GREEN_FILL, size=16, detail_size=12)
@@ -220,7 +214,7 @@ def segment_readout(d):
 
 
 def hypergraph_readout(d):
-    aggregation_heading(d, "COMMON GCN → A: HYPERGRAPH", GREEN, segments=True)
+    aggregation_heading(d, "A: ACTIVITY HYPERGRAPH", GREEN, segments=True)
     segment_units(d)
     segment_feedback(d)
     segment_readout(d)
@@ -264,11 +258,11 @@ def build(arm):
     d.label("Diagram title", 0.60, 0.28, 22.80, 0.60,
             f"{arm.upper()}  |  {ARMS[arm]}", 32, INK, True, PP_ALIGN.LEFT)
     d.label("Diagram subtitle", 0.65, 1.01, 22.7, 0.31,
-            "FIVE-ARM EXPERIMENT  |  Common backbone: Scene MLP + existing cosine GCN  |  "
+            "FIVE-ARM EXPERIMENT  |  Common scene encoder: Residual Scene MLP  |  "
             "Video representation [512] → SASRec", 17, MUTED, align=PP_ALIGN.LEFT)
     for name, x, width, ink, fill in (("Frozen BGE", 0.65, 2.55, GRAY, GRAY_FILL),
                                     ("Scene encoder + MLP", 3.40, 4.5, TEAL, TEAL_FILL),
-                                    ("Common GCN + Mean", 8.1, 3.2, PURPLE, PURPLE_FILL),
+                                    ("Mean readout", 8.1, 3.2, PURPLE, PURPLE_FILL),
                                     ("A: activity hypergraph", 11.5, 4.5, GREEN, GREEN_FILL)):
         if name.startswith("A:") and arm not in ("g1", "g2"):
             continue
@@ -285,7 +279,6 @@ def build(arm):
         hypergraph_readout(d)
     else:
         mean_readout(d)
-    similarity_input(d, arm)
     recommendation(d)
     for shape in d.slide.shapes:
         if shape.name.endswith(" panel"):

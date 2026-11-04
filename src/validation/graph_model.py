@@ -6,7 +6,6 @@ from validation.model import SASRec, SingleLayerResidualMLP, torch, nn
 from validation.graph_inputs import GraphStore
 from validation.graph_context import GRAPH_MODEL, check_extensions
 from validation.graph_batching import PackedGraphStore, GRAPH_EXECUTION_VERSION
-from validation.scene_gcn import SceneGCN, scene_groups
 from validation.config import GraphExecutionConfig
 from validation.profiling import span, timed, workload, is_profiling, checkpoint_contexts
 
@@ -26,7 +25,7 @@ def xavier_normal(rows, columns, generator):
 
 
 class SceneRoleEncoder(nn.Module):
-    """Role Fusion (B), Scene MLP, common cosine GCN and optional hypergraph (A)."""
+    """Role Fusion (B), Scene MLP, optional hypergraph (A) and mean readout."""
 
     ROLE_INDICES = (0, 1, 2, 4)  # actor, target, tool, place; receiver is ignored.
 
@@ -46,8 +45,6 @@ class SceneRoleEncoder(nn.Module):
             self.role_states = nn.Parameter(torch.empty(4, 2, hidden))
             nn.init.normal_(self.role_states, std=0.02)
         self.scene_mlp = SingleLayerResidualMLP(self.output_dim)
-        if aggregation == "gnn":
-            self.gcn = SceneGCN(self.output_dim)
         if "segments" in self.extensions:
             # Private RNG preserves the matching non-hypergraph model at gate 0.
             generator = torch.Generator().manual_seed((torch.initial_seed() + 18) % 2**63)
@@ -76,7 +73,7 @@ class SceneRoleEncoder(nn.Module):
         return entities, states
 
     def _segments(self, batch, scenes, video_count):
-        """Hypergraph after scene exchange; returns scenes and per-video segment readout."""
+        """Hypergraph after Scene MLP; returns scenes and per-video segment readout."""
         members, ids = batch["segment_scenes"], batch["segment_ids"]
         videos = batch["scene_videos"]
         # Batch-local segment ids are dense and fewer than the incidence pairs.
@@ -147,15 +144,8 @@ class SceneRoleEncoder(nn.Module):
                     context = self.context_projection(batch["contexts"])
                 scene_title = title[batch["scene_videos"]]
                 scenes = torch.cat([scene_title, entity_mean, action_mean, context], dim=-1)
-                similarity_features = torch.cat([entity_mean, action_mean, context], dim=-1)
             with span("scene_mlp", cuda=True):
                 scenes = self.scene_mlp(scenes)
-            if self.aggregation == "gnn":
-                groups = [value for key, value in batch.items() if key.startswith("scene_group_")]
-                if not groups:
-                    groups = [torch.as_tensor(value, device=scenes.device)
-                              for value in scene_groups(batch["offsets"]).values()]
-                scenes = self.gcn(scenes, similarity_features, groups)
             if "segments" in self.extensions:
                 with span("segment_update", cuda=True):
                     scenes, segment_readout = self._segments(batch, scenes, video_count)
@@ -173,7 +163,7 @@ class SceneRoleEncoder(nn.Module):
 
 
 class DescriptionSceneEncoder(nn.Module):
-    """Scene Description and title encoding, Scene MLP, common cosine GCN and mean."""
+    """Scene Description and title encoding, Scene MLP and mean readout."""
 
     def __init__(self, feature_dim, hidden=128, aggregation="mean"):
         super().__init__()
@@ -183,8 +173,6 @@ class DescriptionSceneEncoder(nn.Module):
         self.title_projection = nn.Linear(feature_dim, hidden)
         self.description_projection = nn.Linear(feature_dim, hidden * 3)
         self.scene_mlp = SingleLayerResidualMLP(hidden * 4)
-        if aggregation == "gnn":
-            self.gcn = SceneGCN(hidden * 4)
 
     def forward(self, batch):
         count = len(batch["offsets"]) - 1
@@ -192,12 +180,6 @@ class DescriptionSceneEncoder(nn.Module):
         title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
         description = self.description_projection(batch["contexts"])
         scenes = self.scene_mlp(torch.cat([title[batch["scene_videos"]], description], dim=-1))
-        if self.aggregation == "gnn" and len(scenes):
-            groups = [value for key, value in batch.items() if key.startswith("scene_group_")]
-            if not groups:
-                groups = [torch.as_tensor(value, device=scenes.device)
-                          for value in scene_groups(batch["offsets"]).values()]
-            scenes = self.gcn(scenes, description, groups)
         output = segment_mean(scenes, batch["scene_videos"], count)
         missing = [i for i in range(count) if batch["offsets"][i] == batch["offsets"][i + 1]]
         if missing:
@@ -309,14 +291,11 @@ class GraphSASRec(SASRec):
             + edges * hidden * 4
             + scenes * (feature + self.embedding_dim * 12)
         )
-        if self.aggregation == "gnn":
-            pairs = int(np.square(self.packed.scene_counts[indices]).sum())
-            estimate += 4 * (pairs * 8 + scenes * self.embedding_dim * 8)
         free, _ = torch.cuda.mem_get_info(device)
         return estimate > min(8 * 1024**3, int(free * 0.35))
 
     def _batch_options(self):
-        options = {"group_scenes": self.aggregation == "gnn"}
+        options = {}
         if "segments" in getattr(self.graph_encoder, "extensions", ()):
             options["scene_segments"] = True
         return options
@@ -325,21 +304,17 @@ class GraphSASRec(SASRec):
         from torch.utils.checkpoint import checkpoint
 
         vectors, chunks = [], []
-        chunk, nodes, scene_pairs = [], 0, 0
+        chunk, nodes = [], 0
         for item in ids:
             count = int(self.packed.node_counts[item - 1])
-            pairs = int(self.packed.scene_counts[item - 1]) ** 2
             if chunk and (
                 len(chunk) >= self.execution.chunk_items
                 or nodes + count > self.execution.chunk_nodes
-                or (self.aggregation == "gnn"
-                    and scene_pairs + pairs > self.execution.chunk_scene_pairs)
             ):
                 chunks.append(chunk)
-                chunk, nodes, scene_pairs = [], 0, 0
+                chunk, nodes = [], 0
             chunk.append(item)
             nodes += count
-            scene_pairs += pairs
         if chunk:
             chunks.append(chunk)
         use_checkpoint = self._use_checkpoint(ids)

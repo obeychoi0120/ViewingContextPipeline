@@ -79,7 +79,7 @@ def write_report(context, selected, document):
         )
     lines += [
         "", "G0−D에는 추출 내용·인코더·장면 확보율 차이가 포함됩니다. "
-        "코사인 GCN은 D·G0·G1·G2의 공통 기반 구조이며 독립적인 신규 기여로 해석하지 않습니다. "
+        "장면 간 전달은 G1·G2의 Hypergraph에서 수행하며 GCN은 사용하지 않습니다. "
         "G1−G0는 Role Fusion 없이 Hypergraph 전달과 구간 기여를 추가한 A 전체의 효과입니다. "
         "G2−G1은 Hypergraph가 있는 상태에서 Role Fusion(B)을 추가한 효과입니다. "
         "파라미터 증가도 포함하며 A의 개별 경로 또는 연결 구조만의 효과를 분리하지 않습니다. "
