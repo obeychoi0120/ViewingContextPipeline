@@ -8,7 +8,7 @@ from extraction.token_usage import validate_tokens
 from extraction.graph_warnings import warning_tags
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
 from extraction.structured_output import (
-    GRAPH_JSON_SCHEMA, OutputValidationError, normalize_graph_references,
+    GRAPH_JSON_SCHEMA, OutputValidationError, normalize_graph_fields, normalize_graph_references,
 )
 
 GRAPH_FIELDS = ("content_id", "scene_idx", "tokens", "warning", "scene_graph")
@@ -17,7 +17,7 @@ FAILURE_FIELDS = ("content_id", "scene_idx", "tokens", "error", "raw_output")
 
 
 def validate_scene_payload(path, row):
-    """Reject obsolete storage/Graph contracts without transforming source data."""
+    """Validate current and v8 location payloads without mutating source data."""
     path = Path(path)
     fields = FAILURE_FIELDS if "error" in row else (
         GRAPH_FIELDS if "scene_graph" in row else DESCRIPTION_FIELDS
@@ -36,6 +36,10 @@ def validate_scene_payload(path, row):
         warning_tags(row["warning"])
         graph = row["scene_graph"]
         if isinstance(graph, dict):
+            try:
+                graph, _ = normalize_graph_fields(graph)
+            except OutputValidationError as exc:
+                raise UnsupportedArtifactError(f"unsupported Action fields: {path}: {exc}") from exc
             if set(graph) != set(GRAPH_JSON_SCHEMA["properties"]):
                 raise UnsupportedArtifactError(f"unsupported Graph fields; expected Context/Entities/Actions: {path}")
             if isinstance(graph["actions"], list) and any(
@@ -93,7 +97,11 @@ def _payload(path, record):
     if field == "description":
         payload["description"] = record[field]
     else:
-        payload.update(warning=_graph_warning(record, record[field]), scene_graph=record[field])
+        try:
+            graph, _ = normalize_graph_fields(record[field])
+        except OutputValidationError as exc:
+            raise UnsupportedArtifactError(f"unsupported Action fields: {path}: {exc}") from exc
+        payload.update(warning=_graph_warning(record, graph), scene_graph=graph)
     validate_scene_payload(path, payload)
     return {key: payload[key] for key in (GRAPH_FIELDS if "scene_graph" in payload else DESCRIPTION_FIELDS)}
 

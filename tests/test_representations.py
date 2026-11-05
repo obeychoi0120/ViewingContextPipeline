@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 
 import numpy as np
 import pytest
@@ -37,6 +38,60 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     assert len(description["types"]) == 0
     assert description["video_offsets"].tolist() == list(range(0, 49, 2))
     assert read_json(root / "desc_qwen3vl" / "manifest.json")["source"] == "desc_qwen3vl"
+
+
+@pytest.mark.parametrize("as_text", [False, True])
+def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(
+    context, monkeypatch, as_text,
+):
+    from artifact_io import read_json, read_jsonl
+    from extraction.scene_storage import read_scene_records
+    from validation.selection import load_validation_cohort
+    from validation.steps import embed_representations, prepare_module
+    from validation.graph_inputs import GraphStore, load_scene_segments, source_identity
+
+    prepare_inputs(context, monkeypatch)
+    cohort = load_validation_cohort(context)
+    arm = registry(context.config)["g1"]
+    texts_before, arrays_before, stats_before = build_input(context, cohort, arm)
+    identity_before = source_identity(context, cohort, arm)
+    cid = cohort["catalog"][0]["content_id"]
+    path = context.scene_arm_dir(arm.scene_arm) / f"{cid}.jsonl"
+    rows = read_jsonl(path)
+    for row in rows:
+        value = row["scene_graph"]
+        for action in value["actions"]:
+            action["location"] = action.pop("place")
+        if as_text:
+            row["scene_graph"] = json.dumps(value)
+    write_jsonl(path, rows)
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    assert source_identity(context, cohort, arm) != identity_before
+    assert all(not row["semantic_warnings"] for row in read_scene_records(path))
+
+    if as_text:
+        # Reproduce a v1 cache that excluded the same JSON source before compatibility.
+        with monkeypatch.context() as old_runtime:
+            old_runtime.setattr("validation.graph_inputs.VERSION", "scene-bge-inputs/v1")
+            old_runtime.setattr(
+                "extraction.structured_output.normalize_graph_fields",
+                lambda value: (deepcopy(value), False),
+            )
+            embed_representations(context, target=["g1"])
+        stats_path = context.representations_dir / arm.scene_arm / "statistics.json"
+        assert read_json(stats_path)["counts"]["raw"] == len(rows)
+
+    texts, arrays, stats = build_input(context, cohort, arm)
+    assert texts == texts_before and stats == stats_before
+    for key in arrays:
+        np.testing.assert_array_equal(arrays[key], arrays_before[key])
+    result = embed_representations(context, target=["g1"])
+    assert result["generated_sources"] == [arm.scene_arm]
+    prepare_module(context, target=["g1"])
+    store = GraphStore(context.representations_dir / arm.scene_arm)
+    np.testing.assert_array_equal(store["edges"], arrays_before["edges"])
+    assert len(load_scene_segments(store.directory))
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
 def test_d_reuses_legacy_description_features(context, monkeypatch):

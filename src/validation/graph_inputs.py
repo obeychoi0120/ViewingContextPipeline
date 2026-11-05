@@ -18,7 +18,7 @@ from model_provenance import local_model_identity
 from artifact_io import read_json, write_json
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "scene-bge-inputs/v1"
+VERSION = "scene-bge-inputs/v2"
 ROLES = ("actor", "target", "tool", "receiver", "place")
 # Keep the receiver tensor slot for model/checkpoint shape compatibility.
 # Current receiver-free input always supplies the absent state.

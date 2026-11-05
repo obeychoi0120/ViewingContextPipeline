@@ -65,12 +65,28 @@ def validate_graph_structure(value, path="graph"):
     _validate_shape(value, GRAPH_JSON_SCHEMA, path)
 
 
+def normalize_graph_fields(graph):
+    """Copy a Graph and rename the v8 location role; never guess conflicting fields."""
+    normalized = deepcopy(graph)
+    changed = False
+    if isinstance(normalized, dict) and isinstance(normalized.get("actions"), list):
+        for index, action in enumerate(normalized["actions"]):
+            if not isinstance(action, dict) or "location" not in action:
+                continue
+            if "place" in action:
+                raise OutputValidationError(
+                    f"graph.actions[{index}]: location and place cannot both be present"
+                )
+            action["place"] = action.pop("location")
+            changed = True
+    return normalized, changed
+
+
 def normalize_graph_references(graph):
     """Use unknown for undeclared role IDs, keeping all entities and actions."""
-    _validate_shape(graph, GRAPH_JSON_SCHEMA, "graph")
-    ids = {entity["id"] for entity in graph["entities"]}
-    repaired = deepcopy(graph)
-    changed = False
+    repaired, changed = normalize_graph_fields(graph)
+    _validate_shape(repaired, GRAPH_JSON_SCHEMA, "graph")
+    ids = {entity["id"] for entity in repaired["entities"]}
     for action in repaired["actions"]:
         for field in ("actor", "target", "tool", "place"):
             value = action[field]

@@ -1,6 +1,7 @@
 import pytest
+import json
 
-from artifact_io import read_jsonl
+from artifact_io import read_jsonl, write_jsonl
 from extraction.graph_warnings import MISSING_REQUIRED, PARSE_FAILED
 from extraction.qwen_runtime import QwenRuntime
 from extraction.scene_executor import graph_scene_result, run_qwen_scenes
@@ -39,6 +40,65 @@ def test_graph_legacy_id_references():
     assert parsed.error is None
     assert parsed.parse_mode == "native"
     assert parsed.graph == graph()
+
+
+@pytest.mark.parametrize("place", ["l1", None, "unknown"])
+def test_v8_location_json_is_normalized_without_rewriting_source(tmp_path, place):
+    from extraction.scene_storage import validate_scene_payload
+
+    expected = graph()
+    expected["actions"][0]["place"] = place
+    legacy = graph()
+    legacy["actions"][0].pop("place")
+    legacy["actions"][0]["location"] = place
+    raw = json.dumps(legacy)
+    parsed = parse_or_repair_graph(raw)
+    assert parsed.graph == expected
+    assert parsed.parse_mode == "repaired" and not parsed.warning
+    assert json.dumps(legacy) == raw
+
+    path = tmp_path / "video.jsonl"
+    row = scene_row("video", value=legacy)
+    write_jsonl(path, [row])
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+    validate_scene_payload(path, row)
+    restored = read_scene_records(path)
+    assert restored[0]["graph"] == expected
+    assert restored[0]["parse_mode"] == "repaired"
+    _, pending = prepare_scene_batch(
+        [{"content_id": "video"}], tmp_path,
+        lambda visual: [{"scene_idx": 0, "keyframes": []}],
+        minimal_graph_records, force=False,
+    )
+    assert not pending
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+    assert row["scene_graph"] == json.loads(raw)
+
+    generated = tmp_path / "generated" / "video.jsonl"
+    write_scene_records(generated, [row])
+    assert read_jsonl(generated)[0]["scene_graph"] == expected
+
+
+@pytest.mark.parametrize("case", ["both_same", "both_different", "receiver", "missing_place"])
+def test_v8_compatibility_rejects_conflicting_or_unsupported_roles(tmp_path, case):
+    from extraction.errors import UnsupportedArtifactError
+    from extraction.scene_storage import validate_scene_payload
+
+    value = graph()
+    action = value["actions"][0]
+    if case.startswith("both_"):
+        action["location"] = action["place"] if case == "both_same" else "f1"
+    elif case == "receiver":
+        action["location"] = action.pop("place")
+        action["receiver"] = None
+    else:
+        del action["place"]
+    raw = json.dumps(value)
+    parsed = parse_or_repair_graph(raw)
+    assert parsed.graph is None and parsed.warning
+    with pytest.raises(UnsupportedArtifactError):
+        validate_scene_payload(tmp_path / "video.jsonl", scene_row("video", value=value))
+    assert json.dumps(value) == raw
 
 
 def test_invalid_graph_preserves_raw_output():
