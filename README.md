@@ -146,6 +146,8 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET"
 
 각 명령은 독립 단계입니다. 앞 단계의 성공을 확인한 뒤 다음 명령을 실행하세요. 추천 명령은 특징·활동 구간 준비나 진단을 자동 실행하지 않습니다.
 
+`run-diagnosis`는 실험 설정 도입 직전의 v4 결과(`base, d, g0, g1, g2`)도 읽습니다. 현재 선택한 구성과 동일한 예전 Arm 폴더가 모든 설정 seed에 있으면 기존 이름으로 진단·보고서를 생성하며, 원본 recommendation 파일은 변경하지 않습니다. 새 이름과 예전 이름의 폴더가 함께 있으면 모호한 선택을 막기 위해 중단합니다. 예전 파일에 없는 `experiment_definition`만 검증된 `experiment_arm`에서 복원하며, 구조·입력·평가 계약·체크섬 검증은 유지합니다. 더 오래된 구조나 변경된 입력을 자동으로 호환 처리하지 않으며, 이 처리는 추천 학습 재개나 Run 간 비교에는 적용하지 않습니다.
+
 GPU는 `CUDA_VISIBLE_DEVICES`로 선택합니다. Qwen은 GPU별 추론 엔진을, 추천은 `--workers-per-gpu`개 독립 학습 작업을 실행합니다. 추천은 보이는 GPU가 없으면 worker 수 1에서 CPU로 실행할 수 있습니다. 시작 로그에는 실험 설정 파일·해석된 구성·`deterministic` 적용값을 표시합니다.
 
 ## 결과 확인과 해석

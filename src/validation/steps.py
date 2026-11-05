@@ -68,9 +68,11 @@ def run_recommendation(
 
 def run_diagnosis(context, *, force=False, target=None, compare_run_id=None):
     from validation.leave_one_out_diagnosis import diagnose
+    from validation.legacy_diagnosis import diagnosis_context
 
     load_experiments(context)
-    resolve_target_arms(target, config=context.config)
+    selected = resolve_target_arms(target, config=context.config)
+    context, target = diagnosis_context(context, selected)
     log_step_start(context, "run-diagnosis", force=force, target=target,
                    compare_run_id=compare_run_id)
     return diagnose(context, target=target, compare_run_id=compare_run_id)
