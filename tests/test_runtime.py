@@ -20,6 +20,16 @@ def test_current_config_loads(context):
     assert Path(settings.dataset.pairs_csv).is_file()
 
 
+def test_protocol_accepts_current_extractor_subset(context):
+    from copy import deepcopy
+    from pipeline_runtime import _validate_config
+
+    config = deepcopy(context.config)
+    config["protocol"]["graph_extractors"] = ["qwen3vl", "gemini"]
+    config["protocol"]["description_extractors"] = ["qwen3vl", "gemini"]
+    _validate_config(config)
+
+
 def test_empty_run_directories_can_be_initialized(context):
     from pipeline_runtime import RunContext
 

@@ -65,7 +65,7 @@ def validate_presence_penalty(value: float) -> float:
 
 
 def generation_settings(
-    model: str, *, representation: str, summary: bool = False,
+    model: str, *, representation: str,
     repetition_penalty: float | None = None,
     presence_penalty: float | None = None,
 ) -> dict[str, Any]:
@@ -74,7 +74,7 @@ def generation_settings(
         raise ValueError(f"unsupported Qwen model: {model}")
     if representation not in ("graph", "description"):
         raise ValueError(f"unsupported representation: {representation}")
-    penalty = 1.05 if representation == "graph" and not summary else 1.0
+    penalty = 1.05 if representation == "graph" else 1.0
     if repetition_penalty is not None:
         penalty = penalty_schedule([repetition_penalty])[0]
     return {
@@ -85,7 +85,7 @@ def generation_settings(
         "min_p": 0.0,
         "presence_penalty": (
             validate_presence_penalty(presence_penalty)
-            if presence_penalty is not None else (2.0 if summary else 1.5)
+            if presence_penalty is not None else 1.5
         ),
         "repetition_penalty": penalty,
         "enable_thinking": False if model == "qwen3.5" else None,

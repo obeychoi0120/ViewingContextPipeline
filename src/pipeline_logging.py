@@ -14,29 +14,23 @@ def step_settings(context, step, **options):
         "config_file": context.root / CONFIG_PATH,
         "force": options.get("force", False),
     }
-    if step.startswith(("extract-", "summarize-")):
-        summary = step.startswith("summarize-")
+    if step.startswith("extract-"):
         kind = "graph" if "graph" in step else "description"
-        source = options.get("source" if summary else "model")
+        source = options.get("model")
         arm = (
             generation_registry(context.config)[options["arm"]]
             if options.get("arm")
             else generated_arm(context.config, kind, source)
         )
         source = arm.model
-        phase = "summaries" if summary else "scenes"
         values.update(
             arm=arm.name,
-            model=options["model"] if summary else source,
-            model_settings=context.config["models"][options["model"] if summary else source],
+            model=source,
+            model_settings=context.config["models"][source],
             source=source,
             prompt=context.prompt_path(options["schema"]),
-            output_dir=context.summary_arm_dir(arm.name)
-            if summary
-            else context.extraction_dir(arm.representation, source, phase),
-            max_new_tokens=context.config["extraction"][kind][
-                options["model"] if summary else source
-            ]["summary_max_new_tokens" if summary else "scene_max_new_tokens"],
+            output_dir=context.extraction_dir(arm.representation, source, "scenes"),
+            max_new_tokens=context.config["extraction"][kind][source]["scene_max_new_tokens"],
         )
     else:
         values["output_dir"] = {

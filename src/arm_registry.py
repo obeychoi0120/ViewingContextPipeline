@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-CONCAT_POLICY = "title-summary-double-newline/v1"
 EXPERIMENT_CONFIG_VERSION = "v6"
 RECOMMENDATION_ARM_CONTRACT = "gnn-attn-aggregation/v1"
 
@@ -91,7 +90,7 @@ def generated_arm(config, representation, model):
     return source
 
 
-def resolve_generation_arm(config, name, representation, model, *, summary=False):
+def resolve_generation_arm(config, name, representation, model):
     arm = generation_registry(config).get(name)
     if arm is None:
         source = registry(config).get(name)
@@ -99,9 +98,7 @@ def resolve_generation_arm(config, name, representation, model, *, summary=False
         raise ValueError(f"invalid generation source: {name}{hint}")
     if arm.representation != representation:
         raise ValueError(f"invalid {representation} generation arm: {name}")
-    if summary and arm.model == "minicpm":
-        raise ValueError("MiniCPM supports only Graph scene extraction, not summarization")
-    if not summary and arm.model != model:
+    if arm.model != model:
         raise ValueError(
             "Scene arm must identify the requested extraction model and representation"
         )

@@ -71,10 +71,9 @@ class RunContext:
             or (artifact_root / "preparation" / "cohort").exists()
         ):
             raise ConfigError("legacy MicroLens layout found; run python -m preparation.migrate_dataset_layout --apply first")
-        for phase in ("scenes", "summaries"):
-            directory = run_root / "extraction" / phase
-            if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
-                raise ConfigError("legacy qwen extraction layout is unsupported; use a new run_id (no automatic migration)")
+        directory = run_root / "extraction" / "scenes"
+        if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
+            raise ConfigError("legacy qwen extraction layout is unsupported; use a new run_id (no automatic migration)")
         return cls(repo_root, selected, config, run_root, artifact_root, dataset)
 
     def initialize(self) -> None:
@@ -127,15 +126,13 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen3vl", "qwen3.5", "gemini", "minicpm"} or phase not in {"scenes", "summaries"}:
+        if model not in {"qwen3vl", "qwen3.5", "gemini", "minicpm"} or phase != "scenes":
             raise ValueError("invalid extraction model or phase")
-        if model == "minicpm" and (representation != "graph" or phase != "scenes"):
+        if model == "minicpm" and representation != "graph":
             raise ValueError("MiniCPM supports only Graph scene extraction")
         from arm_registry import generated_arm
 
-        if phase == "scenes":
-            return self.scene_arm_dir(generated_arm(self.config, representation, model).name)
-        return self.summary_arm_dir(generated_arm(self.config, representation, model).name)
+        return self.scene_arm_dir(generated_arm(self.config, representation, model).name)
 
     def scene_arm_dir(self, arm):
         from arm_registry import generation_registry
@@ -144,13 +141,6 @@ class RunContext:
         if selected.model is None or selected.name != selected.scene_arm:
             raise ValueError(f"not a Scene arm: {arm}")
         return self.run_root / "extraction" / "scenes" / arm
-
-    def summary_arm_dir(self, arm):
-        from arm_registry import generation_registry
-
-        if generation_registry(self.config)[arm].model is None:
-            raise ValueError("Meta has no Summary artifacts")
-        return self.run_root / "extraction" / "summaries" / arm
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("graph", source, "scenes")
@@ -222,12 +212,8 @@ def _validate_protocol(value: dict[str, Any]) -> None:
         "sampling": "fixed_windows",
         "cohort_sampling": "leave_one_out",
         "catalog_scope": "retained_sequence_catalog",
-        "graph_extractors": ["qwen3vl", "qwen3.5", "gemini"],
-        "description_extractors": ["qwen3vl", "qwen3.5", "gemini"],
     }
-    if "minicpm" in value.get("models", {}):
-        expected["graph_extractors"] = [*expected["graph_extractors"], "minicpm"]
-    if set(protocol) != set(expected):
+    if set(protocol) != set(expected) | {"graph_extractors", "description_extractors"}:
         raise ConfigError("invalid protocol keys")
     for key, setting in expected.items():
         if protocol.get(key) != setting:
@@ -271,7 +257,7 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         raise ConfigError(
             "extraction.visual_evidence.image_resolution must be two positive integers"
         )
-    generation_keys = {"scene_max_new_tokens", "summary_max_new_tokens"}
+    generation_keys = {"scene_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
         expected_models = {"qwen3vl", "qwen3.5", "gemini"}
@@ -281,7 +267,7 @@ def _validate_extraction(value: dict[str, Any]) -> None:
             raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
         for model in sorted(expected_models):
             settings = _require_mapping(models, model)
-            keys = {"scene_max_new_tokens"} if model == "minicpm" else generation_keys
+            keys = generation_keys
             if set(settings) != keys:
                 raise ConfigError(
                     f"extraction.{arm}.{model} must contain exactly {sorted(keys)}"

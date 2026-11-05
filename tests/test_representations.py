@@ -36,7 +36,6 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     assert len(description["contexts"]) == 48  # two independent scenes per video
     assert len(description["types"]) == 0
     assert description["video_offsets"].tolist() == list(range(0, 49, 2))
-    assert not (context.run_root / "extraction" / "summaries").exists()
     assert read_json(root / "desc_qwen3vl" / "manifest.json")["source"] == "desc_qwen3vl"
 
 

@@ -8,7 +8,7 @@ MicroLens-100K 영상 또는 M³L-10M 영화 예고편에서 맥락을 추출하
 - **Graph:** 키프레임 → Scene Graph → 고정 BGE·역할 연결 → Arm별 Entity–Role Fusion·장면 인코더 → 장면 평균 또는 Hypergraph 집계·Action 구간 기여.
 - **추천:** 과거 영상 벡터 → SASRec 사용자 벡터 → 후보 영상 벡터와 내적 → 추천 순위·평가 지표.
 
-모든 Arm은 영문 제목을 사용합니다. 제목은 장면 추출에 넣지 않고 추천 인코더에서 결합합니다. BGE는 동결하고 장면 인코더·집계 모듈·SASRec은 추천 loss로 함께 학습합니다. 영상별 Summary는 현재 추천 입력에 포함되지 않습니다.
+모든 Arm은 영문 제목을 사용합니다. 제목은 장면 추출에 넣지 않고 추천 인코더에서 결합합니다. BGE는 동결하고 장면 인코더·집계 모듈·SASRec은 추천 loss로 함께 학습합니다. 영상별 Summary 생성 단계는 제거했으며 기존 Summary 산출물은 보존합니다.
 
 기존 [설계 그림](docs/design/main_diagram.png)은 이전 Summary·다중 집계 경로를 설명합니다. 현재 추천 Arm 5개의 정의와 실행 인터페이스는 아래 표를 기준으로 합니다.
 
@@ -25,7 +25,7 @@ export RUN_ID="new_run_id"
 export DATASET="microlens_100k"  # 또는 m3l_10m
 ```
 
-먼저 [config.yaml](config.yaml)의 `datasets.<dataset>.data`, `models.qwen3vl`, `models.bge` 경로를 실행 환경에 맞게 바꾸세요. Gemini·MiniCPM 추출과 Summary 생성은 아래 선택 기능에서 설명합니다. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
+먼저 [config.yaml](config.yaml)의 `datasets.<dataset>.data`, `models.qwen3vl`, `models.bge` 경로를 실행 환경에 맞게 바꾸세요. Gemini·MiniCPM 추출은 아래 선택 기능에서 설명합니다. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
 
 <details>
 <summary>환경별 설치와 확인할 설정</summary>
@@ -42,7 +42,7 @@ Qwen 추출 환경은 `.[qwen,dev]`, 임베딩·추천 환경은 `.[train,embedd
 | `models.gemini` | Gemini 호출 시 확인할 Vertex 프로젝트·위치·모델·생성 설정 |
 | `extraction.visual_evidence` | 시간 창·키프레임 수·해상도 |
 | `extraction.qwen`, `extraction.gemini` | 추론 엔진·동시 실행 설정 |
-| `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}` | Scene·Summary 출력 토큰 한도 |
+| `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}` | Scene 출력 토큰 한도 |
 | `validation.cohort` | 사용자 필터·보존 이력 길이 |
 | `validation.encoder`, `validation.graph_execution` | BGE 인코딩·Graph 실행 자원 |
 | `validation.model` | 학습 설정·seed·결정적 연산 사용 여부 |
@@ -131,9 +131,9 @@ GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-eve
 </details>
 
 <details>
-<summary>선택 기능: Gemini·Qwen3.5 추출과 영상 Summary 생성</summary>
+<summary>선택 기능: Gemini·Qwen3.5 추출</summary>
 
-기본 추천 실험의 시각 입력은 Qwen3-VL 장면 소스를 사용합니다. 아래 추가 모델의 추출 결과와 영상 Summary는 현재 추천 Arm에 자동 연결되지 않습니다.
+기본 추천 실험의 시각 입력은 Qwen3-VL 장면 소스를 사용합니다. 아래 추가 모델의 추출 결과는 현재 추천 Arm에 자동 연결되지 않습니다.
 
 Gemini를 호출할 때는 전용 패키지를 설치하고 `models.gemini`의 Vertex 프로젝트·위치·모델 설정, ADC 인증과 호출 권한을 확인합니다. Gemini 생성 환경은 기본 Qwen 환경과 분리할 수 있습니다.
 
@@ -157,17 +157,6 @@ python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
 
-Summary 생성 기능은 별도로 유지하지만 현재 추천 Arm은 이 결과를 읽지 않습니다. 아래는 네 소스 모두 Gemini로 요약하는 예시입니다. 요약 모델을 Qwen으로 선택하려면 `--model qwen3vl` 또는 `--model qwen3.5`를 사용합니다. 소스 이름은 Scene을 생성한 모델을 유지합니다.
-
-```bash
-python -m extraction summarize --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/summary_graph_v9.md --model gemini --arm graph_qwen3vl
-python -m extraction summarize --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/summary_graph_v9.md --model gemini --arm graph_gemini
-python -m extraction summarize --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/summary_description_v5.md --model gemini --arm desc_qwen3vl
-python -m extraction summarize --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/summary_description_v5.md --model gemini --arm desc_gemini
-```
-
-같은 Run·소스에는 하나의 Summary 모델을 사용합니다. 모델을 바꾸려면 새 Run 또는 해당 소스의 `summarize --force`가 필요합니다.
-
 </details>
 
 <details>
@@ -182,7 +171,7 @@ python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET
 
 먼저 공통 cohort·키프레임 준비를 완료해야 합니다. `models.minicpm`은 `/home_nvme/shared/models/MiniCPM-V-4.7-1B`의 로컬 비양자화 BF16 체크포인트를 가리킵니다. 다른 환경에서는 경로를 수정하세요. Linux/CUDA가 필요하며, 전용 extra는 `transformers>=5.18.0`과 `vllm==0.32.0`을 설치합니다. MiniCPM 4.7 지원 변경은 [vLLM PR #58674](https://github.com/vllm-project/vllm/pull/58674)에 기록되어 있습니다.
 
-`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 추출 전용 소스이며 현재 추천 Arm 12개에는 연결되지 않습니다. 기존 v6 설정과 Run을 사용할 수 있습니다. 활성화에는 `models.minicpm`, `protocol.graph_extractors`의 `minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 세 설정이 필요합니다.
+`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 추출 전용 소스이며 현재 추천 Arm 12개에는 연결되지 않습니다. 기존 v6 설정과 Run을 사용할 수 있습니다. 활성화에는 `models.minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 두 설정이 필요합니다. `protocol.graph_extractors`는 전체 지원 모델 목록과 일치할 필요가 없습니다.
 
 입력은 기존 키프레임을 순서대로 사용하며, 16x 시각 토큰 압축과 processor 기본 slicing을 적용합니다. Thinking은 끄고 greedy decoding으로 생성합니다. 기본값은 출력 상한 384토큰, presence penalty 1.5, 생성 토큰 대상 repetition penalty 1.05이며 `--presence-penalty`와 `--repetition-penalty`로 변경할 수 있습니다. GPU 선택은 `CUDA_VISIBLE_DEVICES`, 엔진 자원 설정은 공용 `extraction.qwen`을 사용합니다. 컨텍스트 길이를 초과하면 입력·출력 한도를 자동으로 줄이지 않고 오류를 보고합니다.
 
@@ -201,14 +190,13 @@ python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET
 | 1. 데이터 준비 | interaction·제목·영상 목록 | 전체 원본 catalog·interaction·제목 매핑 | `prepare-cohort` · [데이터 준비](src/preparation/cohort.py) |
 | 2. 영상 관측 준비 | 영상·sampling 설정 | 키프레임 이미지·timestamp | `prepare-input-data` · [입력 준비](src/preparation/input_data.py) |
 | 3. 장면 정보 추출 | 키프레임·프롬프트 | Scene Graph 또는 Description JSONL | `extract-graph-scenes` / `extract-description-scenes` · [추출](src/extraction/steps.py) |
-| 4. 영상 요약 — 선택 기능 | 장면 관측·프롬프트 | 영상 단위 영문 Summary JSON | `summarize` · [요약](src/extraction/summary_executor.py) |
-| 5. 평가·고정 특징 준비 | 원본 이력·제목·장면별 Description 또는 Graph | 사용자별 분할·평가 catalog·1024차원 BGE 특징; Graph는 역할 연결·장면 경계 포함 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Graph 입력](src/validation/graph_inputs.py) |
-| 6. 활동 구간 준비 — G1·G2 | Graph 장면 관측·고정 특징 bundle | 공통 장면–구간 연결 파일 | `prepare-module` · [구간 생성](src/validation/scene_segments.py) |
-| 7. 영상 표현 학습 | 고정 특징·Graph 구조·해당 Arm의 구간 연결 | 영상당 512차원 벡터 | `run-recommendation` 내부 · [영상 인코더](src/validation/graph_model.py) |
-| 8. 사용자 표현·추천 평가 | 시청 이력·후보 영상 벡터 | checkpoint·학습 기록·이벤트별 HR/NDCG | `run-recommendation` · [학습·평가](src/validation/leave_one_out_recommendation.py) |
-| 9. 진단 | 이벤트 지표·입력·학습 기록 | 최종 점수·통계 비교·실행 판정 JSON·Markdown 보고서 | `run-diagnosis` · [공통 진단](src/validation/leave_one_out_diagnosis.py) |
+| 4. 평가·고정 특징 준비 | 원본 이력·제목·장면별 Description 또는 Graph | 사용자별 분할·평가 catalog·1024차원 BGE 특징; Graph는 역할 연결·장면 경계 포함 | `embed-representations` · [분할](src/validation/leave_one_out_data.py), [Graph 입력](src/validation/graph_inputs.py) |
+| 5. 활동 구간 준비 — G1·G2 | Graph 장면 관측·고정 특징 bundle | 공통 장면–구간 연결 파일 | `prepare-module` · [구간 생성](src/validation/scene_segments.py) |
+| 6. 영상 표현 학습 | 고정 특징·Graph 구조·해당 Arm의 구간 연결 | 영상당 512차원 벡터 | `run-recommendation` 내부 · [영상 인코더](src/validation/graph_model.py) |
+| 7. 사용자 표현·추천 평가 | 시청 이력·후보 영상 벡터 | checkpoint·학습 기록·이벤트별 HR/NDCG | `run-recommendation` · [학습·평가](src/validation/leave_one_out_recommendation.py) |
+| 8. 진단 | 이벤트 지표·입력·학습 기록 | 최종 점수·통계 비교·실행 판정 JSON·Markdown 보고서 | `run-diagnosis` · [공통 진단](src/validation/leave_one_out_diagnosis.py) |
 
-**5단계의 고정 입력 특징과 7단계의 학습된 추천용 영상 벡터는 다릅니다.** 6단계는 기존 관측으로 연결 파일을 만드는 사전 작업이며 신경망을 학습하지 않습니다. 7·8단계는 같은 `run-recommendation`에서 함께 학습·평가합니다. 영상 안의 장면 순서와 사용자의 시청 순서도 구분합니다. SASRec은 사용자의 시간순 시청 이력을 처리합니다.
+**4단계의 고정 입력 특징과 6단계의 학습된 추천용 영상 벡터는 다릅니다.** 5단계는 기존 관측으로 연결 파일을 만드는 사전 작업이며 신경망을 학습하지 않습니다. 6·7단계는 같은 `run-recommendation`에서 함께 학습·평가합니다. 영상 안의 장면 순서와 사용자의 시청 순서도 구분합니다. SASRec은 사용자의 시간순 시청 이력을 처리합니다.
 
 ## 모듈별 동작과 세부사항
 
@@ -428,7 +416,7 @@ CPU·오프라인 회귀 테스트는 `python -m pytest -q tests`로 실행합�
 
 파이프라인 실행에서는 `run_contract.json`을 생성하거나 요구하지 않습니다. 기존 파일이 있어도 읽거나 수정하지 않으며, `extraction/`만 있는 Run에서도 후속 단계를 실행할 수 있습니다. 산출물의 유효성은 각 단계의 스키마·입력 fingerprint·학습 및 평가 계약으로 검증합니다.
 
-**재실행은 정상 Scene·완료 Summary를 재사용합니다.** 생성 설정을 바꾸어도 자동 갱신하지 않으며, 같은 Run에 서로 다른 생성 조건의 결과가 섞일 수 있습니다. 전체를 현재 조건으로 다시 만들려면 선택한 단계·소스에 `--force`를 사용합니다. 기존 결과를 보존하려면 새 Run을 사용하세요.
+**재실행은 정상 Scene을 재사용합니다.** 생성 설정을 바꾸어도 자동 갱신하지 않으며, 같은 Run에 서로 다른 생성 조건의 결과가 섞일 수 있습니다. 전체를 현재 조건으로 다시 만들려면 선택한 단계·소스에 `--force`를 사용합니다. 기존 결과를 보존하려면 새 Run을 사용하세요.
 
 <details>
 <summary>기존 MicroLens 산출물 경로 이전</summary>
@@ -457,8 +445,7 @@ artifacts/
 │   └── source_assets/
 ├── runs/<RUN_ID>/<dataset>/
 │   ├── extraction/
-│   │   ├── scenes/<source>/
-│   │   └── summaries/<source>/
+│   │   └── scenes/<source>/
 │   ├── validation/
 │   │   ├── cohort/
 │   │   ├── representations/{metadata,desc_qwen3vl,graph_qwen3vl}/
@@ -471,7 +458,6 @@ artifacts/
 | 확인할 내용 | `artifacts/runs/<RUN_ID>/<dataset>/` 아래 위치 |
 | --- | --- |
 | 장면 관측·실패 | `extraction/scenes/<source>/<content_id>.jsonl` |
-| 영상 Summary | `extraction/summaries/<source>/<content_id>.json` |
 | 제목·Description 특징 | `validation/representations/metadata/`, `validation/representations/desc_qwen3vl/` |
 | Graph 고정 특징·역할 연결 | `validation/representations/graph_qwen3vl/` |
 | G1·G2 공통 활동 구간 | Graph 특징 디렉터리의 `scene_segments.npy`, `scene_segments.json` |
@@ -495,15 +481,13 @@ artifacts/
 | --- | --- |
 | 정상 Scene | 생성 설정이 달라도 재사용 |
 | 누락·실패·warning Scene | 현재 설정으로 한 번씩 재시도. penalty 증가·자동 추가 pass 없음 |
-| 완료 Summary | 동일 소스·요약 모델·실제 Scene 입력을 검증한 뒤 재사용. 생성 설정 차이만으로 차단하지 않음 |
-| 실패 Summary | 현재 설정으로 재시도 |
 | 생성 명령의 `--force` | 선택한 소스의 기존 출력을 제거하고 완료 결과까지 재생성 |
 | 완료 추천 조합 | 입력·모델·학습·평가 계약을 검증한 뒤 재사용 |
 | 미완료 추천 조합 | 처음부터 다시 학습. epoch 중간 재개 없음 |
 | 임베딩·추천 캐시 | 현재 Run → 공유 캐시 → 새 계산. `--force`는 해당 단계의 캐시 읽기를 우회 |
 | 활동 구간 준비 | `prepare-module`은 선택한 구간 파일을 매번 다시 생성. Graph 특징 bundle이나 구간 생성 규칙이 바뀌면 다시 실행 |
 
-Scene·Summary는 다른 Run에서 자동으로 가져오지 않습니다. 같은 추천 경로에서 재학습하면 기존 조합을 대체하며 이후 진단도 다시 생성해야 합니다. 현행 추천·평가 계약으로 학습된 결과만 재학습 없이 재진단할 수 있습니다. 과거 산출물은 이동·삭제하지 않습니다.
+Scene은 다른 Run에서 자동으로 가져오지 않습니다. 같은 추천 경로에서 재학습하면 기존 조합을 대체하며 이후 진단도 다시 생성해야 합니다. 현행 추천·평가 계약으로 학습된 결과만 재학습 없이 재진단할 수 있습니다. 과거 산출물은 이동·삭제하지 않습니다.
 
 Scene 디렉터리의 `generation_identity.json`은 초기 생성 설정 기록이며 폴더 내 모든 Scene의 조건이 같음을 보장하지 않습니다. 일반 재개에서는 기존 기록을 보존하고 없을 때만 생성합니다. 실제 입력·인코더·모델·학습 계약과 provenance로 호환성을 확인합니다. 자세한 저장·캐시 계약은 [실행·저장 계약](docs/runtime.md)을 참고하세요.
 
@@ -514,7 +498,6 @@ Scene 디렉터리의 `generation_identity.json`은 초기 생성 설정 기록�
 
 - **진행바:** `success`(정상)·`warning`(Graph 경고)·`failed`(실패)의 합이 완료 수입니다. 진행률·처리량·ETA도 같은 합으로 계산합니다. Graph의 최종 집계는 소스 디렉터리의 `generation_stats.json`에서 확인합니다.
 - **Scene 실패:** JSONL의 `error`·`raw_output`을 확인합니다. 기존 `failures/<content_id>.jsonl`은 추출 재개 시 원본 JSONL에 원자적으로 통합한 뒤 제거합니다.
-- **Summary 실패:** `summaries/<source>/failures.jsonl`을 확인합니다. 실패 Summary의 텍스트는 빈 문자열입니다.
 - **Description 결측:** 유효 장면이 없으면 제목 + 0을 Scene MLP에 넣고, 제목도 없으면 영상 벡터는 0입니다.
 - **Graph 결측:** 유효 장면의 Entity·Action이 없으면 해당 슬롯은 0입니다. 장면 없이 제목만 있으면 제목 기반 Scene MLP 경로를 사용하고 장면 집계를 건너뜁니다. 제목·유효 장면이 모두 없으면 최종 영상 벡터는 0입니다.
 
@@ -531,7 +514,6 @@ Scene 디렉터리의 `generation_identity.json`은 초기 생성 설정 기록�
 | --- | ---: | ---: | ---: |
 | Graph 장면 추출 | 1.5 | 1.05 | 384 |
 | Description 장면 추출 | 1.5 | 1.0 | 512 |
-| Graph·Description 요약 | 2.0 | 1.0 | 512 |
 
 Decoding은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 생성 정책은 [qwen_config.py](src/extraction/qwen_config.py), 출력 토큰 한도는 `config.yaml`의 `extraction.{graph,description}.{qwen3vl,qwen3.5}`를 참고하세요. 설치 extra `qwen`과 `extraction.qwen`은 두 모델의 공용 런타임 이름이며 CLI 모델 이름은 아닙니다.
 

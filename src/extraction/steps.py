@@ -1,7 +1,7 @@
 from __future__ import annotations
 from functools import partial
 from tqdm import tqdm
-from arm_registry import generation_registry, resolve_generation_arm
+from arm_registry import resolve_generation_arm
 from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
@@ -25,7 +25,7 @@ from extraction.step_support import (
     video_name_map,
     visual_rows,
 )
-from extraction.summary_executor import run_summary_stage, qwen_generator
+from extraction.generation import qwen_generator
 from extraction.scene_storage import read_scene_records, migrate_scene_failures
 from pipeline_logging import log_step_start
 
@@ -34,11 +34,11 @@ GRAPH_SOURCES = (*QWEN_MODELS, "gemini", "minicpm")
 
 
 def prompt_provenance(
-    context, schema, arm, *, summary=False, model=None, repetition_penalty=None, presence_penalty=None,
+    context, schema, arm, *, repetition_penalty=None, presence_penalty=None,
 ):
     path = context.prompt_path(schema)
-    source = model if summary else arm.model
-    if source == "minicpm" and (summary or arm.representation != "graph"):
+    source = arm.model
+    if source == "minicpm" and arm.representation != "graph":
         raise ValueError("MiniCPM supports only Graph scene extraction")
     if repetition_penalty is not None and source not in LOCAL_MODELS:
         raise ValueError("repetition penalty is supported only for local vLLM models")
@@ -56,15 +56,13 @@ def prompt_provenance(
     extraction = context.config["extraction"]
     kind = "graph" if arm.representation == "graph" else "description"
     settings = {
-        "max_new_tokens": extraction[kind][source][
-            "summary_max_new_tokens" if summary else "scene_max_new_tokens"
-        ]
+        "max_new_tokens": extraction[kind][source]["scene_max_new_tokens"]
     }
     if source in LOCAL_MODELS:
         generation = minicpm_generation_settings(
             repetition_penalty=repetition_penalty, presence_penalty=presence_penalty,
         ) if source == "minicpm" else generation_settings(
-            source, representation=kind, summary=summary, repetition_penalty=repetition_penalty,
+            source, representation=kind, repetition_penalty=repetition_penalty,
             presence_penalty=presence_penalty,
         )
         settings.update(
@@ -84,25 +82,17 @@ def prompt_provenance(
             settings["output_normalization"] = NORMALIZATION_VERSION
     else:
         settings["backend"] = "gemini"
-    if not summary:
-        settings["visual_evidence"] = dict(extraction["visual_evidence"])
-        if arm.representation == "graph":
-            settings["response_parser"] = GRAPH_PARSER_VERSION
+    settings["visual_evidence"] = dict(extraction["visual_evidence"])
+    if arm.representation == "graph":
+        settings["response_parser"] = GRAPH_PARSER_VERSION
     return {
-        **(
-            {"uses_title": arm.uses_title, "scene_arm": arm.scene_arm}
-            if summary
-            else {"scene_arm": arm.name}
-        ),
+        "scene_arm": arm.name,
         "representation": arm.representation,
         "prompt_path": str(path),
         "prompt_hash": file_fingerprint(path),
         "model": model,
         "settings": settings,
-        **({"summary_model": source} if summary else {}),
-        "schema_contract": "summary/v5"
-        if summary
-        else GRAPH_SCHEMA_VERSION
+        "schema_contract": GRAPH_SCHEMA_VERSION
         if arm.representation == "graph"
         else "description/v2",
     }
@@ -277,45 +267,6 @@ def _extract(
     )
 
 
-def _summarize(
-    context, *, representation, model, schema, force=False, arm=None,
-    repetition_penalty=None, presence_penalty=None,
-):
-    if model not in (*QWEN_MODELS, "gemini"):
-        raise ValueError("summary model must be qwen3vl, qwen3.5 or gemini")
-    if arm is None:
-        raise ValueError("summarization requires --arm")
-    arm = resolve_generation_arm(context.config, arm, representation, model, summary=True)
-    path = context.prompt_path(schema)
-    stage = f"summarize-{representation}"
-    log_step_start(
-        context, stage, source=arm.model, model=model, schema=path, force=force, arm=arm.name,
-        **({"repetition_penalty": repetition_penalty} if repetition_penalty is not None else {}),
-        **({"presence_penalty": presence_penalty} if presence_penalty is not None else {}),
-    )
-    from extraction.summary_storage import validate_summary_template
-
-    validate_summary_template(path.read_text(), arm.uses_title)
-    context.initialize()
-    cohort = context.require_ready_cohort()
-    provenance = prompt_provenance(
-        context, path, arm, summary=True, model=model, repetition_penalty=repetition_penalty,
-        presence_penalty=presence_penalty,
-    )
-    return run_summary_stage(
-        context,
-        arm=arm,
-        schema=path,
-        catalog=cohort["catalog"],
-        provenance=provenance,
-        generation=provenance["settings"].get("generation", {}),
-        model=model,
-        gemini_pool_factory=GeminiWorkerPool,
-        force=force,
-        generator_factory=qwen_generator,
-    )
-
-
 def extract_graph_scenes(
     context, *, model, schema, force=False, arm=None, repetition_penalty=None, presence_penalty=None,
 ):
@@ -334,21 +285,7 @@ def extract_description_scenes(
     )
 
 
-def summarize(
-    context, *, model, schema, arm=None, force=False, repetition_penalty=None, presence_penalty=None,
-):
-    if arm is None:
-        raise ValueError("summarize requires --arm")
-    selected = generation_registry(context.config).get(arm)
-    representation = selected.representation if selected else None
-    return _summarize(
-        context, representation=representation, model=model, schema=schema, force=force, arm=arm,
-        repetition_penalty=repetition_penalty, presence_penalty=presence_penalty,
-    )
-
-
 STEP_HANDLERS = {
     "extract-graph-scenes": extract_graph_scenes,
     "extract-description-scenes": extract_description_scenes,
-    "summarize": summarize,
 }

@@ -68,25 +68,19 @@ extraction:
   description:
     qwen3vl:
       scene_max_new_tokens: 512
-      summary_max_new_tokens: 512
     qwen3.5:
       scene_max_new_tokens: 512
-      summary_max_new_tokens: 512
     gemini:
       scene_max_new_tokens: 1024
-      summary_max_new_tokens: 1024
   graph:
     minicpm:
       scene_max_new_tokens: 384
     qwen3vl:
       scene_max_new_tokens: 384
-      summary_max_new_tokens: 512
     qwen3.5:
       scene_max_new_tokens: 384
-      summary_max_new_tokens: 512
     gemini:
       scene_max_new_tokens: 1024
-      summary_max_new_tokens: 1024
 validation:
   cohort:
     mode: leave_one_out

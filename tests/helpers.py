@@ -13,8 +13,6 @@ from PIL import Image
 import yaml
 
 from artifact_io import read_json, read_jsonl, write_json
-from arm_registry import generation_registry
-from extraction.qwen_config import generation_settings
 from extraction.scene_storage import write_scene_records
 from pipeline_runtime import RunContext
 from preparation.cohort import prepare_full_cohort
@@ -152,9 +150,7 @@ def make_context(root, lengths=(5, 6, 13)):
     prompts.mkdir()
     for name in (
         "scene_graph_v9.md",
-        "summary_graph_v9.md",
         "scene_description_v3.md",
-        "summary_description_v5.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
     return RunContext.load("regression", dataset="microlens_100k", root=root)
@@ -263,26 +259,6 @@ def train_inputs(context, monkeypatch):
 
     prepare_inputs(context, monkeypatch)
     return run_recommendation(context, target=TARGETS)
-
-
-def summary_options(context, catalog=None):
-    return dict(
-        arm=generation_registry(context.config)["graph_qwen3vl"],
-        schema=context.root / "prompts" / "summary_graph_v9.md",
-        catalog=catalog or context.require_ready_cohort()["catalog"],
-        provenance={
-            "uses_title": False,
-            "scene_arm": "graph_qwen3vl",
-            "representation": "graph",
-            "summary_model": "qwen3vl",
-            "model": {"files_signature": "fake"},
-            "prompt_hash": "fake",
-            "settings": {"backend": "vllm", "generation": {"model": "qwen3vl"}},
-        },
-        generation=generation_settings("qwen3vl", representation="graph", summary=True),
-        model="qwen3vl",
-        force=False,
-    )
 
 
 def graph_store(context, *, counts=(2, 1), arm_name="g1"):

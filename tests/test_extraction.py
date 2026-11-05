@@ -1,9 +1,6 @@
-from copy import deepcopy
-
 import pytest
 
-from artifact_io import read_jsonl, write_jsonl
-from extraction.errors import ExtractionStepError
+from artifact_io import read_jsonl
 from extraction.graph_warnings import MISSING_REQUIRED, PARSE_FAILED
 from extraction.qwen_runtime import QwenRuntime
 from extraction.scene_executor import graph_scene_result, run_qwen_scenes
@@ -11,19 +8,15 @@ from extraction.scene_storage import read_scene_records, write_scene_records
 from extraction.semantic_graph import parse_or_repair_graph
 from extraction.steps import prepare_scene_batch
 from extraction.step_support import minimal_graph_records, scene_generation_rows
-from extraction.summary_executor import prepare_summary_batch
-from extraction.summary_storage import validate_summary_template
 from helpers import (
     GRAPH_TEXT,
     NAMED_GRAPH_TEXT,
     FakeGenerator,
-    extract_scenes,
     failure_row,
     graph,
     quiet_progress,
     ready_cohort,
     scene_row,
-    summary_options,
 )
 
 
@@ -182,41 +175,55 @@ def test_truncated_scene_is_failure(context, monkeypatch):
     assert "scene_graph" not in saved[0]
 
 
-def test_summary_prompt_excludes_title(context, monkeypatch):
-    extract_scenes(context, monkeypatch)
-    options = summary_options(context)
-    batch, _ = prepare_summary_batch(context, **options)
-    assert batch.next_penalties
-    for records, provenance, task in batch.pending.values():
-        assert records and "TITLE_SECRET" not in task.prompt
-        assert "cutting" in task.prompt
-        assert provenance["uses_title"] is False
-        assert "english_title" not in provenance
-    for template in ("No scene placeholder", "{scenes} {english_title}"):
-        with pytest.raises(ValueError):
-            validate_summary_template(template, uses_title=False)
+@pytest.mark.parametrize("representation", ["graph", "description"])
+@pytest.mark.parametrize("model", ["qwen3vl", "qwen3.5", "gemini"])
+def test_scene_sources_extract_reuse_and_retry(
+    context, monkeypatch, representation, model,
+):
+    from extraction.backends.gemini_workers import GeminiGenerationOutcome
+    from extraction.steps import extract_description_scenes, extract_graph_scenes
+    from helpers import install_doubles
+    from preparation.input_data import prepare_input_data
 
+    ready_cohort(context)
+    install_doubles(monkeypatch)
+    prepare_input_data(context)
+    graph_source = representation == "graph"
+    generator = FakeGenerator(GRAPH_TEXT if graph_source else "A person cuts a tomato.")
 
-def test_summary_reuse_tracks_scene_content(context, monkeypatch):
-    from extraction.steps import summarize
-    from helpers import FakeGenerator
+    class GeminiPool:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    extract_scenes(context, monkeypatch)
-    monkeypatch.setattr("extraction.steps.qwen_generator", FakeGenerator("A person cuts a tomato."))
-    summarize(context, model="qwen3vl", schema="prompts/summary_graph_v9.md", arm="graph_qwen3vl")
-    options = summary_options(context)
-    cid = options["catalog"][0]["content_id"]
-    output = context.summary_arm_dir("graph_qwen3vl") / f"{cid}.json"
-    before = output.read_bytes()
-    stat = output.stat().st_mtime_ns
-    batch, _ = prepare_summary_batch(context, **options)
-    assert not batch.next_penalties and cid in batch.documents
-    assert output.stat().st_mtime_ns == stat
-    source = context.scene_arm_dir("graph_qwen3vl") / f"{cid}.jsonl"
-    rows = read_jsonl(source)
-    updated = deepcopy(rows)
-    updated[0]["scene_graph"]["actions"][0]["action"] = "washing"
-    write_jsonl(source, updated)
-    with pytest.raises(ExtractionStepError, match="scene input changed"):
-        prepare_summary_batch(context, **options)
-    assert output.read_bytes() == before
+        def generate(self, tasks, complete, **kwargs):
+            for task in tasks:
+                generator.tasks.append(task)
+                complete(GeminiGenerationOutcome(task.task_id, generator.text))
+
+    monkeypatch.setattr("extraction.steps.qwen_generator", generator)
+    monkeypatch.setattr("extraction.steps.GeminiWorkerPool", GeminiPool)
+    extract = extract_graph_scenes if graph_source else extract_description_scenes
+    options = dict(
+        model=model,
+        arm=f"{'graph' if graph_source else 'desc'}_{model}",
+        schema="prompts/scene_graph_v9.md" if graph_source else "prompts/scene_description_v3.md",
+    )
+    assert extract(context, **options)["failure_count"] == 0
+    assert generator.tasks
+    for task in generator.tasks:
+        assert task.max_new_tokens == context.config["extraction"][representation][model]["scene_max_new_tokens"]
+        assert "TITLE_SECRET" not in task.prompt
+        if model != "gemini":
+            assert task.presence_penalty == 1.5
+            assert task.repetition_penalty == (1.05 if graph_source else 1.0)
+    generator.tasks.clear()
+    assert extract(context, **options)["failure_count"] == 0
+    assert not generator.tasks
+
+    path = next(context.scene_arm_dir(options["arm"]).glob("*.jsonl"))
+    rows = read_jsonl(path)
+    rows[0] = failure_row(path.stem, rows[0]["scene_idx"])
+    write_scene_records(path, rows)
+    assert extract(context, **options)["failure_count"] == 0
+    assert len(generator.tasks) == 1
+    assert all("error" not in row for row in read_scene_records(path, include_failures=True))

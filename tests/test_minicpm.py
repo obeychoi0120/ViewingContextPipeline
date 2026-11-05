@@ -16,7 +16,7 @@ from extraction.minicpm_config import minicpm_generation_settings, validate_mini
 from extraction.minicpm_output import normalize_minicpm_output
 from extraction.qwen_config import generation_settings
 from extraction.scene_storage import ensure_generation_identity
-from extraction.steps import extract_description_scenes, extract_graph_scenes, prompt_provenance, summarize
+from extraction.steps import extract_description_scenes, extract_graph_scenes, prompt_provenance
 from helpers import FakeGenerator, NAMED_GRAPH_TEXT, install_doubles, ready_cohort
 from pipeline_runtime import ConfigError, RunContext, _validate_config
 
@@ -52,10 +52,9 @@ def test_minicpm_optional_v6_config(context):
     del invalid["extraction"]["graph"]["minicpm"]
     with pytest.raises(ConfigError):
         _validate_config(invalid)
-    invalid = deepcopy(current)
-    invalid["protocol"]["graph_extractors"].remove("minicpm")
-    with pytest.raises(ConfigError):
-        _validate_config(invalid)
+    subset = deepcopy(current)
+    subset["protocol"]["graph_extractors"].remove("minicpm")
+    _validate_config(subset)
     invalid = deepcopy(current)
     invalid["models"]["minicpm"] = ""
     with pytest.raises(ConfigError):
@@ -84,8 +83,6 @@ def test_minicpm_cli_arm_default(minicpm_context, monkeypatch, arm):
 
 @pytest.mark.parametrize("step,model,arm", [
     ("extract-description-scenes", "minicpm", "graph_minicpm"),
-    ("summarize", "minicpm", "graph_minicpm"),
-    ("summarize", "gemini", "graph_minicpm"),
     ("extract-graph-scenes", "minicpm", "graph_qwen3vl"),
     ("extract-graph-scenes", "qwen3vl", None),
 ])
@@ -102,15 +99,10 @@ def test_minicpm_cli_rejects_unsupported(step, model, arm, monkeypatch):
 def test_minicpm_public_api_rejects_other_stages(minicpm_context):
     with pytest.raises(ValueError, match="only Graph"):
         extract_description_scenes(minicpm_context, model="minicpm", schema="unused")
-    with pytest.raises(ValueError):
-        summarize(minicpm_context, model="minicpm", schema="unused", arm="graph_minicpm")
-    with pytest.raises(ValueError, match="only Graph"):
-        summarize(minicpm_context, model="gemini", schema="unused", arm="graph_minicpm")
     with pytest.raises(ValueError, match="requested extraction model"):
         resolve_generation_arm(minicpm_context.config, "graph_minicpm", "graph", "qwen3vl")
-    for kind, phase in (("description", "scenes"), ("graph", "summaries")):
-        with pytest.raises(ValueError):
-            minicpm_context.extraction_dir(kind, "minicpm", phase)
+    with pytest.raises(ValueError, match="only Graph"):
+        minicpm_context.extraction_dir("description", "minicpm", "scenes")
 
 
 def test_minicpm_checkpoint_and_generation_policy(minicpm_context):

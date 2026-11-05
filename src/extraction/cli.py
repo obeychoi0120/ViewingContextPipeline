@@ -16,23 +16,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Regenerate all outputs for this step, including completed summaries.",
+        help="Regenerate all scenes for this step, including completed scenes.",
     )
     parser.add_argument("--schema", help="Path to one Markdown prompt (required for generation).")
     parser.add_argument(
         "--model",
         choices=GRAPH_SOURCES,
-        help="Required generation model for extraction and summarization.",
+        help="Required generation model for scene extraction.",
     )
     parser.add_argument(
         "--repetition-penalty",
         type=float,
-        help="Local vLLM generated-token repetition penalty in [1, 2]. Defaults: Graph scenes 1.05; Description scenes and summaries 1.0.",
+        help="Local vLLM generated-token repetition penalty in [1, 2]. Defaults: Graph scenes 1.05; Description scenes 1.0.",
     )
     parser.add_argument(
         "--presence-penalty",
         type=float,
-        help="Local vLLM presence penalty in [-2, 2]. Defaults: scenes 1.5; summaries 2.0. Use 0 to disable.",
+        help="Local vLLM presence penalty in [-2, 2]. Default: 1.5. Use 0 to disable.",
     )
     parser.add_argument(
         "--arm",
@@ -49,8 +49,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.arm = "graph_minicpm"
             elif args.arm != "graph_minicpm":
                 raise ValueError("minicpm Graph scenes require --arm graph_minicpm")
-        if args.step == "summarize" and args.arm == "graph_minicpm":
-            raise ValueError("MiniCPM source supports only Graph scene extraction")
         if args.model is None or args.arm is None:
             raise ValueError("generation requires --model and --arm")
         options = {}

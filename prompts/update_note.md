@@ -21,7 +21,7 @@
 - 행동 형식을 `actor - action - target; tool; place`로 변경합니다. place는 행동이 일어나는 장소이며 목적지가 아닙니다. 불명확한 장소는 `unknown`으로 표현합니다.
 - 두 사람이 등장하는 예시로 번호 구분과 이름 참조를 설명합니다. Context, 개수 상한, 근거 제한, none/unknown 구분, 전달 물체를 target으로 두는 원칙은 유지합니다.
 
-**연동 및 검증 범위:** 내부 필드도 `place`로 변경하는 사용자 결정에 맞춘 프롬프트입니다. 후속 코드 작업에서 내부 `location` → `place` 전환을 반영했습니다. 파서 `graph-text/v14`, 장면 스키마 `scene-graph/v8`, 직접 Graph 입력 `role-graph-inputs/v8`을 사용합니다. 기존 정책대로 `location` 구조화 데이터는 자동 변환 없이 거부하고 원본을 보존합니다. 이름 기반 v9 출력의 파싱·참조 처리를 구현했습니다. 공백·번호를 포함한 이름을 정확히 대조한 뒤 장면별 내부 ID를 부여하며 이름·속성을 보존합니다. 기존 ID 선언 형식과 현재 place JSON도 지원합니다. 미선언 이름은 기존 정책대로 warning 없이 unknown으로 처리하고, 중복 이름은 선언을 모두 보존하되 마지막 선언으로 연결합니다. v9 예시의 파싱·저장·요약 전달과 Qwen3-VL·Qwen3.5·Gemini 실행 경로 및 직접 Graph 입력을 가짜 backend로 검증했습니다. 실제 모델 생성·추천 성능은 검증하지 않았습니다. [summary_graph_v9](../prompts/summary_graph_v9.md)도 place와 장면별 이름·번호 해석에 맞춰 갱신합니다. 기존 v8 파일은 보존합니다.
+**연동 및 검증 범위:** 내부 필드도 `place`로 변경하는 사용자 결정에 맞춘 프롬프트입니다. 후속 코드 작업에서 내부 `location` → `place` 전환을 반영했습니다. 파서 `graph-text/v14`, 장면 스키마 `scene-graph/v8`, 직접 Graph 입력 `role-graph-inputs/v8`을 사용합니다. 기존 정책대로 `location` 구조화 데이터는 자동 변환 없이 거부하고 원본을 보존합니다. 이름 기반 v9 출력의 파싱·참조 처리를 구현했습니다. 공백·번호를 포함한 이름을 정확히 대조한 뒤 장면별 내부 ID를 부여하며 이름·속성을 보존합니다. 기존 ID 선언 형식과 현재 place JSON도 지원합니다. 미선언 이름은 기존 정책대로 warning 없이 unknown으로 처리하고, 중복 이름은 선언을 모두 보존하되 마지막 선언으로 연결합니다. v9 예시의 파싱·저장·요약 전달과 Qwen3-VL·Qwen3.5·Gemini 실행 경로 및 직접 Graph 입력을 가짜 backend로 검증했습니다. 실제 모델 생성·추천 성능은 검증하지 않았습니다. [summary_graph_v9](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v9.md)도 place와 장면별 이름·번호 해석에 맞춰 갱신합니다. 기존 v8 파일은 보존합니다.
 
 ### v7 → v8: receiver 제거로 행동 역할 단순화
 
@@ -117,13 +117,21 @@ v1은 직접 보이는 배경·개체·행동·변화를 포괄적으로 묘사�
 
 ## summary_graph
 
-대상(최신순): [v9](../prompts/summary_graph_v9.md) → [v8](../prompts/summary_graph_v8.md) → [v7](../prompts/summary_graph_v7.md) → [v6](../prompts/summary_graph_v6.md) → [v5](../prompts/summary_graph_v5.md)
+### 2026-11-05: summarize 단계와 전용 프롬프트 제거
+
+extraction을 장면별 Graph·Description 추출로 정리하면서 영상 요약 단계와 전용 프롬프트를 제거했습니다. 현행 추천 Arm은 장면별 특징을 사용하므로 영상 Summary 생성 경로를 유지하지 않습니다.
+
+삭제 대상: `summary_graph_v3.md`–`summary_graph_v9.md`. 실행·저장·실패 로그·요약 프롬프트 생성 API와 `summary_max_new_tokens` 설정을 함께 제거했습니다. 기존 summarize 명령과 요약 설정은 더 이상 지원하지 않습니다. 기존 Run의 Scene·Summary·추천 산출물과 아래 변경 이력은 보존합니다. 삭제한 프롬프트는 파일명별 Git 이력에서 확인할 수 있습니다.
+
+장면 추출 프롬프트와 Scene·추천 계약은 변경하지 않습니다. CPU/offline 회귀 테스트에서 요약 명령·설정 거부, 장면 추출·재개·재시도와 기존 Summary 파일 보존을 확인했습니다. 실제 모델 생성·추천 성능에 대한 새 평가는 수행하지 않았습니다.
+
+삭제 전 버전(Git 이력, 최신순): [v9](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v9.md) → [v8](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v8.md) → [v7](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v7.md) → [v6](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v6.md) → [v5](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v5.md) → [v4](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v4.md) → [v3](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v3.md)
 
 **개선 흐름: 중복을 줄인 자연어 요약 → Context + Actions의 의미 보존 → 확장 역할과 누락값 의미 보존 → receiver 없는 입력 해석으로 동기화.**
 
 ### v8 → v9: place 필드와 장면별 개체 이름·번호 해석 반영
 
-2026-10-14 프롬프트 반영. [summary_graph_v9](../prompts/summary_graph_v9.md)는 [scene_graph_v9](../prompts/scene_graph_v9.md) 및 내부 장소 필드를 `place`로 변경하는 결정에 맞춰 요약 지침을 갱신합니다.
+2026-10-14 프롬프트 반영. [summary_graph_v9](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v9.md)는 [scene_graph_v9](../prompts/scene_graph_v9.md) 및 내부 장소 필드를 `place`로 변경하는 결정에 맞춰 요약 지침을 갱신합니다.
 
 - 장소 역할 설명과 누락 기본값을 `location`에서 `place`로 변경합니다. 행동 장소와 목적지를 구분하고, `unknown`인 장소를 추측하지 않는 원칙은 유지합니다.
 - 장면별 동일성 제한을 ID뿐 아니라 개체 이름과 번호에도 적용합니다. 서로 다른 장면의 `person1`이 같은 사람이라는 의미는 아니며, 요약 본문에 식별용 번호를 노출하지 않도록 명시합니다.
@@ -166,7 +174,15 @@ v5는 주요 주체·행동·상호작용을 자연어로 통합하고, 중복 �
 
 ## summary_description
 
-대상(최신순): [v5](../prompts/summary_description_v5.md) → [v4](../prompts/summary_description_v4.md) → [v3](../prompts/summary_description_v3.md)
+### 2026-11-05: summarize 단계와 전용 프롬프트 제거
+
+extraction을 장면별 Graph·Description 추출로 정리하면서 영상 요약 단계와 전용 프롬프트를 제거했습니다. 현행 추천 Arm은 장면별 특징을 사용하므로 영상 Summary 생성 경로를 유지하지 않습니다.
+
+삭제 대상: `summary_description_v3.md`–`summary_description_v5.md`. 실행·저장·실패 로그·요약 프롬프트 생성 API와 `summary_max_new_tokens` 설정을 함께 제거했습니다. 기존 summarize 명령과 요약 설정은 더 이상 지원하지 않습니다. 기존 Run의 Scene·Summary·추천 산출물과 아래 변경 이력은 보존합니다. 삭제한 프롬프트는 파일명별 Git 이력에서 확인할 수 있습니다.
+
+장면 추출 프롬프트와 Scene·추천 계약은 변경하지 않습니다. CPU/offline 회귀 테스트에서 요약 명령·설정 거부, 장면 추출·재개·재시도와 기존 Summary 파일 보존을 확인했습니다. 실제 모델 생성·추천 성능에 대한 새 평가는 수행하지 않았습니다.
+
+삭제 전 버전(Git 이력, 최신순): [v5](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_description_v5.md) → [v4](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_description_v4.md) → [v3](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_description_v3.md)
 
 **개선 흐름: 일곱 필드의 정형 압축 → 짧은 자연어 요약 → 핵심 정보 보존을 위한 분량 여유 확대.**
 
