@@ -7,11 +7,7 @@ from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
-from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings
-from extraction.minicpm_config import (
-    NORMALIZATION_VERSION, PROCESSOR_SETTINGS, minicpm_generation_settings,
-    validate_local_checkpoint,
-)
+from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
 from extraction.graph_warnings import WARNING_TAGS
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -29,8 +25,8 @@ from extraction.generation import qwen_generator
 from extraction.scene_storage import read_scene_records, migrate_scene_failures
 from pipeline_logging import log_step_start
 
-LOCAL_MODELS = (*QWEN_MODELS, "minicpm")
-GRAPH_SOURCES = (*QWEN_MODELS, "gemini", "minicpm")
+LOCAL_MODELS = QWEN_MODELS
+GRAPH_SOURCES = (*QWEN_MODELS, "gemini")
 
 
 def prompt_provenance(
@@ -38,8 +34,6 @@ def prompt_provenance(
 ):
     path = context.prompt_path(schema)
     source = arm.model
-    if source == "minicpm" and arm.representation != "graph":
-        raise ValueError("MiniCPM supports only Graph scene extraction")
     if repetition_penalty is not None and source not in LOCAL_MODELS:
         raise ValueError("repetition penalty is supported only for local vLLM models")
     if presence_penalty is not None and source not in LOCAL_MODELS:
@@ -47,7 +41,7 @@ def prompt_provenance(
     if source in LOCAL_MODELS:
         import json
         checkpoint = context.path("models", source)
-        validate_local_checkpoint(source, json.loads((checkpoint / "config.json").read_text()))
+        validate_checkpoint(source, json.loads((checkpoint / "config.json").read_text()))
     model = (
         local_model_identity(context.path("models", source))
         if source in LOCAL_MODELS
@@ -59,9 +53,7 @@ def prompt_provenance(
         "max_new_tokens": extraction[kind][source]["scene_max_new_tokens"]
     }
     if source in LOCAL_MODELS:
-        generation = minicpm_generation_settings(
-            repetition_penalty=repetition_penalty, presence_penalty=presence_penalty,
-        ) if source == "minicpm" else generation_settings(
+        generation = generation_settings(
             source, representation=kind, repetition_penalty=repetition_penalty,
             presence_penalty=presence_penalty,
         )
@@ -71,15 +63,6 @@ def prompt_provenance(
             generation=generation,
             repetition_penalty=[generation["repetition_penalty"]],
         )
-        if source == "minicpm":
-            settings["processor"] = {
-                **PROCESSOR_SETTINGS, "max_slice_nums": "processor_default",
-                "chat_template_hash": (
-                    file_fingerprint(checkpoint / "chat_template.jinja")
-                    if (checkpoint / "chat_template.jinja").is_file() else None
-                ),
-            }
-            settings["output_normalization"] = NORMALIZATION_VERSION
     else:
         settings["backend"] = "gemini"
     settings["visual_evidence"] = dict(extraction["visual_evidence"])
@@ -149,11 +132,6 @@ def _extract(
     context, *, representation, model, schema, force=False, arm=None,
     repetition_penalty=None, presence_penalty=None,
 ):
-    if model == "minicpm":
-        if representation != "graph":
-            raise ValueError("MiniCPM supports only Graph scene extraction")
-        if arm is None:
-            arm = "graph_minicpm"
     if arm is None:
         raise ValueError("extraction requires --arm")
     arm = resolve_generation_arm(context.config, arm, representation, model)
@@ -223,7 +201,6 @@ def _extract(
                 names=video_name_map(context),
                 progress=progress,
                 arm=representation,
-                source=model,
                 existing_records=existing,
                 qwen_options=settings.get("qwen"),
                 image_limit=settings["visual_evidence"]["num_keyframes"],

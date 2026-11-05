@@ -7,7 +7,6 @@ from validation.graph_inputs import GraphStore
 from validation.graph_context import GRAPH_MODEL, check_extensions
 from validation.graph_batching import PackedGraphStore, GRAPH_EXECUTION_VERSION
 from validation.config import GraphExecutionConfig
-from validation.profiling import span, timed, workload, is_profiling, checkpoint_contexts
 
 
 def segment_mean(values, indices, count):
@@ -104,9 +103,8 @@ class SceneRoleEncoder(nn.Module):
     def forward(self, batch):
         video_count = len(batch["offsets"]) - 1
         scene_count = len(batch["contexts"])
-        with span("title_projection", cuda=True):
-            title = self.title_projection(batch["titles"])
-            title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
+        title = self.title_projection(batch["titles"])
+        title = title.masked_fill(~batch["title_available"].bool()[:, None], 0.0)
         scenes = title.new_empty((0, self.output_dim))
         if scene_count:
             entity_ids = batch.get("entity_ids")
@@ -114,45 +112,36 @@ class SceneRoleEncoder(nn.Module):
             if entity_ids is None:
                 entity_ids = torch.where(batch["types"] == 0)[0]
                 action_ids = torch.where(batch["types"] == 1)[0]
-            with span("entity_projection", cuda=True):
-                entities = self.entity_projection(batch["features"][entity_ids])
-            with span("action_projection", cuda=True):
-                actions = self.action_projection(batch["features"][action_ids])
+            entities = self.entity_projection(batch["features"][entity_ids])
+            actions = self.action_projection(batch["features"][action_ids])
             if len(action_ids) and self.role_fusion is not None:
-                with span("role_fusion", cuda=True):
-                    role_entities, role_states = self._role_inputs(batch, action_ids)
-                    # Node IDs are local to the batch; compact Entity rows differ.
-                    lookup = action_ids.new_full((len(batch["types"]),), -1)
-                    lookup[entity_ids] = torch.arange(len(entity_ids), device=entity_ids.device)
-                    padded_entities = torch.cat([entities.new_zeros((1, self.hidden_dim)), entities])
-                    role_vectors = []
-                    for role in range(4):
-                        ids = role_entities[:, role]
-                        rows = lookup[ids.clamp_min(0)] + 1
-                        rows = rows.masked_fill(ids < 0, 0)
-                        linked = padded_entities[rows]
-                        with span("state_lookup", cuda=True):
-                            state = nn.functional.embedding(role_states[:, role], self.role_states[role])
-                        role_vectors.append(torch.where((ids >= 0)[:, None], linked, state))
-                    actions = actions + nn.functional.relu(
-                        self.role_fusion(torch.cat([actions, *role_vectors], dim=-1))
-                    )
-            with span("scene_readout", cuda=True):
-                entity_mean = segment_mean(entities, batch["node_scenes"][entity_ids], scene_count)
-                action_mean = segment_mean(actions, batch["node_scenes"][action_ids], scene_count)
-                with span("context_projection", cuda=True):
-                    context = self.context_projection(batch["contexts"])
-                scene_title = title[batch["scene_videos"]]
-                scenes = torch.cat([scene_title, entity_mean, action_mean, context], dim=-1)
-            with span("scene_mlp", cuda=True):
-                scenes = self.scene_mlp(scenes)
+                role_entities, role_states = self._role_inputs(batch, action_ids)
+                # Node IDs are local to the batch; compact Entity rows differ.
+                lookup = action_ids.new_full((len(batch["types"]),), -1)
+                lookup[entity_ids] = torch.arange(len(entity_ids), device=entity_ids.device)
+                padded_entities = torch.cat([entities.new_zeros((1, self.hidden_dim)), entities])
+                role_vectors = []
+                for role in range(4):
+                    ids = role_entities[:, role]
+                    rows = lookup[ids.clamp_min(0)] + 1
+                    rows = rows.masked_fill(ids < 0, 0)
+                    linked = padded_entities[rows]
+                    state = nn.functional.embedding(role_states[:, role], self.role_states[role])
+                    role_vectors.append(torch.where((ids >= 0)[:, None], linked, state))
+                actions = actions + nn.functional.relu(
+                    self.role_fusion(torch.cat([actions, *role_vectors], dim=-1))
+                )
+            entity_mean = segment_mean(entities, batch["node_scenes"][entity_ids], scene_count)
+            action_mean = segment_mean(actions, batch["node_scenes"][action_ids], scene_count)
+            context = self.context_projection(batch["contexts"])
+            scene_title = title[batch["scene_videos"]]
+            scenes = torch.cat([scene_title, entity_mean, action_mean, context], dim=-1)
+            scenes = self.scene_mlp(scenes)
             if "segments" in self.extensions:
-                with span("segment_update", cuda=True):
-                    scenes, segment_readout = self._segments(batch, scenes, video_count)
-        with span("video_pooling", cuda=True):
-            output = segment_mean(scenes, batch["scene_videos"], video_count)
-            if "segments" in self.extensions and scene_count:
-                output = output + segment_readout
+                scenes, segment_readout = self._segments(batch, scenes, video_count)
+        output = segment_mean(scenes, batch["scene_videos"], video_count)
+        if "segments" in self.extensions and scene_count:
+            output = output + segment_readout
         # Only videos with no valid scenes use the title-only scene path.
         missing = [i for i in range(video_count) if batch["offsets"][i] == batch["offsets"][i + 1]]
         if missing:
@@ -268,8 +257,7 @@ class GraphSASRec(SASRec):
 
     def _calculate_chunk(self, batch):
         # Checkpoint backward recomputes only neural operations on static inputs.
-        with span("graph_encoder", cuda=True):
-            return self.graph_encoder(batch)
+        return self.graph_encoder(batch)
 
     def _use_checkpoint(self, items):
         if not self.training or not torch.is_grad_enabled():
@@ -318,16 +306,6 @@ class GraphSASRec(SASRec):
         if chunk:
             chunks.append(chunk)
         use_checkpoint = self._use_checkpoint(ids)
-        if is_profiling():
-            selected = np.asarray(ids, dtype=np.int64) - 1
-            workload(
-                unique_videos=len(ids),
-                scenes=self.packed.scene_counts[selected].sum(),
-                nodes=self.packed.node_counts[selected].sum(),
-                edges=self.packed.edge_counts[selected].sum(),
-                chunks=len(chunks),
-                checkpoint_batches=int(use_checkpoint),
-            )
         if self.training:
             self.execution_counts["checkpoint_batches" if use_checkpoint else "direct_batches"] += 1
         device = self.title_projection.weight.device
@@ -335,8 +313,7 @@ class GraphSASRec(SASRec):
             batch = self.packed.batch(np.asarray(items) - 1, device, **self._batch_options())
             self.execution_counts["chunks"] += 1
             if use_checkpoint:
-                options = {"context_fn": checkpoint_contexts} if is_profiling() else {}
-                values = checkpoint(self._calculate_chunk, batch, use_reentrant=False, **options)
+                values = checkpoint(self._calculate_chunk, batch, use_reentrant=False)
             else:
                 values = self._calculate_chunk(batch)
             vectors.append(values)
@@ -346,15 +323,13 @@ class GraphSASRec(SASRec):
             else self.title_projection.weight.new_empty((0, self.embedding_dim))
         )
 
-    @timed("graph_items")
     def prepare_items(self, ids):
-        with span("unique_ids", cuda=False):
-            if isinstance(ids, torch.Tensor):
-                ids = ids.detach().cpu().numpy()
-            unique = np.unique(np.asarray(ids, dtype=np.int64))
-            unique = unique[unique != 0]
-            if len(unique) and (unique[0] < 1 or unique[-1] > self.item_count):
-                raise ValueError("graph item ID outside catalog")
+        if isinstance(ids, torch.Tensor):
+            ids = ids.detach().cpu().numpy()
+        unique = np.unique(np.asarray(ids, dtype=np.int64))
+        unique = unique[unique != 0]
+        if len(unique) and (unique[0] < 1 or unique[-1] > self.item_count):
+            raise ValueError("graph item ID outside catalog")
         self._vectors = torch.cat(
             [
                 self.title_projection.weight.new_zeros((1, self.embedding_dim)),
@@ -362,12 +337,11 @@ class GraphSASRec(SASRec):
             ]
         )
         # Build the lookup in CPU memory once; transfer it in a single operation.
-        with span("item_lookup", cuda=True):
-            indices = np.full(self.item_count + 1, -1, dtype=np.int64)
-            indices[0] = 0
-            indices[unique] = np.arange(1, len(unique) + 1)
-            self._indices = torch.as_tensor(indices, device=self._vectors.device)
-            self._catalog_cached = len(unique) == self.item_count
+        indices = np.full(self.item_count + 1, -1, dtype=np.int64)
+        indices[0] = 0
+        indices[unique] = np.arange(1, len(unique) + 1)
+        self._indices = torch.as_tensor(indices, device=self._vectors.device)
+        self._catalog_cached = len(unique) == self.item_count
 
     def item_vectors(self, item_ids):
         if self._vectors is None:

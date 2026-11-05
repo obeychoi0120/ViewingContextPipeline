@@ -198,7 +198,5 @@ def ensure_generation_identity(directory, provenance, *, force=False):
         # A new identity must never label old outputs after an interrupted regeneration.
         for path in [*directory.glob("*.jsonl"), *(directory / "failures").glob("*.jsonl")]:
             path.unlink()
-        for path in (directory / "raw_responses").glob("*.jsonl"):
-            path.unlink()
     if force or not identity_path.exists():
         atomic_write_json(identity_path, {"identity": identity}, durable=True)

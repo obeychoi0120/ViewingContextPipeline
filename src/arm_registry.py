@@ -33,8 +33,6 @@ SOURCES = tuple(
     for name, kind, model in (
         ("graph_qwen3vl", "graph", "qwen3vl"),
         ("desc_qwen3vl", "description", "qwen3vl"),
-        ("graph_qwen3.5", "graph", "qwen3.5"),
-        ("desc_qwen3.5", "description", "qwen3.5"),
         ("graph_gemini", "graph", "gemini"),
         ("desc_gemini", "description", "gemini"),
     )
@@ -72,15 +70,12 @@ def select_arms(config, target=None):
 
 
 def generation_registry(config):
-    sources = {arm.name: arm for arm in SOURCES}
-    if "minicpm" in config.get("models", {}):
-        sources["graph_minicpm"] = Arm("graph_minicpm", "graph", "minicpm", False, "graph_minicpm")
-    return sources
+    return {arm.name: arm for arm in SOURCES}
 
 
 def generated_arm(config, representation, model):
-    if model not in {"gemini", "qwen3vl", "qwen3.5", "minicpm"}:
-        raise ValueError("model/source must be qwen3vl, qwen3.5, gemini or minicpm")
+    if model not in {"gemini", "qwen3vl"}:
+        raise ValueError("model/source must be qwen3vl or gemini")
     source = next(
         (arm for arm in generation_registry(config).values() if arm.representation == representation and arm.model == model),
         None,

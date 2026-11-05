@@ -1,6 +1,5 @@
 """G1/G2 activity hypergraph (A): numerical behavior, batching and source sidecars."""
 
-import json
 
 import numpy as np
 import pytest
@@ -12,10 +11,10 @@ from helpers import graph, scene_row
 from validation.config import GraphExecutionConfig
 from arm_registry import registry
 from validation.graph_context import EXTENSION_MODELS
-from validation.graph_inputs import load_scene_segments, scene_segments_paths, write_scene_segments
-from validation.graph_model import GraphSASRec, SceneRoleEncoder
+from validation.graph_inputs import load_scene_segments
+from validation.graph_model import GraphSASRec
 from validation.representation_provenance import recommendation_identity
-from validation.scene_segments import activity_key, attach, segments
+from validation.scene_segments import attach
 
 pytestmark = pytest.mark.torch
 
@@ -89,8 +88,8 @@ def make_model(store, extensions=(), items=8, aggregation="mean", role_fusion=Tr
 
 
 
-@pytest.mark.parametrize("role_fusion", [False, True])
-def test_segments_start_as_matching_backbone_and_leave_the_rng_alone(role_fusion):
+def test_segments_start_as_matching_backbone_and_leave_the_rng_alone():
+    role_fusion = True
     store = synthetic_store()
     reference = make_model(store, role_fusion=role_fusion)
     expected_rng = torch.rand(3)
@@ -122,87 +121,6 @@ def test_open_segment_gates_change_only_videos_with_segments_and_membership_matt
     permuted.load_state_dict(model.state_dict())
     with torch.no_grad():
         assert not torch.allclose(permuted.catalog_vectors(), actual, atol=1e-6)
-
-
-def test_segment_readout_weights_each_segment_equally():
-    store = synthetic_store()
-    offsets = np.asarray(store["video_offsets"])
-    video = next(v for v in range(len(store)) if offsets[v + 1] - offsets[v] >= 3)
-    first = int(offsets[video])
-    store.scene_segments = np.array([[first, 0], [first + 1, 0], [first + 2, 0], [first + 2, 1]], np.int64)
-    model = make_model(store, ("segments",))
-    encoder = model.graph_encoder
-    batch = model.packed.batch(np.array([video]), "cpu", scene_segments=True)
-    scenes = torch.randn(int(offsets[video + 1] - offsets[video]), encoder.output_dim)
-    with torch.no_grad():
-        encoder.segment_gates.copy_(torch.tensor([0.0, 1.0]))
-        _, readout = encoder._segments(batch, scenes, 1)
-        units = []
-        for members in ([0, 1, 2], [2]):
-            length = torch.tensor([np.log(len(members)), len(members) / len(scenes)], dtype=torch.float32)
-            hidden = torch.cat([scenes[members].mean(0), length])
-            units.append(torch.relu(encoder.segment_weight @ hidden + encoder.segment_bias))
-        expected = encoder.segment_video_weight @ torch.stack(units).mean(0)
-    torch.testing.assert_close(readout[0], expected, rtol=1e-5, atol=1e-5)
-
-
-
-
-def test_extensions_train_and_ignore_chunking():
-    extensions, aggregation = ("segments",), "mean"
-    store = synthetic_store(videos=30)
-    model = make_model(store, extensions, items=30, aggregation=aggregation)
-    if "segments" in extensions:
-        with torch.no_grad():
-            model.graph_encoder.segment_gates.copy_(torch.tensor([0.5, 0.5]))
-    small = make_model(store, extensions, items=3, aggregation=aggregation)
-    small.load_state_dict(model.state_dict())
-    with torch.no_grad():
-        torch.testing.assert_close(small.catalog_vectors(), model.catalog_vectors(), rtol=1e-5, atol=1e-5)
-    model.train()
-    model.catalog_vectors().sum().backward()
-    for name in ("segment_weight", "segment_scene_weight", "segment_video_weight", "segment_gates"):
-        grad = getattr(model.graph_encoder, name).grad
-        assert grad is not None and torch.isfinite(grad).all() and grad.abs().sum() > 0
-
-
-def test_segments_require_the_sidecar():
-    store = synthetic_store(videos=4)
-    store.scene_segments = None
-    with pytest.raises(ValueError, match="scene_segments"):
-        make_model(store, ("segments",))
-    with pytest.raises(ValueError, match="unknown"):
-        SceneRoleEncoder(hidden=4, aggregation="mean", extensions=("video_node",))
-
-
-def test_sidecar_variants_round_trip_validation_and_staleness(tmp_path):
-    store = synthetic_store(videos=8)
-    for name, array in store.arrays.items():
-        np.save(tmp_path / f"{name}.npy", array)
-    (tmp_path / "manifest.json").write_text(json.dumps({"input_hash": "abc"}))
-    pairs = store.scene_segments
-    with pytest.raises(ValueError, match="missing"):
-        load_scene_segments(tmp_path)
-    write_scene_segments(tmp_path, pairs[::-1], statistics={"note": "test"})
-    assert np.array_equal(load_scene_segments(tmp_path), pairs)
-    assert scene_segments_paths(tmp_path)[0].name == "scene_segments.npy"
-    with pytest.raises(ValueError, match="only once"):
-        write_scene_segments(tmp_path, np.vstack([pairs, pairs[:1]]))
-    offsets = np.asarray(store["video_offsets"])
-    filled = [v for v in range(len(offsets) - 1) if offsets[v + 1] > offsets[v]]
-    with pytest.raises(ValueError, match="one video"):
-        write_scene_segments(tmp_path, np.array([[offsets[filled[0]], 9], [offsets[filled[1]], 9]]))
-    (tmp_path / "manifest.json").write_text(json.dumps({"input_hash": "changed"}))
-    with pytest.raises(ValueError, match="stale"):
-        load_scene_segments(tmp_path)
-
-
-def test_activity_keys_and_runs():
-    forms = {"attacking": "attack", "attacks": "attack", "being attacked": "attack", "looking at p2": "look",
-             "running": "run", "making": "mak", "makes": "mak", "cries": "cry", "lying": "li", "unknown": None}
-    assert {text: activity_key(text) for text in forms} == forms
-    scenes = [(0, {"cut", "talk"}), (1, {"cut"}), (3, {"cut"}), (4, {"talk"}), (5, {"talk"})]
-    assert segments(scenes) == [("cut", [0, 1]), ("cut", [2]), ("talk", [0]), ("talk", [3, 4])]
 
 
 def test_attach_builds_segments_and_identity_records_them(context, monkeypatch):

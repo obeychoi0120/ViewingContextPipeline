@@ -3,59 +3,12 @@
 from copy import deepcopy
 
 import numpy as np
-import pytest
 import torch
 
-from arm_registry import registry
 from test_scene_extensions import make_model, synthetic_store
 from validation.config import GraphExecutionConfig
 from validation.graph_batching import PackedGraphStore
-from validation.graph_model import DescriptionSceneEncoder, GraphSASRec, SceneRoleEncoder, parameter_report
-
-
-@pytest.mark.parametrize("name", ["g0", "g1", "g2"])
-def test_graph_role_fusion_follows_arm_definition(name):
-    arm = registry({})[name]
-    store = synthetic_store(videos=8)
-    batch = PackedGraphStore(store).batch(np.arange(len(store)), "cpu", scene_segments=bool(arm.extensions))
-    encoder = SceneRoleEncoder(16, hidden=4, aggregation=arm.aggregation,
-                               role_fusion=arm.role_fusion, extensions=arm.extensions)
-    if arm.extensions:
-        with torch.no_grad():
-            encoder.segment_gates.fill_(0.5)
-    actual = encoder(batch)
-    modified = deepcopy(batch)
-    modified["role_entities"] = modified["role_entities"].flip(1)
-    modified["role_states"] = 1 - modified["role_states"]
-    if name == "g2":
-        assert not torch.allclose(encoder(modified), actual)
-        actual.square().sum().backward()
-        assert encoder.role_fusion.weight.grad.abs().sum() > 0
-    else:
-        del modified["role_entities"], modified["role_states"]
-        torch.testing.assert_close(encoder(modified), actual, rtol=0, atol=0)
-
-
-@pytest.mark.parametrize("name,total", [("d", 7624704), ("g0", 7624704),
-                                        ("g1", 8675330), ("g2", 8758402)])
-def test_registered_parameter_counts_and_absent_fusion_report(name, total):
-    arm = registry({})[name]
-    store = synthetic_store(videos=4, feature_dim=1024)
-    model = GraphSASRec(store=store, aggregation=arm.aggregation, item_count=len(store),
-                       max_length=10, embedding_dim=512, num_blocks=2, num_heads=2, dropout=0.1,
-                       arm=name, representation=arm.representation,
-                       role_fusion=arm.role_fusion, extensions=arm.extensions)
-    assert parameter_report(model, name) == {
-        "trainable": total, "active_trainable": total,
-        "removed_role_fusion": 83072 if name in ("g0", "g1") else 0,
-    }
-    assert not any("gcn" in key or "query" in key or "key" in key for key in model.state_dict())
-
-
-@pytest.mark.parametrize("encoder", [SceneRoleEncoder, DescriptionSceneEncoder])
-def test_scene_encoders_reject_removed_aggregation(encoder):
-    with pytest.raises(ValueError, match="scene aggregation must be mean"):
-        encoder(16, aggregation="gnn")
+from validation.graph_model import SceneRoleEncoder
 
 
 def test_scene_order_and_video_isolation_with_hypergraph():

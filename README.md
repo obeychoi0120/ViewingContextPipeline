@@ -25,7 +25,7 @@ export RUN_ID="new_run_id"
 export DATASET="microlens_100k"  # 또는 m3l_10m
 ```
 
-먼저 [config.yaml](config.yaml)의 `datasets.<dataset>.data`, `models.qwen3vl`, `models.bge` 경로를 실행 환경에 맞게 바꾸세요. Gemini·MiniCPM 추출은 아래 선택 기능에서 설명합니다. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
+먼저 [config.yaml](config.yaml)의 `datasets.<dataset>.data`, `models.qwen3vl`, `models.bge` 경로를 실행 환경에 맞게 바꾸세요. Gemini 추출은 아래 선택 기능에서 설명합니다. **조건을 분리해 비교하거나 기존 결과를 보존하려면 새 Run ID를 사용합니다.** 정상 생성 결과는 프롬프트·penalty를 바꿔도 일반 재실행에서 재사용되므로 [재개 규칙](#산출물과-재현)을 확인하세요.
 
 <details>
 <summary>환경별 설치와 확인할 설정</summary>
@@ -38,11 +38,10 @@ Qwen 추출 환경은 `.[qwen,dev]`, 임베딩·추천 환경은 `.[train,embedd
 | `datasets.m3l_10m.data.root` | 다운로드한 M³L의 `metadata/`와 `videos/`를 포함하는 루트 |
 | `datasets.<dataset>.source_counts` | 영상 제외 전 검증할 원본 사용자·상호작용·아이템 개수 |
 | `models.qwen3vl`, `models.bge` | 기본 추천 실험에 사용하는 Qwen3-VL-2B-Instruct·BGE Large 로컬 디렉터리 |
-| `models.qwen3.5`, `models.minicpm` | 추가 추출 모델의 로컬 디렉터리 |
 | `models.gemini` | Gemini 호출 시 확인할 Vertex 프로젝트·위치·모델·생성 설정 |
 | `extraction.visual_evidence` | 시간 창·키프레임 수·해상도 |
 | `extraction.qwen`, `extraction.gemini` | 추론 엔진·동시 실행 설정 |
-| `extraction.{graph,description}.{qwen3vl,qwen3.5,gemini}` | Scene 출력 토큰 한도 |
+| `extraction.{graph,description}.{qwen3vl,gemini}` | Scene 출력 토큰 한도 |
 | `validation.cohort` | 사용자 필터·보존 이력 길이 |
 | `validation.encoder`, `validation.graph_execution` | BGE 인코딩·Graph 실행 자원 |
 | `validation.model` | 학습 설정·seed·결정적 연산 사용 여부 |
@@ -126,12 +125,12 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --tar
 
 D는 `desc_qwen3vl`의 유효 장면만 사용하며 Graph 파일·장면 목록·활동 구간에 의존하지 않습니다. D만 실행할 때는 Description 추출 뒤 `embed-representations --target d`, `run-recommendation --target d`, `run-diagnosis --target d`를 실행하며 `prepare-module`은 필요 없습니다. G0·G1·G2는 `graph_qwen3vl` BGE 특징을 공유합니다.
 
-GPU당 독립 작업 수는 `--workers-per-gpu`, 시간 측정은 `--profile-every 100` 및 선택적인 `--profile-operators`로 지정합니다.
+GPU당 독립 작업 수는 `--workers-per-gpu`로 지정합니다. 시작 로그의 `deterministic`은 `config.yaml`의 `validation.model.deterministic` 적용값입니다. 학습 중 epoch별 소요 시간과 처리량을 출력합니다.
 
 </details>
 
 <details>
-<summary>선택 기능: Gemini·Qwen3.5 추출</summary>
+<summary>선택 기능: Gemini 추출</summary>
 
 기본 추천 실험의 시각 입력은 Qwen3-VL 장면 소스를 사용합니다. 아래 추가 모델의 추출 결과는 현재 추천 Arm에 자동 연결되지 않습니다.
 
@@ -147,37 +146,14 @@ python -m pip check
 | 모델 (`--model`) | Graph 소스 (`--arm`) | Description 소스 (`--arm`) |
 | --- | --- | --- |
 | `qwen3vl` | `graph_qwen3vl` | `desc_qwen3vl` |
-| `qwen3.5` | `graph_qwen3.5` | `desc_qwen3.5` |
 | `gemini` | `graph_gemini` | `desc_gemini` |
 
-아래는 Gemini로 두 관측 형식을 추출하는 예시입니다. Qwen3.5를 사용하려면 `models.qwen3.5` 경로를 확인하고 위 표에 맞춰 모델·소스를 바꿉니다. Qwen3.5는 기본 Qwen 설치의 공용 vLLM 런타임을 사용합니다.
+아래는 Gemini로 두 관측 형식을 추출하는 예시입니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9.md --model gemini --arm graph_gemini
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_description_v3.md --model gemini --arm desc_gemini
 ```
-
-</details>
-
-<details>
-<summary>선택 기능: MiniCPM-V-4.7-1B로 Scene Graph 추출</summary>
-
-```bash
-python -m pip install -e ".[minicpm,dev]"
-python -m pip check
-export RUN_ID="new_minicpm_run"
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9.md --model minicpm
-```
-
-먼저 공통 cohort·키프레임 준비를 완료해야 합니다. `models.minicpm`은 `/home_nvme/shared/models/MiniCPM-V-4.7-1B`의 로컬 비양자화 BF16 체크포인트를 가리킵니다. 다른 환경에서는 경로를 수정하세요. Linux/CUDA가 필요하며, 전용 extra는 `transformers>=5.18.0`과 `vllm==0.32.0`을 설치합니다. MiniCPM 4.7 지원 변경은 [vLLM PR #58674](https://github.com/vllm-project/vllm/pull/58674)에 기록되어 있습니다.
-
-`--arm` 생략 시 `graph_minicpm`을 사용합니다. MiniCPM은 Graph 추출 전용 소스이며 현재 추천 Arm 12개에는 연결되지 않습니다. 기존 v6 설정과 Run을 사용할 수 있습니다. 활성화에는 `models.minicpm`, `extraction.graph.minicpm.scene_max_new_tokens` 두 설정이 필요합니다. `protocol.graph_extractors`는 전체 지원 모델 목록과 일치할 필요가 없습니다.
-
-입력은 기존 키프레임을 순서대로 사용하며, 16x 시각 토큰 압축과 processor 기본 slicing을 적용합니다. Thinking은 끄고 greedy decoding으로 생성합니다. 기본값은 출력 상한 384토큰, presence penalty 1.5, 생성 토큰 대상 repetition penalty 1.05이며 `--presence-penalty`와 `--repetition-penalty`로 변경할 수 있습니다. GPU 선택은 `CUDA_VISIBLE_DEVICES`, 엔진 자원 설정은 공용 `extraction.qwen`을 사용합니다. 컨텍스트 길이를 초과하면 입력·출력 한도를 자동으로 줄이지 않고 오류를 보고합니다.
-
-결과는 `artifacts/runs/<RUN_ID>/<dataset>/extraction/scenes/graph_minicpm/<content_id>.jsonl`, 수정하지 않은 응답은 같은 디렉터리의 `raw_responses/<content_id>.jsonl`에 저장합니다. 원본을 먼저 저장한 뒤, 코드·인용 문자열·수식의 이스케이프를 보존하면서 일반 텍스트 개행을 복원하여 공통 Graph 파서(`graph-text/v15`)에 전달합니다. 프롬프트 파일의 v9와 파서 버전은 별개입니다. 원본 파일은 각 장면의 최근 응답을 보존하며 재시도 시 해당 장면을 교체합니다.
-
-일반 재실행은 설정 변경 여부와 관계없이 정상 결과를 재사용하고 warning·failed 장면을 다시 생성합니다. 변경한 설정은 새로 생성하는 장면에만 적용되며, `generation_identity.json`은 최초 생성 설정을 보존합니다. 전체 결과에 변경한 설정을 적용하려면 `--force` 또는 새 Run ID를 사용합니다. `--force`는 해당 소스의 기존 결과와 원본 응답을 지우고 다시 생성합니다. 추론 실행과 Graph 파싱 성공은 시각적 정확도나 추천 성능 개선을 입증하지 않습니다.
 
 </details>
 
@@ -508,21 +484,21 @@ Scene 디렉터리의 `generation_identity.json`은 초기 생성 설정 기록�
 <details>
 <summary>Qwen 생성 정책·기본값·옵션 변경 예시</summary>
 
-`qwen3vl`은 Qwen3-VL-2B-Instruct, `qwen3.5`는 Qwen3.5-2B를 사용합니다. Qwen3.5는 chat template에 `enable_thinking=False`를 명시합니다. 두 모델은 greedy decoding을 사용하며 greedy에서도 presence·repetition penalty는 적용됩니다.
+`qwen3vl`은 Qwen3-VL-2B-Instruct를 사용합니다. Greedy decoding에서도 presence·repetition penalty는 적용됩니다.
 
 | 작업 | Presence penalty | Repetition penalty | 현재 config의 출력 토큰 한도 |
 | --- | ---: | ---: | ---: |
 | Graph 장면 추출 | 1.5 | 1.05 | 384 |
 | Description 장면 추출 | 1.5 | 1.0 | 512 |
 
-Decoding은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 생성 정책은 [qwen_config.py](src/extraction/qwen_config.py), 출력 토큰 한도는 `config.yaml`의 `extraction.{graph,description}.{qwen3vl,qwen3.5}`를 참고하세요. 설치 extra `qwen`과 `extraction.qwen`은 두 모델의 공용 런타임 이름이며 CLI 모델 이름은 아닙니다.
+Decoding은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 생성 정책은 [qwen_config.py](src/extraction/qwen_config.py), 출력 토큰 한도는 `config.yaml`의 `extraction.{graph,description}.qwen3vl`을 참고하세요. 설치 extra `qwen`과 `extraction.qwen`은 Qwen3-VL의 런타임 설정 이름이며 CLI 모델 이름은 아닙니다.
 
 | CLI 옵션 | 허용 범위 | 적용 |
 | --- | --- | --- |
 | `--presence-penalty FLOAT` | 유한한 단일 숫자 -2.0~2.0 | 해당 실행의 presence penalty. `0`은 비활성화 |
 | `--repetition-penalty FLOAT` | 유한한 단일 숫자 1.0~2.0 | 해당 실행의 생성 토큰 전용 repetition penalty |
 
-두 옵션은 Qwen의 Scene 추출·요약과 MiniCPM Graph 장면 추출에 지정할 수 있으며 생략하면 위 기본값을 사용합니다. Repetition penalty는 vLLM 기본 penalty와 중복 적용하지 않습니다. 다음은 기본 presence penalty를 끄는 **옵션 변경 예시**입니다.
+두 옵션은 Qwen3-VL의 Graph·Description 장면 추출에 지정할 수 있으며 생략하면 위 기본값을 사용합니다. Repetition penalty는 vLLM 기본 penalty와 중복 적용하지 않습니다. 다음은 기본 presence penalty를 끄는 **옵션 변경 예시**입니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl --presence-penalty 0

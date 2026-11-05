@@ -3,7 +3,6 @@
 import numpy as np
 
 from validation.model import torch
-from validation.profiling import span, timed, workload
 
 GRAPH_EXECUTION_VERSION = "packed-role-graph/v2"
 
@@ -59,101 +58,91 @@ class PackedGraphStore:
             self.feature_cache = None
             self.cache_device, self.cache_attempted = device, False
         if not self.cache_attempted:
-            with span("feature_cache_init"):
-                self.cache_attempted = True
-                if device.type == "cuda" and self.feature_cache_mb:
-                    free, _ = torch.cuda.mem_get_info(device)
-                    limit = min(self.feature_cache_mb * 1024**2, int(free * 0.2))
-                    if self.store["features"].nbytes <= limit:
-                        try:
-                            self.feature_cache = torch.as_tensor(
-                                np.array(self.store["features"]), device=device
-                            )
-                        except torch.OutOfMemoryError:
-                            self.feature_cache = None
+            self.cache_attempted = True
+            if device.type == "cuda" and self.feature_cache_mb:
+                free, _ = torch.cuda.mem_get_info(device)
+                limit = min(self.feature_cache_mb * 1024**2, int(free * 0.2))
+                if self.store["features"].nbytes <= limit:
+                    try:
+                        self.feature_cache = torch.as_tensor(
+                            np.array(self.store["features"]), device=device
+                        )
+                    except torch.OutOfMemoryError:
+                        self.feature_cache = None
         if self.feature_cache is not None:
-            workload(feature_gpu_rows=len(ids))
-            with span("feature_gpu_gather"):
-                return self.feature_cache[torch.as_tensor(ids, device=device)]
-        workload(feature_cpu_rows=len(ids))
-        with span("feature_cpu_gather", cuda=False):
-            values = np.array(self.store["features"][ids])
-        with span("feature_transfer"):
-            return torch.as_tensor(values, device=device)
+            return self.feature_cache[torch.as_tensor(ids, device=device)]
+        values = np.array(self.store["features"][ids])
+        return torch.as_tensor(values, device=device)
 
-    @timed("graph_batch")
     def batch(self, item_ids, device, *, prepared=True, scene_segments=False):
-        with span("cpu_pack", cuda=False):
-            items = np.asarray(item_ids, dtype=np.int64)
-            nodes, node_videos, node_offsets = ranges(
-                self.video_nodes[items], self.video_nodes[items + 1]
+        items = np.asarray(item_ids, dtype=np.int64)
+        nodes, node_videos, node_offsets = ranges(
+            self.video_nodes[items], self.video_nodes[items + 1]
+        )
+        scenes, scene_videos, offsets = ranges(
+            self.video_scenes[items], self.video_scenes[items + 1]
+        )
+        shift = node_offsets[:-1] - self.video_nodes[items]
+        scene_shift = offsets[:-1] - self.video_scenes[items]
+        types = np.asarray(self.store["types"][nodes])
+        arrays = {
+            "types": types,
+            "node_scenes": self.node_scenes[nodes] + scene_shift[node_videos],
+            "scene_videos": scene_videos,
+        }
+        if scene_segments:
+            # Pairs are sorted by scene row: one ragged gather; segment ids become dense batch-local ids.
+            pairs = self.store.scene_segments
+            if self.segment_bounds is None:
+                self.segment_bounds = np.searchsorted(pairs[:, 0], np.arange(len(self.store["contexts"]) + 1))
+            indices, owners, _ = ranges(self.segment_bounds[scenes], self.segment_bounds[scenes + 1])
+            arrays["segment_scenes"] = owners
+            arrays["segment_ids"] = np.unique(np.asarray(pairs[indices, 1]), return_inverse=True)[1].reshape(-1)
+        if prepared:
+            action_ids = np.flatnonzero(types == 1)
+            action_rows = np.full(len(nodes), -1, dtype=np.int64)
+            action_rows[action_ids] = np.arange(len(action_ids))
+            role_entities = np.full((len(action_ids), 4), -1, dtype=np.int64)
+            role_states = np.zeros((len(action_ids), 4), dtype=np.int64)
+            for slot, role in enumerate((0, 1, 2, 4)):
+                values, bounds = self.roles[role]
+                indices, owners, _ = ranges(bounds[items], bounds[items + 1])
+                pairs = values[indices] + shift[owners, None]
+                role_entities[action_rows[pairs[:, 1]], slot] = pairs[:, 0]
+                values, bounds = self.states[role]
+                indices, owners, _ = ranges(bounds[items], bounds[items + 1])
+                pairs = values[indices].copy()
+                pairs[:, 0] += shift[owners]
+                role_states[action_rows[pairs[:, 0]], slot] = pairs[:, 1]
+            arrays.update(
+                role_entities=role_entities,
+                role_states=role_states,
+                entity_ids=np.flatnonzero(types == 0),
+                action_ids=action_ids,
             )
-            scenes, scene_videos, offsets = ranges(
-                self.video_scenes[items], self.video_scenes[items + 1]
+        else:
+            indices, owners, _ = ranges(self.video_edges[items], self.video_edges[items + 1])
+            edges = np.array(self.store["edges"][indices])
+            edges[:, :2] += shift[owners, None]
+            indices, owners, _ = ranges(
+                self.video_missing[items], self.video_missing[items + 1]
             )
-            shift = node_offsets[:-1] - self.video_nodes[items]
-            scene_shift = offsets[:-1] - self.video_scenes[items]
-            types = np.asarray(self.store["types"][nodes])
-            arrays = {
-                "types": types,
-                "node_scenes": self.node_scenes[nodes] + scene_shift[node_videos],
-                "scene_videos": scene_videos,
-            }
-            if scene_segments:
-                # Pairs are sorted by scene row: one ragged gather; segment ids become dense batch-local ids.
-                pairs = self.store.scene_segments
-                if self.segment_bounds is None:
-                    self.segment_bounds = np.searchsorted(pairs[:, 0], np.arange(len(self.store["contexts"]) + 1))
-                indices, owners, _ = ranges(self.segment_bounds[scenes], self.segment_bounds[scenes + 1])
-                arrays["segment_scenes"] = owners
-                arrays["segment_ids"] = np.unique(np.asarray(pairs[indices, 1]), return_inverse=True)[1].reshape(-1)
-            if prepared:
-                action_ids = np.flatnonzero(types == 1)
-                action_rows = np.full(len(nodes), -1, dtype=np.int64)
-                action_rows[action_ids] = np.arange(len(action_ids))
-                role_entities = np.full((len(action_ids), 4), -1, dtype=np.int64)
-                role_states = np.zeros((len(action_ids), 4), dtype=np.int64)
-                for slot, role in enumerate((0, 1, 2, 4)):
-                    values, bounds = self.roles[role]
-                    indices, owners, _ = ranges(bounds[items], bounds[items + 1])
-                    pairs = values[indices] + shift[owners, None]
-                    role_entities[action_rows[pairs[:, 1]], slot] = pairs[:, 0]
-                    values, bounds = self.states[role]
-                    indices, owners, _ = ranges(bounds[items], bounds[items + 1])
-                    pairs = values[indices].copy()
-                    pairs[:, 0] += shift[owners]
-                    role_states[action_rows[pairs[:, 0]], slot] = pairs[:, 1]
-                arrays.update(
-                    role_entities=role_entities,
-                    role_states=role_states,
-                    entity_ids=np.flatnonzero(types == 0),
-                    action_ids=action_ids,
-                )
-            else:
-                indices, owners, _ = ranges(self.video_edges[items], self.video_edges[items + 1])
-                edges = np.array(self.store["edges"][indices])
-                edges[:, :2] += shift[owners, None]
-                indices, owners, _ = ranges(
-                    self.video_missing[items], self.video_missing[items + 1]
-                )
-                missing = np.array(self.store["missing"][indices])
-                missing[:, 0] += shift[owners]
-                arrays.update(edges=edges, missing=missing)
-            titles = self.store["titles"][items]
-            arrays["title_available"] = (titles != 0).astype(np.int64)
-            arrays["available"] = ((np.diff(offsets) > 0) | (titles != 0)).astype(np.int64)
-            # One integer transfer, with views for the small relation/index tensors.
-            flat = np.concatenate([a.reshape(-1) for a in arrays.values()])
-        with span("index_transfer", cuda=True):
-            tensor = torch.as_tensor(flat, device=device)
-            batch, offset = {}, 0
-            for name, array in arrays.items():
-                batch[name] = tensor[offset : offset + array.size].reshape(array.shape)
-                offset += array.size
-        with span("feature_ids", cuda=False):
-            feature_ids = np.concatenate(
-                (self.store["nodes"][nodes], self.store["contexts"][scenes], titles)
-            )
+            missing = np.array(self.store["missing"][indices])
+            missing[:, 0] += shift[owners]
+            arrays.update(edges=edges, missing=missing)
+        titles = self.store["titles"][items]
+        arrays["title_available"] = (titles != 0).astype(np.int64)
+        arrays["available"] = ((np.diff(offsets) > 0) | (titles != 0)).astype(np.int64)
+        # One integer transfer, with views for the small relation/index tensors.
+        flat = np.concatenate([a.reshape(-1) for a in arrays.values()])
+        tensor = torch.as_tensor(flat, device=device)
+        batch, offset = {}, 0
+        for name, array in arrays.items():
+            batch[name] = tensor[offset : offset + array.size].reshape(array.shape)
+            offset += array.size
+        feature_ids = np.concatenate(
+            (self.store["nodes"][nodes], self.store["contexts"][scenes], titles)
+        )
         values = self._features(feature_ids, device)
         batch.update(
             features=values[: len(nodes)],

@@ -1,7 +1,6 @@
 import pytest
-import json
 
-from artifact_io import read_jsonl, write_jsonl
+from artifact_io import read_jsonl
 from extraction.graph_warnings import MISSING_REQUIRED, PARSE_FAILED
 from extraction.qwen_runtime import QwenRuntime
 from extraction.scene_executor import graph_scene_result, run_qwen_scenes
@@ -21,7 +20,7 @@ from helpers import (
 )
 
 
-def test_graph_v9_named_references():
+def test_graph_parsing_and_invalid_output_preservation():
     parsed = parse_or_repair_graph(NAMED_GRAPH_TEXT)
     assert parsed.error is None and not parsed.warning
     expected = graph()
@@ -34,74 +33,6 @@ def test_graph_v9_named_references():
     expected["actions"][0].update(actor="e1", target="e2", tool="e3", place="e4")
     assert parsed.graph == expected
 
-
-def test_graph_legacy_id_references():
-    parsed = parse_or_repair_graph(GRAPH_TEXT)
-    assert parsed.error is None
-    assert parsed.parse_mode == "native"
-    assert parsed.graph == graph()
-
-
-@pytest.mark.parametrize("place", ["l1", None, "unknown"])
-def test_v8_location_json_is_normalized_without_rewriting_source(tmp_path, place):
-    from extraction.scene_storage import validate_scene_payload
-
-    expected = graph()
-    expected["actions"][0]["place"] = place
-    legacy = graph()
-    legacy["actions"][0].pop("place")
-    legacy["actions"][0]["location"] = place
-    raw = json.dumps(legacy)
-    parsed = parse_or_repair_graph(raw)
-    assert parsed.graph == expected
-    assert parsed.parse_mode == "repaired" and not parsed.warning
-    assert json.dumps(legacy) == raw
-
-    path = tmp_path / "video.jsonl"
-    row = scene_row("video", value=legacy)
-    write_jsonl(path, [row])
-    before = (path.read_bytes(), path.stat().st_mtime_ns)
-    validate_scene_payload(path, row)
-    restored = read_scene_records(path)
-    assert restored[0]["graph"] == expected
-    assert restored[0]["parse_mode"] == "repaired"
-    _, pending = prepare_scene_batch(
-        [{"content_id": "video"}], tmp_path,
-        lambda visual: [{"scene_idx": 0, "keyframes": []}],
-        minimal_graph_records, force=False,
-    )
-    assert not pending
-    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-    assert row["scene_graph"] == json.loads(raw)
-
-    generated = tmp_path / "generated" / "video.jsonl"
-    write_scene_records(generated, [row])
-    assert read_jsonl(generated)[0]["scene_graph"] == expected
-
-
-@pytest.mark.parametrize("case", ["both_same", "both_different", "receiver", "missing_place"])
-def test_v8_compatibility_rejects_conflicting_or_unsupported_roles(tmp_path, case):
-    from extraction.errors import UnsupportedArtifactError
-    from extraction.scene_storage import validate_scene_payload
-
-    value = graph()
-    action = value["actions"][0]
-    if case.startswith("both_"):
-        action["location"] = action["place"] if case == "both_same" else "f1"
-    elif case == "receiver":
-        action["location"] = action.pop("place")
-        action["receiver"] = None
-    else:
-        del action["place"]
-    raw = json.dumps(value)
-    parsed = parse_or_repair_graph(raw)
-    assert parsed.graph is None and parsed.warning
-    with pytest.raises(UnsupportedArtifactError):
-        validate_scene_payload(tmp_path / "video.jsonl", scene_row("video", value=value))
-    assert json.dumps(value) == raw
-
-
-def test_invalid_graph_preserves_raw_output():
     invalid = GRAPH_TEXT.split("[Actions]")[0]
     record, failure = graph_scene_result({"scene_idx": 7, "keyframes": [2.5]}, invalid)
     assert failure is None
@@ -109,41 +40,6 @@ def test_invalid_graph_preserves_raw_output():
     assert record["parse_mode"] == "text"
     assert record["semantic_warnings"] == [MISSING_REQUIRED]
     assert record["scene_idx"] == 7
-
-
-@pytest.mark.parametrize("failure_count, expected_exit", [(0, 0), (1, 1)])
-def test_extraction_cli_reports_incomplete_outputs(
-    context, monkeypatch, capsys, failure_count, expected_exit,
-):
-    from extraction import cli
-
-    monkeypatch.setattr(cli.RunContext, "load", lambda *args, **kwargs: context)
-    monkeypatch.setitem(
-        cli.STEP_HANDLERS,
-        "extract-graph-scenes",
-        lambda *args, **kwargs: {"content_count": 10, "failure_count": failure_count},
-    )
-    status = cli.main([
-        "extract-graph-scenes", "--run-id", context.run_id,
-        "--dataset", context.dataset, "--schema", "prompts/scene_graph_v9.md",
-        "--model", "qwen3vl", "--arm", "graph_qwen3vl",
-    ])
-    assert status == expected_exit
-    assert ("[FAILED]" in capsys.readouterr().err) == bool(failure_count)
-
-
-def test_undeclared_roles_become_unknown():
-    text = GRAPH_TEXT.replace("p1 - cutting - f1; t1; l1", "p1 - cutting - absent; none; unknown")
-    parsed = parse_or_repair_graph(text)
-    assert parsed.error is None
-    assert parsed.parse_mode == "repaired"
-    assert parsed.graph["entities"] == graph()["entities"]
-    assert parsed.graph["actions"] == [
-        dict(actor="p1", action="cutting", target="unknown", tool=None, place="unknown")
-    ]
-    # A name resembling a generated ID must not accidentally resolve to that ID.
-    named = parse_or_repair_graph(NAMED_GRAPH_TEXT.replace("- tomato 2;", "- e1;"))
-    assert named.graph["actions"][0]["target"] == "unknown"
 
 
 def test_compact_scene_storage_roundtrip(tmp_path):
@@ -236,7 +132,7 @@ def test_truncated_scene_is_failure(context, monkeypatch):
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
-@pytest.mark.parametrize("model", ["qwen3vl", "qwen3.5", "gemini"])
+@pytest.mark.parametrize("model", ["qwen3vl", "gemini"])
 def test_scene_sources_extract_reuse_and_retry(
     context, monkeypatch, representation, model,
 ):

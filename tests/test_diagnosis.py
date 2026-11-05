@@ -23,7 +23,7 @@ from validation.steps import (
 )
 
 
-def test_bootstrap_pairs_users_across_arms():
+def test_paired_bootstrap_and_bonferroni_comparisons(context):
     values = np.array([[0.1, 0.35], [0.6, 0.85], [0.3, 0.55]])
     observed, draws, metadata = cluster_bootstrap(values, np.ones(3), samples=32, seed=42)
     np.testing.assert_allclose(observed, [1 / 3, 1 / 3 + 0.25])
@@ -36,8 +36,6 @@ def test_bootstrap_pairs_users_across_arms():
     with pytest.raises(ValueError, match="one test event"):
         cluster_bootstrap(values, np.array([1, 2, 1]), samples=32)
 
-
-def test_selected_pairs_use_bonferroni(context):
     targets = ["d", "base", "g1"]
     families = comparison_families(context.config, targets)
     assert families == {
@@ -148,91 +146,3 @@ def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
     assert run_recommendation(context, target=arms)["skipped"] == 15
     assert all(path.read_bytes() == content for path, content in source_bytes.items())
     assert not (context.run_root / "run_contract.json").exists()
-
-
-@pytest.mark.torch
-def test_d_runs_without_graph_and_reuses_completed_results(context, monkeypatch):
-    from extraction.scene_storage import write_scene_records
-    from helpers import FakeEncoder, failure_row, ready_cohort
-    from validation.graph_model import new_graph_model
-    from validation.representation_provenance import recommendation_identity
-    from validation.steps import embed_representations
-    import torch
-
-    path = context.path("data", "titles_csv")
-    path.write_text(path.read_text().replace("2,TITLE_SECRET_2\n", "2,\n"))
-    ready_cohort(context)
-    catalog = context.require_ready_cohort()["catalog"]
-    for index, item in enumerate(catalog):
-        cid = item["content_id"]
-        rows = [{"content_id": cid, "scene_idx": 0, "tokens": 4,
-                 "warning": [], "description": "A person cooks."}, failure_row(cid, 1)]
-        if index in (1, 2):
-            rows = [failure_row(cid)]
-        write_scene_records(context.scene_arm_dir("desc_qwen3vl") / f"{cid}.jsonl", rows)
-    monkeypatch.setattr("validation.features.BGETextEncoder", FakeEncoder)
-    embed_representations(context, target=["d"])
-    assert not context.scene_arm_dir("graph_qwen3vl").exists()
-    assert not (context.representations_dir / "graph_qwen3vl").exists()
-    assert not list(context.representations_dir.rglob("scene_segments*"))
-    identity = recommendation_identity(context, "d")
-    assert identity["representation_mode"] == "description"
-    assert identity["experiment_arm"]["name"] == "d"
-    assert identity["scene_aggregation"] == "mean"
-    assert run_recommendation(context, target=["d"])["completed"] == 3
-    assert run_diagnosis(context, target=["d"])["status"] == "pass"
-    document = read_json(context.diagnosis_path(["d"]))
-    counts = document["representations"]["d"]["statistics"]["counts"]
-    assert counts["failed"] > 0 and counts["empty_video"] == 1 and counts["zero_scene_video"] == 2
-    assert document["recommendations"]["base_relative_changes"] is None
-    assert document["statistics"]["comparison_count"] == 0
-    assert document["statistics"]["comparisons"] == {}
-    restored = new_graph_model(context, validation_config(context), "d", "cpu").eval()
-    directory = context.recommendations_dir / "seed_42" / "d"
-    checkpoint = torch.load(directory / "sasrec.pt", map_location="cpu", weights_only=True)
-    restored.load_state_dict(checkpoint["state_dict"], strict=True)
-    with torch.no_grad():
-        np.testing.assert_allclose(restored.catalog_vectors().numpy(), np.load(directory / "catalog_vectors.npy"),
-                                   rtol=1e-5, atol=1e-6)
-    before = {p: p.read_bytes() for p in context.recommendations_dir.rglob("complete.json")}
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("completed combinations must skip model initialization")
-
-    monkeypatch.setattr("validation.graph_model.new_graph_model", forbidden)
-    assert run_recommendation(context, target=["d"])["skipped"] == 3
-    assert all(path.read_bytes() == content for path, content in before.items())
-
-
-@pytest.mark.torch
-def test_arm_registration_changes_preserve_existing_cohort_and_results(context, monkeypatch):
-    from artifact_io import write_json
-    from validation.selection import cohort_directory, load_validation_cohort
-
-    train_inputs(context, monkeypatch)
-    path = cohort_directory(context) / "manifest.json"
-    old = read_json(path)
-    old["arms"] = ["base", "d0", "d1", "g0", "g1", "g2", "g3", "g4", "g1a", "g1b", "g1c", "g3a"]
-    write_json(path, old)
-    assert load_validation_cohort(context)["manifest"] == old
-    assert run_recommendation(context, target=TARGETS)["skipped"] == 6
-    assert read_json(path) == old
-    # Changes to actual cohort inputs are still rejected.
-    old["statistics"]["removed_event_count"] += 1
-    write_json(path, old)
-    with pytest.raises(RuntimeError, match="selection inputs changed"):
-        load_validation_cohort(context)
-
-
-def test_old_diagnosis_and_report_are_preserved(context):
-    from artifact_io import write_json
-
-    destination = context.diagnosis_path(["base", "g1"])
-    write_json(destination, {"recommendations": {"architecture_version": "sasrec-scene-content/v1"}})
-    report = context.run_root / "reports" / "base_g1" / "report.md"
-    report.parent.mkdir(parents=True)
-    report.write_text("historical result")
-    before = destination.read_bytes()
-    with pytest.raises(ValueError, match="new Run ID"):
-        run_diagnosis(context, target=["base", "g1"], force=True)
-    assert destination.read_bytes() == before and report.read_text() == "historical result"

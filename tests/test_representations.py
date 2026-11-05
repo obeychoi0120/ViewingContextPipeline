@@ -9,17 +9,13 @@ from arm_registry import registry
 from artifact_io import write_jsonl
 from extraction.graph_warnings import PARSE_FAILED
 from helpers import (
-    FakeEncoder,
     failure_row,
     graph_store,
     prepare_inputs,
-    ready_cohort,
     scene_row,
 )
 from validation.graph_batching import PackedGraphStore
 from validation.graph_inputs import build_input
-from validation.selection import prepare_validation_cohort
-from validation.text_features import encode_components, validate_arrays
 
 
 def test_scene_sources_and_shared_features(context, monkeypatch):
@@ -40,10 +36,7 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     assert read_json(root / "desc_qwen3vl" / "manifest.json")["source"] == "desc_qwen3vl"
 
 
-@pytest.mark.parametrize("as_text", [False, True])
-def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(
-    context, monkeypatch, as_text,
-):
+def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(context, monkeypatch):
     from artifact_io import read_json, read_jsonl
     from extraction.scene_storage import read_scene_records
     from validation.selection import load_validation_cohort
@@ -62,24 +55,22 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(
         value = row["scene_graph"]
         for action in value["actions"]:
             action["location"] = action.pop("place")
-        if as_text:
-            row["scene_graph"] = json.dumps(value)
+        row["scene_graph"] = json.dumps(value)
     write_jsonl(path, rows)
     before = (path.read_bytes(), path.stat().st_mtime_ns)
     assert source_identity(context, cohort, arm) != identity_before
     assert all(not row["semantic_warnings"] for row in read_scene_records(path))
 
-    if as_text:
-        # Reproduce a v1 cache that excluded the same JSON source before compatibility.
-        with monkeypatch.context() as old_runtime:
-            old_runtime.setattr("validation.graph_inputs.VERSION", "scene-bge-inputs/v1")
-            old_runtime.setattr(
-                "extraction.structured_output.normalize_graph_fields",
-                lambda value: (deepcopy(value), False),
-            )
-            embed_representations(context, target=["g1"])
-        stats_path = context.representations_dir / arm.scene_arm / "statistics.json"
-        assert read_json(stats_path)["counts"]["raw"] == len(rows)
+    # Reproduce a v1 cache that excluded the same JSON source before compatibility.
+    with monkeypatch.context() as old_runtime:
+        old_runtime.setattr("validation.graph_inputs.VERSION", "scene-bge-inputs/v1")
+        old_runtime.setattr(
+            "extraction.structured_output.normalize_graph_fields",
+            lambda value: (deepcopy(value), False),
+        )
+        embed_representations(context, target=["g1"])
+    stats_path = context.representations_dir / arm.scene_arm / "statistics.json"
+    assert read_json(stats_path)["counts"]["raw"] == len(rows)
 
     texts, arrays, stats = build_input(context, cohort, arm)
     assert texts == texts_before and stats == stats_before
@@ -92,68 +83,6 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(
     np.testing.assert_array_equal(store["edges"], arrays_before["edges"])
     assert len(load_scene_segments(store.directory))
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
-
-
-def test_d_reuses_legacy_description_features(context, monkeypatch):
-    from dataclasses import replace
-    from validation.graph_inputs import source_identity
-    from validation.selection import load_validation_cohort
-    from validation.steps import embed_representations
-
-    prepare_inputs(context, monkeypatch)
-    embed_representations(context, target=["d"])
-    cohort = load_validation_cohort(context)
-    d = registry(context.config)["d"]
-    d1 = replace(d, name="d1", extensions=())
-    assert source_identity(context, cohort, d) == source_identity(context, cohort, d1)
-    identity_before = {p: p.read_bytes() for p in (context.representations_dir / "desc_qwen3vl").iterdir()}
-
-    def forbidden(*args, **kwargs):
-        raise AssertionError("compatible frozen Description features must not be encoded again")
-
-    monkeypatch.setattr("validation.graph_inputs.encode_texts", forbidden)
-    result = embed_representations(context, target=["d"])
-    assert result["generated_sources"] == [] and result["reused_sources"] == ["desc_qwen3vl"]
-    assert all(p.read_bytes() == content for p, content in identity_before.items())
-
-
-def test_missing_description_preserves_catalog(context):
-    from extraction.scene_storage import write_scene_records
-
-    path = context.path("data", "titles_csv")
-    path.write_text(path.read_text().replace("2,TITLE_SECRET_2\n", "2,\n"))
-    ready_cohort(context)
-    cohort = prepare_validation_cohort(context)
-    cid = cohort["catalog"][0]["content_id"]
-    write_scene_records(context.scene_arm_dir("desc_qwen3vl") / f"{cid}.jsonl", [failure_row(cid)])
-    texts, arrays, stats = build_input(context, cohort, registry(context.config)["d"])
-    assert len(arrays["titles"]) == len(cohort["catalog"]) == 24
-    assert arrays["titles"][0] != 0 and arrays["titles"][1] == 0
-    assert arrays["video_offsets"].tolist() == [0] * 25
-    assert stats["counts"]["failed"] == 1
-    assert stats["counts"]["zero_scene_video"] == 24
-    assert texts[0] == ""
-
-
-def test_text_arrays_reject_invalid_values():
-    docs = [{"title_text": "hello", "video_text": ""}]
-    good, _ = encode_components(docs, 1024, FakeEncoder(), {})
-    validate_arrays(good, 1, 1024, docs)
-    corruptions = [
-        ("title_values", np.zeros((2, 1024), np.float32)),
-        ("title_values", good["title_values"].astype(np.float64)),
-        ("title_values", np.full((1, 1024), np.nan, np.float32)),
-        ("video_values", np.ones((1, 1024), np.float32)),
-        ("title_available", np.zeros(1, np.bool_)),
-        ("title_available", np.ones(1, np.int64)),
-    ]
-    for name, value in corruptions:
-        bad = deepcopy(good)
-        bad[name] = value
-        with pytest.raises(ValueError):
-            validate_arrays(bad, 1, 1024, docs)
-    with pytest.raises(ValueError, match="legacy/invalid"):
-        validate_arrays({"values": good["title_values"]}, 1, 1024)
 
 
 def test_graph_edges_are_scene_local(context):

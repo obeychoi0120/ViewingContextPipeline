@@ -36,19 +36,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--arm",
-        help="Generation source; minicpm Graph scenes default to graph_minicpm. Other models require --arm.",
+        help="Required generation source matching --model and the extraction step.",
     )
     args = parser.parse_args(argv)
     try:
         if args.schema is None:
             raise ValueError(f"{args.step} requires --schema PATH.md")
-        if args.model == "minicpm":
-            if args.step != "extract-graph-scenes":
-                raise ValueError("MiniCPM supports only extract-graph-scenes")
-            if args.arm is None:
-                args.arm = "graph_minicpm"
-            elif args.arm != "graph_minicpm":
-                raise ValueError("minicpm Graph scenes require --arm graph_minicpm")
         if args.model is None or args.arm is None:
             raise ValueError("generation requires --model and --arm")
         options = {}

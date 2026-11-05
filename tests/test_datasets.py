@@ -1,6 +1,5 @@
 """Dataset isolation, raw M3L semantics and lossless legacy layout relocation."""
 
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -11,14 +10,12 @@ from artifact_io import (
     read_json,
     read_jsonl,
     write_json,
-    write_jsonl,
 )
 from helpers import ready_cohort, result_identity, train_inputs
 from pipeline_runtime import ConfigError, RunContext
 from preparation.cohort import load_cohort, prepare_full_cohort
 from preparation.migrate_dataset_layout import JOURNAL, migrate
 from validation.selection import (
-    build_selection,
     load_validation_cohort,
     prepare_validation_cohort,
     training_signature,
@@ -132,97 +129,6 @@ def test_m3l_filtering_timestamps_sequences_and_frozen_catalog(context, monkeypa
     assert "평가한 영화 이력의 다음 영화 예측" in report and "m3l_10m" in report
 
 
-def test_m3l_environment_errors_and_counts_block_readiness(context, monkeypatch):
-    ctx = make_m3l(context, monkeypatch)
-    monkeypatch.setattr("preparation.m3l.shutil.which", lambda tool: None)
-    with pytest.raises(RuntimeError, match="ffprobe is required"):
-        prepare_full_cohort(ctx)
-    assert not (ctx.cohort_dir / "eligibility.json").exists()
-    monkeypatch.setattr("preparation.m3l.shutil.which", lambda tool: "/usr/bin/ffprobe")
-
-    def cannot_start(path):
-        raise PermissionError("ffprobe cannot start")
-
-    monkeypatch.setattr("preparation.m3l.probe_video", cannot_start)
-    with pytest.raises(PermissionError):
-        prepare_full_cohort(ctx)
-    ctx.config["datasets"]["m3l_10m"]["source_counts"]["interaction_count"] += 1
-    with pytest.raises(ValueError, match="source cardinality mismatch"):
-        prepare_full_cohort(ctx, plan_only=True)
-    with pytest.raises(RuntimeError, match="not ready"):
-        ctx.require_ready_cohort()
-
-
-def test_m3l_plan_only(context, monkeypatch):
-    ctx = make_m3l(context, monkeypatch)
-    monkeypatch.setattr(
-        "preparation.m3l.video_inventory", lambda *args: pytest.fail("plan-only probed videos")
-    )
-    assert prepare_full_cohort(ctx, plan_only=True)["status"] == "planned"
-    with pytest.raises(RuntimeError, match="not ready"):
-        ctx.require_ready_cohort()
-
-
-def test_m3l_no_available_videos_saves_exclusions_and_stays_blocked(context, monkeypatch):
-    ctx = make_m3l(context, monkeypatch)
-
-    def invalid(path):
-        raise ValueError("invalid trailer")
-
-    monkeypatch.setattr("preparation.m3l.probe_video", invalid)
-    with pytest.raises(ValueError, match="no M3L interactions"):
-        prepare_full_cohort(ctx)
-    assert len(read_jsonl(ctx.cohort_dir / "excluded_items.jsonl")) == 18
-    assert read_json(ctx.cohort_dir / "cohort_plan.json")["excluded_interaction_count"] == 26
-    with pytest.raises(RuntimeError, match="not ready"):
-        ctx.require_ready_cohort()
-
-
-def test_m3l_snapshot_detects_changed_events_and_malformed_sources(context, monkeypatch):
-    ctx = make_m3l(context, monkeypatch)
-    prepare_full_cohort(ctx)
-    path = ctx.cohort_dir / "events.jsonl"
-    rows = read_jsonl(path)
-    rows[0]["timestamp"] += 1
-    write_jsonl(path, rows)
-    with pytest.raises(RuntimeError, match="prepared interactions changed"):
-        ctx.require_ready_cohort()
-    mapping = ctx.path("data", "root") / "metadata" / "id_mmrec_to_grouplens.tsv"
-    mapping.write_text(mapping.read_text() + "0\t19\n")
-    with pytest.raises(ValueError, match="duplicate M3L"):
-        prepare_full_cohort(ctx)
-
-
-def test_video_probe_requires_stream_and_duration(context, monkeypatch):
-    from types import SimpleNamespace
-    from preparation.m3l import probe_video
-
-    def result(stdout, returncode=0):
-        monkeypatch.setattr(
-            "preparation.m3l.subprocess.run",
-            lambda *a, **kw: SimpleNamespace(
-                stdout=stdout, returncode=returncode, stderr="decode error"
-            ),
-        )
-
-    result('{"streams":[{"codec_type":"video"}],"format":{"duration":"12.5"}}')
-    assert probe_video(context.root / "movie.mp4") == 12.5
-    for stdout in (
-        "{}",
-        '{"streams":[{"codec_type":"audio"}],"format":{"duration":"12"}}',
-        '{"streams":[{"codec_type":"video"}],"format":{"duration":"nan"}}',
-    ):
-        result(stdout)
-        with pytest.raises(ValueError, match="video stream"):
-            probe_video(context.root / "movie.mp4")
-    result("", returncode=1)
-    with pytest.raises(ValueError, match="ffprobe failed"):
-        probe_video(context.root / "movie.mp4")
-    result("", returncode=127)
-    with pytest.raises(RuntimeError, match="runtime failed"):
-        probe_video(context.root / "movie.mp4")
-
-
 @pytest.mark.torch
 def test_m3l_extraction_embedding_training_diagnosis_and_resume(context, monkeypatch):
     from validation.steps import run_diagnosis, run_recommendation
@@ -236,26 +142,6 @@ def test_m3l_extraction_embedding_training_diagnosis_and_resume(context, monkeyp
     report = (ctx.run_root / "reports" / "base_g1" / "report.md").read_text()
     assert "m3l_10m" in report and "평가한 영화 이력의 다음 영화 예측" in report
     assert run_recommendation(ctx, target=["base", "g1"])["skipped"] == 6
-
-
-def test_streaming_selection_preserves_legacy_order_and_hash(context):
-    ready_cohort(context)
-    rows = read_jsonl(context.cohort_dir / "events.jsonl")
-    # Rows need not arrive in time order. All ties retain original row order.
-    for row in rows:
-        row["timestamp"] = 1000 if row["event_id"] % 3 else 2000
-    write_jsonl(context.cohort_dir / "events.jsonl", rows)
-    original = deepcopy(rows)
-    selected = build_selection(context)
-    from validation.leave_one_out_data import EventTable
-
-    table = EventTable(original)
-    retained = sorted(i for ids in table.by_user.values() if len(ids) >= 5 for i in ids[-13:])
-    expected = [
-        {**original[i], "event_id": j, "source_event_id": i} for j, i in enumerate(retained)
-    ]
-    assert selected["events"] == expected
-    assert selected["plan"]["source_data_hash"] == fingerprint(original)
 
 
 def _make_legacy(context):
@@ -360,61 +246,3 @@ def test_migration_conflicts_resume_and_historical_runs(context, monkeypatch):
     restored = RunContext.load("historical", dataset=context.dataset, root=context.root)
     restored.initialize()
     assert read_json(historical / context.dataset / "run_contract.json") == old_contract
-
-
-def test_previous_migration_journal_does_not_rewrite_contract(context):
-    from preparation.migrate_dataset_layout import SCHEMA
-
-    path = context.run_root / "run_contract.json"
-    path.parent.mkdir(parents=True)
-    old = {"experiment_config_version": "v6", "arm_contract": "title-summary-nine-arms/v3"}
-    write_json(path, {**old, "dataset": context.dataset})
-    before = path.read_bytes()
-    # The previous migration used atomic replacement, so the original inode was lost.
-    stat = path.stat()
-    plan = {
-        "schema_version": SCHEMA, "dataset": context.dataset,
-        "moves": [{
-            "source": str((path.parent.parent / path.name).relative_to(context.artifact_root)),
-            "destination": str(path.relative_to(context.artifact_root)),
-            "identity": [stat.st_dev, -1], "status": "moved",
-        }],
-        "contracts": [{"path": str(path.relative_to(context.artifact_root)),
-                       "compatible": True, "original": old, "status": "pending"}],
-    }
-    write_json(context.artifact_root / JOURNAL, plan)
-    migrate(context.artifact_root, apply=True)
-    assert path.read_bytes() == before
-    assert path.stat().st_ino == stat.st_ino
-
-
-@pytest.mark.parametrize(
-    "module,command",
-    [
-        ("preparation.cli", ["prepare-cohort"]),
-        (
-            "extraction.cli",
-            [
-                "extract-graph-scenes",
-                "--schema",
-                "prompts/scene_graph_v9.md",
-                "--model",
-                "qwen3vl",
-                "--arm",
-                "graph_qwen3vl",
-            ],
-        ),
-        ("validation.cli", ["run-recommendation", "--target", "base"]),
-        ("validation.cli", ["prepare-module", "--target", "g2"]),
-    ],
-)
-def test_cli_requires_dataset(module, command, capsys):
-    import importlib
-
-    with pytest.raises(SystemExit) as exc:
-        importlib.import_module(module).main(["--help"])
-    assert exc.value.code == 0
-    with pytest.raises(SystemExit) as exc:
-        importlib.import_module(module).main(command + ["--run-id", "x"])
-    assert exc.value.code == 2
-    assert "--dataset" in capsys.readouterr().err

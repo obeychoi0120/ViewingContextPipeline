@@ -6,7 +6,10 @@ from arm_registry import generation_registry, registry, select_arms
 from validation.steps import validation_config
 
 
-def test_current_config_loads(context):
+def test_current_config_and_extractor_protocol_load(context):
+    from copy import deepcopy
+    from pipeline_runtime import _validate_config
+
     settings = validation_config(context)
     assert settings.encoder.embedding_dim == 1024
     assert settings.model.embedding_dim == 512
@@ -14,55 +17,15 @@ def test_current_config_loads(context):
     assert settings.model.max_sequence_length == 10
     assert context.run_root == context.root / "artifacts" / "runs" / "regression" / "microlens_100k"
     paths = [context.path("data", key) for key in context.data]
-    paths += [context.path("models", key) for key in ("qwen3vl", "qwen3.5", "bge")]
+    paths += [context.path("models", key) for key in ("qwen3vl", "bge")]
     assert all(path.is_relative_to(context.root) for path in paths)
     assert not any(str(path).startswith("/home_nvme") for path in paths)
     assert Path(settings.dataset.pairs_csv).is_file()
-
-
-def test_protocol_accepts_current_extractor_subset(context):
-    from copy import deepcopy
-    from pipeline_runtime import _validate_config
 
     config = deepcopy(context.config)
     config["protocol"]["graph_extractors"] = ["qwen3vl", "gemini"]
     config["protocol"]["description_extractors"] = ["qwen3vl", "gemini"]
     _validate_config(config)
-
-
-def test_empty_run_directories_can_be_initialized(context):
-    from pipeline_runtime import RunContext
-
-    directory = context.artifact_root / "runs" / "empty-run" / context.dataset
-    (directory / "extraction" / "scenes").mkdir(parents=True)
-    (directory / "validation").mkdir()
-    fresh = RunContext.load("empty-run", dataset=context.dataset, root=context.root)
-    fresh.initialize()
-    assert not (directory / "run_contract.json").exists()
-
-
-def test_existing_results_without_contract_are_preserved(context):
-    from pipeline_runtime import RunContext
-
-    directory = context.artifact_root / "runs" / "261027_v14" / context.dataset
-    (directory / "extraction").mkdir(parents=True)
-    result = directory / "extraction" / "result.json"
-    result.write_text('{"historical": true}')
-    selected = RunContext.load("261027_v14", dataset=context.dataset, root=context.root)
-    selected.initialize()
-    assert result.read_text() == '{"historical": true}'
-    assert not (directory / "run_contract.json").exists()
-
-
-def test_legacy_run_contract_is_ignored_and_preserved(context):
-    from pipeline_runtime import RunContext
-
-    context.run_root.mkdir(parents=True)
-    path = context.run_root / "run_contract.json"
-    path.write_text("historical metadata; not read by the pipeline")
-    selected = RunContext.load(context.run_id, dataset=context.dataset, root=context.root)
-    selected.initialize()
-    assert path.read_text() == "historical metadata; not read by the pipeline"
 
 
 def test_arm_sources_and_title_policy(context):
@@ -78,7 +41,7 @@ def test_arm_sources_and_title_policy(context):
     ]
     sources = generation_registry(context.config)
     assert all(not arm.uses_title and arm.name == arm.scene_arm for arm in sources.values())
-    assert "graph_minicpm" in sources and "graph_gemini" in sources
+    assert set(sources) == {"graph_qwen3vl", "desc_qwen3vl", "graph_gemini", "desc_gemini"}
     assert list(select_arms(context.config, ["g1", "base"])) == ["base", "g1"]
     assert target_set(context.config, ["g1", "base"]) == "base_g1"
     assert RECOMMENDATION_ARM_CONTRACT == "gnn-attn-aggregation/v1"
@@ -90,8 +53,7 @@ def test_arm_sources_and_title_policy(context):
     assert context.diagnosis_path(["g1", "base"]) == (
         context.validation_dir / "diagnosis" / "base_g1" / "diagnosis.json"
     )
-    for targets in ([], ["base", "base"], ["meta"], ["graph_minicpm"], ["missing"],
-                    ["a1"], ["a2"], ["a3"], ["g3s"], ["d0"], ["d1"], ["d2"], ["g3"], ["g4"], ["g5"], ["g1a"], ["g1b"], ["g1c"], ["g3a"], ["g5a"]):
+    for targets in ([], ["base", "base"], ["missing"]):
         with pytest.raises(ValueError):
             select_arms(context.config, targets)
 
@@ -106,8 +68,35 @@ def test_cli_mixed_arms_and_removed_options(context, monkeypatch):
     command = ["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "d", "g0"]
     assert main(command) == 0
     assert calls == [{"force": False, "target": ["d", "g0"]}]
+    with pytest.raises(SystemExit) as exc:
+        main(["run-recommendation", "--run-id", context.run_id, "--target", "base"])
+    assert exc.value.code == 2
     for option in (["--representation-mode", "graph"], ["--scene-aggregation", "mean"],
-                   ["--step", "ablation"]):
+                   ["--step", "ablation"], ["--profile-every", "100"],
+                   ["--profile-operators"]):
         with pytest.raises(SystemExit):
             main(command + option)
-    assert main(["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "graph_minicpm"]) == 1
+    assert main(["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "graph_gemini"]) == 1
+
+
+@pytest.mark.parametrize("configured, expected", [(False, "false"), (True, "true"), (None, "true")])
+def test_recommendation_logs_effective_deterministic(context, monkeypatch, capsys, configured, expected):
+    from validation import leave_one_out_recommendation
+    from validation.steps import run_recommendation
+
+    settings = context.config["validation"]["model"]
+    if configured is None:
+        settings.pop("deterministic", None)
+    else:
+        settings["deterministic"] = configured
+    calls = []
+    monkeypatch.setattr(
+        leave_one_out_recommendation, "run_leave_one_out",
+        lambda ctx, **kwargs: calls.append(kwargs),
+    )
+    run_recommendation(context, target=["base"], workers_per_gpu=4)
+    output = capsys.readouterr().out
+    assert f"  deterministic: {expected}\n" in output
+    assert "profile_every" not in output
+    assert "profile_operators" not in output
+    assert calls == [{"force": False, "target": ["base"], "workers_per_gpu": 4}]

@@ -126,10 +126,8 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen3vl", "qwen3.5", "gemini", "minicpm"} or phase != "scenes":
+        if model not in {"qwen3vl", "gemini"} or phase != "scenes":
             raise ValueError("invalid extraction model or phase")
-        if model == "minicpm" and representation != "graph":
-            raise ValueError("MiniCPM supports only Graph scene extraction")
         from arm_registry import generated_arm
 
         return self.scene_arm_dir(generated_arm(self.config, representation, model).name)
@@ -260,9 +258,7 @@ def _validate_extraction(value: dict[str, Any]) -> None:
     generation_keys = {"scene_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
-        expected_models = {"qwen3vl", "qwen3.5", "gemini"}
-        if arm == "graph" and "minicpm" in value.get("models", {}):
-            expected_models.add("minicpm")
+        expected_models = {"qwen3vl", "gemini"}
         if set(models) != expected_models:
             raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
         for model in sorted(expected_models):
@@ -304,12 +300,10 @@ def _validate_models(value: dict[str, Any]) -> None:
         if any(not isinstance(p, str) or not p.strip() for p in data.values()):
             raise ConfigError(f"datasets.{name}.data paths must be non-empty strings")
     models = _require_mapping(value, "models")
-    required = {"qwen3vl", "qwen3.5", "bge", "gemini"}
-    if not required <= set(models) or set(models) - required - {"minicpm"}:
-        raise ConfigError("models must contain qwen3vl, qwen3.5, bge, gemini and optional minicpm")
-    local_models = ["qwen3vl", "qwen3.5", "bge"]
-    if "minicpm" in models:
-        local_models.append("minicpm")
+    required = {"qwen3vl", "bge", "gemini"}
+    if set(models) != required:
+        raise ConfigError("models must contain exactly qwen3vl, bge and gemini")
+    local_models = ["qwen3vl", "bge"]
     for key in local_models:
         if not isinstance(models[key], str) or not models[key].strip():
             raise ConfigError(f"models.{key} must be a non-empty local checkpoint path")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from itertools import chain
-from artifact_io import atomic_write_jsonl, read_jsonl
 
 from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
 
@@ -67,7 +66,6 @@ class SceneResults:
         records,
         progress,
         arm,
-        source,
         names,
         provenance=None,
     ):
@@ -76,7 +74,6 @@ class SceneResults:
         self.records = records
         self.progress = progress
         self.arm = arm
-        self.source = source
         self.names = names
         self.provenance = provenance
         self.penalty = None
@@ -111,25 +108,6 @@ class SceneResults:
         if task_id in self.completed:
             return
         cid, row = self.rows[task_id]
-        raw_text = text
-        if self.source == "minicpm":
-            from extraction.minicpm_output import normalize_minicpm_output
-
-            # Publish the unmodified response before publishing its parsed scene.
-            raw_path = self.scene_dir / "raw_responses" / f"{cid}.jsonl"
-            raw_rows = {
-                record["scene_idx"]: record
-                for record in (read_jsonl(raw_path) if raw_path.is_file() else [])
-            }
-            raw_rows[int(row["scene_idx"])] = {
-                "content_id": cid, "scene_idx": int(row["scene_idx"]),
-                "tokens": tokens, "raw_output": raw_text,
-            }
-            atomic_write_jsonl(
-                raw_path, sorted(raw_rows.values(), key=lambda record: record["scene_idx"]),
-                durable=True, sort_keys=False,
-            )
-            text = normalize_minicpm_output(text)
         if self.arm == "graph":
             record, failure = graph_scene_result(
                 row,
@@ -159,7 +137,7 @@ class SceneResults:
         else:
             self.contents[cid][int(row["scene_idx"])] = {
                 "content_id": cid, "scene_idx": int(row["scene_idx"]),
-                "tokens": tokens, "error": failure["error"], "raw_output": raw_text,
+                "tokens": tokens, "error": failure["error"], "raw_output": text,
             }
         records = list(self.contents[cid].values())
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
@@ -183,7 +161,6 @@ def run_qwen_scenes(
     progress,
     arm,
     existing_records,
-    source=None,
     qwen_options=None,
     image_limit=6,
     runtime=None,
@@ -196,7 +173,6 @@ def run_qwen_scenes(
         records=existing_records,
         progress=progress,
         arm=arm,
-        source=source,
         names=names,
         provenance=provenance,
     )
@@ -255,7 +231,6 @@ def run_gemini_scenes(
         records=records_by_content,
         progress=progress,
         arm=arm,
-        source="gemini",
         names=names,
         provenance=provenance,
     )

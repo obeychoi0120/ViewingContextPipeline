@@ -12,6 +12,10 @@
 
 **개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소.**
 
+### 2026-11-05: 추출 모델을 Qwen3-VL·Gemini로 한정
+
+추출 모델 설정·CLI·backend·생성 소스를 `qwen3vl`과 `gemini`로 정리했습니다. 추천 특징용 BGE와 현행 5개 추천 Arm, Scene 저장 형식 및 v8 location 읽기 호환은 유지합니다. 프롬프트 파일 내용은 변경하지 않으며, 기존 Run 산출물·생성 provenance와 프롬프트 버전 이력을 보존합니다. CPU/offline 테스트에서 두 모델의 추출·재사용·재시도와 Qwen 이미지 입력·생성 설정·길이 초과 처리를 확인했습니다. 실제 모델 생성과 추천 성능 평가는 수행하지 않았습니다.
+
 ### 2026-11-05: v8 location JSON 읽기 호환 추가
 
 프롬프트 파일 `scene_graph_v8.md`·`scene_graph_v9.md`의 내용은 변경하지 않습니다. v8 실험에서 저장된 Action `location`을 읽기용 복사본에서 `place`로 정규화하도록 파서·저장 검증·추천 입력을 연결합니다. 이전 v9 전환 시의 location 거부 정책을 이 범위에서 변경하며, 아래 과거 변경 기록은 유지합니다.
@@ -30,7 +34,7 @@
 - 행동 형식을 `actor - action - target; tool; place`로 변경합니다. place는 행동이 일어나는 장소이며 목적지가 아닙니다. 불명확한 장소는 `unknown`으로 표현합니다.
 - 두 사람이 등장하는 예시로 번호 구분과 이름 참조를 설명합니다. Context, 개수 상한, 근거 제한, none/unknown 구분, 전달 물체를 target으로 두는 원칙은 유지합니다.
 
-**연동 및 검증 범위:** 내부 필드도 `place`로 변경하는 사용자 결정에 맞춘 프롬프트입니다. 후속 코드 작업에서 내부 `location` → `place` 전환을 반영했습니다. 파서 `graph-text/v14`, 장면 스키마 `scene-graph/v8`, 직접 Graph 입력 `role-graph-inputs/v8`을 사용합니다. 기존 정책대로 `location` 구조화 데이터는 자동 변환 없이 거부하고 원본을 보존합니다. 이름 기반 v9 출력의 파싱·참조 처리를 구현했습니다. 공백·번호를 포함한 이름을 정확히 대조한 뒤 장면별 내부 ID를 부여하며 이름·속성을 보존합니다. 기존 ID 선언 형식과 현재 place JSON도 지원합니다. 미선언 이름은 기존 정책대로 warning 없이 unknown으로 처리하고, 중복 이름은 선언을 모두 보존하되 마지막 선언으로 연결합니다. v9 예시의 파싱·저장·요약 전달과 Qwen3-VL·Qwen3.5·Gemini 실행 경로 및 직접 Graph 입력을 가짜 backend로 검증했습니다. 실제 모델 생성·추천 성능은 검증하지 않았습니다. [summary_graph_v9](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v9.md)도 place와 장면별 이름·번호 해석에 맞춰 갱신합니다. 기존 v8 파일은 보존합니다.
+**연동 및 검증 범위:** 내부 필드도 `place`로 변경하는 사용자 결정에 맞춘 프롬프트입니다. 후속 코드 작업에서 내부 `location` → `place` 전환을 반영했습니다. 파서 `graph-text/v14`, 장면 스키마 `scene-graph/v8`, 직접 Graph 입력 `role-graph-inputs/v8`을 사용합니다. 기존 정책대로 `location` 구조화 데이터는 자동 변환 없이 거부하고 원본을 보존합니다. 이름 기반 v9 출력의 파싱·참조 처리를 구현했습니다. 공백·번호를 포함한 이름을 정확히 대조한 뒤 장면별 내부 ID를 부여하며 이름·속성을 보존합니다. 기존 ID 선언 형식과 현재 place JSON도 지원합니다. 미선언 이름은 기존 정책대로 warning 없이 unknown으로 처리하고, 중복 이름은 선언을 모두 보존하되 마지막 선언으로 연결합니다. v9 예시의 파싱·저장·요약 전달과 당시 로컬·클라우드 실행 경로 및 직접 Graph 입력을 가짜 backend로 검증했습니다. 실제 모델 생성·추천 성능은 검증하지 않았습니다. [summary_graph_v9](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/summary_graph_v9.md)도 place와 장면별 이름·번호 해석에 맞춰 갱신합니다. 기존 v8 파일은 보존합니다.
 
 ### v7 → v8: receiver 제거로 행동 역할 단순화
 

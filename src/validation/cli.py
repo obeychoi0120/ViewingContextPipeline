@@ -34,17 +34,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--compare-run-id", help="Reference run for paired Arm comparison (run-diagnosis only)."
     )
-    parser.add_argument(
-        "--profile-every",
-        type=_positive_int,
-        help="Profile first 3 batches and every Nth batch per epoch with synchronized CUDA timings "
-        "(run-recommendation only; disabled by default).",
-    )
-    parser.add_argument(
-        "--profile-operators", action="store_true",
-        help="Capture one warmed training batch with PyTorch operator/ backward tracing "
-        "(requires --profile-every; run-recommendation only).",
-    )
     args = parser.parse_args(argv)
     try:
         if args.compare_run_id is not None and args.step != "run-diagnosis":
@@ -61,10 +50,6 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.workers_per_gpu is not None and args.step != "run-recommendation":
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")
-        if args.profile_every is not None and args.step != "run-recommendation":
-            raise ValueError("--profile-every is only supported by run-recommendation")
-        if args.profile_operators and (args.step != "run-recommendation" or args.profile_every is None):
-            raise ValueError("--profile-operators requires run-recommendation and --profile-every")
         context = RunContext.load(args.run_id, dataset=args.dataset)
         kwargs = {"force": args.force}
         if args.compare_run_id is not None:
@@ -76,10 +61,6 @@ def main(argv: list[str] | None = None) -> int:
             kwargs["target"] = args.target
         if args.workers_per_gpu is not None:
             kwargs["workers_per_gpu"] = args.workers_per_gpu
-        if args.profile_every is not None:
-            kwargs["profile_every"] = args.profile_every
-        if args.profile_operators:
-            kwargs["profile_operators"] = True
         STEP_HANDLERS[args.step](context, **kwargs)
     except KeyboardInterrupt:
         print(f"[INTERRUPTED] {args.step}", file=sys.stderr)

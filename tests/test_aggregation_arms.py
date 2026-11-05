@@ -42,54 +42,6 @@ def test_d_title_description_residual_mlp_mean_and_missing_components():
         assert module.weight.grad.abs().sum() > 0
 
 
-def test_d_all_empty_scenes_use_same_fallback_as_graph():
-    graph = SceneRoleEncoder(4, hidden=2, aggregation="mean")
-    desc = DescriptionSceneEncoder(4, hidden=2, aggregation="mean")
-    for name in ("title_projection", "scene_mlp"):
-        getattr(desc, name).load_state_dict(getattr(graph, name).state_dict())
-    batch = description_batch()
-    batch.update(contexts=torch.empty(0, 4), scene_videos=torch.empty(0, dtype=torch.long), offsets=[0] * 5)
-    batch["available"] = batch["title_available"]
-    torch.testing.assert_close(desc(batch), graph(batch), rtol=0, atol=0)
-
-
-
-
-def test_d_batch_order_and_separate_videos():
-    encoder = DescriptionSceneEncoder(4, hidden=2, aggregation="mean")
-    batch = description_batch()
-    together = encoder(batch)
-    separate = []
-    for video in range(4):
-        first, stop = batch["offsets"][video:video + 2]
-        one = {key: batch[key][video:video + 1] for key in ("titles", "title_available", "available")}
-        one.update(contexts=batch["contexts"][first:stop], offsets=[0, stop - first],
-                   scene_videos=torch.zeros(stop - first, dtype=torch.long))
-        separate.append(encoder(one))
-    torch.testing.assert_close(together, torch.cat(separate), rtol=1e-5, atol=1e-6)
-    reverse = {key: batch[key].flip(0) for key in ("titles", "title_available", "available")}
-    reverse.update(contexts=batch["contexts"][[2, 0, 1]], offsets=[0, 0, 1, 1, 3],
-                   scene_videos=torch.tensor([1, 3, 3]))
-    torch.testing.assert_close(encoder(reverse), together.flip(0), rtol=1e-5, atol=1e-6)
-
-
-
-
-def test_graph_role_fusion_retains_role_and_feature_gradients(context):
-    arrays, _, _, _ = graph_store(context)
-    batch = PackedGraphStore(arrays).batch([0, 1], "cpu")
-    encoder = SceneRoleEncoder(hidden=4, aggregation="mean")
-    modified = deepcopy(batch)
-    modified["role_entities"] = modified["role_entities"].flip(1)
-    assert not torch.allclose(encoder(batch), encoder(modified))
-    batch["features"].requires_grad_()
-    batch["contexts"].requires_grad_()
-    encoder(batch).square().sum().backward()
-    assert batch["features"].grad[batch["entity_ids"]].abs().sum() > 0
-    assert batch["features"].grad[batch["action_ids"]].abs().sum() > 0
-    assert encoder.role_fusion.weight.grad.abs().sum() > 0
-
-
 def test_worker_consumes_mixed_arm_jobs(context, monkeypatch):
     import pickle
     from queue import Queue

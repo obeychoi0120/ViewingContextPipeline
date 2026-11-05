@@ -143,7 +143,7 @@ def build():
     d.node("Keyframes", 1.1, 4.0, 4.0, 1.1, "Keyframes",
            "1 Scene: 30s, 6 keyframes", subtitle_size=20)
     d.node("Extraction", 1.1, 5.5, 4.0, 1.0, "Scene Extraction",
-           "Qwen3-VL · Qwen3.5 · Gemini", subtitle_size=16)
+           "Qwen3-VL · Gemini", subtitle_size=16)
     d.node("Descriptions", 1.1, 7.0, 4.0, 0.9, "Scene Descriptions", ink=BLUE)
     d.node("Graphs", 1.1, 8.9, 4.0, 0.9, "Scene Graphs", ink=TEAL)
     d.wire("Video to keyframes", [(3.1, 3.65), (3.1, 4.0)])
@@ -246,7 +246,7 @@ def build():
             "transformer_pos · transformer_local", 19, TEAL, align=PP_ALIGN.LEFT)
     d.wire("Item vectors to recommendation", [(17.8, 7.4), (18.55, 7.4)], NAVY)
     d.slide.notes_slide.notes_text_frame.text = (
-        "Scene extraction supports qwen3vl, qwen3.5 and gemini. "
+        "Scene extraction supports qwen3vl and gemini. "
         "Graphs feed both paths; Descriptions feed only the Summary-based Text path. "
         "Title is excluded from extraction and summarization. Title branches shown here "
         "are used only by title-enabled arms; other arms mask the title component. "

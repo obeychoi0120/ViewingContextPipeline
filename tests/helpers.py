@@ -126,7 +126,6 @@ def make_context(root, lengths=(5, 6, 13)):
     }
     for name, kind, architecture in (
         ("qwen3vl", "qwen3_vl", "Qwen3VLForConditionalGeneration"),
-        ("qwen3.5", "qwen3_5", "Qwen3_5ForConditionalGeneration"),
         ("bge", "bert", "BertModel"),
     ):
         path = root / "models" / name

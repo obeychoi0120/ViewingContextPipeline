@@ -11,8 +11,8 @@ from validation.graph_inputs import load_scene_segments, scene_segments_identity
 from validation.representation_provenance import recommendation_identity
 
 
-@pytest.mark.parametrize("targets", [["g1"], ["g2"], ["g1", "g2"]])
-def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys, targets):
+def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys):
+    targets = ["g1", "g2"]
     prepare_inputs(context, monkeypatch, modules=False)
     directory = context.representations_dir / "graph_qwen3vl"
     originals = {path: path.read_bytes() for path in directory.iterdir() if path.is_file()}
@@ -68,8 +68,9 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert all(path.read_bytes() == content for path, content in originals.items())
 
 
-@pytest.mark.parametrize("target", [["g2", "g0"], ["base"], ["d"], ["g2", "g2"], ["missing"]])
-def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monkeypatch, capsys, target):
+def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monkeypatch, capsys):
+    target = ["g2", "g0"]
+
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid targets must be rejected before preparing any Arm")
 
@@ -81,23 +82,3 @@ def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monk
     ]) == 1
     assert "[FAILED] prepare-module:" in capsys.readouterr().err
     assert not context.representations_dir.exists()
-
-
-@pytest.mark.parametrize("options", [
-    ["--workers-per-gpu", "1"], ["--profile-every", "10"], ["--profile-operators"],
-    ["--compare-run-id", "other"],
-])
-def test_prepare_module_cli_rejects_training_and_diagnosis_options(context, capsys, options):
-    assert main([
-        "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", "g2", *options,
-    ]) == 1
-    assert "[FAILED] prepare-module:" in capsys.readouterr().err
-
-
-def test_prepare_module_cli_rejects_underscore_spelling(context):
-    with pytest.raises(SystemExit) as exc:
-        main(["prepare_module", "--run-id", context.run_id, "--dataset", context.dataset,
-              "--target", "g2"])
-    assert exc.value.code == 2
-

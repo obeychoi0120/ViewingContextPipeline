@@ -32,20 +32,20 @@ class WorkerOutput(io.TextIOBase):
 
 
 def combination_worker(
-    context, device_name, jobs, results, profile_every=None, profile_operators=False
+    context, device_name, jobs, results
 ):
     # The parent owns Ctrl-C and terminates/joins all its children on interruption.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     output = WorkerOutput(results)
     with redirect_stdout(output), redirect_stderr(output):
         try:
-            _consume_combinations(context, device_name, jobs, results, profile_every, profile_operators)
+            _consume_combinations(context, device_name, jobs, results)
         finally:
             output.flush()
 
 
 def _consume_combinations(
-    context, device_name, jobs, results, profile_every=None, profile_operators=False
+    context, device_name, jobs, results
 ):
     identity = None
     try:
@@ -80,8 +80,6 @@ def _consume_combinations(
                 branch,
                 prepared,
                 device,
-                **({"profile_every": profile_every} if profile_every is not None else {}),
-                **({"profile_operators": True} if profile_operators else {}),
             )
             results.put(("complete", identity))
     except BaseException:
@@ -91,7 +89,7 @@ def _consume_combinations(
 
 
 def run_parallel(
-    context, jobs, devices, progress, *, profile_every=None, profile_operators=False
+    context, jobs, devices, progress
 ):
     # CUDA must be initialized in spawned children, never inherited through fork.
     runtime = mp.get_context("spawn")
@@ -107,10 +105,6 @@ def run_parallel(
             process = runtime.Process(
                 target=combination_worker,
                 args=(context, device, pending, results),
-                kwargs={
-                    **({"profile_every": profile_every} if profile_every is not None else {}),
-                    **({"profile_operators": True} if profile_operators else {}),
-                },
             )
             process.start()
             processes.append(process)

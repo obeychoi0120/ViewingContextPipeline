@@ -7,12 +7,9 @@ protocol:
   catalog_scope: retained_sequence_catalog
   graph_extractors:
   - qwen3vl
-  - qwen3.5
   - gemini
-  - minicpm
   description_extractors:
   - qwen3vl
-  - qwen3.5
   - gemini
 artifacts_root: artifacts
 datasets:
@@ -36,8 +33,6 @@ datasets:
       item_count: 9031
 models:
   qwen3vl: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
-  qwen3.5: /home_nvme/shared/models/Qwen3.5-2B
-  minicpm: /home_nvme/shared/models/MiniCPM-V-4.7-1B
   bge: /home_nvme/shared/models/bge-large-en-v1.5
   gemini:
     project_id: insight-dev-490002
@@ -67,17 +62,11 @@ extraction:
     num_keyframes: 6
   description:
     qwen3vl:
-      scene_max_new_tokens: 512
-    qwen3.5:
-      scene_max_new_tokens: 512
+      scene_max_new_tokens: 384
     gemini:
       scene_max_new_tokens: 1024
   graph:
-    minicpm:
-      scene_max_new_tokens: 384
     qwen3vl:
-      scene_max_new_tokens: 384
-    qwen3.5:
       scene_max_new_tokens: 384
     gemini:
       scene_max_new_tokens: 1024

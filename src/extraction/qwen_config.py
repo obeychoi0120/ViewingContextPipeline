@@ -55,7 +55,7 @@ def penalty_schedule(value):
     return [float(x) for x in values]
 
 
-QWEN_MODELS = ("qwen3vl", "qwen3.5")
+QWEN_MODELS = ("qwen3vl",)
 
 
 def validate_presence_penalty(value: float) -> float:
@@ -88,7 +88,6 @@ def generation_settings(
             if presence_penalty is not None else 1.5
         ),
         "repetition_penalty": penalty,
-        "enable_thinking": False if model == "qwen3.5" else None,
         "model": model,
     }
 
@@ -96,7 +95,6 @@ def generation_settings(
 def validate_checkpoint(model: str, config: dict) -> None:
     expected = {
         "qwen3vl": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),
-        "qwen3.5": ("qwen3_5", "Qwen3_5ForConditionalGeneration"),
     }
     if model not in expected:
         raise ValueError(f"unsupported Qwen model: {model}")

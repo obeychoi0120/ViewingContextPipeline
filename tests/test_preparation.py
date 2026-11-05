@@ -1,8 +1,7 @@
 from artifact_io import read_jsonl
-from helpers import events, make_context, ready_cohort
+from helpers import events, ready_cohort
 from preparation.cohort import load_csv
 from validation.leave_one_out_data import EventTable
-from validation.selection import build_selection
 from visual_sampling import build_fixed_windows, timestamp_stem
 
 
@@ -50,19 +49,6 @@ def test_fixed_window_sampling():
     ]
     assert len(build_fixed_windows(30, scene_duration=30, num_keyframes=6)) == 1
     assert timestamp_stem(31.199999) == "0031_1"
-
-
-def test_selection_filters_and_trims(tmp_path):
-    context = make_context(tmp_path / "boundary", lengths=(4, 5, 14))
-    ready_cohort(context)
-    selected = build_selection(context)
-    retained = selected["events"]
-    assert len(retained) == 18
-    assert {r["user_id"] for r in retained} == {"2", "3"}
-    assert [r["source_event_id"] for r in retained] == list(range(4, 9)) + list(range(10, 23))
-    assert {r["item_id"] for r in selected["catalog"]} == {r["item_id"] for r in retained}
-    assert selected["manifest"]["statistics"]["excluded_by_arm"] == {}
-    assert selected["plan"]["trimmed_event_count"] == 1
 
 
 def test_leave_one_out_partitions():

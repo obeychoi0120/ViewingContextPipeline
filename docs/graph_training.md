@@ -14,7 +14,7 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET" --tar
 
 `graph_execution.chunk_items`와 `chunk_nodes`로 청크 크기를 제한하고 한 영상 내부의 장면은 분할하지 않습니다. `chunk_scene_pairs`는 기존 설정 파일 호환을 위해 받지만 현재 모델에서는 사용하지 않습니다. 새 학습에는 이전 구조 결과가 없는 새 Run ID를 사용합니다.
 
-각 단계는 독립적이며 `--target`이 필수입니다. `prepare-module`은 G1·G2를 받으며 함께 선택하면 공통 Graph bundle의 구간 파일을 한 번만 준비합니다. 추천은 학습·validation·최종 test를 수행하고 특징·구간 준비나 진단을 자동 실행하지 않습니다. worker 수·profiling·`--force`는 기존 CLI 규칙을 유지합니다.
+각 단계는 독립적이며 `--target`이 필수입니다. `prepare-module`은 G1·G2를 받으며 함께 선택하면 공통 Graph bundle의 구간 파일을 한 번만 준비합니다. 추천은 학습·validation·최종 test를 수행하고 특징·구간 준비나 진단을 자동 실행하지 않습니다. worker 수는 `--workers-per-gpu`로 지정하고 `--force`는 기존 CLI 규칙을 유지합니다. 시작 로그에는 `validation.model.deterministic` 적용값을 표시합니다.
 
 ## 인코더와 B: Role Fusion
 

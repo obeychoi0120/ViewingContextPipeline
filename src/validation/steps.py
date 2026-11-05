@@ -49,18 +49,16 @@ def prepare_module(context, *, force=False, target=None):
 
 def run_recommendation(
     context, *, force=False, workers_per_gpu=1, target=None,
-    profile_every=None, profile_operators=False,
 ):
     from validation.leave_one_out_recommendation import run_leave_one_out
 
     resolve_target_arms(target, config=context.config)
     log_step_start(context, "run-recommendation", force=force, target=target,
-                   workers_per_gpu=workers_per_gpu, profile_every=profile_every,
-                   profile_operators=profile_operators)
+                   workers_per_gpu=workers_per_gpu,
+                   deterministic=validation_config(context).model.deterministic)
     context.initialize()
     return run_leave_one_out(
         context, force=force, workers_per_gpu=workers_per_gpu, target=target,
-        profile_every=profile_every, profile_operators=profile_operators,
     )
 
 
