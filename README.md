@@ -128,6 +128,8 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$D
 
 Gemini도 표의 model·source로 추출하고 YAML의 `source`에 같은 값을 명시하면 추천에 연결됩니다. Graph·Description의 `--schema`는 각각 위 프롬프트를 지정합니다. 생성 옵션과 출력 예시는 [장면 추출](docs/scene_extraction.md)을 참고하세요.
 
+장면 결과는 `<artifacts_root>/runs/<RUN_ID>/<dataset>/extraction/<source>/`에 저장합니다. 기존 `extraction/scenes/<source>/` 결과를 재사용하려면 source 폴더 전체를 새 위치로 옮깁니다.
+
 ### 3. 고정 특징과 활동 구간 준비
 
 ```bash

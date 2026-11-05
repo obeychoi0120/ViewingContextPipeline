@@ -41,6 +41,15 @@ def test_arm_sources_and_title_policy(context):
         "metadata", "desc_qwen3vl", *(["graph_qwen3vl"] * 3),
     ]
     sources = generation_registry(context.config)
+    from validation.diagnosis_scenes import scene_arms
+
+    for name, arm in sources.items():
+        expected = context.run_root / "extraction" / name
+        assert context.scene_arm_dir(name) == expected
+        assert context.extraction_dir(arm.representation, arm.model, "scenes") == expected
+    for name, (scene_path, failure_path) in scene_arms(context.config).items():
+        assert context.run_root / scene_path == context.scene_arm_dir(arms[name].scene_arm)
+        assert context.run_root / failure_path == context.scene_arm_dir(arms[name].scene_arm) / "failures"
     assert all(not arm.uses_title and arm.name == arm.scene_arm for arm in sources.values())
     assert set(sources) == {"graph_qwen3vl", "desc_qwen3vl", "graph_gemini", "desc_gemini"}
     assert list(select_arms(context.config, ["graph-activity", "base"])) == ["base", "graph-activity"]

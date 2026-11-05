@@ -12,7 +12,7 @@ def scene_arms(config):
     from arm_registry import registry
 
     return {
-        name: (f"extraction/scenes/{arm.scene_arm}", f"extraction/scenes/{arm.scene_arm}/failures")
+        name: (f"extraction/{arm.scene_arm}", f"extraction/{arm.scene_arm}/failures")
         for name, arm in registry(config).items()
         if arm.model
     }

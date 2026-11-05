@@ -71,8 +71,10 @@ class RunContext:
             or (artifact_root / "preparation" / "cohort").exists()
         ):
             raise ConfigError("legacy MicroLens layout found; run python -m preparation.migrate_dataset_layout --apply first")
-        directory = run_root / "extraction" / "scenes"
-        if any((directory / arm).exists() for arm in ("graph_qwen", "desc_qwen")):
+        extraction = run_root / "extraction"
+        if any((directory / arm).exists()
+               for directory in (extraction, extraction / "scenes")
+               for arm in ("graph_qwen", "desc_qwen")):
             raise ConfigError("legacy qwen extraction layout is unsupported; use a new run_id (no automatic migration)")
         return cls(repo_root, selected, config, run_root, artifact_root, dataset)
 
@@ -138,7 +140,7 @@ class RunContext:
         selected = generation_registry(self.config)[arm]
         if selected.model is None or selected.name != selected.scene_arm:
             raise ValueError(f"not a Scene arm: {arm}")
-        return self.run_root / "extraction" / "scenes" / arm
+        return self.run_root / "extraction" / arm
 
     def graph_scene_dir(self, source: str) -> Path:
         return self.extraction_dir("graph", source, "scenes")

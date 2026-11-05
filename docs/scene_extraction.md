@@ -92,7 +92,9 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$D
 
 ## 저장과 실패 확인
 
-장면은 `<artifacts_root>/runs/<RUN_ID>/<dataset>/extraction/scenes/<source>/<content_id>.jsonl`에 저장합니다.
+장면은 `<artifacts_root>/runs/<RUN_ID>/<dataset>/extraction/<source>/<content_id>.jsonl`에 저장합니다.
+
+기존 `extraction/scenes/<source>/` 결과를 재사용하려면 source 폴더 전체를 `extraction/<source>/`로 옮깁니다. `generation_identity.json`과 실패·원본 응답 파일도 함께 유지해야 합니다. 기존 폴더는 자동 이동하지 않으며, 새 위치가 이미 있으면 두 결과를 덮어쓰거나 임의로 병합하지 않습니다.
 
 | 행 종류 | compact 필드 |
 | --- | --- |

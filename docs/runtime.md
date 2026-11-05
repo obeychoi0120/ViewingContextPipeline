@@ -55,7 +55,7 @@ Qwen은 로컬 checkpoint와 vLLM으로 보이는 GPU별 worker를 실행합니�
 │   ├── resized_keyframes/<width>_<height>/<content_id>/
 │   └── source_assets/
 ├── runs/<RUN_ID>/<dataset>/
-│   ├── extraction/scenes/<source>/
+│   ├── extraction/<source>/
 │   ├── validation/
 │   │   ├── cohort/
 │   │   ├── representations/<source>/
