@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from artifact_io import read_json, write_json
+from arm_registry import registry
 from helpers import prepare_inputs
 from pipeline_runtime import RunContext
 from validation.cli import main
@@ -12,7 +13,7 @@ from validation.representation_provenance import recommendation_identity
 
 
 def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys):
-    targets = ["g1", "g2"]
+    targets = ["graph-activity", "graph-role-activity"]
     prepare_inputs(context, monkeypatch, modules=False)
     directory = context.representations_dir / "graph_qwen3vl"
     originals = {path: path.read_bytes() for path in directory.iterdir() if path.is_file()}
@@ -36,13 +37,12 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     monkeypatch.setattr("validation.scene_segments.attach", tracked_attach)
     command = [
         "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", *targets,
     ]
     assert main(command) == 0
     assert calls == [targets[0]]
     output = capsys.readouterr().out
     assert "[STEP] prepare-module" in output
-    assert f"selected_arms: {json.dumps(targets)}" in output
+    assert f"selected_arms: {json.dumps(list(registry(context.config)))}" in output
     assert f"output_dir: {context.representations_dir}" in output
     manifest = read_json(directory / "manifest.json")
     pairs = load_scene_segments(directory)
@@ -51,10 +51,10 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert len(np.unique(pairs[:, 1])) == 24
     meta = scene_segments_identity(directory)
     assert meta["input_hash"] == manifest["input_hash"]
-    for arm in ("g0", "g1", "g2"):
+    for arm in ("graph", "graph-activity", "graph-role-activity"):
         identity = recommendation_identity(context, arm)
         assert json.loads(json.dumps(identity)) == identity
-    assert recommendation_identity(context, "g1")["scene_segments"] == recommendation_identity(context, "g2")["scene_segments"]
+    assert recommendation_identity(context, "graph-activity")["scene_segments"] == recommendation_identity(context, "graph-role-activity")["scene_segments"]
 
     path = directory / "scene_segments.json"
     stale = read_json(path)
@@ -68,17 +68,20 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert all(path.read_bytes() == content for path, content in originals.items())
 
 
-def test_prepare_module_cli_rejects_invalid_targets_before_writing(context, monkeypatch, capsys):
-    target = ["g2", "g0"]
+def test_prepare_module_cli_with_no_activity_modules_is_noop(context, monkeypatch, capsys):
+    from rec_experiments import CONFIG_KEY, parse_experiments
+
+    context.config[CONFIG_KEY] = parse_experiments({"version": 1, "experiments": [
+        {"label": "only-description", "source": "desc_qwen3vl"},
+    ]})
 
     def forbidden(*args, **kwargs):
-        raise AssertionError("invalid targets must be rejected before preparing any Arm")
+        raise AssertionError("no activity module should be prepared")
 
     monkeypatch.setattr("validation.scene_segments.attach", forbidden)
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
     assert main([
         "prepare-module", "--run-id", context.run_id, "--dataset", context.dataset,
-        "--target", *target,
-    ]) == 1
-    assert "[FAILED] prepare-module:" in capsys.readouterr().err
+    ]) == 0
+    assert "[STEP] prepare-module" in capsys.readouterr().out
     assert not context.representations_dir.exists()

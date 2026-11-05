@@ -80,7 +80,7 @@ def make_model(store, extensions=(), items=8, aggregation="mean", role_fusion=Tr
     torch.manual_seed(0)
     return GraphSASRec(
         store=store, aggregation=aggregation, item_count=len(store), max_length=10, embedding_dim=32,
-        num_blocks=1, num_heads=2, dropout=0.0, arm="g2", role_fusion=role_fusion, extensions=extensions,
+        num_blocks=1, num_heads=2, dropout=0.0, arm="graph-role-activity", role_fusion=role_fusion, extensions=extensions,
         execution=GraphExecutionConfig(chunk_items=items, chunk_nodes=100000, chunk_scene_pairs=1048576,
                                        checkpoint="never", feature_cache_mb=0),
     ).eval()
@@ -137,20 +137,20 @@ def test_attach_builds_segments_and_identity_records_them(context, monkeypatch):
             value["actions"] = [dict(value["actions"][0], action=p) for p in phrases]
             rows.append(scene_row(item["content_id"], index, value=value))
         write_scene_records(context.scene_arm_dir("graph_qwen3vl") / f"{item['content_id']}.jsonl", rows)
-    texts, arrays, stats = build_input(context, cohort, registry(context.config)["g2"])
+    texts, arrays, stats = build_input(context, cohort, registry(context.config)["graph-role-activity"])
     bundle = context.representations_dir / "graph_qwen3vl"
     bundle.mkdir(parents=True)
     for name, array in arrays.items():
         np.save(bundle / f"{name}.npy", array)
     write_json(bundle / "manifest.json", {"input_hash": "h", "version": "v", "catalog": catalog})
     write_json(bundle / "statistics.json", stats)
-    result = attach(context, "g2")
+    result = attach(context, "graph-role-activity")
     pairs = load_scene_segments(bundle)
     # video_0: cut [0, 1], talk [1, 2]; video_1: eat [0]  (bundle scene rows 0, 1, 2, 3)
     assert result["segments"] == 3 and sorted(map(tuple, pairs.tolist())) == [(0, 0), (1, 0), (1, 1), (2, 1), (3, 2)]
     with pytest.raises(ValueError, match="no segments extension"):
-        attach(context, "g0")
-    g1, g2 = (recommendation_identity(context, name) for name in ("g1", "g2"))
+        attach(context, "graph")
+    g1, g2 = (recommendation_identity(context, name) for name in ("graph-activity", "graph-role-activity"))
     assert g1["experiment_arm"]["extensions"] == ["segments"]
     assert g1["experiment_arm"]["role_fusion"] is False
     assert g2["experiment_arm"]["role_fusion"] is True

@@ -60,9 +60,7 @@ def cluster_bootstrap(sums, counts, *, samples, seed=42, memory_limit=MEMORY_LIM
 
 def comparisons(observed, draws, settings, *, arms=None, config=None):
     from validation.diagnosis_statistics import comparison_families
-    from validation.recommendation_contracts import DEFAULT_PROTOCOL
-
-    configured = registry(config or DEFAULT_PROTOCOL)
+    configured = registry(config)
     names = list(configured if arms is None else arms)
     indices = {name: index for index, name in enumerate(names)}
     if len(observed) != len(names) or draws.shape[1] != len(names):
@@ -78,7 +76,8 @@ def comparisons(observed, draws, settings, *, arms=None, config=None):
             a, b = (indices[left], indices[right])
             delta = draws[:, a] - draws[:, b]
             lo, hi = np.quantile(delta, [alpha / 2, 1 - alpha / 2])
-            result[f"{left}-{right}"] = {
+            result[f"{left}|{right}"] = {
+                "left": left, "right": right,
                 "family": family,
                 "role": "confirmatory",
                 "family_size": len(pairs),
@@ -113,7 +112,7 @@ def diagnosis_training(directory, identity, expected_count, *, architecture_vers
 
 
 def collect_metrics(context, config, cohort, *, arms=None):
-    selected = registry(context.config) if arms is None else arms
+    selected = ({name: name for name in registry(context.config)} if arms is None else arms)
     cohort = load_validation_cohort(context)
     table = EventTable(cohort["events"])
     training_input_hash = training_signature(context, cohort, config)
@@ -163,6 +162,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 architecture_version = training["architecture_version"]
                 model_reports[arm] = {
                     "parameters": training.get("parameters", {}),
+                    "experiment_definition": training["experiment_definition"],
                 }
                 best = training["best_epoch"]
                 if training["split"] != split or best not in [row["epoch"] for row in training["train"]]:
@@ -230,11 +230,13 @@ def collect_metrics(context, config, cohort, *, arms=None):
               if len(config.model.seeds) > 1 else 0.0 for metric in metrics}
         for arm in arms
     }
+    baseline = next((name for name, arm in registry(context.config).items()
+                     if name in arms and arm.representation == "metadata"), None)
     relative = {
-        arm: {metric: (means[arm][metric] / means["base"][metric] - 1)
-              if means["base"][metric] > 0 else None for metric in metrics}
+        arm: {metric: (means[arm][metric] / means[baseline][metric] - 1)
+              if means[baseline][metric] > 0 else None for metric in metrics}
         for arm in arms
-    } if "base" in arms else None
+    } if baseline is not None else None
     return (
         sums,
         counts,
@@ -248,6 +250,7 @@ def collect_metrics(context, config, cohort, *, arms=None):
             "means": means,
             "standard_deviations": standard_deviations,
             "base_relative_changes": relative,
+            "baseline": baseline,
             "model_reports": model_reports,
         },
     )
@@ -266,18 +269,18 @@ def diagnose(context, *, target=None, compare_run_id=None):
     contract = comparison_contract(context.config, arms)
     selected = target_set(context.config, arms)
     destination = context.diagnosis_path(arms)
-    report_path = context.run_root / "reports" / selected / "report.md"
     if destination.exists():
         previous = read_json(destination)
         previous_architecture = previous.get("architecture_version") or previous.get(
             "recommendations", {}).get("architecture_version")
         if previous_architecture != ARCHITECTURE_VERSION:
             raise ValueError(f"incompatible diagnosis output: {destination}; use a new Run ID")
-    elif report_path.exists():
-        raise ValueError(f"report without matching diagnosis provenance: {report_path}; use a new Run ID")
+    from rec_experiments import experiment_definition
+
     document = {
+        "experiments": [experiment_definition(registry(context.config)[name]) for name in arms],
         "dataset": context.dataset,
-        "schema_version": "leave-one-out-diagnosis/v5",
+        "schema_version": "leave-one-out-diagnosis/v6",
         "architecture_version": ARCHITECTURE_VERSION,
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),

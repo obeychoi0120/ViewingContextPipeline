@@ -42,7 +42,12 @@ def step_settings(context, step, **options):
             "run-diagnosis": context.diagnosis_dir,
         }[step]
         if step in {"embed-representations", "prepare-module", "run-recommendation", "run-diagnosis"}:
-            values["selected_arms"] = list(select_arms(context.config, options.get("target")))
+            from rec_experiments import CONFIG_PATH as REC_CONFIG_PATH, experiment_definition
+
+            arms = select_arms(context.config, options.get("target"))
+            values["selected_arms"] = list(arms)
+            values["rec_experiments_config"] = context.root / REC_CONFIG_PATH
+            values["experiments"] = [experiment_definition(arm) for arm in arms.values()]
     values.update({key: value for key, value in options.items() if key not in values})
     return values
 

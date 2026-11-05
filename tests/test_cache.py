@@ -93,9 +93,9 @@ def test_preflight_protects_entire_grid_before_restoring_or_training(context, mo
 
     prepare_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
-    last = context.recommendations_dir / "seed_44" / "g1"
+    last = context.recommendations_dir / "seed_44" / "graph-activity"
     last.mkdir(parents=True)
-    old = {**result_identity(context, cohort, 44, "g1"), "architecture_version": "sasrec-scene-content/v1"}
+    old = {**result_identity(context, cohort, 44, "graph-activity"), "architecture_version": "sasrec-scene-content/v1"}
     write_json(last / "training.json", old)
     before = {p: p.read_bytes() for p in context.recommendations_dir.rglob("*") if p.is_file()}
 
@@ -105,5 +105,5 @@ def test_preflight_protects_entire_grid_before_restoring_or_training(context, mo
     monkeypatch.setattr(recommendation_cache, "restore", forbidden)
     monkeypatch.setattr("validation.leave_one_out_recommendation.run_combination", forbidden)
     with pytest.raises(ValueError, match="new Run ID"):
-        run_recommendation(context, target=["base", "g1"], force=True)
+        run_recommendation(context, target=["base", "graph-activity"], force=True)
     assert before == {p: p.read_bytes() for p in context.recommendations_dir.rglob("*") if p.is_file()}

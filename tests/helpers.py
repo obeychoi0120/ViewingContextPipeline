@@ -20,7 +20,7 @@ from validation.leave_one_out_data import EventTable
 from visual_sampling import timestamp_stem
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = ["base", "g1"]
+TARGETS = ["base", "graph-activity"]
 GRAPH_TEXT = """[Context]
 medium: live_action
 format: demonstration
@@ -152,7 +152,12 @@ def make_context(root, lengths=(5, 6, 13)):
         "scene_description_v3.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
-    return RunContext.load("regression", dataset="microlens_100k", root=root)
+    (root / "rec_experiments_config.yaml").write_text((ROOT / "rec_experiments_config.yaml").read_text())
+    context = RunContext.load("regression", dataset="microlens_100k", root=root)
+    from rec_experiments import load_experiments
+
+    load_experiments(context)
+    return context
 
 
 def ready_cohort(context):
@@ -249,7 +254,7 @@ def prepare_inputs(context, monkeypatch, *, modules=True):
                                arm="desc_qwen3vl")
     embed_representations(context, target=TARGETS)
     if modules:
-        prepare_module(context, target=["g1"])
+        prepare_module(context, target=["graph-activity"])
     return generator, description
 
 
@@ -260,7 +265,7 @@ def train_inputs(context, monkeypatch):
     return run_recommendation(context, target=TARGETS)
 
 
-def graph_store(context, *, counts=(2, 1), arm_name="g1"):
+def graph_store(context, *, counts=(2, 1), arm_name="graph-activity"):
     from arm_registry import registry
     from validation.graph_inputs import build_input
 

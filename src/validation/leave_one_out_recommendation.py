@@ -142,7 +142,7 @@ def ensure_compatible_output(directory, identity):
     """Never overwrite a different Arm/model, including partial results and force runs."""
     if not directory.exists() or not any(directory.iterdir()):
         return
-    keys = ("arm_contract", "architecture_version", "experiment_arm", "item_model")
+    keys = ("arm_contract", "architecture_version", "experiment_arm", "item_model", "experiment_definition")
     evidence = []
     for name in ("identity.json", "complete.json", "training.json"):
         path = directory / name

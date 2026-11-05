@@ -51,11 +51,11 @@ def test_worker_consumes_mixed_arm_jobs(context, monkeypatch):
     from validation.steps import embed_representations
 
     prepare_inputs(context, monkeypatch)
-    embed_representations(context, target=["d"])
+    embed_representations(context, target=["description"])
     worker_context = pickle.loads(pickle.dumps(context))
     cohort, _, split = selected_table(context)
     jobs, results = Queue(), Queue()
-    for seed, arm in ((42, "d"), (43, "g1")):
+    for seed, arm in ((42, "description"), (43, "graph-activity")):
         jobs.put((split, result_identity(context, cohort, seed, arm), arm))
     jobs.put(None)
     _consume_combinations(worker_context, "cpu", jobs, results)

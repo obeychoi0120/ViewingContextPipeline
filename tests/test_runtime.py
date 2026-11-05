@@ -23,6 +23,7 @@ def test_current_config_and_extractor_protocol_load(context):
     assert Path(settings.dataset.pairs_csv).is_file()
 
     config = deepcopy(context.config)
+    config.pop("_rec_experiments")
     config["protocol"]["graph_extractors"] = ["qwen3vl", "gemini"]
     config["protocol"]["description_extractors"] = ["qwen3vl", "gemini"]
     _validate_config(config)
@@ -33,7 +34,7 @@ def test_arm_sources_and_title_policy(context):
 
     arms = registry(context.config)
     assert list(arms) == [
-        "base", "d", "g0", "g1", "g2",
+        "base", "description", "graph", "graph-activity", "graph-role-activity",
     ]
     assert all(arm.uses_title for arm in arms.values())
     assert [feature_source(arm) for arm in arms.values()] == [
@@ -42,16 +43,16 @@ def test_arm_sources_and_title_policy(context):
     sources = generation_registry(context.config)
     assert all(not arm.uses_title and arm.name == arm.scene_arm for arm in sources.values())
     assert set(sources) == {"graph_qwen3vl", "desc_qwen3vl", "graph_gemini", "desc_gemini"}
-    assert list(select_arms(context.config, ["g1", "base"])) == ["base", "g1"]
-    assert target_set(context.config, ["g1", "base"]) == "base_g1"
+    assert list(select_arms(context.config, ["graph-activity", "base"])) == ["base", "graph-activity"]
+    assert target_set(context.config, ["graph-activity", "base"]) == "base_graph-activity"
     assert RECOMMENDATION_ARM_CONTRACT == "gnn-attn-aggregation/v1"
-    assert all(arms[name].aggregation == "mean" for name in ("d", "g0", "g1", "g2"))
-    assert [arms[name].role_fusion for name in ("g0", "g1", "g2")] == [False, False, True]
-    assert [arms[name].extensions for name in ("g0", "g1", "g2")] == [(), ("segments",), ("segments",)]
+    assert all(arms[name].aggregation == "mean" for name in ("description", "graph", "graph-activity", "graph-role-activity"))
+    assert [arms[name].role_fusion for name in ("graph", "graph-activity", "graph-role-activity")] == [False, False, True]
+    assert [arms[name].extensions for name in ("graph", "graph-activity", "graph-role-activity")] == [(), ("segments",), ("segments",)]
     assert context.representations_dir == context.validation_dir / "representations"
     assert context.recommendations_dir == context.validation_dir / "recommendations"
-    assert context.diagnosis_path(["g1", "base"]) == (
-        context.validation_dir / "diagnosis" / "base_g1" / "diagnosis.json"
+    assert context.diagnosis_path(["graph-activity", "base"]) == (
+        context.validation_dir / "diagnosis" / "base_graph-activity" / "diagnosis.json"
     )
     for targets in ([], ["base", "base"], ["missing"]):
         with pytest.raises(ValueError):
@@ -65,18 +66,19 @@ def test_cli_mixed_arms_and_removed_options(context, monkeypatch):
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
     calls = []
     monkeypatch.setitem(STEP_HANDLERS, "run-recommendation", lambda ctx, **kw: calls.append(kw))
-    command = ["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "d", "g0"]
+    command = ["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset]
     assert main(command) == 0
-    assert calls == [{"force": False, "target": ["d", "g0"]}]
+    assert calls == [{"force": False}]
     with pytest.raises(SystemExit) as exc:
-        main(["run-recommendation", "--run-id", context.run_id, "--target", "base"])
+        main(["run-recommendation", "--run-id", context.run_id])
     assert exc.value.code == 2
     for option in (["--representation-mode", "graph"], ["--scene-aggregation", "mean"],
                    ["--step", "ablation"], ["--profile-every", "100"],
-                   ["--profile-operators"]):
+                   ["--profile-operators"], ["--target", "graph"],
+                   ["--experiments", "another.yaml"]):
         with pytest.raises(SystemExit):
             main(command + option)
-    assert main(["run-recommendation", "--run-id", context.run_id, "--dataset", context.dataset, "--target", "graph_gemini"]) == 1
+
 
 
 @pytest.mark.parametrize("configured, expected", [(False, "false"), (True, "true"), (None, "true")])

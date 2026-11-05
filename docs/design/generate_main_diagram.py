@@ -126,135 +126,134 @@ class Diagram:
 
 def build():
     d = Diagram()
-    d.box("Shared extraction panel", 0.6, 2.15, 5.0, 9.65, "F6F8FB")
-    d.box("Baseline panel", 6.15, 2.15, 11.4, 1.5, "F5F6F8")
-    d.box("Text path panel", 6.15, 4.15, 11.4, 3.65, "F0F5FF", "C6D9F5")
-    d.box("Graph path panel", 6.15, 8.15, 11.4, 3.65, "EFF9F8", "BADEDC")
-    d.label("Title", 0.6, 0.35, 22.8, 0.65, "ViewingContextPipeline", 40, NAVY,
+    d.label("Title", 0.6, 0.30, 22.8, 0.60, "ViewingContextPipeline", 38, NAVY,
             True, PP_ALIGN.LEFT)
-    d.label("Dataset", 0.6, 1.12, 22.8, 0.4, "MicroLens-100K", 24, MUTED,
+    d.label("Datasets", 0.6, 0.99, 22.8, 0.32,
+            "MicroLens-100K / M³L-10M  |  Title + visual observations for recommendation", 22,
+            MUTED, align=PP_ALIGN.LEFT)
+    d.box("Experiment configuration", 0.6, 1.50, 22.8, 0.48, "E7EDF5", NAVY)
+    d.label("Configuration text", 0.75, 1.53, 22.5, 0.40,
+            "rec_experiments_config.yaml: label + source + modules + readout  |  "
+            "Titles always included  |  One model per experiment", 20, NAVY)
+
+    for x, w, text in ((0.6, 4.5, "VISUAL OBSERVATIONS"),
+                       (5.6, 11.5, "SOURCE-SPECIFIC VIDEO REPRESENTATIONS"),
+                       (18.2, 5.2, "TRAIN / EVALUATE")):
+        d.label(text, x, 2.20, w, 0.35, text, 24, NAVY, True, PP_ALIGN.LEFT)
+    d.box("Visual observations panel", 0.6, 2.70, 4.5, 8.65, "F6F8FB")
+    d.box("Metadata panel", 5.6, 2.70, 11.5, 1.70, "F5F6F8")
+    d.box("Description panel", 5.6, 4.75, 11.5, 2.70, "F0F5FF", "C6D9F5")
+    d.box("Graph panel", 5.6, 7.80, 11.5, 3.55, "EFF9F8", "BADEDC")
+    d.box("Recommendation panel", 18.2, 2.70, 5.2, 8.65, "E7EDF5", NAVY)
+
+    d.node("Video", 1.0, 3.30, 3.7, 0.80, "Video")
+    d.node("Keyframes", 1.0, 4.60, 3.7, 1.00, "Window sampling",
+           "Ordered keyframes", size=22, subtitle_size=20)
+    d.node("Extraction", 1.0, 6.00, 3.7, 0.90, "Scene extraction",
+           "Qwen3-VL / Gemini", size=22, subtitle_size=19)
+    d.node("Descriptions", 1.0, 7.45, 3.7, 1.00, "Scene Descriptions",
+           "desc_qwen3vl / desc_gemini", ink=BLUE, size=22, subtitle_size=14)
+    d.node("Graphs", 1.0, 9.05, 3.7, 1.00, "Scene Graphs",
+           "graph_qwen3vl / graph_gemini", ink=TEAL, size=22, subtitle_size=14)
+    d.wire("Video to keyframes", [(2.85, 4.10), (2.85, 4.60)])
+    d.wire("Keyframes to extraction", [(2.85, 5.60), (2.85, 6.00)])
+    d.wire("Extraction to descriptions", [(2.85, 6.90), (2.85, 7.45)], BLUE)
+    d.wire("Extraction to graphs", [(2.85, 6.90), (2.85, 7.15), (0.82, 7.15),
+                                     (0.82, 9.55), (1.0, 9.55)], TEAL)
+    d.label("Visual scope", 0.9, 10.53, 3.9, 0.32,
+            "No titles or audio in extraction", 16, MUTED)
+
+    d.label("Metadata source", 5.9, 2.90, 10.9, 0.27, "source: metadata", 19, GRAY,
+            True, PP_ALIGN.LEFT)
+    d.node("Metadata title", 5.9, 3.30, 2.75, 0.85, "Title", ink=GRAY, size=22)
+    d.node("Metadata BGE", 9.0, 3.30, 2.7, 0.85, "BGE [frozen]", "1,024", ink=GRAY,
+           size=20, subtitle_size=18)
+    d.node("Metadata model", 12.05, 3.30, 4.75, 0.85, "Projection + Residual MLP",
+           "Video [512]", ink=GRAY, size=20, subtitle_size=18)
+    d.wire("Metadata title to BGE", [(8.65, 3.725), (9.0, 3.725)], GRAY)
+    d.wire("Metadata BGE to model", [(11.7, 3.725), (12.05, 3.725)], GRAY)
+
+    d.label("Description sources", 5.9, 4.98, 10.9, 0.32, "DESCRIPTION SOURCES", 22,
+            BLUE, True, PP_ALIGN.LEFT)
+    d.node("Description inputs", 5.9, 5.75, 2.75, 1.00, "Title + Description",
+           "Each valid scene", ink=BLUE, size=18, subtitle_size=16)
+    d.node("Description BGE", 9.0, 5.75, 2.7, 1.00, "BGE [frozen]",
+           "Per text: 1,024", ink=BLUE, size=20, subtitle_size=17)
+    d.box("Description encoder", 12.05, 5.40, 4.75, 1.70, "E2EEFF", BLUE)
+    d.text("Description encoder text", 12.15, 5.47, 4.55, 1.56,
+           [("Projections + Scene MLP", 22, BLUE, True),
+            ("Title [128] + Description [384]", 17, MUTED, False),
+            ("Residual scene representation [512]", 17, MUTED, False),
+            ("Mean → Video [512]", 21, BLUE, True)])
+    d.wire("Descriptions to inputs", [(4.7, 7.95), (5.30, 7.95),
+                                         (5.30, 6.25), (5.9, 6.25)], BLUE)
+    d.wire("Description inputs to BGE", [(8.65, 6.25), (9.0, 6.25)], BLUE)
+    d.wire("Description BGE to model", [(11.7, 6.25), (12.05, 6.25)], BLUE)
+
+    d.label("Graph sources", 5.9, 8.04, 10.9, 0.32, "GRAPH SOURCES", 22,
+            TEAL, True, PP_ALIGN.LEFT)
+    d.node("Graph inputs", 5.9, 9.05, 2.75, 1.00, "Title + Graph",
+           "Entities / Actions / Context", ink=TEAL, size=21, subtitle_size=13)
+    d.node("Graph BGE", 9.0, 9.05, 2.7, 1.00, "BGE [frozen]",
+           "Per text: 1,024", ink=TEAL, size=20, subtitle_size=17)
+    d.box("Graph encoder", 12.05, 8.55, 4.75, 2.25, "DFF2F0", TEAL)
+    d.text("Graph encoder text", 12.15, 8.62, 4.55, 2.11,
+           [("Graph scene encoder", 23, TEAL, True),
+            ("role_fusion (optional)", 19, MUTED, False),
+            ("→ Residual Scene MLP [512]", 19, TEAL, True),
+            ("→ activity_hypergraph (optional)", 17, MUTED, False),
+            ("→ Mean + optional segment term [512]", 17, TEAL, True)])
+    d.wire("Graphs to inputs", [(4.7, 9.55), (5.9, 9.55)], TEAL)
+    d.wire("Graph inputs to BGE", [(8.65, 9.55), (9.0, 9.55)], TEAL)
+    d.wire("Graph BGE to model", [(11.7, 9.55), (12.05, 9.55)], TEAL)
+
+    # Alternative models supply their own history and candidate vectors.
+    for y, ink in ((3.725, GRAY), (6.25, BLUE), (9.55, TEAL)):
+        d.wire(f"Video vectors {y}", [(16.8, y), (17.65, y)], ink, arrow=False)
+        d.junction(f"Video junction {y}", 17.65, y, NAVY)
+    d.wire("Alternative model bus", [(17.65, 3.725), (17.65, 9.55)], NAVY, arrow=False)
+    d.node("History vectors", 18.65, 3.35, 4.3, 1.00, "History item vectors",
+           "Past interactions", size=23, subtitle_size=20)
+    d.node("User model", 18.65, 4.95, 4.3, 1.10, "SASRec + User MLP",
+           "User [512]", size=23, subtitle_size=20)
+    d.node("Scoring", 18.65, 7.10, 4.3, 1.10, "Full-catalog scores",
+           "User · Candidate", size=23, subtitle_size=20)
+    d.box("Evaluation", 18.65, 9.10, 4.3, 1.45, WHITE, NAVY)
+    d.text("Evaluation text", 18.75, 9.18, 4.1, 1.29,
+           [("Validation / Test", 24, NAVY, True),
+            ("HR@10 checkpoint selection", 19, MUTED, False),
+            ("NDCG@10 / HR@10 reporting", 19, MUTED, False)])
+    d.wire("Vectors to history", [(17.65, 3.85), (18.65, 3.85)], NAVY)
+    d.wire("History to SASRec", [(20.8, 4.35), (20.8, 4.95)], NAVY)
+    d.wire("User to scoring", [(20.8, 6.05), (20.8, 7.10)], NAVY)
+    d.wire("Candidate vectors to scoring", [(17.65, 7.65), (18.65, 7.65)], NAVY)
+    d.wire("Scoring to evaluation", [(20.8, 8.20), (20.8, 9.10)], NAVY)
+
+    d.box("Training boundary", 0.6, 11.85, 22.8, 0.92, "F6F8FB")
+    d.text("Training boundary text", 0.8, 11.94, 22.4, 0.74,
+           [("Frozen: BGE features   |   Learnable per experiment: projections, scene encoder, "
+             "selected modules, SASRec and User MLP", 20, NAVY, True),
+            ("readout: mean   |   Role Fusion before Scene MLP; activity Hypergraph after Scene MLP   |   "
+             "Shared source features; independent seed × experiment training", 17, MUTED, False)])
+    d.label("Scope note", 0.65, 12.97, 22.7, 0.25,
+            "Source identifiers select observations. Module choices select the graph encoder. "
+            "Labels name outputs. This overview describes the implemented data flow.", 15, MUTED,
             align=PP_ALIGN.LEFT)
-    for x, w, text in ((0.6, 5.0, "VIDEO PROCESSING"),
-                       (6.15, 11.4, "ITEM REPRESENTATIONS")):
-        d.label(text, x, 1.63, w, 0.42, text, 28, NAVY, True, PP_ALIGN.LEFT)
-
-    # Scene Graphs feed both paths; Descriptions feed only video-wise Summary.
-    d.node("Video", 1.1, 2.85, 4.0, 0.8, "Video")
-    d.node("Keyframes", 1.1, 4.0, 4.0, 1.1, "Keyframes",
-           "1 Scene: 30s, 6 keyframes", subtitle_size=20)
-    d.node("Extraction", 1.1, 5.5, 4.0, 1.0, "Scene Extraction",
-           "Qwen3-VL · Gemini", subtitle_size=16)
-    d.node("Descriptions", 1.1, 7.0, 4.0, 0.9, "Scene Descriptions", ink=BLUE)
-    d.node("Graphs", 1.1, 8.9, 4.0, 0.9, "Scene Graphs", ink=TEAL)
-    d.wire("Video to keyframes", [(3.1, 3.65), (3.1, 4.0)])
-    d.wire("Keyframes to extraction", [(3.1, 5.1), (3.1, 5.5)])
-    d.wire("Extraction to descriptions", [(3.1, 6.5), (3.1, 7.0)], BLUE)
-    d.wire("Extraction to graphs", [(3.1, 6.5), (3.1, 6.72),
-                                     (0.86, 6.72), (0.86, 9.35), (1.1, 9.35)], TEAL)
-
-    # Each path has its own title branch; no optional-title trunks or dashed wires.
-    d.node("Baseline title", 6.4, 2.4, 3.6, 1.0, "Title", ink=GRAY)
-    d.node("Baseline embedding", 10.35, 2.4, 3.7, 1.0, "BGE [frozen]", "1,024",
-           ink=GRAY)
-    d.node("Baseline", 14.75, 2.4, 2.55, 1.0, "Projection + MLP", "Item 512",
-           ink=GRAY, size=18)
-    d.wire("Baseline title to embedding", [(10.0, 2.9), (10.35, 2.9)], GRAY)
-    d.wire("Baseline embedding to output", [(14.05, 2.9), (14.75, 2.9)], GRAY)
-
-    # Independently project frozen 1024-dimensional title and Summary features.
-    d.label("Text heading", 6.4, 4.4, 3.0, 0.42, "TEXT PATH", 28, BLUE, True,
-            PP_ALIGN.LEFT)
-    d.node("Text title", 6.4, 4.95, 3.6, 1.0, "Title", ink=BLUE)
-    d.node("Text title embedding", 10.35, 4.95, 3.7, 1.0, "BGE + Projection", "1,024 → 128",
-           ink=BLUE, size=22)
-    d.node("Video summary", 6.4, 6.5, 3.6, 1.0, "Video-wise Summary", ink=BLUE,
-           size=22)
-    d.node("Summary embedding", 10.35, 6.5, 3.7, 1.0, "BGE + Projection", "1,024 → 384",
-           ink=BLUE, size=22)
-    d.node("Text fusion", 14.75, 5.75, 2.55, 1.3, "Concat + MLP", "Item 512", ink=BLUE,
-           fill="E2EEFF", size=20)
-    d.wire("Descriptions to summary", [(5.1, 7.45), (5.67, 7.45),
-                                         (5.67, 6.7), (6.4, 6.7)], BLUE)
-    d.wire("Graphs to summary", [(5.1, 9.35), (5.9, 9.35),
-                                   (5.9, 7.2), (6.4, 7.2)], TEAL)
-    d.wire("Text title to embedding", [(10.0, 5.45), (10.35, 5.45)], BLUE)
-    d.wire("Summary to embedding", [(10.0, 7.0), (10.35, 7.0)], BLUE)
-    d.wire("Text title embedding to merge", [(14.05, 5.45), (14.45, 5.45),
-                                             (14.45, 6.4)], BLUE, arrow=False)
-    d.wire("Summary embedding to merge", [(14.05, 7.0), (14.45, 7.0),
-                                          (14.45, 6.4)], BLUE, arrow=False)
-    d.junction("Text embedding merge", 14.45, 6.4, BLUE)
-    d.wire("Text embeddings to fusion", [(14.45, 6.4), (14.75, 6.4)], BLUE)
-
-    # The projected title joins role-enriched scene features BEFORE scene MLP
-    # and the selected scene aggregation. No separate Item MLP follows pooling.
-    d.label("Graph heading", 6.4, 8.4, 3.0, 0.42, "GRAPH PATH", 28, TEAL, True,
-            PP_ALIGN.LEFT)
-    d.node("Graph title", 6.4, 8.95, 3.6, 1.0, "Title", ink=TEAL)
-    d.node("Graph title embedding", 10.35, 8.95, 3.7, 1.0, "BGE + Projection", "1,024 → 128",
-           ink=TEAL, size=22)
-    d.node("Graph elements", 6.4, 10.45, 3.6, 1.0, "Graph Elements",
-           "Entities · Actions · Context", ink=TEAL, subtitle_size=20)
-    d.box("Graph embedding", 10.35, 10.3, 3.7, 1.3, WHITE, TEAL)
-    d.text("Graph embedding text", 10.45, 10.36, 3.5, 1.18,
-           [("Scene Features", 24, TEAL, True),
-            ("BGE + independent projections", 17, MUTED, False),
-            ("Role fusion E → A · 384", 18, MUTED, False)])
-    d.node("Graph scene MLP", 14.75, 9.45, 2.55, 0.9, "Scene MLP", "Concat 512", ink=TEAL,
-           fill="DFF2F0", size=22, subtitle_size=19)
-    d.node("Graph aggregation", 14.75, 10.65, 2.55, 0.8, "Aggregation", "Item 512",
-           ink=TEAL, fill="DFF2F0", size=20, subtitle_size=18)
-    d.wire("Graphs to graph elements", [(5.9, 9.35), (5.9, 10.95), (6.4, 10.95)], TEAL)
-    d.junction("Graph source fork", 5.9, 9.35, TEAL)
-    d.wire("Graph title to embedding", [(10.0, 9.45), (10.35, 9.45)], TEAL)
-    d.wire("Graph elements to embedding", [(10.0, 10.95), (10.35, 10.95)], TEAL)
-    d.wire("Graph title embedding to merge", [(14.05, 9.45), (14.45, 9.45),
-                                              (14.45, 9.9)], TEAL, arrow=False)
-    d.wire("Graph video embedding to merge", [(14.05, 10.95), (14.45, 10.95),
-                                              (14.45, 9.9)], TEAL, arrow=False)
-    d.junction("Graph scene input merge", 14.45, 9.9, TEAL)
-    d.wire("Graph features to scene MLP", [(14.45, 9.9), (14.75, 9.9)], TEAL)
-    d.wire("Scene MLP to aggregation", [(16.025, 10.35), (16.025, 10.65)], TEAL)
-
-    # Alternative per-path models, not concatenation of their final outputs.
-    d.wire("Baseline item vectors", [(17.3, 2.9), (17.8, 2.9)], GRAY, arrow=False)
-    d.wire("Text item vectors", [(17.3, 6.4), (17.8, 6.4)], BLUE, arrow=False)
-    d.wire("Graph item vectors", [(17.3, 11.05), (17.8, 11.05)], TEAL, arrow=False)
-    d.wire("Alternative item vector bus", [(17.8, 2.9), (17.8, 11.05)], NAVY,
-           arrow=False)
-    for y in (2.9, 6.4, 7.4, 11.05):
-        d.junction("Item bus junction", 17.8, y, NAVY)
-    d.box("Recommendation", 18.55, 4.0, 4.4, 7.8, "E7EDF5", NAVY)
-    d.label("Recommendation heading", 18.75, 4.3, 4.0, 0.6,
-            "Recommendation", 24, NAVY, True)
-    d.text("User representation", 18.85, 5.15, 3.8, 1.85,
-           [("Viewing history", 22, NAVY, True),
-            ("Past item vectors", 19, MUTED, False),
-            ("SASRec + User MLP", 19, NAVY, False),
-            ("User 512", 20, NAVY, True)])
-    d.text("Candidate scoring", 18.85, 7.65, 3.8, 1.85,
-           [("Candidate scoring", 22, NAVY, True),
-            ("Candidate item vectors", 18, MUTED, False),
-            ("User · Candidate", 20, NAVY, True),
-            ("Full-catalog ranking", 19, MUTED, False)])
-    d.text("Evaluation", 18.85, 10.05, 3.8, 1.25,
-           [("Evaluation", 22, NAVY, True),
-            ("Validation: HR@10", 19, MUTED, False),
-            ("Test: NDCG / HR", 19, MUTED, False)])
-    d.label("Aggregation choices", 0.6, 12.18, 22.8, 0.5,
-            "Graph aggregation: mean · gnn · attn_pool · gnn_attn · transformer · "
-            "transformer_pos · transformer_local", 19, TEAL, align=PP_ALIGN.LEFT)
-    d.wire("Item vectors to recommendation", [(17.8, 7.4), (18.55, 7.4)], NAVY)
     d.slide.notes_slide.notes_text_frame.text = (
-        "Scene extraction supports qwen3vl and gemini. "
-        "Graphs feed both paths; Descriptions feed only the Summary-based Text path. "
-        "Title is excluded from extraction and summarization. Title branches shown here "
-        "are used only by title-enabled arms; other arms mask the title component. "
-        "BGE features are frozen; video encoders and SASRec train jointly. "
-        "The three item-vector paths are alternative models, not concatenated outputs. "
-        "Direct Graph uses the selected aggregation after its Scene MLP. "
-        "Current arm names and required inputs are listed in README."
+        "Recommendation definitions come from rec_experiments_config.yaml. "
+        "Metadata requires titles only. Description uses each valid scene paragraph directly. "
+        "Graph uses scene-local entities, actions, context and optional role_fusion and activity_hypergraph. "
+        "Titles are always included in recommendation and excluded from extraction. "
+        "BGE is frozen; trainable video encoders and SASRec train jointly per seed and experiment. "
+        "The representation paths are alternative models, not concatenated final outputs. "
+        "Activity segments are prepared from the source graph bundle before training. "
+        "Validation HR@10 selects the checkpoint; test NDCG@10/HR@10 are reported."
     )
+    for shape in d.slide.shapes:
+        if (shape.left < 0 or shape.top < 0
+                or shape.left + shape.width > d.presentation.slide_width
+                or shape.top + shape.height > d.presentation.slide_height):
+            raise ValueError(f"shape outside canvas: {shape.name}")
     return d.presentation
 
 

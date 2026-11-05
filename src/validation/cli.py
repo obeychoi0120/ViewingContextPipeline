@@ -21,12 +21,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset", required=True, choices=DATASETS)
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
-        "--target",
-        nargs="+",
-        required=True,
-        help="Explicit arms: base d g0 g1 g2 (prepare-module: g2 only; required).",
-    )
-    parser.add_argument(
         "--workers-per-gpu",
         type=_positive_int,
         help="Independent combination processes per GPU (run-recommendation only; default: one).",
@@ -38,27 +32,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.compare_run_id is not None and args.step != "run-diagnosis":
             raise ValueError("--compare-run-id is only supported by run-diagnosis")
-        if args.target is not None and args.step not in {
-            "embed-representations",
-            "prepare-module",
-            "run-recommendation",
-            "run-diagnosis",
-        }:
-            raise ValueError(
-                "--target is only supported by embed-representations/prepare-module/"
-                "run-recommendation/run-diagnosis"
-            )
         if args.workers_per_gpu is not None and args.step != "run-recommendation":
             raise ValueError("--workers-per-gpu is only supported by run-recommendation")
         context = RunContext.load(args.run_id, dataset=args.dataset)
+        from rec_experiments import load_experiments
+
+        load_experiments(context)
         kwargs = {"force": args.force}
         if args.compare_run_id is not None:
             kwargs["compare_run_id"] = args.compare_run_id
-        if args.target is not None:
-            from arm_registry import select_arms
-
-            select_arms(context.config, args.target)
-            kwargs["target"] = args.target
         if args.workers_per_gpu is not None:
             kwargs["workers_per_gpu"] = args.workers_per_gpu
         STEP_HANDLERS[args.step](context, **kwargs)

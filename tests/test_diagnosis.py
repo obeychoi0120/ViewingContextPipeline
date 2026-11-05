@@ -36,13 +36,13 @@ def test_paired_bootstrap_and_bonferroni_comparisons(context):
     with pytest.raises(ValueError, match="one test event"):
         cluster_bootstrap(values, np.array([1, 2, 1]), samples=32)
 
-    targets = ["d", "base", "g1"]
+    targets = ["description", "base", "graph-activity"]
     families = comparison_families(context.config, targets)
     assert families == {
         "selected_targets": [
-            ("d", "base"),
-            ("g1", "base"),
-            ("g1", "d"),
+            ("description", "base"),
+            ("graph-activity", "base"),
+            ("graph-activity", "description"),
         ]
     }
     assert comparison_contract(context.config, targets)["comparison_count"] == 3
@@ -53,7 +53,7 @@ def test_paired_bootstrap_and_bonferroni_comparisons(context):
     )
     assert len(report) == 3
     for name, item in report.items():
-        left, right = name.split("-")
+        left, right = item["left"], item["right"]
         expected = observed[targets.index(left)] - observed[targets.index(right)]
         assert item["family_size"] == 3
         assert item["difference"] == pytest.approx(expected)
@@ -81,7 +81,7 @@ def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
         collect_metrics(context, config, cohort, arms={name: name for name in TARGETS})
     with pytest.raises(RuntimeError, match="diagnosis failed"):
         run_diagnosis(context, target=TARGETS)
-    report = read_json(context.validation_dir / "diagnosis" / "base_g1" / "diagnosis.json")
+    report = read_json(context.validation_dir / "diagnosis" / "base_graph-activity" / "diagnosis.json")
     assert report["runtime_decision"]["status"] == "fail"
     assert report["statistics"]["status"] == "not_computed"
     assert "metric/rank mismatch" in report["runtime_decision"]["errors"][0]["message"]
@@ -98,19 +98,18 @@ def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
 
     graph_generator, description_generator = prepare_inputs(context, monkeypatch)
     assert len(graph_generator.tasks) == len(description_generator.tasks) == 48
-    arms = ["base", "d", "g0", "g1", "g2"]
+    arms = ["base", "description", "graph", "graph-activity", "graph-role-activity"]
     monkeypatch.setattr(RunContext, "load", lambda run_id, *, dataset: context)
 
     def command(step, target):
-        return main([step, "--run-id", context.run_id, "--dataset", context.dataset,
-                     "--target", *target])
+        return main([step, "--run-id", context.run_id, "--dataset", context.dataset])
 
     assert command("embed-representations", arms) == 0
-    assert command("prepare-module", ["g2"]) == 0
-    graph_arms = ["g0", "g1", "g2"]
+    assert command("prepare-module", ["graph-role-activity"]) == 0
+    graph_arms = ["graph", "graph-activity", "graph-role-activity"]
     assert len({recommendation_identity(context, name)["embedding_hash"] for name in graph_arms}) == 1
     assert len(GraphStore(context.representations_dir / "desc_qwen3vl")["contexts"]) == 48
-    d_identity = recommendation_identity(context, "d")
+    d_identity = recommendation_identity(context, "description")
     assert d_identity["item_model"]["description_projection_dim"] == 384
     assert "scene_segments" not in d_identity
     source_bytes = {p: p.read_bytes() for p in context.representations_dir.rglob("*") if p.is_file()}
@@ -133,15 +132,21 @@ def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
     assert document["recommendations"]["actual_event_count"] == 45
     assert document["arm_contract"] == RECOMMENDATION_ARM_CONTRACT
     assert console[-6].split() == ["Arm", "NDCG@10", "HR@10"]
-    for line, arm, label in zip(console[-5:], arms, ["Base", "D", "G0", "G1", "G2"], strict=True):
+    for line, arm, label in zip(console[-5:], arms, arms, strict=True):
         means = document["recommendations"]["means"][arm]
         std = document["recommendations"]["standard_deviations"][arm]
         assert line.split() == [label, f"{means['NDCG@10']:.6f}", "±", f"{std['NDCG@10']:.6f}",
                                 f"{means['HR@10']:.6f}", "±", f"{std['HR@10']:.6f}"]
     text = (context.run_root / "reports" / target_set / "report.md").read_text()
-    for comparison in ("G0 − D", "G1 − G0", "G2 − G1"):
+    for comparison in ("graph − description", "graph-activity − graph", "graph-role-activity − graph-activity"):
         assert comparison in text
     assert "장면 확보율" in text and "제목 fallback" in text
+    # A remaining Markdown report must not prevent rebuilding missing diagnosis evidence.
+    context.diagnosis_path(arms).unlink()
+    assert command("run-diagnosis", arms) == 0
+    rebuilt = read_json(context.diagnosis_path(arms))
+    assert rebuilt == document
+    assert (context.run_root / "reports" / target_set / "report.md").read_text() == text
     assert_run_grid(context, graph_mode=True)
     assert run_recommendation(context, target=arms)["skipped"] == 15
     assert all(path.read_bytes() == content for path, content in source_bytes.items())

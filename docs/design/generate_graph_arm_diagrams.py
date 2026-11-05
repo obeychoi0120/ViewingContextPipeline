@@ -1,10 +1,10 @@
-"""Render the D/G0/G1/G2 suite as matching 3840 x 2160 architecture PNGs.
+"""Render the initial description/graph/graph-activity/graph-role-activity examples as matching 3840 x 2160 architecture PNGs.
 
 Run: python docs/design/generate_graph_arm_diagrams.py
 Requires python-pptx, PyMuPDF and LibreOffice, as do the existing generators.
 Only PNGs are retained; editable slides and PDFs are temporary render inputs.
 Implemented architecture: common Residual Scene MLP,
-activity hypergraph (A), and optional Role Fusion (B). Names follow the Arm registry.
+activity hypergraph (A), and optional Role Fusion (B). Labels describe the initial recommendation YAML. Asset filenames remain stable.
 No model, extraction, embedding or training is executed.
 """
 
@@ -28,9 +28,12 @@ GRAY, GRAY_FILL = "9AA7B5", "EFF2F6"
 ARMS = {
     "d": "Description + Mean",
     "g0": "Graph Encoding + Mean",
-    "g1": "G0 + Activity Hypergraph (A)",
-    "g2": "G0 + Activity Hypergraph (A) + Role Fusion (B)",
+    "g1": "Graph + Activity Hypergraph",
+    "g2": "Graph + Hypergraph + Role Fusion",
 }
+
+
+LABELS = {"d": "description", "g0": "graph", "g1": "graph-activity", "g2": "graph-role-activity"}
 
 
 def card(d, name, x, y, w, h, title, *lines, ink=TEAL, fill="FFFFFF", size=16,
@@ -256,9 +259,9 @@ def recommendation(d):
 def build(arm):
     d = Diagram()
     d.label("Diagram title", 0.60, 0.28, 22.80, 0.60,
-            f"{arm.upper()}  |  {ARMS[arm]}", 32, INK, True, PP_ALIGN.LEFT)
+            f"{LABELS[arm]}  |  {ARMS[arm]}", 32, INK, True, PP_ALIGN.LEFT)
     d.label("Diagram subtitle", 0.65, 1.01, 22.7, 0.31,
-            "FIVE-ARM EXPERIMENT  |  Common scene encoder: Residual Scene MLP  |  "
+            "INITIAL YAML EXAMPLE  |  Common scene encoder: Residual Scene MLP  |  "
             "Video representation [512] → SASRec", 17, MUTED, align=PP_ALIGN.LEFT)
     for name, x, width, ink, fill in (("Frozen BGE", 0.65, 2.55, GRAY, GRAY_FILL),
                                     ("Scene encoder + MLP", 3.40, 4.5, TEAL, TEAL_FILL),

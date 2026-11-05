@@ -172,7 +172,9 @@ class RunContext:
 
     def diagnosis_path(self, target) -> Path:
         from arm_registry import target_set
+        from rec_experiments import load_experiments
 
+        load_experiments(self)
         return self.diagnosis_dir / target_set(self.config, target) / "diagnosis.json"
 
     def path(self, section: str, key: str) -> Path:
@@ -201,8 +203,6 @@ def _validate_config(value: dict[str, Any]) -> None:
 
 
 def _validate_protocol(value: dict[str, Any]) -> None:
-    from arm_registry import active_arms
-
     protocol = _require_mapping(value, "protocol")
     expected = {
         "dataset": list(DATASETS),
@@ -216,10 +216,6 @@ def _validate_protocol(value: dict[str, Any]) -> None:
     for key, setting in expected.items():
         if protocol.get(key) != setting:
             raise ConfigError(f"protocol.{key} must be {setting!r}")
-    try:
-        active_arms(value)
-    except (ValueError, TypeError, KeyError) as exc:
-        raise ConfigError(str(exc)) from exc
 
 
 def _validate_extraction(value: dict[str, Any]) -> None:

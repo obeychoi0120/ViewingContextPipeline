@@ -24,7 +24,7 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     from validation.steps import embed_representations
 
     prepare_inputs(context, monkeypatch)
-    result = embed_representations(context, target=["d", "g0", "g1", "g2"])
+    result = embed_representations(context, target=["description", "graph", "graph-activity", "graph-role-activity"])
     assert result["generated_sources"] == ["desc_qwen3vl"]
     assert result["reused_sources"] == ["graph_qwen3vl"]
     root = context.representations_dir
@@ -45,7 +45,7 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(cont
 
     prepare_inputs(context, monkeypatch)
     cohort = load_validation_cohort(context)
-    arm = registry(context.config)["g1"]
+    arm = registry(context.config)["graph-activity"]
     texts_before, arrays_before, stats_before = build_input(context, cohort, arm)
     identity_before = source_identity(context, cohort, arm)
     cid = cohort["catalog"][0]["content_id"]
@@ -68,7 +68,7 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(cont
             "extraction.structured_output.normalize_graph_fields",
             lambda value: (deepcopy(value), False),
         )
-        embed_representations(context, target=["g1"])
+        embed_representations(context, target=["graph-activity"])
     stats_path = context.representations_dir / arm.scene_arm / "statistics.json"
     assert read_json(stats_path)["counts"]["raw"] == len(rows)
 
@@ -76,9 +76,9 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(cont
     assert texts == texts_before and stats == stats_before
     for key in arrays:
         np.testing.assert_array_equal(arrays[key], arrays_before[key])
-    result = embed_representations(context, target=["g1"])
+    result = embed_representations(context, target=["graph-activity"])
     assert result["generated_sources"] == [arm.scene_arm]
-    prepare_module(context, target=["g1"])
+    prepare_module(context, target=["graph-activity"])
     store = GraphStore(context.representations_dir / arm.scene_arm)
     np.testing.assert_array_equal(store["edges"], arrays_before["edges"])
     assert len(load_scene_segments(store.directory))
@@ -109,7 +109,7 @@ def test_graph_exclusions_preserve_items(context):
         failure_row(cid, 3),
     ]
     write_jsonl(context.scene_arm_dir("graph_qwen3vl") / f"{cid}.jsonl", rows)
-    _, arrays, stats = build_input(context, cohort, registry(context.config)["g1"])
+    _, arrays, stats = build_input(context, cohort, registry(context.config)["graph-activity"])
     assert arrays["video_offsets"].tolist() == [0, 1, 1]
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 2
     assert stats["counts"]["valid_scenes"] == 1

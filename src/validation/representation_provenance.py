@@ -30,6 +30,8 @@ def recommendation_identity(context, branch):
     from model_provenance import canonical, local_model_identity
 
     arm = registry(context.config)[branch]
+    from rec_experiments import experiment_definition
+
     experiment_arm = asdict(arm)
     experiment_arm["extensions"] = list(arm.extensions)
     identity = {
@@ -43,17 +45,18 @@ def recommendation_identity(context, branch):
         "item_model": {
             **ITEM_MODEL,
             "kind": arm.representation,
-            "scene_mlp": branch != "base",
-            "item_mlp": branch == "base",
+            "scene_mlp": arm.representation != "metadata",
+            "item_mlp": arm.representation == "metadata",
             "description_projection_dim": 384 if arm.representation == "description" else None,
             "role_fusion": arm.role_fusion,
             "scene_mlp_config": {"input_dim": 512, "output_dim": 512,
-                                 "formula": "x_plus_relu_linear_x"} if branch != "base" else None,
+                                 "formula": "x_plus_relu_linear_x"} if arm.representation != "metadata" else None,
         },
         "experiment_arm": experiment_arm,
+        "experiment_definition": experiment_definition(arm),
         "embedding_hash": value,
         "representation_mode": arm.representation,
-        "scene_aggregation": arm.aggregation if branch != "base" else None,
+        "scene_aggregation": arm.aggregation if arm.representation != "metadata" else None,
     }
     if arm.extensions:
         from validation.graph_context import EXTENSION_MODELS

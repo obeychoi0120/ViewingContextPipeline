@@ -342,12 +342,11 @@ def _scene_coverage(
     source_assets_dir,
     informational=False,
 ):
-    from validation.recommendation_contracts import DEFAULT_PROTOCOL
 
     original_errors = errors
     if informational:
         errors = []
-    paths = scene_arms(config or DEFAULT_PROTOCOL)
+    paths = scene_arms(config)
     selected = [arm for arm in paths if branches is None or arm in branches]
     if not selected:
         return (

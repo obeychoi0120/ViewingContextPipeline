@@ -34,6 +34,9 @@ def data_identity(cohort):
 
 
 def build_selection(context):
+    from rec_experiments import load_experiments
+
+    load_experiments(context)
     source = context.require_ready_cohort()
     settings = context.config["validation"]["cohort"]
     # Bound retained memory by users * 13 while preserving the legacy JSON-list hash.

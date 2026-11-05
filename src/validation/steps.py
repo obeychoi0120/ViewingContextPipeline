@@ -3,11 +3,13 @@
 import json
 
 from pipeline_logging import log_step_start
+from rec_experiments import load_experiments
 from validation.config import build_validation_config
 from validation.recommendation_contracts import resolve_target_arms
 
 
 def validation_config(context):
+    load_experiments(context)
     return build_validation_config(
         run_id=context.run_id,
         dataset={key: context.path("data", key) for key in context.data},
@@ -21,6 +23,7 @@ def validation_config(context):
 def embed_representations(context, *, force=False, target=None):
     from validation.graph_inputs import prepare
 
+    load_experiments(context)
     resolve_target_arms(target, config=context.config)
     log_step_start(context, "embed-representations", force=force, target=target)
     return prepare(context, target=target, force=force)
@@ -30,15 +33,15 @@ def prepare_module(context, *, force=False, target=None):
     from arm_registry import feature_source, registry
     from validation.scene_segments import attach
 
+    load_experiments(context)
     selected = resolve_target_arms(target, config=context.config)
     arms = registry(context.config)
-    invalid = [name for name in selected if "segments" not in arms[name].extensions]
-    if invalid:
-        raise ValueError("prepare-module requires Arms with the segments extension: " + ", ".join(invalid))
     log_step_start(context, "prepare-module", force=force, target=target)
     statistics = {}
     prepared = {}
     for name in selected:
+        if "segments" not in arms[name].extensions:
+            continue
         source = feature_source(arms[name])
         if source not in prepared:
             prepared[source] = attach(context, name)
@@ -52,6 +55,7 @@ def run_recommendation(
 ):
     from validation.leave_one_out_recommendation import run_leave_one_out
 
+    load_experiments(context)
     resolve_target_arms(target, config=context.config)
     log_step_start(context, "run-recommendation", force=force, target=target,
                    workers_per_gpu=workers_per_gpu,
@@ -65,6 +69,7 @@ def run_recommendation(
 def run_diagnosis(context, *, force=False, target=None, compare_run_id=None):
     from validation.leave_one_out_diagnosis import diagnose
 
+    load_experiments(context)
     resolve_target_arms(target, config=context.config)
     log_step_start(context, "run-diagnosis", force=force, target=target,
                    compare_run_id=compare_run_id)

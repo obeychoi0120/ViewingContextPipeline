@@ -1,0 +1,25 @@
+version: 1
+
+defaults:
+  readout: mean
+
+experiments:
+  - label: base
+    source: metadata
+    modules: []
+
+  - label: description
+    source: desc_qwen3vl
+    modules: []
+
+  - label: graph
+    source: graph_qwen3vl
+    modules: []
+
+  - label: graph-activity
+    source: graph_qwen3vl
+    modules: [activity_hypergraph]
+
+  - label: graph-role-activity
+    source: graph_qwen3vl
+    modules: [role_fusion, activity_hypergraph]

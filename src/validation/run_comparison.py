@@ -15,12 +15,26 @@ def compare_runs(context, reference_run_id, *, target=None):
     if reference_run_id == context.run_id:
         raise ValueError("comparison requires two different run IDs")
     reference = RunContext.load(reference_run_id, dataset=context.dataset, root=context.root)
+    from copy import deepcopy
     from arm_registry import select_arms
+    from rec_experiments import CONFIG_KEY, experiment_definition
+    from artifact_io import read_json
+
+    # Use the invocation snapshot; never reload a file changed during training/diagnosis.
+    reference.config[CONFIG_KEY] = deepcopy(context.config[CONFIG_KEY])
 
     names = list(select_arms(context.config, target))
     if not names:
         raise ValueError("run comparison requires at least one target")
     arms = {name: name for name in names}
+    definitions = {name: experiment_definition(arm)
+                   for name, arm in select_arms(context.config, names).items()}
+    for ctx in (context, reference):
+        for seed in ctx.config["validation"]["model"]["seeds"]:
+            for name in names:
+                path = ctx.recommendations_dir / f"seed_{seed}" / name / "training.json"
+                if read_json(path).get("experiment_definition") != definitions[name]:
+                    raise ValueError(f"run comparison requires identical experiment definitions: {name}")
     cohorts = [load_validation_cohort(ctx) for ctx in (context, reference)]
     for key in ("protocol", "preprocessing", "source_data_hash"):
         if cohorts[0]["plan"][key] != cohorts[1]["plan"][key]:

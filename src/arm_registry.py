@@ -15,19 +15,10 @@ class Arm:
     scene_arm: str | None = None
     aggregation: str = "mean"
     role_fusion: bool = False
-    # A: activity hypergraph (G1/G2); B: Entity→Action Role Fusion (G2).
+    # Internal sidecar extensions; public module names live in rec_experiments.
     extensions: tuple[str, ...] = ()
 
 
-ARMS = (
-    Arm("base", "metadata", uses_title=True),
-    Arm("d", "description", "qwen3vl", True, "desc_qwen3vl", "mean"),
-    Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", "mean"),
-    Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "mean",
-        extensions=("segments",)),
-    Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", role_fusion=True,
-        extensions=("segments",)),
-)
 SOURCES = tuple(
     Arm(name, kind, model, False, name)
     for name, kind, model in (
@@ -44,7 +35,21 @@ def arm_contract(config):
 
 
 def registry(config):
-    return {arm.name: arm for arm in ARMS}
+    from rec_experiments import CONFIG_KEY
+
+    if CONFIG_KEY not in config:
+        raise ValueError("recommendation experiments are not loaded; load rec_experiments_config.yaml first")
+    sources = generation_registry(config)
+    result = {}
+    for row in config[CONFIG_KEY]["experiments"]:
+        source = sources.get(row["source"])
+        result[row["label"]] = Arm(
+            row["label"], source.representation if source else "metadata",
+            source.model if source else None, True, source.name if source else None,
+            row["readout"], "role_fusion" in row["modules"],
+            ("segments",) if "activity_hypergraph" in row["modules"] else (),
+        )
+    return result
 
 
 def feature_source(arm):
@@ -57,7 +62,7 @@ def target_set(config, target):
 
 def active_arms(config):
     if "arms" in config.get("protocol", {}):
-        raise ValueError("protocol.arms is not supported; select --target explicitly")
+        raise ValueError("protocol.arms is not supported; edit rec_experiments_config.yaml")
     return list(registry(config))
 
 
@@ -65,7 +70,7 @@ def select_arms(config, target=None):
     registered = registry(config)
     names = active_arms(config) if target is None else target
     if not names or len(names) != len(set(names)) or set(names) - registered.keys():
-        raise ValueError(f"--target must select from {', '.join(registered)}")
+        raise ValueError(f"experiments must select from {', '.join(registered)}")
     return {name: arm for name, arm in registered.items() if name in names}
 
 
@@ -88,7 +93,7 @@ def generated_arm(config, representation, model):
 def resolve_generation_arm(config, name, representation, model):
     arm = generation_registry(config).get(name)
     if arm is None:
-        source = registry(config).get(name)
+        source = registry(config).get(name) if "_rec_experiments" in config else None
         hint = f"; use source --arm {source.scene_arm}" if source and source.scene_arm else ""
         raise ValueError(f"invalid generation source: {name}{hint}")
     if arm.representation != representation:

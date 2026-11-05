@@ -401,7 +401,7 @@ def new_graph_model(context, config, branch, device):
         num_heads=config.model.num_heads,
         dropout=config.model.dropout,
     )
-    if branch == "base":
+    if arm.representation == "metadata":
         features = np.array(store["features"][store["titles"]], copy=True)
         return SASRec(
             **kwargs,
