@@ -1,0 +1,13 @@
+% !TeX root = main.tex
+\section{Conclusion}
+\label{sec:conclusion}
+\begingroup
+\setlength{\emergencystretch}{1em}
+We presented HGVRec, a video representation learning framework that organizes MLLM-extracted semantics through explicit structure.
+ASHA groups scenes into maximal contiguous action segments and aggregates their information through a hypergraph, while REAF encodes entity participation roles within each scene.
+Experiments on MicroLens-100K and M$^3$L-10M show that HGVRec achieves the highest mean NDCG@10 and HR@10 among the five evaluated variants.
+With shared graph inputs, adding ASHA improves NDCG@10 on both datasets, and adding REAF provides further gains when ASHA is present.
+These findings support explicit role and action-segment modeling as a way to improve the recommendation utility of available MLLM outputs.
+Future work will examine comparisons with chronological scene encoders and attention, stronger MLLM extractors, and device-level efficiency to assess the framework's broader applicability.
+\par
+\endgroup

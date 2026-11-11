@@ -4,7 +4,9 @@ MicroLens-100K 영상 또는 M³L-10M 영화 예고편에서 관측 정보를 �
 
 ## 프로젝트 소개와 전체 흐름
 
-![추출 소스별 고정 BGE 특징, 선택 모듈과 SASRec 공동 학습 흐름](docs/design/main_diagram.png)
+![HGVRec: REAF의 장면 내부 역할 결합과 ASHA의 Action 구간 집계를 통한 비디오 표현 학습](WWW2027/figures/hgvrec_framework.png)
+
+그림은 HGVRec의 전체 구조입니다. 논문의 Motivation·Framework 그림은 `python docs/design/generate_hgvrec_figures.py`로 재생성하며, 편집용 PPTX·벡터 PDF·600dpi PNG는 `WWW2027/figures/`에 저장합니다. 생성에는 `python-pptx`, `PyMuPDF`, LibreOffice가 필요합니다.
 
 `preparation → extraction → validation` 순서로 처리합니다. 제목은 장면 추출에 넣지 않고 추천 인코더에서 결합합니다. **BGE 특징은 동결하고, 투영층·장면 인코더·선택 모듈·SASRec은 추천 loss로 함께 학습합니다.** 학습된 장면·영상 벡터는 추천 모델의 forward에서 계산합니다.
 

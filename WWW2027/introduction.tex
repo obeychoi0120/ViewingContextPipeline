@@ -1,0 +1,51 @@
+% !TeX root = main.tex
+\section{Introduction}
+\label{sec:introduction}
+\begingroup
+\setlength{\emergencystretch}{1em}
+
+Video recommendation on Web platforms depends on representations that connect visual content with user preferences.
+Multimodal large language models (MLLMs) provide semantic information beyond item metadata: DWYS~\cite{denadai2025dwys} uses generated descriptions as recommendation inputs, while IISAN~\cite{fu2024iisan} adapts multimodal representations through side networks.
+Resource constraints can favor compact MLLMs for content extraction.
+This raises a representation learning question: how can a recommender make better use of the information that a compact MLLM already extracts?
+
+We investigate explicit structure as a way to improve the recommendation utility of compact MLLM outputs.
+A scene may contain entities and actions, yet their separate aggregation leaves participation roles implicit; likewise, aggregating scene vectors without action-level organization leaves continuity implicit.
+The opportunity is to expose these relations to the recommender through structured representations of the available observations.
+
+For example, a person may cut vegetables with a knife across several consecutive scenes.
+The person, vegetables, and knife play different roles in the same action, while the repeated action links the scenes into a coherent segment.
+This suggests contiguous action segments as aggregation units for video representation.
+We examine this choice within each video; user interaction histories remain modeled by a sequential recommender.
+
+We introduce HGVRec, a hierarchical framework centered on Action-Segment Hypergraph Aggregation (ASHA).
+Building on the general aggregation framework of AllSet~\cite{chien2022allset}, ASHA treats scenes as nodes and maximal contiguous runs sharing a normalized action key as hyperedges.
+Scenes with multiple actions can belong to overlapping segments.
+Messages pass from scenes to segments and back, with segment extent incorporated into the representations and video readout.
+Role-aware Entity--Action Fusion (REAF) supplies ASHA with scene features by fusing entity features into actions according to extracted actor, target, tool, and place assignments.
+These explicit memberships and role links make the modeled structure inspectable.
+
+We frame evaluation around structural modeling with a fixed compact MLLM, comparisons with scene sequence and attention encoders, and the use of more capable extractors.
+As device chips improve or server AI becomes available, stronger MLLMs may become practical; HGVRec's modular extraction stage allows their recommendation benefits to be investigated within the same framework.
+Our contributions and the empirical questions they motivate are:
+\begin{itemize}
+  \item \textbf{Structured representations from compact MLLMs.}
+  We propose a framework that explicitly organizes extracted semantics into role-aware scenes and action segments to improve their utility for recommendation.
+  % TODO (A): Verify the gain with the same compact MLLM, visual evidence,
+  % recommendation backbone, and evaluation protocol before stating a result.
+  \item \textbf{Action segments as aggregation units.}
+  We formulate contiguous action grouping as a video representation unit and investigate its utility relative to chronological scene encoding.
+  % TODO (B): Add a matched comparison using identical scene features with
+  % chronological sequence encoding; report results only after verification.
+  \item \textbf{Inspectable relational modeling.}
+  ASHA and REAF define explicit scene memberships and role links, supporting structural inspection and comparison with attention-based scene aggregation.
+  % TODO (C): Add a matched attention comparison and an actual segment/role
+  % example. Structural inspection alone does not establish explanation fidelity.
+  \item \textbf{Extension across MLLM capabilities.}
+  The framework separates semantic extraction from recommendation learning, enabling evaluation of compact and more capable MLLMs under a common recommendation setup.
+  % TODO (D): Add verified comparisons across extractors under the same
+  % evaluation protocol; do not infer device latency or memory scalability.
+\end{itemize}
+\par
+\endgroup
+

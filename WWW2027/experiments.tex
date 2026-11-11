@@ -1,0 +1,251 @@
+% !TeX root = main.tex
+% Numerical source: artifacts/runs/R05_v8_261105/<dataset>/validation/diagnosis/
+% base_description_graph_graph-activity_graph-role-activity/diagnosis.json.
+% Verified table evidence and cohort replay: R05_v8_261105/reports/paper_evidence.json.
+% The stored 10-pair statistical family is preserved even when only four contrasts are shown.
+\section{Experiments}
+\label{sec:experiments}
+\begingroup
+\setlength{\emergencystretch}{1em}
+We use results from run \texttt{R05\_v8\_261105}.
+HGVRec is evaluated on two datasets through three questions:
+\begin{itemize}
+  \item \textbf{RQ1: Overall effectiveness.} How does HGVRec compare with title-only, scene-description, and mean-pooled scene-graph representations?
+  \item \textbf{RQ2: Adding action segments.} What changes when ASHA is added to the scene-graph encoder?
+  \item \textbf{RQ3: Adding role information.} What changes when REAF is added to the encoder that already uses ASHA?
+\end{itemize}
+These questions evaluate the recommendation utility of the available extracted information and the incremental contribution of the two modules.
+
+\subsection{Experimental Setup}
+\label{sec:experimental-setup}
+\paragraph{Datasets.}
+We use MicroLens-100K for its micro-video interactions and video content~\cite{ni2025microlens}.
+We also use M$^3$L-10M, which adds multimodal movie information, including trailers, to MovieLens-10M~\cite{spillo2026bingewatch}.
+Our M$^3$L setup uses titles and available trailer videos; every rating is treated as an interaction without weighting by the rating value.
+Movies with unavailable or unusable videos and their interactions are excluded during source preparation.
+Accordingly, its prediction task concerns the next movie in a rating-event sequence.
+Rating timestamps do not establish the order in which the user watched the movies or their trailers.
+
+For both datasets, users must have at least five source interactions.
+We retain at most their 13 most recent events, ordered by timestamp with source-event order breaking ties.
+The candidate catalog is the union of items in these retained sequences.
+The last event of each user is held out for test and the penultimate event for validation.
+Earlier events supply training transitions, excluding the first event, which has no preceding history.
+Table~\ref{tab:datasets} reports the resulting evaluation cohorts.
+The counts were reconstructed from the available preparation events and accepted only after their split hashes matched the stored R05 split for the corresponding dataset.
+
+\begin{table}[t]
+  \caption{Retained evaluation cohorts. Training transitions exclude each user's first event and the two held-out events. Validation and test contain one event per user.}
+  \label{tab:datasets}
+  \centering
+  \small
+  \begin{tabular}{@{}lrr@{}}
+    \toprule
+    Statistic & MicroLens-100K & M$^3$L-10M \\
+    \midrule
+    Users & 100,000 & 69,878 \\
+    Candidate items & 19,671 & 8,197 \\
+    Retained interactions & 678,355 & 908,412 \\
+    Training transitions & 378,355 & 698,778 \\
+    Validation events & 100,000 & 69,878 \\
+    Test events & 100,000 & 69,878 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Prediction and ranking protocol.}
+Training examples use only the history preceding their target event.
+Validation selects the checkpoint with the highest HR@10, retaining the first checkpoint in a tie.
+Test uses the selected checkpoint and the history preceding the test event, including the validation interaction; there is no refit on validation labels.
+The model accepts a truncated history, while evaluation masks \emph{all} items in the preceding retained history before ranking the full catalog.
+The masking rule also applies if the held-out target repeats an earlier item.
+Scores are sorted in descending order using the recorded evaluation contract.
+There is no sampled-negative evaluation.
+This user-wise split does not impose a shared global time boundary across users.
+
+\paragraph{Representation variants.}
+Table~\ref{tab:variants} maps the five archived configurations to their paper names.
+All use a content-based sequential recommendation backbone.
+Title-only projects the title embedding and applies a residual item MLP.
+Scene Description combines a projected title with projected scene-description embeddings, applies a residual scene MLP, and averages the scenes.
+Scene Graph projects title, entity, action, and context features; it pools entities and actions separately within each scene and averages the encoded scenes.
+Scene Graph + ASHA adds the action-segment module to this graph encoder.
+HGVRec further adds REAF before scene pooling.
+Parameters are trained independently for each variant and seed.
+
+The three graph variants have identical stored graph-input and representation hashes within each dataset.
+Their comparison therefore reuses the same extracted graph information.
+The description and graph sources have their own extracted outputs and valid-scene sets, so their difference also includes the extraction format and input encoding.
+Videos without valid extracted scenes use the fallback described in Section~\ref{sec:reaf} rather than being dropped from a variant's candidate catalog.
+
+\begin{table*}[t]
+  \caption{Compared content encoders and archived active trainable parameter counts, including the sequential recommender. Frozen extraction and text-embedding models are excluded. Counts are identical across the two datasets.}
+  \label{tab:variants}
+  \centering
+  \small
+  \begin{tabular}{@{}llccr@{}}
+    \toprule
+    Method & Content input & REAF & ASHA & Trainable parameters \\
+    \midrule
+    Title-only & Title & -- & -- & 7,624,704 \\
+    Scene Description & Title + scene descriptions & -- & -- & 7,624,704 \\
+    Scene Graph & Title + scene graphs & -- & -- & 7,624,704 \\
+    Scene Graph + ASHA & Title + scene graphs & -- & Yes & 8,675,330 \\
+    HGVRec & Title + scene graphs & Yes & Yes & 8,758,402 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\paragraph{Implementation and configuration provenance.}
+The archived source labels identify Qwen3-VL graph and description extraction and a BGE-based text-feature representation.
+The shared graph inputs are held fixed across the graph comparisons, and the learned representation modules are optimized with the recommender.
+The inspected implementation uses AdamW with weight decay $0.1$ and gradient-norm clipping at $5.0$ for the objective in Section~\ref{sec:objective}.
+These implementation details describe the available code; the historical run configuration still requires completion as noted below.
+The stored experiments use seeds 42, 43, and 44, giving 15 trained variant--seed combinations per dataset.
+
+\emph{Draft reproducibility note.}
+The available R05 archive contains the diagnostic results and parameter reports but not the original training and extraction configuration files.
+The exact historical MLLM and text-encoder checkpoint revisions, prompt versions, frame/window settings, embedding and history dimensions, learning rate, batch size, epoch limit, patience, precision, and hardware remain to be verified.
+We therefore leave those run-specific settings unresolved rather than infer them from the repository's current defaults.
+% TODO(R05-config): Retrieve training.json and extraction identity/settings from R05.
+% Confirm exact checkpoints (including whether the extractor was the 2B Instruct model),
+% original window length, frame count/resolution, token limits and prompt revisions.
+% Confirm F,d,D,history length, Transformer blocks/heads/dropout, optimizer settings,
+% learning rate,batch size,epoch limit,patience,min_delta,precision and hardware.
+% Current config.yaml is not an archived R05 configuration.
+
+\paragraph{Metrics and statistical analysis.}
+We report the mean and sample standard deviation of HR@10 and NDCG@10 over the three seeds.
+For a single held-out target of rank $r$, the per-user metrics are
+\begin{equation}
+\begin{aligned}
+  \mathrm{HR@10}(r)&=\mathbb{I}[r\leq 10],\\
+  \mathrm{NDCG@10}(r)&=\frac{\mathbb{I}[r\leq 10]}{\log_2(r+1)}.
+\end{aligned}
+\label{eq:metrics}
+\end{equation}
+Relative improvement over reference method $b$ is $100(M_a/M_b-1)$ for metric $M$.
+For NDCG@10, the archived analysis first averages each user's metric over seeds and then performs paired bootstrap resampling over users with equal user weight and 10,000 replicates.
+Each dataset has a separate family of all ten pairwise comparisons among its five variants.
+Bonferroni correction at family-wise level $0.05$ yields a 99.5\% confidence interval for each difference.
+Table~\ref{tab:contrasts} displays four relevant contrasts while preserving this original ten-comparison correction.
+We use the stored intervals without rerunning the bootstrap.
+The reported standard deviations describe seed variation; they are distinct from the user-bootstrap confidence intervals.
+HR@10 is reported descriptively, without significance claims.
+
+\subsection{Overall Recommendation Performance (RQ1)}
+\label{sec:overall-results}
+Table~\ref{tab:overall-results} shows that HGVRec achieves the highest mean NDCG@10 and HR@10 among the five compared variants on both datasets.
+On MicroLens-100K, it reaches NDCG@10 of $0.043448$ and HR@10 of $0.082210$, compared with $0.033708$ and $0.064190$ for Title-only.
+These correspond to relative improvements of 28.90\% and 28.07\%, respectively.
+On M$^3$L-10M, HGVRec reaches $0.143475$ and $0.240467$, improving over Title-only by 3.38\% and 3.45\%.
+The HGVRec--Title-only NDCG@10 intervals exclude zero on both datasets (Table~\ref{tab:contrasts}).
+
+\begin{table*}[t]
+  \caption{Recommendation performance, reported as mean $\pm$ sample standard deviation across seeds 42, 43, and 44. Relative changes use Title-only within each dataset. Bold indicates the highest mean, not an additional significance test.}
+  \label{tab:overall-results}
+  \centering
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Method & NDCG@10 & HR@10 & $\Delta$NDCG (\%) & $\Delta$HR (\%) \\
+    \midrule
+    \multicolumn{5}{l}{\textbf{MicroLens-100K}} \\
+    Title-only & $0.033708 \pm 0.000474$ & $0.064190 \pm 0.000925$ & -- & -- \\
+    Scene Description & $0.037941 \pm 0.001164$ & $0.072610 \pm 0.001585$ & +12.56 & +13.12 \\
+    Scene Graph & $0.035142 \pm 0.001069$ & $0.068667 \pm 0.001931$ & +4.25 & +6.97 \\
+    Scene Graph + ASHA & $0.042218 \pm 0.001034$ & $0.080500 \pm 0.001876$ & +25.25 & +25.41 \\
+    HGVRec & $\mathbf{0.043448} \pm 0.000429$ & $\mathbf{0.082210} \pm 0.001040$ & +28.90 & +28.07 \\
+    \midrule
+    \multicolumn{5}{l}{\textbf{M$^3$L-10M}} \\
+    Title-only & $0.138784 \pm 0.001909$ & $0.232443 \pm 0.002425$ & -- & -- \\
+    Scene Description & $0.139729 \pm 0.001739$ & $0.234041 \pm 0.001755$ & +0.68 & +0.69 \\
+    Scene Graph & $0.138132 \pm 0.000708$ & $0.232362 \pm 0.000673$ & -0.47 & -0.03 \\
+    Scene Graph + ASHA & $0.142260 \pm 0.001667$ & $0.239799 \pm 0.001916$ & +2.50 & +3.16 \\
+    HGVRec & $\mathbf{0.143475} \pm 0.000611$ & $\mathbf{0.240467} \pm 0.000638$ & +3.38 & +3.45 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+Scene Description improves NDCG@10 over Title-only by 12.56\% on MicroLens-100K and 0.68\% on M$^3$L-10M; only the former difference is significant under the stored correction.
+HGVRec also improves over Scene Description, by 14.51\% and 2.68\% in NDCG@10, respectively, with positive corrected intervals for both comparisons.
+Thus, the complete structured encoder provides a measurable advantage over the description-based variant under this evaluation protocol.
+
+Scene Graph alone is below Scene Description on both datasets: its NDCG@10 deficits are $0.002799$ and $0.001597$, respectively, and both are significant in the archived pairwise analysis.
+On M$^3$L-10M, neither Scene Graph nor Scene Description differs significantly from Title-only in NDCG@10.
+These observations indicate that producing graph-formatted outputs and pooling their components is insufficient by itself to reproduce the gains of HGVRec.
+Because descriptions and graphs are different extracted inputs, this comparison does not isolate a single encoding operation; the graph-to-graph comparisons below more directly assess the added modules.
+
+\begin{table*}[t]
+  \caption{Selected NDCG@10 contrasts from the archived paired-user bootstrap. Differences are left minus right; relative changes use the right-hand method. All intervals retain Bonferroni correction over the original ten comparisons per dataset.}
+  \label{tab:contrasts}
+  \centering
+  \small
+  \begin{tabular}{@{}lrrc@{}}
+    \toprule
+    Contrast & Absolute difference & Relative (\%) & 99.5\% confidence interval \\
+    \midrule
+    \multicolumn{4}{l}{\textbf{MicroLens-100K}} \\
+    HGVRec $-$ Title-only & +0.009740 & +28.90 & $[0.008874,\ 0.010591]$ \\
+    HGVRec $-$ Scene Description & +0.005507 & +14.51 & $[0.004708,\ 0.006299]$ \\
+    Scene Graph + ASHA $-$ Scene Graph & +0.007076 & +20.14 & $[0.006338,\ 0.007803]$ \\
+    HGVRec $-$ Scene Graph + ASHA & +0.001230 & +2.91 & $[0.000534,\ 0.001916]$ \\
+    \midrule
+    \multicolumn{4}{l}{\textbf{M$^3$L-10M}} \\
+    HGVRec $-$ Title-only & +0.004691 & +3.38 & $[0.003377,\ 0.005948]$ \\
+    HGVRec $-$ Scene Description & +0.003746 & +2.68 & $[0.002458,\ 0.005013]$ \\
+    Scene Graph + ASHA $-$ Scene Graph & +0.004128 & +2.99 & $[0.002910,\ 0.005336]$ \\
+    HGVRec $-$ Scene Graph + ASHA & +0.001215 & +0.85 & $[0.000026,\ 0.002420]$ \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\subsection{Effect of Action-Segment Aggregation (RQ2)}
+\label{sec:asha-results}
+Adding ASHA to Scene Graph raises NDCG@10 from $0.035142$ to $0.042218$ on MicroLens-100K and from $0.138132$ to $0.142260$ on M$^3$L-10M.
+The absolute increases are $0.007076$ and $0.004128$, corresponding to relative gains of 20.14\% and 2.99\%.
+Both corrected confidence intervals are positive.
+Mean HR@10 also increases, from $0.068667$ to $0.080500$ and from $0.232362$ to $0.239799$, respectively.
+Since the graph variants share their extracted inputs, this comparison supports the usefulness of adding action-segment-based aggregation to the otherwise mean-pooled scene encoder.
+
+The intervention adds the whole ASHA module: action-segment membership, size-aware segment encoding, scene updates, and segment readout.
+It also adds 1,050,626 trainable parameters.
+The present comparison therefore measures the contribution of that complete module rather than independently identifying the effects of hyperedge structure, size features, or the two message/readout paths.
+The reference encoder averages scenes and does not encode their chronology.
+Consequently, this experiment does not establish that action segments outperform a chronological scene encoder or an attention-based scene aggregator.
+
+\subsection{Effect of Role-aware Fusion (RQ3)}
+\label{sec:reaf-results}
+Adding REAF to Scene Graph + ASHA increases NDCG@10 by $0.001230$ on MicroLens-100K and $0.001215$ on M$^3$L-10M, corresponding to relative gains of 2.91\% and 0.85\%.
+The corrected intervals are $[0.000534,0.001916]$ and $[0.000026,0.002420]$, respectively.
+Both exclude zero, although the lower bound for M$^3$L-10M is close to zero.
+Mean HR@10 increases from $0.080500$ to $0.082210$ and from $0.239799$ to $0.240467$.
+REAF adds 83,072 trainable parameters to the ASHA-equipped model.
+
+This result is consistent with encoding actor, target, tool, and place assignments before pooling actions being useful for the subsequent action-segment representation.
+The contrast holds the extracted graphs and presence of ASHA fixed, while changing the role-fusion computation and its parameters.
+R05 does not include a REAF-only variant; it therefore supports the incremental benefit of REAF \emph{in the presence of ASHA}, but does not measure its standalone contribution or a factorial interaction between the modules.
+
+\subsection{Interpretation and Evaluation Scope}
+\label{sec:experimental-scope}
+The relative HGVRec gain over Title-only is larger on MicroLens-100K, but both the baseline level and the absolute improvement differ.
+Title-only NDCG@10 is $0.033708$ on MicroLens-100K and $0.138784$ on M$^3$L-10M, while the corresponding absolute HGVRec gains are $0.009740$ and $0.004691$.
+The retained cohorts also differ in catalog size and history length (Table~\ref{tab:datasets}), as well as in content and interaction semantics.
+These descriptive differences do not identify the cause of the cross-dataset performance gap.
+The stored graph scene-coverage rates are similar, 96.04\% and 95.92\%, but extraction coverage is not a measure of semantic correctness or role grounding.
+
+The evidence establishes improvements among the five evaluated variants using the archived extraction sources.
+The three graph configurations provide a controlled comparison of how the same graph information is used by the learned encoder, subject to their differing parameter counts.
+The results do not directly measure correction of hallucinations, fidelity of recommendation explanations, or performance on an on-device accelerator.
+Our fixed structural memberships are inspectable, while their explanatory value requires a separate evaluation.
+
+The broader questions raised in the Introduction remain open where R05 lacks the necessary comparisons: chronological scene encoding, scene attention, stronger MLLM extractors, and device latency or memory consumption.
+No conclusion about scaling with MLLM capability or a measured on-device efficiency gain is drawn from this run.
+Completing those comparisons and the run-specific configuration record is necessary before expanding the empirical claims beyond the reported results.
+% TODO(R05-scope): Add matched scene-sequence and attention comparisons in a later run.
+% TODO(R05-scope): Add stronger-MLLM comparisons with aligned observations/protocol.
+% TODO(R05-scope): Add REAF-only and parameter-matched controls before independent,
+% interaction, or structure-only claims; evaluate grounding/explanation separately.
+% TODO(R05-scope): Device efficiency requires measured latency and memory results.
+\par
+\endgroup
