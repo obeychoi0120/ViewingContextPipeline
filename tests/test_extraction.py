@@ -69,6 +69,34 @@ def test_named_graph_keeps_roles_missing_from_entities():
     assert legacy.graph["actions"][0]["target"] == "unknown"
 
 
+def test_named_graph_regroups_actions_joined_on_one_line():
+    head = "[Context]\nmedium: animation\nformat: narrative\ntopics: dorm\n[Entities]\n"
+    names = "woman1; white blouse\nman1\ndoor\nknife\nroom\n[Actions]\n"
+
+    def actions(text):
+        parsed = parse_or_repair_graph(head + names + text)
+        assert parsed.error is None and parsed.parse_mode == "repaired", parsed.error
+        return [tuple(a.values()) for a in parsed.graph["actions"]]
+
+    # e1 woman1, e2 man1, e3 door, e4 knife, e5 room
+    assert actions("woman1 - pushing - door; man1 - looking - woman1; man1 - cutting - door") == [
+        ("e1", "pushing", "e3", None, "unknown"),
+        ("e2", "looking", "e1", None, "unknown"),
+        ("e2", "cutting", "e3", None, "unknown"),
+    ]
+    assert actions("man1 - cutting - door; knife; room; woman1 - leaving\nman1 - waiting - none; knife") == [
+        ("e2", "cutting", "e3", "e4", "e5"),
+        ("e1", "leaving", "unknown", None, "unknown"),
+        ("e2", "waiting", None, "e4", "unknown"),
+    ]
+    for ambiguous in ("man1 - cutting - door; knife; room; door", "knife; man1 - cutting - door",
+                      "man1 - cutting - door - room"):
+        assert parse_or_repair_graph(head + names + ambiguous).warning == (PARSE_FAILED,)
+    # ID-form output keeps its earlier behavior.
+    legacy = head + "p1: woman\nf1: door\n[Actions]\np1 - pushing - f1; p1 - leaving - f1"
+    assert parse_or_repair_graph(legacy).warning == (PARSE_FAILED,)
+
+
 def test_compact_scene_storage_roundtrip(tmp_path):
     cid = "video"
     path = tmp_path / f"{cid}.jsonl"

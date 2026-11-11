@@ -12,7 +12,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v16"
+GRAPH_PARSER_VERSION = "graph-text/v17"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -125,6 +125,33 @@ def _action(line, *, repair, named=False):
     }
 
 
+def _split_joined_actions(rows):
+    """Regroup name-form actions that were joined with semicolons or lost slots.
+
+    A piece containing an action delimiter starts an action; the pieces after it
+    are its tool and place. Missing slots take the prompt defaults (tool none,
+    place unknown), and "actor - action" keeps the action with an unknown target.
+    """
+    actions = []
+    for row in rows:
+        pieces = [piece.strip() for piece in re.split(r"[;；]", row)]
+        while len(pieces) > 1 and not pieces[-1]:
+            pieces.pop()
+        current = None
+        for piece in pieces:
+            delimiters = len(_DELIMITER.findall(piece))
+            if delimiters:
+                if delimiters > 2:
+                    raise GraphTextError("expected actor - action - target; tool; place")
+                current = [piece if delimiters == 2 else f"{piece} - unknown"]
+                actions.append(current)
+            elif current is None or len(current) == 3 or not piece:
+                raise GraphTextError("expected actor - action - target; tool; place")
+            else:
+                current.append(piece)
+    return ["; ".join([*action, *("none", "unknown")[len(action) - 1:]]) for action in actions]
+
+
 def _parse_context_actions(text, *, repair):
     required = ("Context", "Entities", "Actions")
     headers = {
@@ -201,6 +228,8 @@ def _parse_context_actions(text, *, repair):
                 raise GraphTextError(f"[{section}]: none mixed with other items")
             graph[section.lower()] = []
         else:
+            if repair and named and section == "Actions":
+                rows = _split_joined_actions(rows)
             graph[section.lower()] = [parse(line, repair=repair, named=named) for line in rows]
     return graph, named
 
