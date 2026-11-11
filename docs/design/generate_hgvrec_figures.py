@@ -241,114 +241,100 @@ def motivation():
 
 
 def framework():
-    f = Figure(506, 307)
-    # A stable, left-to-right storyboard; examples are the same as in Figure 1.
+    f = Figure(506, 160)
+    # Left to right: frozen extraction, REAF inside a scene, ASHA across scenes,
+    # then the recommender. Gray fill marks frozen models; colors mark trained modules.
     for x, w, title, color, fill in (
-        (0, 144, "1. Scene graph extraction", INK, FROZEN),
-        (150, 142, "2. REAF: Role encoding", AMBER, PALE_AMBER),
-        (298, 208, "3. ASHA: Action segments", TEAL, PALE_TEAL),
+        (0, 116, "1. Scene graphs", INK, FROZEN),
+        (122, 124, "2. REAF: role fusion", AMBER, PALE_AMBER),
+        (252, 168, "3. ASHA: action segments", TEAL, PALE_TEAL),
+        (426, 80, "4. Recommender", INK, FROZEN),
     ):
-        f.shape(x, 0, w, 248, ink=RULE, fill=None)
-        f.shape(x, 0, w, 18, ink=color, fill=fill)
-        f.text(title, x + 2, 0, w - 4, 18, size=9.5, bold=True, ink=color)
+        f.shape(x, 0, w, 158, ink=RULE, fill=None)
+        f.shape(x, 0, w, 16, ink=color, fill=fill)
+        f.text(title, x + 2, 0, w - 4, 16, size=9, bold=True, ink=color)
 
-    # Concrete observed content, followed by its extracted role assignments.
-    f.scene(7, 29, 53, 33, cut=True)
-    f.text("Scene S1", 7, 65, 53, 12, size=8.5)
-    f.wire([(60, 45), (74, 45)])
-    f.box("MLLM\n(frozen)", 74, 32, 62, 26, fill=FROZEN, size=8.8)
-    f.wire([(105, 58), (105, 81)])
-    f.table("Action: cut", 12, 81, 124, ("",) * 5, row_height=15)
-    for i, (role, entity) in enumerate((('actor', 'person'), ('target', 'carrot'),
-                                       ('tool', 'knife'), ('place', 'kitchen'))):
-        y = 97 + i * 15
-        f.text(role, 15, y, 40, 15, size=8.5, align=PP_ALIGN.LEFT)
-        f.text(entity, 64, y, 69, 15, size=8.5, align=PP_ALIGN.LEFT)
-        f.wire([(12, y + 15), (136, y + 15)], ink=RULE, arrow=False)
-    f.wire([(58, 97), (58, 157)], ink=RULE, arrow=False)
-    f.text("Context: kitchen", 15, 157, 118, 15, size=8.5, align=PP_ALIGN.LEFT)
-    f.text("One graph per scene", 12, 179, 124, 12, size=8.5, ink=MUTED)
-    f.box("Title: Vegetable prep", 12, 197, 124, 18, size=8.5)
-    f.wire([(136, 123), (145, 123), (145, 35), (155, 35)])
-    f.wire([(136, 206), (145, 206), (145, 123)], arrow=False)
-
-    # Vector cells are schematic, not measured embedding values.
-    f.box("BGE text encoder (frozen)", 155, 25, 130, 20, fill=FROZEN, size=8.8)
-    f.wire([(220, 45), (220, 52)])
-    f.box("Learned projections", 155, 52, 130, 16, size=8.8)
-    f.wire([(220, 68), (220, 74)], ink=AMBER)
-    f.shape(155, 74, 130, 63, ink=AMBER, fill=PALE_AMBER)
-    for label, y, color in (("cut (action)", 76, INK), ("person (actor)", 88, AMBER),
-                            ("carrot (target)", 100, AMBER), ("knife (tool)", 112, AMBER),
-                            ("kitchen (place)", 124, AMBER)):
-        f.text(label, 159, y, 84, 12, size=8.5, align=PP_ALIGN.LEFT)
-        f.vector(248, y + 2, 31, 7, ink=color)
-    f.wire([(220, 137), (220, 146)], ink=AMBER)
-    f.box("REAF residual fusion", 155, 146, 130, 18, ink=AMBER, fill=PALE_AMBER, size=9)
-    f.wire([(220, 164), (220, 171)], ink=AMBER)
-    f.text("Role-aware cut", 157, 172, 85, 12, size=8.5, ink=AMBER,
+    # 1. One sampled scene becomes a small role-labelled graph.
+    f.scene(6, 21, 46, 30, cut=True)
+    f.wire([(52, 36), (60, 36)])
+    f.box("MLLM\n(frozen)", 60, 22, 50, 28, fill=FROZEN, size=8.5)
+    f.wire([(85, 50), (85, 58)])
+    f.shape(2, 58, 112, 68, ink=RULE, fill=None)
+    for x0, y0, x1, y1 in ((44, 74, 48, 84), (72, 74, 68, 84),
+                           (44, 110, 48, 98), (72, 110, 68, 98)):
+        f.wire([(x0, y0), (x1, y1)], ink=AMBER, arrow=False)
+    for name, x, y in (("person", 6, 61), ("carrot", 66, 61),
+                       ("knife", 6, 110), ("kitchen", 66, 110)):
+        f.box(name, x, y, 44, 13, size=8.5)
+    f.box("cut", 40, 84, 36, 14, size=8.5, bold=True)
+    for role, x, y, align in (("actor", 6, 75, PP_ALIGN.LEFT),
+                              ("target", 80, 75, PP_ALIGN.RIGHT),
+                              ("tool", 6, 99, PP_ALIGN.LEFT),
+                              ("place", 80, 99, PP_ALIGN.RIGHT)):
+        f.text(role, x, y, 30, 10, size=8.2, ink=AMBER, align=align)
+    f.text("context: demonstration", 6, 128, 106, 11, size=8.2, ink=MUTED,
            align=PP_ALIGN.LEFT)
-    f.vector(248, 174, 31, 7, ink=AMBER)
-    f.text("Scene concat", 155, 186, 75, 12, size=8.5, bold=True, align=PP_ALIGN.LEFT)
-    f.wire([(264, 181), (264, 185), (236, 185), (236, 201)], ink=AMBER)
-    for i, (label, x, width) in enumerate((("Title", 155, 28), ("E mean", 183, 33),
-                                          ("A′ mean", 216, 39), ("Ctx", 255, 30))):
-        color = AMBER if i == 2 else MUTED
-        f.box(label, x, 201, width, 15,
-              size=8.2, ink=color, fill=PALE_AMBER if i == 2 else WHITE)
-    # Title, unchanged entity means and context bypass the action fusion.
-    f.wire([(285, 60), (290, 60), (290, 208), (285, 208)])
-    f.wire([(220, 216), (220, 224)])
-    f.box("Residual Scene MLP", 155, 224, 130, 17, size=9)
+    f.box("title: Vegetable prep", 6, 141, 104, 14, size=8.5)
 
-    actions = ("cut", "cut+talk", "talk", "cut+talk", "cut")
-    for i, (x, action) in enumerate(zip((306, 346, 386, 426, 466), actions), start=1):
-        f.shape(x, 27, 36, 27, ink=RULE)
-        f.text(f"S{i}", x + 1, 28, 34, 12, size=8.5, bold=True)
-        f.text(action, x + 1, 41, 34, 12, size=8.2)
-    f.wire([(404, 54), (404, 78)], ink=TEAL)
-    f.hypergraph((324, 364, 404, 444, 484), 88)
-    f.wire([(404, 115), (404, 130)], ink=TEAL, dashed=True)
-    f.box("Scene → Segment\nmean + [log(n), n/S]", 306, 130, 196, 27,
-          ink=TEAL, fill=PALE_TEAL, size=9)
-    f.wire([(285, 232), (294, 232), (294, 143), (306, 143)], ink=TEAL)
-    f.wire([(294, 201), (306, 201)], ink=TEAL)
-    f.shape(306, 161, 196, 15, ink=RULE, fill=None)
-    for x in (325, 390, 455):
-        f.vector(x, 166, 28, 7, ink=TEAL)
-    f.wire([(404, 157), (404, 161)], ink=TEAL)
-    f.wire([(404, 176), (404, 180), (353, 180), (353, 188)], ink=TEAL)
-    f.wire([(404, 180), (459, 180), (459, 188)], ink=TEAL)
-    f.box("Segment → Scene\ngated residual update", 306, 188, 94, 26,
-          ink=TEAL, fill=PALE_TEAL, size=8.5)
-    f.box("Segment readout\nmean → linear → gate", 416, 188, 86, 26,
-          ink=TEAL, fill=PALE_TEAL, size=8.5)
-    f.wire([(353, 214), (353, 224)], ink=TEAL)
-    f.box("Updated scene mean", 306, 224, 94, 17, size=8.5)
-    f.wire([(400, 232), (404, 232)], ink=TEAL, arrow=False)
-    f.wire([(459, 214), (459, 219), (408, 219), (408, 228)], ink=TEAL)
-    f.circle("+", 408, 232, radius=4)
-    f.wire([(412, 232), (416, 232)], ink=TEAL, arrow=False)
-    f.box("Video embedding", 416, 224, 86, 17, size=9, bold=True)
-
-    # The same learned encoder supplies history items and candidates.
-    f.wire([(459, 241), (459, 254), (2, 254), (2, 291), (7, 291)])
-    f.wire([(459, 254), (459, 268), (432, 268)])
-    f.text("4. Next-video recommendation", 7, 259, 172, 14, size=9.5, bold=True,
+    # 2. Role-linked entity vectors are fused into the action vector.
+    f.text("frozen BGE + projections", 126, 18, 116, 11, size=8.2, ink=MUTED)
+    rows = (("action: cut", INK), ("actor: person", AMBER), ("target: carrot", AMBER),
+            ("tool: knife", AMBER), ("place: kitchen", AMBER))
+    for i, (label, color) in enumerate(rows):
+        y = 31 + i * 11
+        f.shape(130, y + 1, 14, 9, ink=color, fill=color)
+        f.text(label, 149, y, 92, 11, size=8.2, align=PP_ALIGN.LEFT)
+    f.wire([(114, 92), (119, 92), (119, 53), (127, 53)])
+    f.wire([(137, 86), (137, 92)], ink=AMBER)
+    f.box("fuse roles into action", 126, 92, 116, 14, ink=AMBER, fill=PALE_AMBER,
+          size=8.5)
+    f.text("pool, concat", 128, 108, 56, 11, size=8.2, ink=MUTED,
            align=PP_ALIGN.LEFT)
-    f.text("Joint recommendation training", 181, 260, 163, 12, size=8.5, ink=MUTED,
-           align=PP_ALIGN.RIGHT)
-    f.box("Candidate video", 354, 261, 78, 14, size=8.5)
-    f.wire([(393, 275), (393, 280)])
-    f.shape(7, 280, 89, 22, ink=INK)
-    f.text("History videos", 9, 280, 85, 12, size=8.5)
-    for x in (18, 42, 66):
-        f.vector(x, 294, 18, 5, ink=MUTED)
-    for label, x, w in (("SASRec", 115, 60), ("User readout + MLP", 193, 112),
-                        ("Dot-product scores", 354, 78), ("Next-video\nranking", 452, 51)):
-        f.box(label, x, 280, w, 22, size=8.5)
-    for start, end in ((96, 115), (175, 193), (305, 354), (432, 452)):
-        f.wire([(start, 291), (end, 291)])
+    f.wire([(194, 106), (194, 121)], ink=AMBER)
+    for label, x, w, color in (("Title", 126, 24, MUTED), ("Ent", 150, 28, MUTED),
+                               ("Act′", 178, 32, AMBER), ("Ctx", 210, 32, MUTED)):
+        f.box(label, x, 121, w, 14, ink=color,
+              fill=PALE_AMBER if color == AMBER else WHITE, size=8.2)
+    f.wire([(110, 148), (119, 148), (119, 128), (126, 128)])
+    f.wire([(184, 135), (184, 140)])
+    f.box("residual scene MLP", 126, 140, 116, 14, size=8.5)
+
+    # 3. Scene vectors are nodes; contiguous runs of one action are hyperedges.
+    f.text("scene nodes, segment hyperedges", 256, 18, 160, 11, size=8.2, ink=MUTED)
+    centers = (280, 308, 336, 364, 392)
+    f.wire([(242, 147), (248, 147), (248, 38), (271, 38)], ink=TEAL)
+    for x in centers:
+        f.wire([(x, 46), (x, 96)], ink=RULE, arrow=False)
+    for label, x, y, w, dashed in (("cut₁", 270, 52, 48, False),
+                                   ("talk", 298, 67, 76, True),
+                                   ("cut₂", 354, 82, 48, False)):
+        f.shape(x, y, w, 12, ink=TEAL, fill=PALE_TEAL, dashed=dashed)
+        f.text(label, x + 2, y, w - 4, 12, size=8.2, ink=TEAL)
+    for i, x in enumerate(centers, start=1):
+        f.circle(f"S{i}", x, 38, radius=8.5, ink=TEAL)
+    f.box("scene → segment\nmean + size", 256, 100, 78, 24, ink=TEAL,
+          fill=PALE_TEAL, size=8.2)
+    f.box("segment → scene\ngated residual", 338, 100, 78, 24, ink=TEAL,
+          fill=PALE_TEAL, size=8.2)
+    f.wire([(295, 124), (295, 132)], ink=TEAL)
+    f.wire([(377, 124), (377, 128), (318, 128), (318, 132)], ink=TEAL)
+    f.box("video readout", 256, 132, 74, 16, ink=TEAL, fill=PALE_TEAL, size=8.5)
+    f.wire([(330, 140), (336, 140)])
+    f.box("video embedding", 336, 132, 80, 16, size=8.5, bold=True)
+
+    # 4. The same video encoder embeds history items and candidates.
+    f.text("history videos", 430, 18, 72, 11, size=8.2, ink=MUTED)
+    for x in (432, 455, 478):
+        f.vector(x, 31, 18, 6, ink=MUTED)
+    f.wire([(466, 38), (466, 44)])
+    f.box("SASRec", 430, 44, 72, 14, size=8.5)
+    f.wire([(466, 58), (466, 64)])
+    f.box("user MLP", 430, 64, 72, 14, size=8.5)
+    f.wire([(466, 78), (466, 90)])
+    f.box("dot-product\nscore", 430, 90, 72, 24, size=8.5)
+    f.wire([(416, 140), (423, 140), (423, 102), (430, 102)])
+    f.wire([(466, 114), (466, 120)])
+    f.box("next-video\nranking", 430, 120, 72, 24, size=8.5, bold=True)
     return f
 
 

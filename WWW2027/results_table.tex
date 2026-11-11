@@ -1,0 +1,25 @@
+% !TeX root = main.tex
+% Full-width results table. It is input from main.tex ahead of the Experiments text so that
+% the float lands at the top of the page where the results are discussed.
+% Rows are generated and checked by
+% artifacts/runs/R05_v8_261105/reports/short_paper_numbers.py (--check).
+\begin{table*}[t]
+  \caption{Recommendation performance (mean$\pm$sample standard deviation over seeds 42, 43, and 44). $\Delta$N and $\Delta$H are relative changes (\%) in NDCG@10 and HR@10 over Title-only. Params counts trainable parameters including the sequential recommender. Bold marks the highest mean.}
+  \label{tab:overall-results}
+  \centering
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lrcccccccc@{}}
+    \toprule
+    & & \multicolumn{4}{c}{MicroLens-100K} & \multicolumn{4}{c}{M$^3$L-10M} \\
+    \cmidrule(lr){3-6}\cmidrule(l){7-10}
+    Method & Params & NDCG@10 & HR@10 & $\Delta$N & $\Delta$H & NDCG@10 & HR@10 & $\Delta$N & $\Delta$H \\
+    \midrule
+Title-only & 7.62M & .0337$\pm$.0005 & .0642$\pm$.0009 & -- & -- & .1388$\pm$.0019 & .2324$\pm$.0024 & -- & -- \\
+Scene Description & 7.62M & .0379$\pm$.0012 & .0726$\pm$.0016 & +12.56 & +13.12 & .1397$\pm$.0017 & .2340$\pm$.0018 & +0.68 & +0.69 \\
+Scene Graph & 7.62M & .0351$\pm$.0011 & .0687$\pm$.0019 & +4.25 & +6.97 & .1381$\pm$.0007 & .2324$\pm$.0007 & $-$0.47 & $-$0.03 \\
+Scene Graph + ASHA & 8.68M & .0422$\pm$.0010 & .0805$\pm$.0019 & +25.25 & +25.41 & .1423$\pm$.0017 & .2398$\pm$.0019 & +2.50 & +3.16 \\
+HGVRec & 8.76M & \textbf{.0434}$\pm$.0004 & \textbf{.0822}$\pm$.0010 & +28.90 & +28.07 & \textbf{.1435}$\pm$.0006 & \textbf{.2405}$\pm$.0006 & +3.38 & +3.45 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}

@@ -3,218 +3,60 @@
 % graph_inputs,leave_one_out_recommendation,leave_one_out_execution}.py.
 \section{Methods}
 \label{sec:methods}
-\begingroup
-\setlength{\emergencystretch}{1em}
 
 \subsection{Problem Formulation and Overview}
 \label{sec:formulation}
-Let $\mathcal{V}$ denote the candidate video catalog and
-$\mathcal{H}_u=(v_{u,1},\ldots,v_{u,L_u})$ the observed interaction history of user $u$.
-Our goal is to rank candidate items for the user's next interaction.
-HGVRec learns a content representation $\mathbf{z}_v\in\mathbb{R}^{D}$ for each video and a user representation $\mathbf{q}_u\in\mathbb{R}^{D}$ from the history, with score
-\begin{equation}
-  f(u,v)=\mathbf{q}_u^{\mathsf T}\mathbf{z}_v.
-  \label{eq:score}
-\end{equation}
-The same video encoder supplies history-item and candidate-item representations.
-
-We observe each video through temporally ordered windows of sampled frames.
-We call an observation window a \emph{scene}; this does not imply a detected shot or a ground-truth action boundary.
-A frozen MLLM produces a scene graph containing entities, action descriptions, action-specific role assignments, and scene context.
-After structural validation, video $v$ has $S_v$ valid scenes with original window indices $p_1<\cdots<p_{S_v}$.
-Retaining these indices prevents a failed or missing window from silently joining two otherwise separated action segments.
-An entity has a textual name and attributes; an action has a textual phrase and actor, target, tool, and place assignments.
-Context is serialized from scene-level format, medium, and topic fields.
-Entity identifiers specify local graph connectivity and are excluded from text embedding inputs.
+Let $\mathcal{V}$ denote the candidate video catalog and $\mathcal{H}_u$ the observed interaction history of user $u$.
+HGVRec learns a content representation $\mathbf{z}_v\in\mathbb{R}^{D}$ for each video and a user representation $\mathbf{q}_u\in\mathbb{R}^{D}$ from the history, and ranks candidates for the next interaction by $f(u,v)=\mathbf{q}_u^{\mathsf T}\mathbf{z}_v$; the same video encoder supplies history-item and candidate-item representations.
+We observe each video through temporally ordered windows of sampled frames and call a window a \emph{scene}; this does not imply a detected shot or a ground-truth action boundary.
+A frozen MLLM produces a scene graph containing entities (name and attributes), action phrases with actor, target, tool, and place assignments, and a scene context (format, medium, and topics).
+After structural validation, video $v$ has $S$ valid scenes with original window indices $p_1<\cdots<p_S$.
 The video title enters the representation stage as a separate input after visual extraction.
-
-Figure~\ref{fig:hgvrec-framework} summarizes the computation:
-REAF constructs role-aware action features, a residual scene encoder produces scene vectors, ASHA organizes them into a video representation, and a sequential recommender models the user's interaction history.
-The MLLM outputs and their text embeddings remain fixed during recommendation learning.
-We introduce ASHA first, taking scene vectors as inputs, and then define their construction through REAF.
-Throughout, $[\cdot\,;\,\cdot]$ denotes concatenation and $\sigma$ denotes ReLU.
-Figure~\ref{fig:hgvrec-motivation} illustrates the two levels of structure using a cooking example.
+We introduce ASHA first, taking scene vectors $\mathbf{x}_s\in\mathbb{R}^{D}$ as inputs, and then define their construction through REAF (Figure~\ref{fig:hgvrec-framework}).
+Throughout, $[\cdot\,;\cdot]$ denotes concatenation and $\sigma$ denotes ReLU.
 
 \subsection{Action-Segment Hypergraph Aggregation (ASHA)}
 \label{sec:asha}
-\paragraph{Action keys and contiguous segments.}
-For a fixed video, let $\mathbf{x}_s\in\mathbb{R}^{D}$ be the representation of valid scene $s$ and let $\mathcal{A}_s$ be its actions.
-A deterministic function $\kappa$ converts an action phrase into a consistency key.
-The implementation lowercases and tokenizes the phrase, removes participant markers and a fixed set of function words, and normalizes the first remaining token using irregular-form mappings and suffix rules.
-Empty or unknown phrases produce no key.
-This is a lightweight lexical rule, not a semantic equivalence test; for example, it does not merge arbitrary synonymous actions.
-We use the set of keys in a scene,
-\begin{equation}
-  \mathcal{K}_s=\{\kappa(a):a\in\mathcal{A}_s,\ \kappa(a)\neq\varnothing\}.
-  \label{eq:keys}
-\end{equation}
-Multiple actions with the same key in one scene contribute one membership.
+A deterministic function $\kappa$ converts an action phrase into a key: it lowercases and tokenizes the phrase, removes participant markers and a fixed set of function words, and normalizes the first remaining token using irregular-form mappings and suffix rules.
+This is a lightweight lexical rule that does not merge synonymous actions.
+For key $k$, an \emph{action segment} is a maximal run of scenes that contain $k$ and have consecutive original indices ($p_{s+1}=p_s+1$).
+A missing window, a scene without $k$, or a later reappearance of $k$ separates segments; singleton segments are retained, and a scene containing several keys belongs to several segments.
+A segment thus expresses continuity of an extracted action key rather than a verified continuous real-world event.
+The hypergraph has one node per valid scene and the $K$ segments as hyperedges, with fixed incidence $H_{sk}=\mathbb{I}[s\in e_k]$, segment sizes $n_k=\sum_sH_{sk}$, and scene degrees $d_s=\sum_kH_{sk}$.
 
-For key $k$, an action segment $e$ is a maximal run of scenes satisfying both $k\in\mathcal{K}_s$ and consecutiveness of their original indices.
-Specifically, adjacent members $s,s+1$ must satisfy $p_{s+1}=p_s+1$.
-A missing window, a scene without $k$, or a later reappearance of $k$ separates segments.
-Singleton segments are retained.
-A scene containing several keys belongs to several segments, allowing overlapping actions to induce different aggregation groups.
-Neither participant identity nor temporal identity of entities is required to construct these groups.
-Thus, a segment expresses continuity of an extracted action key across observations rather than a verified continuous real-world event.
-
-\paragraph{Hypergraph construction.}
-The hypergraph contains one node per valid scene. Its $K$ hyperedges are the action segments, collected in $\mathcal{E}$.
-Its incidence matrix and associated counts are
-\begin{equation}
-  H_{sk}=\mathbb{I}[s\in e_k],\qquad
-  n_k=\sum_{s=1}^{S}H_{sk},\qquad
-  d_s=\sum_{k=1}^{K}H_{sk},
-  \label{eq:incidence}
-\end{equation}
-where $S=S_v$ and $n_k\geq 1$ for every constructed segment.
-The incidence structure is fixed before recommendation training.
-It explicitly records which action key groups which scene indices, providing an inspectable grouping mechanism.
-This structural property alone does not establish that a group is a faithful explanation of a recommendation.
-
-\paragraph{Scene-to-segment aggregation.}
-Following the two-stage aggregation framework of AllSet~\cite{chien2022allset}, we first pool the content of each segment and augment it with its extent:
+Following the two-stage aggregation framework of AllSet~\cite{chien2022allset}, ASHA pools each segment and augments it with its extent, updates each scene with the mean of its incident segments, and reads out the video:
 \begin{align}
-  \overline{\mathbf{x}}_k &= \frac{1}{n_k}\sum_{s=1}^{S}H_{sk}\mathbf{x}_s, \\
-  \mathbf{l}_k &= [\log n_k\,;\,n_k/S], \\
-  \mathbf{u}_k &= \sigma\!\left(W_{\mathrm{seg}}
-      [\overline{\mathbf{x}}_k\,;\,\mathbf{l}_k]
-      +\mathbf{b}_{\mathrm{seg}}\right).
-  \label{eq:segment}
+  \mathbf{u}_k &= \sigma\!\left(W_{\mathrm{seg}}\big[\tfrac{1}{n_k}\textstyle\sum_s H_{sk}\mathbf{x}_s;\ \log n_k;\ n_k/S\big]+\mathbf{b}_{\mathrm{seg}}\right), \label{eq:segment}\\
+  \mathbf{x}'_s &= \mathbf{x}_s+\alpha\,\mathbb{I}[d_s>0]\,\sigma\!\left(W_{\mathrm{msg}}\big[\mathbf{x}_s;\ \tfrac{1}{d_s}\textstyle\sum_k H_{sk}\mathbf{u}_k\big]+\mathbf{b}_{\mathrm{msg}}\right), \label{eq:scene-update}\\
+  \mathbf{z}_v &= \tfrac{1}{S}\textstyle\sum_s\mathbf{x}'_s+\beta\,\mathbb{I}[K>0]\,W_{\mathrm{out}}\tfrac{1}{K}\textstyle\sum_k\mathbf{u}_k. \label{eq:video-readout}
 \end{align}
-Here $W_{\mathrm{seg}}\in\mathbb{R}^{D\times(D+2)}$.
-Mean pooling summarizes segment content, while $\mathbf{l}_k$ preserves information that the mean alone discards.
-Its entries represent the number of member scenes and its fraction of all valid scenes in the video; neither entry is a duration in seconds.
-
-\paragraph{Segment-to-scene update.}
-A scene receives the mean of the representations of its incident segments:
-\begin{align}
-  \mathbf{m}_s &= \frac{\sum_{k=1}^{K}H_{sk}\mathbf{u}_k}{\max(1,d_s)}, \\
-  \mathbf{x}'_s &= \mathbf{x}_s + \alpha\,\mathbb{I}[d_s>0]\,
-       \sigma\!\left(W_{\mathrm{msg}}[\mathbf{x}_s\,;\,\mathbf{m}_s]
-       +\mathbf{b}_{\mathrm{msg}}\right),
-  \label{eq:scene-update}
-\end{align}
-where $W_{\mathrm{msg}}\in\mathbb{R}^{D\times 2D}$.
-Including the receiving scene's own representation allows the update to depend on both local content and segment context.
-Scenes without valid action keys have $d_s=0$ and retain $\mathbf{x}_s$.
-We use one scene-to-segment-to-scene pass.
-
-\paragraph{Video readout.}
-ASHA combines the mean of updated scenes with a separate segment contribution:
-\begin{align}
-  \overline{\mathbf{u}} &=
-      \frac{1}{\max(1,K)}\sum_{k=1}^{K}\mathbf{u}_k, \\
-  \mathbf{z}_v &= \frac{1}{S}\sum_{s=1}^{S}\mathbf{x}'_s
-      +\beta\,\mathbb{I}[K>0]W_{\mathrm{out}}\overline{\mathbf{u}}.
-  \label{eq:video-readout}
-\end{align}
-$W_{\mathrm{out}}\in\mathbb{R}^{D\times D}$ has no bias.
-The readout weights segments equally, with segment size already supplied to their encoder in Equation~\eqref{eq:segment}.
-Both $\alpha$ and $\beta$ are unconstrained trainable scalars initialized to zero; they are shared across videos and are not sigmoid probabilities.
-At initialization, ASHA therefore reduces to a mean of its input scene vectors.
-If $K=0$, its output remains the scene mean.
-The $S=0$ case is handled by the title fallback described below.
+The extent features give the number of member scenes and its fraction of the video's valid scenes.
+The scalars $\alpha$ and $\beta$ are trainable and initialized to zero, so ASHA starts as a mean of its input scene vectors; videos without segments keep the scene mean.
 
 \subsection{Role-aware Entity--Action Fusion (REAF)}
 \label{sec:reaf}
-\paragraph{Typed features and role assignments.}
-Let $\phi(\cdot)\in\mathbb{R}^{F}$ be a frozen text encoder.
-We independently project the video title $t_v$, entity description $e$, action phrase $a$, and scene context $c_s$ into $d$-dimensional features:
+Let $\phi(\cdot)$ be a frozen text encoder.
+We independently project the video title, each entity description, each action phrase, and the scene context into $d$ dimensions with separate learned linear maps of $\phi$, obtaining $\mathbf{t}_v$, $\mathbf{e}$, $\mathbf{a}$, and $\mathbf{c}_s$.
+For each action $a$ and role $r$ (actor, target, tool, or place), the role vector $\mathbf{g}_{a,r}$ is the feature of the linked entity, or a learned state $\mathbf{b}_r^{\mathrm{abs}}$ or $\mathbf{b}_r^{\mathrm{unk}}$ when the role is absent or unknown.
+With $\mathbf{r}_a$ the concatenation of the four role vectors in this fixed order, REAF updates the action residually:
 \begin{equation}
-\begin{aligned}
-  \mathbf{t}_v &= W_t\phi(t_v)+\mathbf{b}_t,&
-  \mathbf{e}_{s,e} &= W_e\phi(e)+\mathbf{b}_e,\\
-  \mathbf{a}_{s,a} &= W_a\phi(a)+\mathbf{b}_a,&
-  \mathbf{c}_s &= W_c\phi(c_s)+\mathbf{b}_c.
-\end{aligned}
-\label{eq:typed-projections}
+  \widetilde{\mathbf{a}}=\mathbf{a}+\sigma\!\left(W_R[\mathbf{a};\mathbf{r}_a]+\mathbf{b}_R\right).
+  \label{eq:reaf}
 \end{equation}
-The entity and action expressions apply to every entity and action in scene $s$.
-Missing titles are explicitly masked to zero after projection.
-Let $\mathcal{R}$ contain four role types: actor, target, tool, and place.
-For each action $a$ and role $r\in\mathcal{R}$, we obtain a role vector
+The fixed slot order permits different transformations of the same entity feature when it serves different roles; entity features themselves are unchanged.
+Let $\overline{\mathbf{e}}_s$ be the mean of projected entity features and $\overline{\mathbf{a}}_s$ the mean of updated action features in scene $s$ (zero if empty).
+The scene representation, with $D=4d$, is
 \begin{equation}
-  \mathbf{g}_{s,a,r}=\begin{cases}
-    \mathbf{e}_{s,r(a)}, & \text{if role $r$ links to entity $r(a)$},\\
-    \mathbf{b}_{r}^{\mathrm{abs}}, & \text{if role $r$ is absent},\\
-    \mathbf{b}_{r}^{\mathrm{unk}}, & \text{if role $r$ is unknown}.
-  \end{cases}
-  \label{eq:role-input}
-\end{equation}
-The two state vectors are learned separately for each role.
-An absent role and an unknown participant therefore need not receive the same representation.
-REAF uses the extracted assignments; it does not infer new role links or track an entity across scenes.
-
-\paragraph{Action update and scene construction.}
-The residual update of action $a$ in scene $s$ is
-\begin{equation}
-\begin{aligned}
-  \mathbf{r}_{s,a} &=[\mathbf{g}_{s,a,\mathrm{actor}}\,;
-       \mathbf{g}_{s,a,\mathrm{target}}\,;
-       \mathbf{g}_{s,a,\mathrm{tool}}\,;
-       \mathbf{g}_{s,a,\mathrm{place}}],\\
-  \widetilde{\mathbf{a}}_{s,a} &= \mathbf{a}_{s,a}
-      +\sigma\!\left(W_R[\mathbf{a}_{s,a}\,;\,\mathbf{r}_{s,a}]
-      +\mathbf{b}_R\right),
-\end{aligned}
-\label{eq:reaf}
-\end{equation}
-with $W_R\in\mathbb{R}^{d\times 5d}$.
-The fixed slot order permits different transformations of the same entity feature when it serves different roles.
-Entity features themselves are unchanged by this update.
-
-Let $\overline{\mathbf{e}}_s$ be the mean of projected entity features and $\overline{\mathbf{a}}_s$ the mean of updated action features in scene $s$.
-The mean of an empty entity or action set is a zero vector.
-We construct the scene representation as
-\begin{align}
-  \mathbf{b}_s &=[\mathbf{t}_v\,;\,\overline{\mathbf{e}}_s\,;
-                   \overline{\mathbf{a}}_s\,;\,\mathbf{c}_s],\\
-  \mathbf{x}_s &= \mathbf{b}_s+\sigma(W_{\mathrm{scene}}\mathbf{b}_s
-                                     +\mathbf{b}_{\mathrm{scene}}),
+  \mathbf{x}_s=\mathbf{b}_s+\sigma(W_{\mathrm{scene}}\mathbf{b}_s+\mathbf{b}_{\mathrm{scene}}),\quad
+  \mathbf{b}_s=[\mathbf{t}_v;\overline{\mathbf{e}}_s;\overline{\mathbf{a}}_s;\mathbf{c}_s].
   \label{eq:scene-encoder}
-\end{align}
-where $D=4d$ and $W_{\mathrm{scene}}\in\mathbb{R}^{D\times D}$.
-This single-layer residual MLP operates independently on each scene.
-REAF encodes local participation before pooling actions, while ASHA subsequently models groups of scenes.
-
-\paragraph{Missing observations.}
-Malformed or failed scene outputs do not enter the graph encoder.
-A valid scene with no actions still contributes its available title, entity, and context information to the scene mean.
-If a video has no valid scenes, we apply the same residual scene MLP to $[\mathbf{t}_v;\mathbf{0};\mathbf{0};\mathbf{0}]$.
-If neither a title nor a valid scene is available, its final video vector is masked to zero.
-These rules preserve the recommendation catalog despite extraction failures.
-They define fallback behavior rather than repair missing visual evidence.
+\end{equation}
+A video with no valid scenes applies the same scene MLP to $[\mathbf{t}_v;\mathbf{0};\mathbf{0};\mathbf{0}]$, so extraction failures do not remove items from the catalog.
 
 \subsection{Sequential Recommendation and Joint Optimization}
 \label{sec:objective}
-For each prediction event, we retain the most recent $L$ available history items, add learned position embeddings to their video vectors, and apply a causally masked SASRec-style Transformer~\cite{kang2018sasrec}.
-Padding positions are masked.
-The final normalized hidden state at the last valid position is passed through a two-layer residual user MLP with LayerNorm and GELU to obtain $\mathbf{q}_u$.
-History positions are modeled chronologically at the user level, independently of ASHA's organization of scenes \emph{inside} an item.
-Candidate scores follow Equation~\eqref{eq:score}; there is no learned item-ID embedding table in the content encoder.
-
-\paragraph{Popularity-corrected in-batch objective.}
-A training batch contains $B$ history--target pairs $(\mathcal{H}_i,y_i)$.
-The targets of other batch examples serve as negatives.
-Let $Q(v)$ be the normalized frequency of $v$ as a target among training transitions with nonempty histories; validation and test targets are excluded from this frequency estimate.
-The corrected logit for user-history row $i$ and target column $j$ is
-\begin{equation}
-  \ell_{ij}=\mathbf{q}_i^{\mathsf T}\mathbf{z}_{y_j}-\log Q(y_j).
-  \label{eq:corrected-logits}
-\end{equation}
-For $j\neq i$, we mask column $j$ if $y_j=y_i$ or $y_j$ occurs in the truncated input history $\mathcal{H}_i$.
-The diagonal positive is always retained.
-Writing $\widetilde{\ell}_{ij}$ for the resulting logits, the objective is
-\begin{equation}
-  \mathcal{L}=-\frac{1}{B}\sum_{i=1}^{B}
-       \log\frac{\exp(\widetilde{\ell}_{ii})}
-       {\sum_{j=1}^{B}\exp(\widetilde{\ell}_{ij})}.
-  \label{eq:objective}
-\end{equation}
-The implementation sets masked logits to $-10^4$.
-The popularity correction is used during training; evaluation ranks the uncorrected dot-product scores.
-All typed projections, role-state embeddings, REAF, the scene MLP, ASHA, the sequential encoder, and the user MLP are optimized jointly.
-The frozen MLLM and text encoder receive no recommendation gradients, and action-segment memberships are not learned.
-\par
-\endgroup
+For each prediction event, we retain the most recent $L$ history items, add learned position embeddings to their video vectors, and apply a causally masked SASRec-style Transformer~\cite{kang2018sasrec}.
+The hidden state at the last valid position is passed through a two-layer residual user MLP to obtain $\mathbf{q}_u$; the content encoder has no item-ID embedding table.
+We train with an in-batch softmax cross-entropy over history--target pairs $(\mathcal{H}_i,y_i)$ using popularity-corrected logits $\mathbf{q}_i^{\mathsf T}\mathbf{z}_{y_j}-\log Q(y_j)$, where $Q$ is the normalized target frequency among training transitions.
+Negatives that equal the positive or occur in the input history are masked, and evaluation ranks the uncorrected scores.
+All projections, role-state embeddings, REAF, the scene MLP, ASHA, the sequential encoder, and the user MLP are optimized jointly, while the MLLM, the text encoder, and the segment memberships stay fixed.

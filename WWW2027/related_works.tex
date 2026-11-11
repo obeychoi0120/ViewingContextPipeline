@@ -2,18 +2,7 @@
 % Detailed reading notes and the complete candidate list: related_works/README.md.
 \section{Related Works}
 \label{sec:related_works}
-\begingroup
-\setlength{\emergencystretch}{2em}
-Video recommendation benefits from modality-specific graph representations, as in MMGCN~\cite{wei2019mmgcn}, and MLLM-generated descriptions, as in DWYS~\cite{denadai2025dwys}.
-DFF~\cite{sun2026dff} further studies representations from frozen MLLMs and their fusion with item IDs.
-Hypergraphs also support recommendation: DHCN~\cite{xia2021dhcn} connects items through sessions, and MHCR~\cite{lyu2025mhcr} combines multiple graph views with hypergraph contrastive learning.
-HGVRec constructs a hypergraph within each video, with scenes as nodes and contiguous action segments as hyperedges.
-
-Hypergraph message passing is well established by HGNN~\cite{feng2019hgnn} and the multiset aggregation framework of AllSet~\cite{chien2022allset}.
-ED-HNN~\cite{wang2023edhnn} introduces receiver-dependent hyperedge messages, and ZEN~\cite{bae2025zen} unifies linearized forms of representative hypergraph networks.
-ASHA follows the general pattern of aggregation between nodes and hyperedges, using action continuity to define overlapping groups of scenes and incorporating segment extent into aggregation and video readout.
-
-Structured visual representations encode actions through participants and relations: Grounded Situation Recognition~\cite{pratt2020gsr} models entities in semantic roles, while Action Genome~\cite{ji2020actiongenome} represents actions through spatiotemporal scene graphs.
-REAF uses extracted actor, target, tool, and place assignments to fuse entity features into action representations for recommendation, supplying role-aware scene features to ASHA.
-\par
-\endgroup
+Video recommendation benefits from modality-specific graph representations, as in MMGCN~\cite{wei2019mmgcn}, MLLM-generated descriptions, as in DWYS~\cite{denadai2025dwys}, and representations from frozen MLLMs fused with item IDs, as in DFF~\cite{sun2026dff}.
+Hypergraphs also support recommendation: DHCN~\cite{xia2021dhcn} connects items through sessions, and MHCR~\cite{lyu2025mhcr} combines multiple graph views with hypergraph contrastive learning; HGVRec instead constructs a hypergraph within each video, with scenes as nodes and contiguous action segments as hyperedges.
+ASHA follows the node--hyperedge aggregation pattern of HGNN~\cite{feng2019hgnn} and AllSet~\cite{chien2022allset}, using action continuity to define overlapping groups of scenes and incorporating segment extent.
+Structured visual representations model entities in semantic roles~\cite{pratt2020gsr} and actions through spatiotemporal scene graphs~\cite{ji2020actiongenome}; REAF uses extracted actor, target, tool, and place assignments to fuse entity features into action representations for recommendation.

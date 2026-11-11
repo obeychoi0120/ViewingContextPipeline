@@ -50,10 +50,11 @@
 %% for your publication.
 %%
 %%
-% Draft with visible authors; add anonymous for anonymous submission.
-\documentclass[sigconf,review]{templates/acmart}
+% WWW 2027 short paper: 4 pages including references, double-blind review.
+% Remove "anonymous" to preview the author block (kept below in the source).
+\documentclass[sigconf,anonymous,review]{templates/acmart}
 % ACM first-page classification and citation information.
-\settopmatter{printccs=true,printacmref=true}
+\settopmatter{printccs=true,printacmref=false}
 %%
 %% \BibTeX command to typeset BibTeX logo in the docs
 \AtBeginDocument{%
@@ -118,6 +119,9 @@
 
 %%
 %% end of the preamble, start of the body of the document source.
+% Give TeX extra flexibility when fitting long terms within the two-column layout.
+\AtBeginDocument{\setlength{\emergencystretch}{2em}}
+
 \begin{document}
 
 %%
@@ -303,10 +307,9 @@
 \begin{figure}[!htbp]
   \centering
   \includegraphics[width=\columnwidth]{figures/hgvrec_motivation.pdf}
-  \caption{An illustrative example of HGVRec. REAF encodes who acts on
-    what and with which tool, while ASHA groups consecutive scenes sharing
-    an action. Both use the same extracted scene information; the two cut
-    segments remain separate across the interruption.}
+  \caption{An illustrative example. REAF encodes who acts on what and
+    with which tool; ASHA groups consecutive scenes sharing an action, so
+    the two cut segments stay separate.}
   \Description{An illustrative cooking video has five scenes: cut, cut and
     talk, talk, cut and talk, and cut. A person, carrot, knife and kitchen
     provide concrete examples of extracted entities. Three cards show the
@@ -323,34 +326,30 @@
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\textwidth]{figures/hgvrec_framework.pdf}
-  \caption{Overview of HGVRec using the same cooking example.
-    (1) A frozen MLLM extracts scene graphs.
-    (2) Frozen text embeddings and learned projections feed REAF, which
-    fuses action features with their role-linked entities.
-    (3) ASHA aggregates contiguous action segments and combines scene and
-    segment readouts. (4) The resulting video embeddings support next-video
-    recommendation. Vector cells are schematic; $n$ and $S$ count segment
-    scenes and valid video scenes, respectively.}
-  \Description{Four numbered stages follow a cooking example. First, a
-    sampled scene is processed by a frozen MLLM into a scene-graph table
-    whose cut action links person, carrot, knife and kitchen to actor,
-    target, tool and place roles. Second, a frozen BGE encoder and learned
-    projections supply action and role-entity vectors to residual REAF
-    fusion. Metadata titles bypass the MLLM. Title, raw entity means,
-    updated action means and context are concatenated before a residual
-    scene MLP. Third, action memberships across five scenes define two
-    disjoint cut hyperedges and one overlapping talk hyperedge. ASHA
-    aggregates scene features with segment-count features, sends gated
-    residual messages back to scenes, and adds updated scene means to
-    segment readout. Fourth, the same video encoder supplies history and
-    candidate embeddings. SASRec and a user MLP produce user vectors for
-    dot-product ranking. Feature-vector cells are illustrative and do not
-    represent measured embedding values or experimental results.}
+  \caption{Overview of HGVRec on the cooking example. (1) A frozen MLLM turns each
+    scene into a graph whose action links entities as actor, target, tool and place.
+    (2) REAF fuses the role-linked entity features into the action before pooling a
+    scene vector. (3) ASHA groups scenes into contiguous action segments (hyperedges),
+    passes messages between scenes and segments, and reads out the video. (4) The same
+    encoder embeds history and candidate videos for a SASRec recommender.}
+  \Description{Four panels from left to right. Panel 1: a sketched scene of a person
+    cutting a carrot is passed to a frozen MLLM, which outputs a small graph: the
+    action node cut is linked to person as actor, carrot as target, knife as tool and
+    kitchen as place; a context line and the video title are shown below. Panel 2: the
+    action vector and four role vectors are stacked and fused into the action; title,
+    entity mean, fused action mean and context are concatenated and passed through a
+    residual scene MLP. Panel 3: five scene nodes S1 to S5 with three hyperedges drawn
+    as bars: cut over S1 and S2, talk over S2 to S4, and a second cut over S4 and S5.
+    Boxes describe scene-to-segment aggregation with size features, a gated residual
+    segment-to-scene update, and a video readout producing the video embedding.
+    Panel 4: history video vectors go through SASRec and a user MLP; a dot product
+    with the candidate video embedding gives next-video ranking.}
   \label{fig:hgvrec-framework}
 \end{figure*}
 
 \input{introduction.tex}
 \input{related_works.tex}
+\input{results_table.tex}
 \input{methods.tex}
 \input{experiments.tex}
 \input{conclusion.tex}
