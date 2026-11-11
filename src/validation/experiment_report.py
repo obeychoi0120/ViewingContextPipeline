@@ -22,10 +22,6 @@ def write_report(context, selected, document):
         versions = ", ".join(f"{k}={v}" for k, v in row["module_versions"].items()) or "—"
         lines.append(f"| {row['label']} | {row['source']} | {', '.join(row['modules']) or '—'} "
                      f"| {row['readout']} | {versions} |")
-    if any(row.get("definition_source") == "validated_legacy_experiment_arm"
-           for row in report["model_reports"].values()):
-        lines += ["", "기존 형식의 실험 정의는 저장된 `experiment_arm`과 v4 고정 정의의 일치를 검증한 뒤 복원했습니다. "
-                  "실험 이름은 학습 결과에 기록된 이름을 유지합니다."]
     if context.dataset == "m3l_10m":
         from preparation.m3l import INTERPRETATION
 

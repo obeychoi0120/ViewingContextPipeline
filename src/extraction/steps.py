@@ -41,7 +41,7 @@ def prompt_provenance(
     if source in LOCAL_MODELS:
         import json
         checkpoint = context.path("models", source)
-        validate_checkpoint(source, json.loads((checkpoint / "config.json").read_text()))
+        validate_checkpoint(source, json.loads((checkpoint / "config.json").read_text()), checkpoint)
     model = (
         local_model_identity(context.path("models", source))
         if source in LOCAL_MODELS

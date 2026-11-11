@@ -108,7 +108,7 @@ def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
     assert command("prepare-module", ["graph-role-activity"]) == 0
     graph_arms = ["graph", "graph-activity", "graph-role-activity"]
     assert len({recommendation_identity(context, name)["embedding_hash"] for name in graph_arms}) == 1
-    assert len(GraphStore(context.representations_dir / "desc_qwen3vl")["contexts"]) == 48
+    assert len(GraphStore(context.representations_dir / "desc_qwen3vl_2b")["contexts"]) == 48
     d_identity = recommendation_identity(context, "description")
     assert d_identity["item_model"]["description_projection_dim"] == 384
     assert "scene_segments" not in d_identity

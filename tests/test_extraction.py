@@ -96,7 +96,7 @@ def test_compact_scene_storage_roundtrip(tmp_path):
 
 def test_scene_resume_selects_pending_only(context):
     cid = "video"
-    directory = context.scene_arm_dir("graph_qwen3vl")
+    directory = context.scene_arm_dir("graph_qwen3vl_2b")
     path = directory / f"{cid}.jsonl"
     write_scene_records(
         path, [scene_row(cid), failure_row(cid, 1), scene_row(cid, 2, warnings=[PARSE_FAILED])]
@@ -138,11 +138,11 @@ def test_truncated_scene_is_failure(context, monkeypatch):
     rows = scene_generation_rows(visual, prompt="observe", max_new_tokens=384)[:1]
     factory = FakeGenerator(finish_reason="length")
     runtime = QwenRuntime()
-    directory = context.scene_arm_dir("graph_qwen3vl")
+    directory = context.scene_arm_dir("graph_qwen3vl_2b")
     run_qwen_scenes(
         [(visual, rows)],
         scene_dir=directory,
-        model_path=context.path("models", "qwen3vl"),
+        model_path=context.path("models", "qwen3vl_2b"),
         generator_factory=factory,
         names={},
         progress=quiet_progress(),
@@ -159,7 +159,7 @@ def test_truncated_scene_is_failure(context, monkeypatch):
 
 
 @pytest.mark.parametrize("representation", ["graph", "description"])
-@pytest.mark.parametrize("model", ["qwen3vl", "gemini"])
+@pytest.mark.parametrize("model", ["qwen3vl_2b", "gemini"])
 def test_scene_sources_extract_reuse_and_retry(
     context, monkeypatch, representation, model,
 ):
@@ -189,7 +189,7 @@ def test_scene_sources_extract_reuse_and_retry(
     options = dict(
         model=model,
         arm=f"{'graph' if graph_source else 'desc'}_{model}",
-        schema="prompts/scene_graph_v9.md" if graph_source else "prompts/scene_description_v3.md",
+        schema="prompts/scene_graph_v9_2b.md" if graph_source else "prompts/scene_description_v3.md",
     )
     assert extract(context, **options)["failure_count"] == 0
     assert generator.tasks

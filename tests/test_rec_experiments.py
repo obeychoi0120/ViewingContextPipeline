@@ -10,7 +10,7 @@ from rec_experiments import CONFIG_KEY, load_experiments, parse_experiments
 def test_explicit_sources_defaults_modules_and_order():
     value = {"version": 1, "defaults": {"readout": "mean"}, "experiments": [
         {"label": "custom-role", "source": "graph_gemini", "modules": ["role_fusion"]},
-        {"label": "combined", "source": "graph_qwen3vl",
+        {"label": "combined", "source": "graph_qwen3vl_2b",
          "modules": ["activity_hypergraph", "role_fusion"], "readout": "mean"},
         {"label": "title-only", "source": "metadata"},
         {"label": "description-only", "source": "desc_gemini"},
@@ -28,7 +28,7 @@ def test_explicit_sources_defaults_modules_and_order():
 def test_config_module_names_resolve_to_result_identity_names():
     def modules(names):
         value = {"version": 1, "experiments": [
-            {"label": "trial", "source": "graph_qwen3vl", "modules": names}]}
+            {"label": "trial", "source": "graph_qwen3vl_2b", "modules": names}]}
         return parse_experiments(value)["experiments"][0]["modules"]
 
     assert modules(["ASHA", "REAF"]) == ["role_fusion", "activity_hypergraph"]
@@ -41,9 +41,9 @@ def test_config_module_names_resolve_to_result_identity_names():
 
 
 def test_invalid_settings_are_rejected_before_outputs(context, monkeypatch):
-    value = {"version": 1, "experiments": [{"label": "trial", "source": "graph_qwen3vl"}]}
+    value = {"version": 1, "experiments": [{"label": "trial", "source": "graph_qwen3vl_2b"}]}
     invalid = [None, {}, {**value, "version": True}, {**value, "experiments": []},
-               {**value, "defaults": {"source": "graph_qwen3vl"}},
+               {**value, "defaults": {"source": "graph_qwen3vl_2b"}},
                {**value, "defaults": {"readout": "attention"}},
                {**value, "use_title": True}]
     for change in ({"source": None}, {"label": "../bad"}, {"label": "A"},
@@ -51,7 +51,7 @@ def test_invalid_settings_are_rejected_before_outputs(context, monkeypatch):
                    {"modules": "role_fusion"}, {"modules": [None]}, {"modules": ["unknown"]},
                    {"modules": ["role_fusion", "role_fusion"]}, {"use_title": True},
                    {"source": "metadata", "modules": ["role_fusion"]},
-                   {"source": "desc_qwen3vl", "modules": ["activity_hypergraph"]}):
+                   {"source": "desc_qwen3vl_2b", "modules": ["activity_hypergraph"]}):
         invalid.append({**value, "experiments": [{**value["experiments"][0], **change}]})
     invalid += [{**value, "experiments": value["experiments"] * 2},
                 {**value, "experiments": [{"label": n, "source": "metadata"} for n in ["a", "b"]]}]
@@ -94,10 +94,10 @@ def test_initial_definitions_preserve_legacy_weights_and_outputs(context, monkey
     config = validation_config(context)
     legacy = [
         Arm("base", "metadata", uses_title=True),
-        Arm("d", "description", "qwen3vl", True, "desc_qwen3vl", "mean"),
-        Arm("g0", "graph", "qwen3vl", True, "graph_qwen3vl", "mean"),
-        Arm("g1", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", extensions=("segments",)),
-        Arm("g2", "graph", "qwen3vl", True, "graph_qwen3vl", "mean", True, ("segments",)),
+        Arm("d", "description", "qwen3vl_2b", True, "desc_qwen3vl_2b", "mean"),
+        Arm("g0", "graph", "qwen3vl_2b", True, "graph_qwen3vl_2b", "mean"),
+        Arm("g1", "graph", "qwen3vl_2b", True, "graph_qwen3vl_2b", "mean", extensions=("segments",)),
+        Arm("g2", "graph", "qwen3vl_2b", True, "graph_qwen3vl_2b", "mean", True, ("segments",)),
     ]
     for current, previous in zip(registry(context.config), legacy, strict=True):
         torch.manual_seed(42)
@@ -122,9 +122,9 @@ def replace_experiments(context, rows):
 
 
 @pytest.mark.parametrize("rows, baseline", [
-    ([{"label": "just-description", "source": "desc_qwen3vl"}], None),
+    ([{"label": "just-description", "source": "desc_qwen3vl_2b"}], None),
     ([{"label": "title-only", "source": "metadata"},
-      {"label": "base", "source": "graph_qwen3vl", "modules": ["role_fusion"]}], "title-only"),
+      {"label": "base", "source": "graph_qwen3vl_2b", "modules": ["role_fusion"]}], "title-only"),
 ])
 def test_custom_labels_and_sources_complete_the_pipeline(context, monkeypatch, rows, baseline):
     from artifact_io import read_json
@@ -159,7 +159,7 @@ def test_editing_experiment_list_reuses_results_and_preserves_conflicts(context,
     train_inputs(context, monkeypatch)
     saved = {p: p.read_bytes() for p in context.recommendations_dir.glob("seed_*/*/*") if p.is_file()}
     rows = [r for r in load_experiments(context)["experiments"] if r["label"] in {"base", "graph-activity"}]
-    added = {"label": "role-only", "source": "graph_qwen3vl", "modules": ["role_fusion"]}
+    added = {"label": "role-only", "source": "graph_qwen3vl_2b", "modules": ["role_fusion"]}
     replace_experiments(context, rows + [added])
     assert embed_representations(context)["generated_sources"] == []
     prepare_module(context)

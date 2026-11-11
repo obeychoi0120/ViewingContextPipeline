@@ -15,7 +15,7 @@ from validation.representation_provenance import recommendation_identity
 def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys):
     targets = ["graph-activity", "graph-role-activity"]
     prepare_inputs(context, monkeypatch, modules=False)
-    directory = context.representations_dir / "graph_qwen3vl"
+    directory = context.representations_dir / "graph_qwen3vl_2b"
     originals = {path: path.read_bytes() for path in directory.iterdir() if path.is_file()}
     with pytest.raises(ValueError, match="python -m validation prepare-module"):
         load_scene_segments(directory)
@@ -72,7 +72,7 @@ def test_prepare_module_cli_with_no_activity_modules_is_noop(context, monkeypatc
     from rec_experiments import CONFIG_KEY, parse_experiments
 
     context.config[CONFIG_KEY] = parse_experiments({"version": 1, "experiments": [
-        {"label": "only-description", "source": "desc_qwen3vl"},
+        {"label": "only-description", "source": "desc_qwen3vl_2b"},
     ]})
 
     def forbidden(*args, **kwargs):

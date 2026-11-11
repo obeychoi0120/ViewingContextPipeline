@@ -28,19 +28,19 @@ experiments:
     modules: []
 
   - label: description
-    source: desc_qwen3vl
+    source: desc_qwen3vl_2b
     modules: []
 
   - label: graph
-    source: graph_qwen3vl
+    source: graph_qwen3vl_2b
     modules: []
 
   - label: graph-activity
-    source: graph_qwen3vl
+    source: graph_qwen3vl_2b
     modules: [ASHA]
 
   - label: graph-role-activity
-    source: graph_qwen3vl
+    source: graph_qwen3vl_2b
     modules: [REAF, ASHA]
 ```
 
@@ -49,7 +49,7 @@ experiments:
 | `version` | `1` |
 | `defaults.readout` | 선택 항목. 생략하면 `mean`. 공통 `source`는 허용하지 않습니다. |
 | `experiments[].label` | 필수 사용자 지정 이름. 소문자 영문으로 시작하고 영문 소문자·숫자·하이픈만 사용하며 중복은 허용하지 않습니다. 모델 구조를 결정하지 않습니다. |
-| `experiments[].source` | 각 실험에 필수. `metadata`, `graph_qwen3vl`, `desc_qwen3vl`, `graph_gemini`, `desc_gemini` 중 선택합니다. |
+| `experiments[].source` | 각 실험에 필수. `metadata`, `graph_qwen3vl_2b`, `desc_qwen3vl_2b`, `graph_qwen3vl_8b`, `desc_qwen3vl_8b`, `graph_gemini`, `desc_gemini` 중 선택합니다. |
 | `experiments[].modules` | 생략하면 `[]`. Graph source에서 `REAF`(role_fusion), `ASHA`(activity_hypergraph)를 단독 또는 함께 사용할 수 있습니다. 결과 identity에는 괄호 안의 내부 이름이 기록되며, 내부 이름도 설정에서 계속 읽습니다. |
 | `experiments[].readout` | 개별 값 → 공통값 → `mean` 순서로 적용합니다. 현재 `mean`만 지원합니다. |
 
@@ -80,10 +80,10 @@ Qwen 장면 추출 환경에는 `python -m pip install -e ".[qwen,dev]"`를 추�
 | 설정 키 | 확인할 내용 |
 | --- | --- |
 | `datasets.<dataset>.data`, `datasets.<dataset>.source_counts` | 원본 데이터 경로와 검증할 개수 |
-| `models.qwen3vl`, `models.bge`, `models.gemini` | 필요한 로컬 가중치 또는 Gemini 호출 설정 |
+| `models.qwen3vl_2b`, `models.qwen3vl_8b`, `models.bge`, `models.gemini` | 필요한 로컬 가중치 또는 Gemini 호출 설정. Qwen 경로의 폴더 이름에는 해당 크기(`2B`·`8B`)가 들어 있어야 합니다. |
 | `extraction.visual_evidence` | 시간 창·키프레임 수·해상도 |
 | `extraction.qwen`, `extraction.gemini` | 추론 엔진·동시 실행 설정 |
-| `extraction.{graph,description}.{qwen3vl,gemini}` | 장면 출력 토큰 한도 |
+| `extraction.{graph,description}.{qwen3vl_2b,qwen3vl_8b,gemini}` | 장면 출력 토큰 한도 |
 | `validation.cohort`, `validation.encoder` | 사용자 이력 처리와 BGE 인코딩 |
 | `validation.model`, `validation.evaluation` | seed·학습·결정적 연산·평가·통계 설정 |
 | `validation.graph_execution` | 특징 캐시·chunk·checkpoint 실행 설정 |
@@ -116,15 +116,18 @@ python -m preparation prepare-input-data --run-id "$RUN_ID" --dataset "$DATASET"
 YAML에서 사용하는 서로 다른 시각 source만 준비합니다. 추출 명령의 `--arm`은 source 식별자이며 추천 실험의 label과 구분합니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl
-python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_description_v3.md --model qwen3vl --arm desc_qwen3vl
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_2b.md --model qwen3vl_2b --arm graph_qwen3vl_2b
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_8b.md --model qwen3vl_8b --arm graph_qwen3vl_8b
+python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_description_v3.md --model qwen3vl_2b --arm desc_qwen3vl_2b
 ```
 
 | YAML source | 추출 명령 | `--model` | `--arm` |
 | --- | --- | --- | --- |
 | `metadata` | 필요 없음 | — | — |
-| `graph_qwen3vl` | `extract-graph-scenes` | `qwen3vl` | `graph_qwen3vl` |
-| `desc_qwen3vl` | `extract-description-scenes` | `qwen3vl` | `desc_qwen3vl` |
+| `graph_qwen3vl_2b` | `extract-graph-scenes` | `qwen3vl_2b` | `graph_qwen3vl_2b` |
+| `desc_qwen3vl_2b` | `extract-description-scenes` | `qwen3vl_2b` | `desc_qwen3vl_2b` |
+| `graph_qwen3vl_8b` | `extract-graph-scenes` | `qwen3vl_8b` | `graph_qwen3vl_8b` |
+| `desc_qwen3vl_8b` | `extract-description-scenes` | `qwen3vl_8b` | `desc_qwen3vl_8b` |
 | `graph_gemini` | `extract-graph-scenes` | `gemini` | `graph_gemini` |
 | `desc_gemini` | `extract-description-scenes` | `gemini` | `desc_gemini` |
 
@@ -149,8 +152,6 @@ python -m validation run-diagnosis --run-id "$RUN_ID" --dataset "$DATASET"
 ```
 
 각 명령은 독립 단계입니다. 앞 단계의 성공을 확인한 뒤 다음 명령을 실행하세요. 추천 명령은 특징·활동 구간 준비나 진단을 자동 실행하지 않습니다.
-
-`run-diagnosis`는 실험 설정 도입 직전의 v4 결과(`base, d, g0, g1, g2`)도 읽습니다. 현재 선택한 구성과 동일한 예전 Arm 폴더가 모든 설정 seed에 있으면 기존 이름으로 진단·보고서를 생성하며, 원본 recommendation 파일은 변경하지 않습니다. 새 이름과 예전 이름의 폴더가 함께 있으면 모호한 선택을 막기 위해 중단합니다. 예전 파일에 없는 `experiment_definition`만 검증된 `experiment_arm`에서 복원하며, 구조·입력·평가 계약·체크섬 검증은 유지합니다. 더 오래된 구조나 변경된 입력을 자동으로 호환 처리하지 않으며, 이 처리는 추천 학습 재개나 Run 간 비교에는 적용하지 않습니다.
 
 GPU는 `CUDA_VISIBLE_DEVICES`로 선택합니다. Qwen은 GPU별 추론 엔진을, 추천은 `--workers-per-gpu`개 독립 학습 작업을 실행합니다. 추천은 보이는 GPU가 없으면 worker 수 1에서 CPU로 실행할 수 있습니다. 시작 로그에는 실험 설정 파일·해석된 구성·`deterministic` 적용값을 표시합니다.
 

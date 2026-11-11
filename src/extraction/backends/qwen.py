@@ -10,7 +10,7 @@ from typing import Any
 
 from extraction.backends.qwen_penalty import PENALTY_KEY
 from extraction.evidence import load_images
-from extraction.qwen_config import qwen_settings, validate_checkpoint
+from extraction.qwen_config import qwen_settings, validate_checkpoint, validate_checkpoint_family
 
 
 @dataclass
@@ -48,7 +48,7 @@ class QwenBackend:
         config = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
         if config.get("quantization_config"):
             raise ValueError("Qwen vLLM pipeline requires a non-quantized BF16 checkpoint")
-        validate_checkpoint("qwen3vl", config)
+        validate_checkpoint_family(config)
         resolved = qwen_settings(settings)
         processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
         generation_path = model_dir / "generation_config.json"
@@ -121,7 +121,11 @@ class QwenBackend:
             content.append({"type": "text", "text": task.prompt})
             if task.model is not None:
                 import json
-                validate_checkpoint(task.model, json.loads((Path(self.model_id) / "config.json").read_text()))
+                validate_checkpoint(
+                    task.model,
+                    json.loads((Path(self.model_id) / "config.json").read_text()),
+                    self.model_id,
+                )
             prompt = self.processor.apply_chat_template(
                 [{"role": "user", "content": content}],
                 tokenize=False,

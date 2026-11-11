@@ -10,10 +10,10 @@
 
 | 표현 | 프롬프트 | 추출 결과 |
 | --- | --- | --- |
-| Graph | [scene_graph_v9.md](../prompts/scene_graph_v9.md) | 장면별 Context·Entities·Actions |
+| Graph | [scene_graph_v9_2b.md](../prompts/scene_graph_v9_2b.md) · [scene_graph_v9_8b.md](../prompts/scene_graph_v9_8b.md) | 장면별 Context·Entities·Actions |
 | Description | [scene_description_v3.md](../prompts/scene_description_v3.md) | 장면별 관측 문단 |
 
-Graph는 `graph_qwen3vl` 또는 `graph_gemini`, Description은 `desc_qwen3vl` 또는 `desc_gemini` source에 저장합니다. 생성 명령에는 `--schema`, `--model`, `--arm`이 필요합니다. 상대 프롬프트 경로는 저장소 루트 기준이며 기존의 비어 있지 않은 Markdown 파일을 지정합니다.
+Graph는 `graph_qwen3vl_2b`·`graph_qwen3vl_8b`·`graph_gemini`, Description은 `desc_qwen3vl_2b`·`desc_qwen3vl_8b`·`desc_gemini` source에 저장합니다. 2B와 8B는 별도 source이므로 한 Run에서 함께 추출할 수 있습니다. 생성 명령에는 `--schema`, `--model`, `--arm`이 필요합니다. 상대 프롬프트 경로는 저장소 루트 기준이며 기존의 비어 있지 않은 Markdown 파일을 지정합니다.
 
 ## Graph 스키마와 출력 예시
 
@@ -60,9 +60,9 @@ Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `gra
 
 ## Qwen 생성 정책과 옵션
 
-CLI 모델 식별자 `qwen3vl`은 Qwen3-VL Instruct checkpoint를 사용합니다. 로컬 checkpoint 경로는 `models.qwen3vl`에 지정합니다. Thinking checkpoint는 지원하지 않습니다. Linux/CUDA의 vLLM 실행이며 설치 요구사항은 [pyproject.toml](../pyproject.toml)의 `qwen` extra를 확인하세요.
+CLI 모델 식별자 `qwen3vl_2b`·`qwen3vl_8b`는 각각 Qwen3-VL 2B·8B Instruct checkpoint를 사용합니다. 로컬 checkpoint 경로는 `models.qwen3vl_2b`·`models.qwen3vl_8b`에 지정하며, 폴더 이름(또는 `_name_or_path`)에 요청한 크기만 들어 있어야 합니다. 이전 식별자 `qwen3vl`과 `graph_qwen3vl`·`desc_qwen3vl` source는 지원하지 않으므로, 기존 결과를 이어 쓰려면 source 폴더를 생성 당시 크기의 새 이름으로 옮깁니다. Thinking checkpoint는 지원하지 않습니다. Linux/CUDA의 vLLM 실행이며 설치 요구사항은 [pyproject.toml](../pyproject.toml)의 `qwen` extra를 확인하세요.
 
-Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 기본 presence penalty는 1.5, repetition penalty는 Graph 1.05·Description 1.0입니다. 출력 토큰 한도는 `extraction.{graph,description}.qwen3vl.scene_max_new_tokens`를 따르며 문서에 별도 값으로 복제하지 않습니다.
+Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 기본 presence penalty는 1.5, repetition penalty는 Graph 1.05·Description 1.0입니다. 출력 토큰 한도는 `extraction.{graph,description}.{qwen3vl_2b,qwen3vl_8b}.scene_max_new_tokens`를 따르며 문서에 별도 값으로 복제하지 않습니다.
 
 | 옵션 | 허용 범위 | 적용 |
 | --- | --- | --- |
@@ -72,12 +72,12 @@ Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, 
 Repetition penalty는 전용 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용하지 않습니다. 최초 요청·구조 복구·재실행에 같은 옵션값을 사용하고 증가 schedule은 적용하지 않습니다. 예를 들어 presence penalty를 끄려면 다음과 같이 실행합니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9.md --model qwen3vl --arm graph_qwen3vl --presence-penalty 0
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_2b.md --model qwen3vl_2b --arm graph_qwen3vl_2b --presence-penalty 0
 ```
 
 옵션은 새로 생성하는 결과와 provenance에 적용됩니다. 기존 정상 장면을 갱신하려면 새 Run 또는 해당 추출의 `--force`를 사용합니다. 생성 정책 변경의 형식 준수율·추천 성능 효과는 별도의 비교가 필요합니다.
 
-엔진 설정 `extraction.qwen`은 GPU 메모리 사용량, 동시 요청, 배치 토큰, context 길이와 prefix caching 등을 제어합니다. 구체적 허용값은 [qwen_config.py](../src/extraction/qwen_config.py)를 따릅니다. 설치 extra `qwen`과 이 설정 이름은 CLI의 `--model qwen3vl`과 구분합니다.
+엔진 설정 `extraction.qwen`은 GPU 메모리 사용량, 동시 요청, 배치 토큰, context 길이와 prefix caching 등을 제어합니다. 구체적 허용값은 [qwen_config.py](../src/extraction/qwen_config.py)를 따릅니다. 설치 extra `qwen`과 이 설정 이름은 CLI의 `--model qwen3vl_2b`·`qwen3vl_8b`와 구분하며 두 크기에 같은 엔진 설정을 사용합니다.
 
 ## Gemini 사용
 

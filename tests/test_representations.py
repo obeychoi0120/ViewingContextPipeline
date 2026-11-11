@@ -25,15 +25,15 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
 
     prepare_inputs(context, monkeypatch)
     result = embed_representations(context, target=["description", "graph", "graph-activity", "graph-role-activity"])
-    assert result["generated_sources"] == ["desc_qwen3vl"]
-    assert result["reused_sources"] == ["graph_qwen3vl"]
+    assert result["generated_sources"] == ["desc_qwen3vl_2b"]
+    assert result["reused_sources"] == ["graph_qwen3vl_2b"]
     root = context.representations_dir
-    assert {p.name for p in root.iterdir()} == {"metadata", "desc_qwen3vl", "graph_qwen3vl"}
-    description = GraphStore(root / "desc_qwen3vl")
+    assert {p.name for p in root.iterdir()} == {"metadata", "desc_qwen3vl_2b", "graph_qwen3vl_2b"}
+    description = GraphStore(root / "desc_qwen3vl_2b")
     assert len(description["contexts"]) == 48  # two independent scenes per video
     assert len(description["types"]) == 0
     assert description["video_offsets"].tolist() == list(range(0, 49, 2))
-    assert read_json(root / "desc_qwen3vl" / "manifest.json")["source"] == "desc_qwen3vl"
+    assert read_json(root / "desc_qwen3vl_2b" / "manifest.json")["source"] == "desc_qwen3vl_2b"
 
 
 def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(context, monkeypatch):
@@ -108,7 +108,7 @@ def test_graph_exclusions_preserve_items(context):
         scene_row(cid, 2, value="unrecoverable observation"),
         failure_row(cid, 3),
     ]
-    write_jsonl(context.scene_arm_dir("graph_qwen3vl") / f"{cid}.jsonl", rows)
+    write_jsonl(context.scene_arm_dir("graph_qwen3vl_2b") / f"{cid}.jsonl", rows)
     _, arrays, stats = build_input(context, cohort, registry(context.config)["graph-activity"])
     assert arrays["video_offsets"].tolist() == [0, 1, 1]
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 2

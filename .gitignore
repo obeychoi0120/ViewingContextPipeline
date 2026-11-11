@@ -7,3 +7,4 @@
 **/.mypy_cache/
 update_repo.sh
 run_script*.sh
+rec_experiments_config.yaml

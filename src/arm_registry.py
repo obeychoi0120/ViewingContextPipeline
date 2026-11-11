@@ -19,14 +19,11 @@ class Arm:
     extensions: tuple[str, ...] = ()
 
 
+GENERATION_MODELS = ("qwen3vl_2b", "qwen3vl_8b", "gemini")
 SOURCES = tuple(
-    Arm(name, kind, model, False, name)
-    for name, kind, model in (
-        ("graph_qwen3vl", "graph", "qwen3vl"),
-        ("desc_qwen3vl", "description", "qwen3vl"),
-        ("graph_gemini", "graph", "gemini"),
-        ("desc_gemini", "description", "gemini"),
-    )
+    Arm(f"{prefix}_{model}", kind, model, False, f"{prefix}_{model}")
+    for model in GENERATION_MODELS
+    for prefix, kind in (("graph", "graph"), ("desc", "description"))
 )
 
 
@@ -79,8 +76,8 @@ def generation_registry(config):
 
 
 def generated_arm(config, representation, model):
-    if model not in {"gemini", "qwen3vl"}:
-        raise ValueError("model/source must be qwen3vl or gemini")
+    if model not in GENERATION_MODELS:
+        raise ValueError(f"model/source must be one of {', '.join(GENERATION_MODELS)}")
     source = next(
         (arm for arm in generation_registry(config).values() if arm.representation == representation and arm.model == model),
         None,

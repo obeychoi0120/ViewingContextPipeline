@@ -76,7 +76,7 @@ def test_dataset_paths_contract_and_cache_are_isolated(context, monkeypatch):
         assert not (ctx.run_root / "run_contract.json").exists()
     assert context.keyframes_dir != m3l.keyframes_dir
     assert context.source_assets_dir != m3l.source_assets_dir
-    assert context.scene_arm_dir("graph_qwen3vl") != m3l.scene_arm_dir("graph_qwen3vl")
+    assert context.scene_arm_dir("graph_qwen3vl_2b") != m3l.scene_arm_dir("graph_qwen3vl_2b")
     assert context.diagnosis_path(["base"]) != m3l.diagnosis_path(["base"])
     left, right = (SharedCache(ctx, "features", "same-key") for ctx in (context, m3l))
     source = context.root / "cache-input"
@@ -194,7 +194,7 @@ def test_migration_preserves_selection_features_and_completed_training(context, 
     generator = FakeGenerator()
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     extract_graph_scenes(
-        migrated, model="qwen3vl", schema="prompts/scene_graph_v9.md", arm="graph_qwen3vl"
+        migrated, model="qwen3vl_2b", schema="prompts/scene_graph_v9_2b.md", arm="graph_qwen3vl_2b"
     )
     assert not generator.tasks
     reused = run_recommendation(migrated, target=["base", "graph-activity"])

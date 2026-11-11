@@ -55,7 +55,9 @@ def penalty_schedule(value):
     return [float(x) for x in values]
 
 
-QWEN_MODELS = ("qwen3vl",)
+# Local Qwen3-VL Instruct checkpoints, one key per parameter size.
+QWEN_MODEL_SIZES = {"qwen3vl_2b": "2B", "qwen3vl_8b": "8B"}
+QWEN_MODELS = tuple(QWEN_MODEL_SIZES)
 
 
 def validate_presence_penalty(value: float) -> float:
@@ -92,14 +94,31 @@ def generation_settings(
     }
 
 
-def validate_checkpoint(model: str, config: dict) -> None:
-    expected = {
-        "qwen3vl": ("qwen3_vl", "Qwen3VLForConditionalGeneration"),
-    }
-    if model not in expected:
+def validate_checkpoint_family(config: dict) -> None:
+    """Reject checkpoints that are not Qwen3-VL Instruct models."""
+    if config.get("model_type") != "qwen3_vl" or "Qwen3VLForConditionalGeneration" not in config.get("architectures", []):
+        raise ValueError("checkpoint is not Qwen3-VL: expected qwen3_vl/Qwen3VLForConditionalGeneration")
+    if config.get("_name_or_path") and "Thinking" in config["_name_or_path"]:
+        raise ValueError("Qwen3-VL requires the Instruct checkpoint")
+
+
+def validate_checkpoint(model: str, config: dict, path=None) -> None:
+    """Check the family and, when a path is known, that its name states the requested size."""
+    if model not in QWEN_MODEL_SIZES:
         raise ValueError(f"unsupported Qwen model: {model}")
-    model_type, architecture = expected[model]
-    if config.get("model_type") != model_type or architecture not in config.get("architectures", []):
-        raise ValueError(f"checkpoint does not match requested {model}: expected {model_type}/{architecture}")
-    if model == "qwen3vl" and config.get("_name_or_path") and "Thinking" in config["_name_or_path"]:
-        raise ValueError("qwen3vl requires the Instruct checkpoint")
+    validate_checkpoint_family(config)
+    if path is None:
+        return
+    from pathlib import Path
+
+    def sizes(name):
+        token = f"-{name.upper().replace('/', '-')}-"
+        return {size for size in QWEN_MODEL_SIZES.values() if f"-{size}-" in token}
+
+    size = QWEN_MODEL_SIZES[model]
+    stated = sizes(Path(path).name) | sizes(Path(path).resolve().name)
+    stated |= sizes(str(config.get("_name_or_path") or ""))
+    if stated != {size}:
+        raise ValueError(
+            f"{model} requires a checkpoint whose directory name states {size}: {path}"
+        )

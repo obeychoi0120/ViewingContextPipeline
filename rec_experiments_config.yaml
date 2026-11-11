@@ -9,17 +9,17 @@ experiments:
     modules: []
 
   - label: description
-    source: desc_qwen3vl
+    source: desc_qwen3vl_2b
     modules: []
 
   - label: graph
-    source: graph_qwen3vl
+    source: graph_qwen3vl_2b
     modules: []
 
   - label: graph-activity
-    source: graph_qwen3vl
+    source: graph_qwen3vl_2b
     modules: [ASHA]
 
   - label: graph-role-activity
-    source: graph_qwen3vl
+    source: graph_qwen3vl_2b
     modules: [REAF, ASHA]

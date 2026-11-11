@@ -28,7 +28,7 @@ def test_report_uses_recorded_definitions_and_all_contrasts(context):
                 "confidence_level": 1 - 0.05 / 10} for earlier, later in combinations(arms, 2)},
         },
         "representations": {
-            arm: {"sources": [{"source": "desc_qwen3vl" if arm == "description" else "graph_qwen3vl"}],
+            arm: {"sources": [{"source": "desc_qwen3vl_2b" if arm == "description" else "graph_qwen3vl_2b"}],
                   "statistics": {"counts": {"valid_scenes": 5, "zero_scene_video": 3, "empty_video": 1},
                                  "scene_coverage": 0.5}}
             for arm in arms
@@ -43,7 +43,7 @@ def test_report_uses_recorded_definitions_and_all_contrasts(context):
     assert "-0.100000 | [-0.150000, -0.050000]" in text
     assert "열위 근거 확보" in text and "50.00%" in text
     assert "| base |" in text
-    assert "| description | desc_qwen3vl | 5 | 50.00% | 2 | 1 | 100 | 100 |" in text
+    assert "| description | desc_qwen3vl_2b | 5 | 50.00% | 2 | 1 | 100 | 100 |" in text
     assert "activity_hypergraph=segments-v1" in text
     assert "role_fusion=role-fusion/v1" in text
     assert ARCHITECTURE_VERSION in text

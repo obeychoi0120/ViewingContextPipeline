@@ -44,7 +44,7 @@ Run별 `validation/cohort/`는 원본 이력 5개 이상 사용자의 최근 13�
 
 Qwen은 로컬 checkpoint와 vLLM으로 보이는 GPU별 worker를 실행합니다. `CUDA_VISIBLE_DEVICES`가 없으면 보이는 GPU 전체를 사용하고 GPU가 없으면 실패합니다. Gemini의 장면 동시성은 `extraction.gemini.threads`입니다. 추천의 `--workers-per-gpu`는 GPU당 독립 조합 process 수이며 분산 학습으로 한 모델을 나누는 설정은 아닙니다. GPU가 없으면 값 1에서 CPU를 사용합니다. `--gpus` 옵션은 없습니다.
 
-추출 토큰 한도는 `extraction.{graph,description}.{qwen3vl,gemini}.scene_max_new_tokens`, 생성 정책·옵션은 [장면 추출](scene_extraction.md#qwen-생성-정책과-옵션)을 따릅니다. `validation.graph_execution`의 특징 캐시·chunk·checkpoint는 [학습 자원 설명](graph_training.md#공동-학습과-실행-자원)을 참고하세요.
+추출 토큰 한도는 `extraction.{graph,description}.{qwen3vl_2b,qwen3vl_8b,gemini}.scene_max_new_tokens`, 생성 정책·옵션은 [장면 추출](scene_extraction.md#qwen-생성-정책과-옵션)을 따릅니다. `validation.graph_execution`의 특징 캐시·chunk·checkpoint는 [학습 자원 설명](graph_training.md#공동-학습과-실행-자원)을 참고하세요.
 
 ## 산출물 경로
 

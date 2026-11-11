@@ -157,9 +157,6 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 identity.update(recommendation_identity(context, selected[arm]))
                 definition = identity["experiment_definition"]
                 directory = combination_dir(context, seed, arm)
-                from validation.legacy_diagnosis import diagnosis_identity
-
-                identity = diagnosis_identity(directory, identity)
                 training = diagnosis_training(
                     directory, identity, len(ids), architecture_version=architecture_version
                 )
@@ -167,8 +164,6 @@ def collect_metrics(context, config, cohort, *, arms=None):
                 model_reports[arm] = {
                     "parameters": training.get("parameters", {}),
                     "experiment_definition": definition,
-                    "definition_source": "training.json" if "experiment_definition" in training
-                    else "validated_legacy_experiment_arm",
                 }
                 best = training["best_epoch"]
                 if training["split"] != split or best not in [row["epoch"] for row in training["train"]]:

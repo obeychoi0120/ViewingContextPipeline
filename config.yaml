@@ -6,10 +6,12 @@ protocol:
   cohort_sampling: leave_one_out
   catalog_scope: retained_sequence_catalog
   graph_extractors:
-  - qwen3vl
+  - qwen3vl_2b
+  - qwen3vl_8b
   - gemini
   description_extractors:
-  - qwen3vl
+  - qwen3vl_2b
+  - qwen3vl_8b
   - gemini
 artifacts_root: artifacts
 datasets:
@@ -32,7 +34,8 @@ datasets:
       interaction_count: 9409884
       item_count: 9031
 models:
-  qwen3vl: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
+  qwen3vl_2b: /home_nvme/shared/models/Qwen3-VL-2B-Instruct
+  qwen3vl_8b: /home_nvme/shared/models/Qwen3-VL-8B-Instruct
   bge: /home_nvme/shared/models/bge-large-en-v1.5
   gemini:
     project_id: insight-dev-490002
@@ -61,12 +64,16 @@ extraction:
     scene_duration: 30
     num_keyframes: 6
   description:
-    qwen3vl:
+    qwen3vl_2b:
+      scene_max_new_tokens: 384
+    qwen3vl_8b:
       scene_max_new_tokens: 384
     gemini:
       scene_max_new_tokens: 1024
   graph:
-    qwen3vl:
+    qwen3vl_2b:
+      scene_max_new_tokens: 384
+    qwen3vl_8b:
       scene_max_new_tokens: 384
     gemini:
       scene_max_new_tokens: 1024

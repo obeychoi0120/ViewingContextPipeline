@@ -124,11 +124,12 @@ def make_context(root, lengths=(5, 6, 13)):
         "titles_supplement_csv": str(data / "supplement.csv"),
         "videos_dir": str(videos),
     }
-    for name, kind, architecture in (
-        ("qwen3vl", "qwen3_vl", "Qwen3VLForConditionalGeneration"),
-        ("bge", "bert", "BertModel"),
+    for name, directory, kind, architecture in (
+        ("qwen3vl_2b", "Qwen3-VL-2B-Instruct", "qwen3_vl", "Qwen3VLForConditionalGeneration"),
+        ("qwen3vl_8b", "Qwen3-VL-8B-Instruct", "qwen3_vl", "Qwen3VLForConditionalGeneration"),
+        ("bge", "bge", "bert", "BertModel"),
     ):
-        path = root / "models" / name
+        path = root / "models" / directory
         path.mkdir(parents=True)
         write_json(
             path / "config.json",
@@ -148,7 +149,8 @@ def make_context(root, lengths=(5, 6, 13)):
     prompts = root / "prompts"
     prompts.mkdir()
     for name in (
-        "scene_graph_v9.md",
+        "scene_graph_v9_2b.md",
+        "scene_graph_v9_8b.md",
         "scene_description_v3.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
@@ -238,7 +240,7 @@ def extract_scenes(context, monkeypatch):
     generator = FakeGenerator()
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     extract_graph_scenes(
-        context, model="qwen3vl", schema="prompts/scene_graph_v9.md", arm="graph_qwen3vl"
+        context, model="qwen3vl_2b", schema="prompts/scene_graph_v9_2b.md", arm="graph_qwen3vl_2b"
     )
     return generator
 
@@ -250,8 +252,8 @@ def prepare_inputs(context, monkeypatch, *, modules=True):
     generator = extract_scenes(context, monkeypatch)
     description = FakeGenerator("A person cuts a tomato with a knife in a kitchen.")
     monkeypatch.setattr("extraction.steps.qwen_generator", description)
-    extract_description_scenes(context, model="qwen3vl", schema="prompts/scene_description_v3.md",
-                               arm="desc_qwen3vl")
+    extract_description_scenes(context, model="qwen3vl_2b", schema="prompts/scene_description_v3.md",
+                               arm="desc_qwen3vl_2b")
     embed_representations(context, target=TARGETS)
     if modules:
         prepare_module(context, target=["graph-activity"])
@@ -282,7 +284,7 @@ def graph_store(context, *, counts=(2, 1), arm_name="graph-activity"):
                 value["actions"][0].update(actor="f1", target="p1", tool=None, place="unknown")
             records.append(scene_row(item["content_id"], index, value=value))
         write_scene_records(
-            context.scene_arm_dir("graph_qwen3vl") / f"{item['content_id']}.jsonl", records
+            context.scene_arm_dir("graph_qwen3vl_2b") / f"{item['content_id']}.jsonl", records
         )
     texts, arrays, stats = build_input(context, cohort, registry(context.config)[arm_name])
     encoder = FakeEncoder()

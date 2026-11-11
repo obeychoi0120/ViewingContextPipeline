@@ -136,9 +136,9 @@ def test_attach_builds_segments_and_identity_records_them(context, monkeypatch):
             phrases = verbs[index if item["content_id"] == "video_0" else 3]
             value["actions"] = [dict(value["actions"][0], action=p) for p in phrases]
             rows.append(scene_row(item["content_id"], index, value=value))
-        write_scene_records(context.scene_arm_dir("graph_qwen3vl") / f"{item['content_id']}.jsonl", rows)
+        write_scene_records(context.scene_arm_dir("graph_qwen3vl_2b") / f"{item['content_id']}.jsonl", rows)
     texts, arrays, stats = build_input(context, cohort, registry(context.config)["graph-role-activity"])
-    bundle = context.representations_dir / "graph_qwen3vl"
+    bundle = context.representations_dir / "graph_qwen3vl_2b"
     bundle.mkdir(parents=True)
     for name, array in arrays.items():
         np.save(bundle / f"{name}.npy", array)

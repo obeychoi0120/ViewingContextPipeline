@@ -17,15 +17,15 @@ def test_current_config_and_extractor_protocol_load(context):
     assert settings.model.max_sequence_length == 10
     assert context.run_root == context.root / "artifacts" / "runs" / "regression" / "microlens_100k"
     paths = [context.path("data", key) for key in context.data]
-    paths += [context.path("models", key) for key in ("qwen3vl", "bge")]
+    paths += [context.path("models", key) for key in ("qwen3vl_2b", "qwen3vl_8b", "bge")]
     assert all(path.is_relative_to(context.root) for path in paths)
     assert not any(str(path).startswith("/home_nvme") for path in paths)
     assert Path(settings.dataset.pairs_csv).is_file()
 
     config = deepcopy(context.config)
     config.pop("_rec_experiments")
-    config["protocol"]["graph_extractors"] = ["qwen3vl", "gemini"]
-    config["protocol"]["description_extractors"] = ["qwen3vl", "gemini"]
+    config["protocol"]["graph_extractors"] = ["qwen3vl_2b", "qwen3vl_8b", "gemini"]
+    config["protocol"]["description_extractors"] = ["qwen3vl_2b", "qwen3vl_8b", "gemini"]
     _validate_config(config)
 
 
@@ -38,7 +38,7 @@ def test_arm_sources_and_title_policy(context):
     ]
     assert all(arm.uses_title for arm in arms.values())
     assert [feature_source(arm) for arm in arms.values()] == [
-        "metadata", "desc_qwen3vl", *(["graph_qwen3vl"] * 3),
+        "metadata", "desc_qwen3vl_2b", *(["graph_qwen3vl_2b"] * 3),
     ]
     sources = generation_registry(context.config)
     from validation.diagnosis_scenes import scene_arms
@@ -51,7 +51,10 @@ def test_arm_sources_and_title_policy(context):
         assert context.run_root / scene_path == context.scene_arm_dir(arms[name].scene_arm)
         assert context.run_root / failure_path == context.scene_arm_dir(arms[name].scene_arm) / "failures"
     assert all(not arm.uses_title and arm.name == arm.scene_arm for arm in sources.values())
-    assert set(sources) == {"graph_qwen3vl", "desc_qwen3vl", "graph_gemini", "desc_gemini"}
+    assert set(sources) == {
+        "graph_qwen3vl_2b", "desc_qwen3vl_2b", "graph_qwen3vl_8b", "desc_qwen3vl_8b",
+        "graph_gemini", "desc_gemini",
+    }
     assert list(select_arms(context.config, ["graph-activity", "base"])) == ["base", "graph-activity"]
     assert target_set(context.config, ["graph-activity", "base"]) == "base_graph-activity"
     assert RECOMMENDATION_ARM_CONTRACT == "gnn-attn-aggregation/v1"

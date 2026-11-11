@@ -128,7 +128,9 @@ class RunContext:
     def extraction_dir(self, representation: str, model: str, phase: str) -> Path:
         if representation not in {"description", "graph"}:
             raise ValueError(f"invalid representation: {representation}")
-        if model not in {"qwen3vl", "gemini"} or phase != "scenes":
+        from extraction.qwen_config import QWEN_MODELS
+
+        if model not in {*QWEN_MODELS, "gemini"} or phase != "scenes":
             raise ValueError("invalid extraction model or phase")
         from arm_registry import generated_arm
 
@@ -221,7 +223,7 @@ def _validate_protocol(value: dict[str, Any]) -> None:
 
 
 def _validate_extraction(value: dict[str, Any]) -> None:
-    from extraction.qwen_config import qwen_settings
+    from extraction.qwen_config import QWEN_MODELS, qwen_settings
 
     extraction = _require_mapping(value, "extraction")
     try:
@@ -256,7 +258,7 @@ def _validate_extraction(value: dict[str, Any]) -> None:
     generation_keys = {"scene_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
-        expected_models = {"qwen3vl", "gemini"}
+        expected_models = {*QWEN_MODELS, "gemini"}
         if set(models) != expected_models:
             raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
         for model in sorted(expected_models):
@@ -298,10 +300,12 @@ def _validate_models(value: dict[str, Any]) -> None:
         if any(not isinstance(p, str) or not p.strip() for p in data.values()):
             raise ConfigError(f"datasets.{name}.data paths must be non-empty strings")
     models = _require_mapping(value, "models")
-    required = {"qwen3vl", "bge", "gemini"}
+    from extraction.qwen_config import QWEN_MODELS
+
+    local_models = [*QWEN_MODELS, "bge"]
+    required = {*local_models, "gemini"}
     if set(models) != required:
-        raise ConfigError("models must contain exactly qwen3vl, bge and gemini")
-    local_models = ["qwen3vl", "bge"]
+        raise ConfigError(f"models must contain exactly {sorted(required)}")
     for key in local_models:
         if not isinstance(models[key], str) or not models[key].strip():
             raise ConfigError(f"models.{key} must be a non-empty local checkpoint path")
