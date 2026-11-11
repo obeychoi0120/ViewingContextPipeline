@@ -42,6 +42,33 @@ def test_graph_parsing_and_invalid_output_preservation():
     assert record["scene_idx"] == 7
 
 
+def test_named_graph_keeps_roles_missing_from_entities():
+    text = (
+        "[Context]\nmedium: live_action\nformat: narrative\ntopics: hospital visit\n"
+        "[Entities]\nman; wearing coat\n"
+        "[Actions]\nman - removing - sunglasses; None; hospital room\n"
+        "man - holding - sunglasses; none; unknown"
+    )
+    parsed = parse_or_repair_graph(text)
+    assert parsed.error is None and not parsed.warning and parsed.parse_mode == "repaired"
+    assert parsed.graph["entities"] == [
+        {"id": "e1", "name": "man", "attributes": ["wearing coat"]},
+        {"id": "e2", "name": "sunglasses", "attributes": []},
+        {"id": "e3", "name": "hospital room", "attributes": []},
+    ]
+    assert parsed.graph["actions"] == [
+        {"actor": "e1", "action": "removing", "target": "e2", "tool": None, "place": "e3"},
+        {"actor": "e1", "action": "holding", "target": "e2", "tool": None, "place": "unknown"},
+    ]
+    # ID-form output is unchanged: an undeclared ID has no name to keep.
+    legacy = parse_or_repair_graph(
+        "[Context]\nmedium: live_action\nformat: narrative\ntopics: hospital visit\n"
+        "[Entities]\np1: man\n[Actions]\np1 - removing - t9; none; unknown"
+    )
+    assert legacy.graph["entities"] == [{"id": "p1", "name": "man", "attributes": []}]
+    assert legacy.graph["actions"][0]["target"] == "unknown"
+
+
 def test_compact_scene_storage_roundtrip(tmp_path):
     cid = "video"
     path = tmp_path / f"{cid}.jsonl"

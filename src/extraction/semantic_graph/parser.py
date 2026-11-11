@@ -12,7 +12,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v15"
+GRAPH_PARSER_VERSION = "graph-text/v16"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -206,7 +206,11 @@ def _parse_context_actions(text, *, repair):
 
 
 def parse_or_repair_graph(text: str) -> GraphParseResult:
-    """Parse complete Actions graphs; undeclared role IDs become unknown."""
+    """Parse complete Actions graphs.
+
+    Name-form roles missing from [Entities] are kept as attribute-less entities;
+    undeclared ID-form roles still become unknown.
+    """
     raw = str(text or "")
     if not raw.strip():
         return GraphParseResult(None, error="empty VLM output", warning=(MISSING_REQUIRED,))
@@ -231,8 +235,29 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
         return GraphParseResult(None, error=f"graph text repair failed: {exc}", warning=(exc.tag,))
 
 
+def _declare_referenced_names(graph):
+    """Keep name-form roles that [Entities] omitted, as attribute-less entities."""
+    names = {entity["id"] for entity in graph["entities"]}
+    declared = False
+    for action in graph["actions"]:
+        for role in ("actor", "target", "tool", "place"):
+            value = action[role]
+            if value is None or value == "unknown" or value in names:
+                continue
+            token = value.casefold()
+            if token in {"none", "unknown"}:
+                action[role] = None if token == "none" else "unknown"
+            else:
+                graph["entities"].append({"id": value, "name": value, "attributes": []})
+                names.add(value)
+            declared = True
+    return declared
+
+
 def _validated_graph(graph, mode, *, named=False):
+    declared = named and _declare_referenced_names(graph)
     graph, changed = normalize_graph_references(graph)
+    changed = changed or declared
     if named:
         # Resolve exact names before assigning IDs so an undeclared e1 cannot
         # accidentally reference the first generated entity. Keep duplicate
