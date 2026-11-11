@@ -37,11 +37,11 @@ experiments:
 
   - label: graph-activity
     source: graph_qwen3vl
-    modules: [activity_hypergraph]
+    modules: [ASHA]
 
   - label: graph-role-activity
     source: graph_qwen3vl
-    modules: [role_fusion, activity_hypergraph]
+    modules: [REAF, ASHA]
 ```
 
 | 항목 | 설정 방법 |
@@ -50,12 +50,12 @@ experiments:
 | `defaults.readout` | 선택 항목. 생략하면 `mean`. 공통 `source`는 허용하지 않습니다. |
 | `experiments[].label` | 필수 사용자 지정 이름. 소문자 영문으로 시작하고 영문 소문자·숫자·하이픈만 사용하며 중복은 허용하지 않습니다. 모델 구조를 결정하지 않습니다. |
 | `experiments[].source` | 각 실험에 필수. `metadata`, `graph_qwen3vl`, `desc_qwen3vl`, `graph_gemini`, `desc_gemini` 중 선택합니다. |
-| `experiments[].modules` | 생략하면 `[]`. Graph source에서 `role_fusion`, `activity_hypergraph`를 단독 또는 함께 사용할 수 있습니다. |
+| `experiments[].modules` | 생략하면 `[]`. Graph source에서 `REAF`(role_fusion), `ASHA`(activity_hypergraph)를 단독 또는 함께 사용할 수 있습니다. 결과 identity에는 괄호 안의 내부 이름이 기록되며, 내부 이름도 설정에서 계속 읽습니다. |
 | `experiments[].readout` | 개별 값 → 공통값 → `mean` 순서로 적용합니다. 현재 `mean`만 지원합니다. |
 
 제목은 모든 추천 실험에 포함하며 `use_title` 설정은 제공하지 않습니다. `metadata` 실험은 최대 하나이고, label에 관계없이 상대 성능 변화율의 기준이 됩니다. 없으면 상대 변화율을 생략합니다.
 
-실험을 추가하려면 항목을 복사해 새 label과 source·modules를 적고, 삭제하려면 해당 항목을 제거합니다. Role Fusion만 비교하려면 Graph source에 `modules: [role_fusion]`을 지정합니다. 새로운 알고리즘은 코드 구현과 등록이 필요하며, 등록된 모듈의 조합은 YAML에서 변경합니다. 알 수 없는 설정·모듈, 중복 이름·모듈, 잘못된 조합과 빈 실험 목록은 실행 전에 거부합니다.
+실험을 추가하려면 항목을 복사해 새 label과 source·modules를 적고, 삭제하려면 해당 항목을 제거합니다. Role Fusion만 비교하려면 Graph source에 `modules: [REAF]`를 지정합니다. 새로운 알고리즘은 코드 구현과 등록이 필요하며, 등록된 모듈의 조합은 YAML에서 변경합니다. 알 수 없는 설정·모듈, 중복 이름·모듈, 잘못된 조합과 빈 실험 목록은 실행 전에 거부합니다.
 
 **모든 validation 명령은 이 파일의 전체 실험을 목록 순서로 처리합니다.** 일부만 실행하려면 파일의 목록을 해당 실험들로 구성합니다. `--target`, `--experiments`는 지원하지 않습니다. 설정은 명령 시작에 한 번 읽고 worker에도 같은 내용을 전달합니다. 실행 중 파일을 바꾸면 다음 명령부터 적용되므로 단계 사이에도 의도한 구성을 유지하세요.
 
@@ -139,7 +139,7 @@ python -m validation embed-representations --run-id "$RUN_ID" --dataset "$DATASE
 python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET"
 ```
 
-특징은 같은 source에 대해 한 번 준비합니다. `prepare-module`은 `activity_hypergraph`를 사용하는 Graph source의 활동 구간만 준비하고, 해당 모듈이 없으면 정상 종료합니다. 활동 구간 준비는 VLM·BGE를 다시 실행하지 않습니다.
+특징은 같은 source에 대해 한 번 준비합니다. `prepare-module`은 `ASHA`(activity_hypergraph)를 사용하는 Graph source의 활동 구간만 준비하고, 해당 모듈이 없으면 정상 종료합니다. 활동 구간 준비는 VLM·BGE를 다시 실행하지 않습니다.
 
 ### 4. 추천 학습과 결과 진단
 
@@ -195,8 +195,8 @@ GPU는 `CUDA_VISIBLE_DEVICES`로 선택합니다. Qwen은 GPU별 추론 엔진�
 | metadata | 제목 특징 → 투영·Residual MLP → 영상 벡터 |
 | Description | 제목·장면 문단 특징 → 투영·Residual Scene MLP → 장면 평균 |
 | Graph | 제목·Entity·Action·Context 특징 → 투영·장면 내부 평균 → Residual Scene MLP |
-| `role_fusion` | Scene MLP 앞에서 역할별 Entity를 Action에 결합 |
-| `activity_hypergraph` | Scene MLP 뒤에서 장면–활동 구간 전달과 구간 기여를 적용 |
+| `REAF` (`role_fusion`) | Scene MLP 앞에서 역할별 Entity를 Action에 결합 |
+| `ASHA` (`activity_hypergraph`) | Scene MLP 뒤에서 장면–활동 구간 전달과 구간 기여를 적용 |
 | 공통 추천기 | 이력 영상 벡터 → SASRec·User MLP → 후보 영상 벡터와 내적 |
 
 모듈 목록 순서와 무관하게 역할 결합 → Scene MLP → 활동 Hypergraph → 영상 집계 순서로 적용합니다. 장면 내부 Entity ID는 영상 간 공유 노드가 아니며, 장면 간 동일 개체 추적이나 명시적 사건 관계는 구현하지 않습니다. SASRec의 사용자 시청 순서와 영상 내부 장면 관계는 구분합니다.

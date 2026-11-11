@@ -25,6 +25,21 @@ def test_explicit_sources_defaults_modules_and_order():
     assert all(arm.uses_title for arm in arms.values())
 
 
+def test_config_module_names_resolve_to_result_identity_names():
+    def modules(names):
+        value = {"version": 1, "experiments": [
+            {"label": "trial", "source": "graph_qwen3vl", "modules": names}]}
+        return parse_experiments(value)["experiments"][0]["modules"]
+
+    assert modules(["ASHA", "REAF"]) == ["role_fusion", "activity_hypergraph"]
+    assert modules(["REAF"]) == ["role_fusion"]
+    # Earlier names stay readable; an alias and its target are the same module.
+    assert modules(["activity_hypergraph"]) == ["activity_hypergraph"]
+    for duplicate in (["ASHA", "activity_hypergraph"], ["REAF", "REAF"], ["asha"]):
+        with pytest.raises(ValueError):
+            modules(duplicate)
+
+
 def test_invalid_settings_are_rejected_before_outputs(context, monkeypatch):
     value = {"version": 1, "experiments": [{"label": "trial", "source": "graph_qwen3vl"}]}
     invalid = [None, {}, {**value, "version": True}, {**value, "experiments": []},

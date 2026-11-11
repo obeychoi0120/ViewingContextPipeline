@@ -18,8 +18,8 @@ experiments:
 
   - label: graph-activity
     source: graph_qwen3vl
-    modules: [activity_hypergraph]
+    modules: [ASHA]
 
   - label: graph-role-activity
     source: graph_qwen3vl
-    modules: [role_fusion, activity_hypergraph]
+    modules: [REAF, ASHA]

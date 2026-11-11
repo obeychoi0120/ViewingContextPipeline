@@ -11,6 +11,12 @@ MODULE_VERSIONS = {
     "role_fusion": "role-fusion/v1",
     "activity_hypergraph": "segments-v1",
 }
+# Names written in rec_experiments_config.yaml. Results keep the internal names
+# above in their identity, so renaming config entries never invalidates a Run.
+MODULE_ALIASES = {
+    "REAF": "role_fusion",
+    "ASHA": "activity_hypergraph",
+}
 
 
 def parse_experiments(value):
@@ -43,9 +49,12 @@ def parse_experiments(value):
         if not isinstance(source, str) or source not in {"metadata", *sources}:
             raise ValueError(f"{name}: source must explicitly select metadata or a registered extraction source")
         modules = row.get("modules", [])
-        if (not isinstance(modules, list) or any(not isinstance(m, str) for m in modules)
-                or len(set(modules)) != len(modules) or set(modules) - MODULE_VERSIONS.keys()):
-            raise ValueError(f"{name}: modules must be unique supported module names")
+        if not isinstance(modules, list) or any(not isinstance(m, str) for m in modules):
+            raise ValueError(f"{name}: modules must be a list of module names")
+        modules = [MODULE_ALIASES.get(m, m) for m in modules]
+        if len(set(modules)) != len(modules) or set(modules) - MODULE_VERSIONS.keys():
+            raise ValueError(f"{name}: modules must be unique supported module names "
+                             f"({', '.join(MODULE_ALIASES)})")
         if modules and (source == "metadata" or sources[source].representation != "graph"):
             raise ValueError(f"{name}: modules are graph-only")
         readout = row.get("readout", defaults.get("readout", "mean"))
