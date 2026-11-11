@@ -2,6 +2,7 @@
 
 from collections import Counter
 from arm_registry import select_arms
+from extraction.graph_warnings import blocking_tags, is_recovered
 from extraction.scene_storage import read_scene_records
 
 
@@ -27,8 +28,11 @@ def recovery_report(context, *, branches=None, content_ids=None):
                 if "error" in row:
                     modes["failed"] += 1
                     continue
-                if row.get("semantic_warnings"):
+                if blocking_tags(row.get("semantic_warnings")):
                     modes["warning"] += 1
+                    continue
+                if is_recovered(row.get("semantic_warnings")):
+                    modes["recovered"] += 1
                     continue
                 modes[
                     row.get("status", row.get("parse_mode", history.get("repair_mode", "unknown")))

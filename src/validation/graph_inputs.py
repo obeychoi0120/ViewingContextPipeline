@@ -12,6 +12,7 @@ import numpy as np
 
 from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, select_arms
 from artifact_io import fingerprint
+from extraction.graph_warnings import blocking_tags
 from extraction.structured_output import validate_graph_structure, OutputValidationError
 from extraction.scene_storage import read_scene_records, validate_scene_payload, recover_scene_graph
 from model_provenance import local_model_identity
@@ -162,7 +163,7 @@ def build_input(context, cohort, arm):
             if not isinstance(g, dict):
                 reject("raw")
                 continue
-            if warnings:
+            if blocking_tags(warnings):
                 reject("warning", str(warnings))
                 continue
             try:
