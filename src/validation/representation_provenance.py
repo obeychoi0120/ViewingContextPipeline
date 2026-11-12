@@ -34,6 +34,11 @@ def recommendation_identity(context, branch):
 
     experiment_arm = asdict(arm)
     experiment_arm["extensions"] = list(arm.extensions)
+    # Default-segment Arms keep the identity they had before segment variants existed.
+    if arm.segments is None:
+        experiment_arm.pop("segments")
+    else:
+        experiment_arm["segments"] = list(arm.segments)
     identity = {
         "arm_contract": RECOMMENDATION_ARM_CONTRACT,
         "evaluation_contract": dict(EVALUATION_CONTRACT),
@@ -66,6 +71,6 @@ def recommendation_identity(context, branch):
         from validation.graph_inputs import scene_segments_identity
 
         identity["scene_segments"] = scene_segments_identity(
-            context.representations_dir / feature_source(arm)
+            context.representations_dir / feature_source(arm), arm.segments
         )
     return identity

@@ -35,16 +35,19 @@ def parse_experiments(value):
     if not isinstance(experiments, list) or not experiments:
         raise ValueError("experiments must be a non-empty list")
     sources = generation_registry({})
-    names, result, metadata = set(), [], 0
+    names, result = set(), []
     for row in experiments:
-        if not isinstance(row, dict) or set(row) - {"label", "source", "modules", "readout"}:
-            raise ValueError("experiment allows only label, source, modules, readout")
+        if not isinstance(row, dict) or set(row) - {"label", "source", "modules", "readout",
+                                                     "segments", "segments_seed"}:
+            raise ValueError("experiment allows only label, source, modules, readout, segments, segments_seed")
         name = row.get("label")
-        if not isinstance(name, str) or re.fullmatch(r"[a-z][a-z0-9-]*", name) is None:
-            raise ValueError("label must start with a lowercase letter and contain only a-z, 0-9, hyphens")
-        if name in names:
-            raise ValueError(f"duplicate experiment label: {name}")
-        names.add(name)
+        # Labels name result directories: only keep characters that are safe in a path.
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_+.-]*", name) is None:
+            raise ValueError("label must start with a letter or digit and contain only "
+                             "letters, digits, _, +, ., -")
+        if name.lower() in names:
+            raise ValueError(f"duplicate experiment label (case-insensitive): {name}")
+        names.add(name.lower())
         source = row.get("source")
         if not isinstance(source, str) or source not in {"metadata", *sources}:
             raise ValueError(f"{name}: source must explicitly select metadata or a registered extraction source")
@@ -60,12 +63,28 @@ def parse_experiments(value):
         readout = row.get("readout", defaults.get("readout", "mean"))
         if readout != "mean":
             raise ValueError(f"{name}: readout must be mean")
-        metadata += source == "metadata"
-        if metadata > 1:
-            raise ValueError("at most one metadata experiment is allowed")
-        result.append({"label": name, "source": source,
-                       "modules": [m for m in MODULE_VERSIONS if m in modules], "readout": readout})
+        resolved = {"label": name, "source": source,
+                    "modules": [m for m in MODULE_VERSIONS if m in modules], "readout": readout}
+        # Omitted segments keep the default ASHA incidence and add nothing to the resolved row,
+        # so existing experiments keep their identity.
+        if "segments" in row or "segments_seed" in row:
+            resolved["segments"] = parse_segments(name, row, modules)
+        result.append(resolved)
     return {"version": 1, "experiments": result}
+
+
+def parse_segments(name, row, modules):
+    from validation.segment_variants import VARIANTS
+
+    if "activity_hypergraph" not in modules:
+        raise ValueError(f"{name}: segments requires the ASHA module")
+    variant = row.get("segments")
+    if variant not in VARIANTS:
+        raise ValueError(f"{name}: segments must be one of {', '.join(VARIANTS)}")
+    seed = row.get("segments_seed", 0)
+    if type(seed) is not int or seed < 0:
+        raise ValueError(f"{name}: segments_seed must be a non-negative integer")
+    return {"variant": variant, "seed": seed}
 
 
 def load_experiments(context):
@@ -86,6 +105,9 @@ def experiment_definition(arm):
     modules = (["role_fusion"] if arm.role_fusion else [])
     if "segments" in arm.extensions:
         modules.append("activity_hypergraph")
-    return {"label": arm.name, "source": feature_source(arm), "modules": modules,
-            "readout": arm.aggregation,
-            "module_versions": {name: MODULE_VERSIONS[name] for name in modules}}
+    definition = {"label": arm.name, "source": feature_source(arm), "modules": modules,
+                  "readout": arm.aggregation,
+                  "module_versions": {name: MODULE_VERSIONS[name] for name in modules}}
+    if arm.segments is not None:
+        definition["segments"] = {"variant": arm.segments[0], "seed": arm.segments[1]}
+    return definition

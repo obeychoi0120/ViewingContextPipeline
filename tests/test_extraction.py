@@ -313,10 +313,13 @@ def test_truncated_graph_scenes_are_recovered_counted_and_reused(context, monkey
     assert all(row["warning"] == [TRUNCATION_RECOVERED] and len(row["scene_graph"]["actions"]) == 2
                for row in rows)
 
-    # Recovered scenes are final: a rerun generates nothing.
+    # Recovered scenes are final: a rerun generates nothing, also when --arm is omitted.
     generator.tasks.clear()
     extract_graph_scenes(context, **options)
+    extract_graph_scenes(context, model="qwen3vl_2b", schema=options["schema"])
     assert not generator.tasks
+    with pytest.raises(ValueError, match="invalid graph generation arm"):
+        extract_graph_scenes(context, model="qwen3vl_2b", arm="desc_qwen3vl_2b", schema=options["schema"])
 
     # A stored truncation failure is salvaged in place instead of being generated again.
     rows[0] = {"content_id": path.stem, "scene_idx": rows[0]["scene_idx"], "tokens": 384,

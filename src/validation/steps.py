@@ -32,6 +32,7 @@ def embed_representations(context, *, force=False, target=None):
 def prepare_module(context, *, force=False, target=None):
     from arm_registry import feature_source, registry
     from validation.scene_segments import attach
+    from validation.segment_variants import attach_variant
 
     load_experiments(context)
     selected = resolve_target_arms(target, config=context.config)
@@ -42,10 +43,11 @@ def prepare_module(context, *, force=False, target=None):
     for name in selected:
         if "segments" not in arms[name].extensions:
             continue
-        source = feature_source(arms[name])
-        if source not in prepared:
-            prepared[source] = attach(context, name)
-        statistics[name] = {**prepared[source], "arm": name}
+        # Arms over one source share a sidecar per segment variant (None is the default segments).
+        key = (feature_source(arms[name]), arms[name].segments)
+        if key not in prepared:
+            prepared[key] = (attach if key[1] is None else attach_variant)(context, name)
+        statistics[name] = {**prepared[key], "arm": name}
         print(json.dumps(statistics[name], indent=1))
     return {"stage": "prepare-module", "selected_arms": list(selected), "statistics": statistics}
 

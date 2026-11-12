@@ -186,6 +186,19 @@ class RunContext:
         return _resolve(self.root, values.get(key), f"{section}.{key}")
 
 
+def require_generation_config(config: dict[str, Any], representation: str, model: str) -> None:
+    """Fail before a generation step starts if its model was omitted from the config."""
+    missing = [
+        name for name, present in (
+            (f"models.{model}", model in config["models"]),
+            (f"extraction.{representation}.{model}", model in config["extraction"][representation]),
+            ("extraction.gemini", model != "gemini" or "gemini" in config["extraction"]),
+        ) if not present
+    ]
+    if missing:
+        raise ConfigError(f"{model} {representation} generation requires {', '.join(missing)}")
+
+
 def _validate_config(value: dict[str, Any]) -> None:
     expected_keys = {
         "experiment_config_version",
@@ -230,8 +243,10 @@ def _validate_extraction(value: dict[str, Any]) -> None:
         qwen_settings(extraction.get("qwen"))
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
-    if set(extraction) - {"qwen"} != {"visual_evidence", "graph", "description", "gemini"}:
-        raise ConfigError("extraction must contain visual_evidence, graph, description, gemini and optional qwen engine settings")
+    if not {"visual_evidence", "graph", "description"} <= set(extraction) or set(extraction) - {
+        "visual_evidence", "graph", "description", "gemini", "qwen",
+    }:
+        raise ConfigError("extraction must contain visual_evidence, graph, description and optional gemini, qwen settings")
     visual_evidence = _require_mapping(extraction, "visual_evidence")
     if set(visual_evidence) != {"image_resolution", "scene_duration", "num_keyframes"}:
         raise ConfigError(
@@ -258,10 +273,11 @@ def _validate_extraction(value: dict[str, Any]) -> None:
     generation_keys = {"scene_max_new_tokens"}
     for arm in ("graph", "description"):
         models = _require_mapping(extraction, arm)
+        # Unused models may be omitted; a step checks its own model when it runs.
         expected_models = {*QWEN_MODELS, "gemini"}
-        if set(models) != expected_models:
-            raise ConfigError(f"extraction.{arm} must contain exactly {sorted(expected_models)}")
-        for model in sorted(expected_models):
+        if set(models) - expected_models:
+            raise ConfigError(f"extraction.{arm} allows only {sorted(expected_models)}")
+        for model in sorted(models):
             settings = _require_mapping(models, model)
             keys = generation_keys
             if set(settings) != keys:
@@ -272,6 +288,9 @@ def _validate_extraction(value: dict[str, Any]) -> None:
                 setting = settings.get(key)
                 if not isinstance(setting, int) or isinstance(setting, bool) or setting <= 0:
                     raise ConfigError(f"extraction.{arm}.{model}.{key} must be a positive integer")
+    if "gemini" not in extraction:
+        _require_mapping(value, "validation")
+        return
     gemini = _require_mapping(extraction, "gemini")
     if set(gemini) != {"threads"}:
         raise ConfigError("extraction.gemini must contain exactly threads")
@@ -303,12 +322,14 @@ def _validate_models(value: dict[str, Any]) -> None:
     from extraction.qwen_config import QWEN_MODELS
 
     local_models = [*QWEN_MODELS, "bge"]
-    required = {*local_models, "gemini"}
-    if set(models) != required:
-        raise ConfigError(f"models must contain exactly {sorted(required)}")
+    allowed = {*local_models, "gemini"}
+    if "bge" not in models or set(models) - allowed:
+        raise ConfigError(f"models requires bge and allows only {sorted(allowed)}")
     for key in local_models:
-        if not isinstance(models[key], str) or not models[key].strip():
+        if key in models and (not isinstance(models[key], str) or not models[key].strip()):
             raise ConfigError(f"models.{key} must be a non-empty local checkpoint path")
+    if "gemini" not in models:
+        return
     gemini = _require_mapping(models, "gemini")
     gemini_keys = {
         "project_id",

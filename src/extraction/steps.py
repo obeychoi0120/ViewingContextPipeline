@@ -1,7 +1,7 @@
 from __future__ import annotations
 from functools import partial
 from tqdm import tqdm
-from arm_registry import resolve_generation_arm
+from arm_registry import generated_arm, resolve_generation_arm
 from model_provenance import local_model_identity
 from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
@@ -146,9 +146,12 @@ def _extract(
     context, *, representation, model, schema, force=False, arm=None,
     repetition_penalty=None, presence_penalty=None,
 ):
-    if arm is None:
-        raise ValueError("extraction requires --arm")
-    arm = resolve_generation_arm(context.config, arm, representation, model)
+    from pipeline_runtime import require_generation_config
+
+    require_generation_config(context.config, representation, model)
+    # --arm is optional: the step and model already determine the source.
+    arm = (generated_arm(context.config, representation, model) if arm is None
+           else resolve_generation_arm(context.config, arm, representation, model))
     stage = f"extract-{representation}-scenes"
     path = context.prompt_path(schema)
     log_step_start(

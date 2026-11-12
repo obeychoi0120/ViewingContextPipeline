@@ -103,7 +103,7 @@ def validate_checkpoint_family(config: dict) -> None:
 
 
 def validate_checkpoint(model: str, config: dict, path=None) -> None:
-    """Check the family and, when a path is known, that its name states the requested size."""
+    """Check the family and, when a path is known, that its name states no other size."""
     if model not in QWEN_MODEL_SIZES:
         raise ValueError(f"unsupported Qwen model: {model}")
     validate_checkpoint_family(config)
@@ -118,7 +118,9 @@ def validate_checkpoint(model: str, config: dict, path=None) -> None:
     size = QWEN_MODEL_SIZES[model]
     stated = sizes(Path(path).name) | sizes(Path(path).resolve().name)
     stated |= sizes(str(config.get("_name_or_path") or ""))
-    if stated != {size}:
+    # A renamed checkpoint without a size is accepted; only a conflicting size is rejected.
+    if stated - {size}:
         raise ValueError(
-            f"{model} requires a checkpoint whose directory name states {size}: {path}"
+            f"{model} expects {size}, but the checkpoint name states "
+            f"{', '.join(sorted(stated))}: {path}"
         )

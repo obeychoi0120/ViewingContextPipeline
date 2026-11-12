@@ -99,8 +99,10 @@ def test_qwen_sizes_use_separate_sources_and_checkpoints(context):
     assert identities[0]["model"]["path"] != identities[1]["model"]["path"]
     assert identities[1]["settings"]["generation"]["model"] == "qwen3vl_8b"
     config = read_json(context.path("models", "qwen3vl_2b") / "config.json")
-    with pytest.raises(ValueError, match="states 8B"):
+    with pytest.raises(ValueError, match="expects 8B, but the checkpoint name states 2B"):
         validate_checkpoint("qwen3vl_8b", config, context.path("models", "qwen3vl_2b"))
-    with pytest.raises(ValueError, match="states 8B"):
+    # A renamed checkpoint without a stated size is accepted.
+    validate_checkpoint("qwen3vl_8b", config, context.path("models", "qwen3vl_2b").parent / "local-vl")
+    with pytest.raises(ValueError, match="expects 8B"):
         context.config["models"]["qwen3vl_8b"] = context.config["models"]["qwen3vl_2b"]
         prompt_provenance(context, "prompts/scene_graph_v9_8b.md", large)

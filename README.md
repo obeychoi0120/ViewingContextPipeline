@@ -52,6 +52,30 @@ experiments:
 | `experiments[].source` | 각 실험에 필수. `metadata`, `graph_qwen3vl_2b`, `desc_qwen3vl_2b`, `graph_qwen3vl_8b`, `desc_qwen3vl_8b`, `graph_gemini`, `desc_gemini` 중 선택합니다. |
 | `experiments[].modules` | 생략하면 `[]`. Graph source에서 `REAF`(role_fusion), `ASHA`(activity_hypergraph)를 단독 또는 함께 사용할 수 있습니다. 결과 identity에는 괄호 안의 내부 이름이 기록되며, 내부 이름도 설정에서 계속 읽습니다. |
 | `experiments[].readout` | 개별 값 → 공통값 → `mean` 순서로 적용합니다. 현재 `mean`만 지원합니다. |
+| `experiments[].segments` | 선택 항목. `ASHA`가 있는 실험에서만 허용합니다. 생략하면 기본 활동 구간을 사용하고 기존 결과 identity가 바뀌지 않습니다. `action_bag`, `time_window`, `random` 중 하나를 지정하면 모델 구조는 같고 장면–구간 소속만 바꾼 ablation이 됩니다. 아래 표를 참고하세요. |
+| `experiments[].segments_seed` | 선택 항목. 생략하면 `0`. `segments` 변형을 만드는 난수 seed이며 0 이상의 정수입니다. 모델 학습 seed와는 별개입니다. |
+
+`segments` 변형은 기본 활동 구간이 묶는 두 조건, 즉 같은 Action key와 연속된 장면을 분리합니다.
+
+| 값 | 같은 Action | 연속성 | 구성 |
+| --- | --- | --- | --- |
+| (생략) | O | O | 같은 key를 가진 연속 장면 구간 |
+| `action_bag` | O | X | 같은 key를 가진 영상 내 모든 장면을 하나의 구간으로 묶음 |
+| `time_window` | X | O | 기본 구간의 길이를 유지하고, 같은 영상의 연속 장면 구간 중 하나로 위치만 무작위 이동 |
+| `random` | X | X | 영상별 장면 순열을 기본 구간에 적용. 구간 수·크기·장면별 소속 수가 유지됨 |
+
+```yaml
+  - label: HGVRec-bag
+    source: graph_qwen3vl_2b
+    modules: [REAF, ASHA]
+    segments: action_bag
+
+  - label: HGVRec-random-s1
+    source: graph_qwen3vl_2b
+    modules: [REAF, ASHA]
+    segments: random
+    segments_seed: 1
+```
 
 제목은 모든 추천 실험에 포함하며 `use_title` 설정은 제공하지 않습니다. `metadata` 실험은 최대 하나이고, label에 관계없이 상대 성능 변화율의 기준이 됩니다. 없으면 상대 변화율을 생략합니다.
 
@@ -113,7 +137,7 @@ python -m preparation prepare-input-data --run-id "$RUN_ID" --dataset "$DATASET"
 
 ### 2. 필요한 source 추출
 
-YAML에서 사용하는 서로 다른 시각 source만 준비합니다. 추출 명령의 `--arm`은 source 식별자이며 추천 실험의 label과 구분합니다.
+YAML에서 사용하는 서로 다른 시각 source만 준비합니다. 추출 명령의 `--arm`은 source 식별자이며 추천 실험의 label과 구분합니다. source는 추출 명령과 `--model`로 정해지므로 `--arm`은 생략할 수 있고, 넣으면 일치하는지만 확인합니다. `config.yaml`의 `models`·`extraction.graph`·`extraction.description`에는 실제로 쓰는 모델만 두면 되며(`bge`는 필수), Gemini를 쓰지 않으면 `models.gemini`·`extraction.gemini`도 생략할 수 있습니다. 빠진 모델로 추출을 시작하면 그 단계에서 바로 오류를 냅니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_2b.md --model qwen3vl_2b --arm graph_qwen3vl_2b
@@ -143,6 +167,8 @@ python -m validation prepare-module --run-id "$RUN_ID" --dataset "$DATASET"
 ```
 
 특징은 같은 source에 대해 한 번 준비합니다. `prepare-module`은 `ASHA`(activity_hypergraph)를 사용하는 Graph source의 활동 구간만 준비하고, 해당 모듈이 없으면 정상 종료합니다. 활동 구간 준비는 VLM·BGE를 다시 실행하지 않습니다.
+
+`segments` 변형은 기본 `scene_segments.npy` 옆에 `scene_segments.<변형>-s<seed>.npy`로 따로 저장되며 기본 파일은 바꾸지 않습니다. 출력 통계의 `identical_to_default_fraction`(기본 구간과 멤버가 완전히 같은 구간의 비율)과 `mean_best_jaccard_with_default`가 1에 가까우면 그 변형은 기본 ASHA와 사실상 같으므로, 학습 전에 비교할 가치가 있는지 확인하세요.
 
 ### 4. 추천 학습과 결과 진단
 

@@ -46,15 +46,19 @@ def test_invalid_settings_are_rejected_before_outputs(context, monkeypatch):
                {**value, "defaults": {"source": "graph_qwen3vl_2b"}},
                {**value, "defaults": {"readout": "attention"}},
                {**value, "use_title": True}]
-    for change in ({"source": None}, {"label": "../bad"}, {"label": "A"},
-                   {"label": "has_space"}, {"readout": "sum"}, {"source": "missing"},
+    for change in ({"source": None}, {"label": "../bad"}, {"label": ".hidden"}, {"label": ""},
+                   {"label": "has space"}, {"label": "a/b"}, {"readout": "sum"}, {"source": "missing"},
                    {"modules": "role_fusion"}, {"modules": [None]}, {"modules": ["unknown"]},
                    {"modules": ["role_fusion", "role_fusion"]}, {"use_title": True},
                    {"source": "metadata", "modules": ["role_fusion"]},
                    {"source": "desc_qwen3vl_2b", "modules": ["activity_hypergraph"]}):
         invalid.append({**value, "experiments": [{**value["experiments"][0], **change}]})
     invalid += [{**value, "experiments": value["experiments"] * 2},
-                {**value, "experiments": [{"label": n, "source": "metadata"} for n in ["a", "b"]]}]
+                {**value, "experiments": [{"label": n, "source": "graph_qwen3vl_2b"}
+                                          for n in ["HGVRec", "hgvrec"]]}]
+    parse_experiments({**value, "experiments": [{"label": n, "source": "metadata"} for n in ["a", "b"]]})
+    for label in ("HGVRec", "graph+ASHA", "HGVRec_8b", "v1.2"):
+        parse_experiments({**value, "experiments": [{**value["experiments"][0], "label": label}]})
     for item in invalid:
         with pytest.raises(ValueError):
             parse_experiments(item)

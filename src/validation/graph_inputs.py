@@ -389,13 +389,14 @@ def verify(context, cohort, arms):
 
 
 
-def scene_segments_paths(directory):
-    """Activity incidence and metadata paths."""
+def scene_segments_paths(directory, variant=None):
+    """Activity incidence and metadata paths; a (name, seed) variant sits beside the default sidecar."""
     directory = Path(directory)
-    return directory / "scene_segments.npy", directory / "scene_segments.json"
+    stem = "scene_segments" if variant is None else f"scene_segments.{variant[0]}-s{variant[1]}"
+    return directory / f"{stem}.npy", directory / f"{stem}.json"
 
 
-def write_scene_segments(directory, pairs, statistics=None):
+def write_scene_segments(directory, pairs, statistics=None, variant=None):
     """Attach a scene-segment incidence, [bundle scene row, segment id] pairs, to a valid bundle.
 
     Pairs are stored sorted by scene row; a segment holds >= 1 scenes of one video, each scene at most once.
@@ -403,7 +404,7 @@ def write_scene_segments(directory, pairs, statistics=None):
     from validation.graph_context import SCENE_SEGMENTS_VERSION
 
     directory = Path(directory)
-    array_path, meta_path = scene_segments_paths(directory)
+    array_path, meta_path = scene_segments_paths(directory, variant)
     manifest = read_json(directory / "manifest.json")
     video_offsets = np.load(directory / "video_offsets.npy", allow_pickle=False)
     scene_count = int(video_offsets[-1])
@@ -422,18 +423,19 @@ def write_scene_segments(directory, pairs, statistics=None):
         raise ValueError("a segment must stay within one video")
     pairs = pairs[np.lexsort((pairs[:, 1], pairs[:, 0]))]
     np.save(array_path, pairs)
-    write_json(
-        meta_path,
-        {
-            "version": SCENE_SEGMENTS_VERSION,
-            "builder_sha256": segment_builder_hash(),
-            "input_hash": manifest["input_hash"],
-            "pairs": int(len(pairs)),
-            "segments": int(len(ids)),
-            "statistics": statistics,
-            "checksum": checksum(array_path),
-        },
-    )
+    meta = {
+        "version": SCENE_SEGMENTS_VERSION,
+        "builder_sha256": segment_builder_hash(),
+        "input_hash": manifest["input_hash"],
+        "pairs": int(len(pairs)),
+        "segments": int(len(ids)),
+        "statistics": statistics,
+        "checksum": checksum(array_path),
+    }
+    if variant is not None:
+        meta |= {"variant": variant[0], "seed": variant[1],
+                 "variant_builder_sha256": segment_variant_builder_hash()}
+    write_json(meta_path, meta)
 
 
 def segment_builder_hash():
@@ -442,14 +444,20 @@ def segment_builder_hash():
     return checksum(Path(scene_segments.__file__))
 
 
-def scene_segments_identity(directory):
+def segment_variant_builder_hash():
+    from validation import segment_variants
+
+    return checksum(Path(segment_variants.__file__))
+
+
+def scene_segments_identity(directory, variant=None):
     """Validated sidecar metadata; raises if missing, stale or corrupt."""
     from validation.graph_context import SCENE_SEGMENTS_VERSION
 
     directory = Path(directory)
-    array_path, meta_path = scene_segments_paths(directory)
+    array_path, meta_path = scene_segments_paths(directory, variant)
     if not meta_path.is_file():
-        raise ValueError(f"missing scene segments: {directory}; run python -m validation prepare-module")
+        raise ValueError(f"missing scene segments: {meta_path}; run python -m validation prepare-module")
     meta = read_json(meta_path)
     manifest = read_json(directory / "manifest.json")
     if (
@@ -457,15 +465,18 @@ def scene_segments_identity(directory):
         or meta.get("builder_sha256") != segment_builder_hash()
         or meta.get("input_hash") != manifest["input_hash"]
         or checksum(array_path) != meta.get("checksum")
+        or (variant is not None and (
+            [meta.get("variant"), meta.get("seed")] != list(variant)
+            or meta.get("variant_builder_sha256") != segment_variant_builder_hash()))
     ):
-        raise ValueError(f"stale scene segments: {directory}; run python -m validation prepare-module")
+        raise ValueError(f"stale scene segments: {meta_path}; run python -m validation prepare-module")
     return meta
 
 
-def load_scene_segments(directory):
+def load_scene_segments(directory, variant=None):
     """The validated [scene row, segment] pairs of a bundle, sorted by scene row."""
-    scene_segments_identity(directory)
-    pairs = np.load(scene_segments_paths(directory)[0], allow_pickle=False)
+    scene_segments_identity(directory, variant)
+    pairs = np.load(scene_segments_paths(directory, variant)[0], allow_pickle=False)
     contexts = np.load(Path(directory) / "contexts.npy", mmap_mode="r", allow_pickle=False)
     if pairs.ndim != 2 or pairs.shape[1] != 2 or (len(pairs) and pairs[:, 0].max() >= len(contexts)):
         raise ValueError(f"scene segments do not match bundle scenes: {directory}")

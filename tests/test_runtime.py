@@ -29,6 +29,30 @@ def test_current_config_and_extractor_protocol_load(context):
     _validate_config(config)
 
 
+def test_unused_models_may_be_omitted_until_a_step_needs_them(context):
+    from copy import deepcopy
+    from pipeline_runtime import ConfigError, _validate_config, require_generation_config
+
+    config = deepcopy(context.config)
+    config.pop("_rec_experiments")
+    for section in (config["models"], config["extraction"]["graph"], config["extraction"]["description"]):
+        for name in ("qwen3vl_8b", "gemini"):
+            section.pop(name)
+    config["extraction"].pop("gemini")
+    _validate_config(config)
+    require_generation_config(config, "graph", "qwen3vl_2b")
+    for model in ("qwen3vl_8b", "gemini"):
+        with pytest.raises(ConfigError, match=f"models.{model}"):
+            require_generation_config(config, "graph", model)
+    for broken in ({"bge": None}, {"unknown_model": "x"}):
+        changed = deepcopy(config)
+        changed["models"] = {k: v for k, v in changed["models"].items() if k not in broken}
+        if "unknown_model" in broken:
+            changed["models"]["unknown_model"] = "x"
+        with pytest.raises(ConfigError):
+            _validate_config(changed)
+
+
 def test_arm_sources_and_title_policy(context):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, target_set
 

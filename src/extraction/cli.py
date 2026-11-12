@@ -36,14 +36,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--arm",
-        help="Required generation source matching --model and the extraction step.",
+        help="Optional generation source; defaults to the one set by --model and the extraction step.",
     )
     args = parser.parse_args(argv)
     try:
         if args.schema is None:
             raise ValueError(f"{args.step} requires --schema PATH.md")
-        if args.model is None or args.arm is None:
-            raise ValueError("generation requires --model and --arm")
+        if args.model is None:
+            raise ValueError("generation requires --model")
         options = {}
         if args.repetition_penalty is not None:
             if args.model not in LOCAL_MODELS:

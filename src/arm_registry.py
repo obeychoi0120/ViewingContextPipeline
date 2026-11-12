@@ -17,6 +17,8 @@ class Arm:
     role_fusion: bool = False
     # Internal sidecar extensions; public module names live in rec_experiments.
     extensions: tuple[str, ...] = ()
+    # ASHA ablation: (variant, seed) of validation.segment_variants; None is the default segments.
+    segments: tuple[str, int] | None = None
 
 
 GENERATION_MODELS = ("qwen3vl_2b", "qwen3vl_8b", "gemini")
@@ -45,6 +47,7 @@ def registry(config):
             source.model if source else None, True, source.name if source else None,
             row["readout"], "role_fusion" in row["modules"],
             ("segments",) if "activity_hypergraph" in row["modules"] else (),
+            (row["segments"]["variant"], row["segments"]["seed"]) if "segments" in row else None,
         )
     return result
 

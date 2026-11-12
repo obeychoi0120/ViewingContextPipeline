@@ -390,7 +390,7 @@ def new_graph_model(context, config, branch, device):
     if "segments" in arm.extensions:
         from validation.graph_inputs import load_scene_segments
 
-        store.scene_segments = load_scene_segments(store.directory)
+        store.scene_segments = load_scene_segments(store.directory, arm.segments)
     if store["features"].shape[1] != config.encoder.embedding_dim:
         raise ValueError("graph feature dimension mismatch; rerun embed-representations")
     kwargs = dict(

@@ -21,6 +21,16 @@ from visual_sampling import timestamp_stem
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ["base", "graph-activity"]
+TEST_EXPERIMENTS = """version: 1
+defaults:
+  readout: mean
+experiments:
+  - {label: base, source: metadata, modules: []}
+  - {label: description, source: desc_qwen3vl_2b, modules: []}
+  - {label: graph, source: graph_qwen3vl_2b, modules: []}
+  - {label: graph-activity, source: graph_qwen3vl_2b, modules: [ASHA]}
+  - {label: graph-role-activity, source: graph_qwen3vl_2b, modules: [REAF, ASHA]}
+"""
 GRAPH_TEXT = """[Context]
 medium: live_action
 format: demonstration
@@ -154,7 +164,8 @@ def make_context(root, lengths=(5, 6, 13)):
         "scene_description_v3.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
-    (root / "rec_experiments_config.yaml").write_text((ROOT / "rec_experiments_config.yaml").read_text())
+    # A fixed experiment list, not the repository's: that file is git-ignored and edited per Run.
+    (root / "rec_experiments_config.yaml").write_text(TEST_EXPERIMENTS)
     context = RunContext.load("regression", dataset="microlens_100k", root=root)
     from rec_experiments import load_experiments
 
