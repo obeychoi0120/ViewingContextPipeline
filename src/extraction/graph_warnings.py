@@ -1,7 +1,8 @@
 """Scene outcome tags. Errors carry no output; a warning keeps the output.
 
-A usable warning (REPEAT_OCCURRED) is counted separately but the scene is used and never
-generated again. Every other warning excludes the scene and is generated again.
+A usable warning (REPEAT_OCCURRED) is counted separately but the scene is used and is not
+generated again on a rerun; within one run a later penalty pass still retries it. Every other
+warning excludes the scene and is generated again.
 """
 
 PARSE_FAILED = "PARSE_FAILED"  # [Context], [Entities] or [Actions] cannot be separated.

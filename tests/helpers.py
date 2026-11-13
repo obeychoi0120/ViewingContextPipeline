@@ -214,7 +214,8 @@ class FakeGenerator:
                     runtime.current_result = {
                         "output_tokens": 19,
                         "finish_reason": self.finish_reason,
-                        "repeat_stopped": self.repeat_stopped,
+                        "repeat_stopped": self.repeat_stopped(task)
+                        if callable(self.repeat_stopped) else self.repeat_stopped,
                     }
                 try:
                     on_task_complete(task.task_id, text)

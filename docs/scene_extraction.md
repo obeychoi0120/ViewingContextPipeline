@@ -64,10 +64,12 @@ Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `gra
 | 결과 | 조건 | 입력 사용 | 재생성 | 대상 |
 | --- | --- | --- | --- | --- |
 | success | 구조화 성공 | 사용 | 안 함 | Graph, Description |
-| `REPEAT_OCCURRED` | `--stop-repeated-lines`로 앞 줄을 반복하기 직전에 멈췄고, 남은 출력은 구조화 성공 | 사용(집계만 따로) | 안 함 | Graph |
+| `REPEAT_OCCURRED` | `--stop-repeated-lines`로 앞 줄을 반복하기 직전에 멈췄고, 남은 출력은 구조화 성공 | 사용(집계만 따로) | 재실행에서는 안 함, penalty 패스에서는 함(아래) | Graph |
 | `PARSE_FAILED` | Context 세 필드, Entities(또는 `none`), Actions(또는 `none`) 중 하나라도 분리하지 못함 | 제외 | 함 | Graph |
 | `TOKEN_LIMIT` | 출력 토큰 한도에서 잘림. 원문만 저장하고 파싱하지 않음 | 제외 | 함 | Graph, Description |
 | error | 위에 해당하지 않는 생성 실패(예외, API 오류, 빈 출력) | 제외 | 함 | Graph, Description |
+
+`--repetition-penalty`에 값을 여러 개 주면(예: `1.05 1.10 1.15`) 패스마다 success가 아닌 장면만 다음 값으로 다시 생성합니다. `REPEAT_OCCURRED`도 재시도 대상입니다. 재시도에서 success가 나오면 warning 없는 일반 success로 저장하고, `REPEAT_OCCURRED`가 다시 나오면 새 결과로 바꿉니다. 재시도 결과가 사용할 수 없는 결과(`PARSE_FAILED`·`TOKEN_LIMIT`·error)이면 앞 패스의 `REPEAT_OCCURRED` 그래프를 유지하고 다음 패스에서 다시 시도합니다. 마지막 패스의 결과는 재시도하지 않습니다.
 
 정보가 없는 그래프(맥락이 전부 `unknown`/`none`이거나 엔티티·행동이 없음)를 따로 판정하던 `TRASH_INFO`는 `graph-text/v23`에서 없앴습니다. 이런 장면도 구조화에 성공하면 success로 사용합니다.
 

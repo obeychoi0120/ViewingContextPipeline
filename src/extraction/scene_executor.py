@@ -93,6 +93,8 @@ class SceneResults:
         self.rows = {}
         self.contents = {}
         self.completed = set()
+        # REPEAT_OCCURRED records from an earlier pass, kept if a retry does no better.
+        self.repeat_fallback = {}
 
     def tasks(self):
         for visual, scene_rows in self.pending:
@@ -136,7 +138,11 @@ class SceneResults:
                 **provenance,
                 "settings": {**provenance["settings"], "actual_repetition_penalty": self.penalty},
             }
-        if record is not None:
+        fallback = self.repeat_fallback.pop(task_id, None)
+        if fallback is not None and outcome(record) not in USABLE_OUTCOMES:
+            # A retry that is no longer usable does not replace the usable repeated graph.
+            record = fallback
+        elif record is not None:
             record["tokens"] = tokens
             if provenance is not None:
                 record["provenance"] = provenance
@@ -152,8 +158,11 @@ class SceneResults:
         self.completed.add(task_id)
         result = outcome(record)
         self.progress.complete(task_id=task_id, outcome=result)
-        # Warnings and errors are generated again by a later penalty pass; usable outcomes are kept.
-        return result not in USABLE_OUTCOMES
+        if result == "repeat_occurred":
+            self.repeat_fallback[task_id] = record
+        # Everything but success is generated again by a later penalty pass. A retry that
+        # succeeds is stored as a plain success, without the earlier warning.
+        return result != "success"
 
 
 def run_qwen_scenes(

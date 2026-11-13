@@ -331,6 +331,26 @@ def test_qwen_scene_runs_warn_on_token_limit_and_retry_with_penalty(context, mon
     assert [task.repetition_penalty for task in factory.tasks] == [1.0, 1.1]
     assert read_jsonl(directory / f"{visual['content_id']}.jsonl")[0]["warning"] == []
 
+    # REPEAT_OCCURRED is retried too: a later success is stored as a plain success, and a
+    # retry that is no longer usable keeps the earlier repeated graph.
+    def repeat_run(name, text):
+        factory = FakeGenerator(text, repeat_stopped=lambda task: task.repetition_penalty == 1.0)
+        directory = context.scene_arm_dir(name)
+        run_qwen_scenes(
+            [(visual, rows)], scene_dir=directory, model_path=context.path("models", "qwen3vl_2b"),
+            generator_factory=factory, names={}, progress=quiet_progress(), arm="graph",
+            existing_records={}, runtime=QwenRuntime(), penalties=(1.0, 1.1, 1.2),
+        )
+        return factory, read_jsonl(directory / f"{visual['content_id']}.jsonl")[0]
+
+    factory, saved = repeat_run("graph_qwen3vl_2b", GRAPH_TEXT)
+    assert [task.repetition_penalty for task in factory.tasks] == [1.0, 1.1]
+    assert saved["warning"] == [] and isinstance(saved["scene_graph"], dict)
+    factory, saved = repeat_run(
+        "graph_gemini", lambda task: GRAPH_TEXT if task.repetition_penalty == 1.0 else "A man cooks.")
+    assert [task.repetition_penalty for task in factory.tasks] == [1.0, 1.1, 1.2]
+    assert saved["warning"] == [REPEAT_OCCURRED] and isinstance(saved["scene_graph"], dict)
+
 
 def test_scene_sources_extract_reuse_and_retry(context, monkeypatch):
     from helpers import install_doubles
