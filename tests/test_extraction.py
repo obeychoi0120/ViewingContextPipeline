@@ -98,6 +98,36 @@ def test_named_graph_regroups_actions_joined_on_one_line():
     assert parse_or_repair_graph(legacy).warning == (PARSE_FAILED,)
 
 
+def test_named_graph_reads_labelled_optional_tool_and_place():
+    head = ("[Context]\nmedium: animation\nformat: narrative\ntopics: dorm\n"
+            "[Entities]\nwoman\ndoor\nknife\nroom\n[Actions]\n")
+
+    def actions(text, mode="native"):
+        parsed = parse_or_repair_graph(head + text)
+        assert parsed.error is None and parsed.parse_mode == mode, parsed.error
+        return [tuple(a.values()) for a in parsed.graph["actions"]]
+
+    # e1 woman, e2 door, e3 knife, e4 room. An omitted tool is none, an omitted place unknown.
+    assert actions("woman - cutting - door; tool: knife; place: room\nwoman - pushing - door; place: room\n"
+                   "woman - prying - door; tool: knife\nwoman - leaving - none") == [
+        ("e1", "cutting", "e2", "e3", "e4"), ("e1", "pushing", "e2", None, "e4"),
+        ("e1", "prying", "e2", "e3", "unknown"), ("e1", "leaving", None, None, "unknown")]
+    assert actions("woman - cutting - door; place: room; tool: knife\nwoman - pushing - door; tool: none") == [
+        ("e1", "cutting", "e2", "e3", "e4"), ("e1", "pushing", "e2", None, "unknown")]
+    # Positional slots still parse, and loose labels are repaired.
+    assert actions("woman - cutting - door; knife; room") == [("e1", "cutting", "e2", "e3", "e4")]
+    assert actions("woman - cutting - door; Tool : knife; room\nwoman - pushing - door; place:",
+                   "repaired") == [("e1", "cutting", "e2", "e3", "e4"), ("e1", "pushing", "e2", None, "unknown")]
+    assert actions("woman - cutting - door; tool: knife; woman - pushing - door; place: room", "repaired") == [
+        ("e1", "cutting", "e2", "e3", "unknown"), ("e1", "pushing", "e2", None, "e4")]
+    for ambiguous in ("woman - cutting - door; tool: knife; tool: room",
+                      "woman - cutting - door; tool: knife; place: room; door", "place: room"):
+        assert parse_or_repair_graph(head + ambiguous).warning == (PARSE_FAILED,)
+    # ID-form output does not take labelled slots.
+    legacy = head.replace("woman\ndoor\nknife\nroom", "p1: woman\nf1: door\nt1: knife")
+    assert parse_or_repair_graph(legacy + "p1 - cutting - f1; tool: t1").warning == (PARSE_FAILED,)
+
+
 def test_named_graph_repairs_missing_context_header_and_stray_none():
     body = "medium: animation\nformat: narrative\ntopics: dorm\n[Entities]\n{entities}\n[Actions]\n{actions}"
     parsed = parse_or_repair_graph(body.format(entities="woman; white blouse\ndoor",
@@ -352,3 +382,16 @@ def test_truncated_graph_scenes_are_recovered_counted_and_reused(context, monkey
     assert not generator.tasks
     assert read_jsonl(path)[0]["warning"] == [TRUNCATION_RECOVERED]
     assert read_json(directory / "generation_stats.json")["recovered"] == stats["total"]
+
+
+@pytest.mark.parametrize("name", ["v9_core", "v9_extended", "v10_core", "v10_extended"])
+def test_current_prompt_examples_parse_natively(name):
+    from pathlib import Path
+
+    text = (Path(__file__).parents[1] / "prompts" / f"scene_graph_{name}.md").read_text(encoding="utf-8")
+    blocks = [block for block in text.split("\n\n") if "\n[Context]\nmedium: " in "\n" + block]
+    layout, *examples = [block[block.index("[Context]"):] for block in blocks]
+    assert "medium: value" in layout and len(examples) >= 3
+    for example in examples:
+        parsed = parse_or_repair_graph(example)
+        assert parsed.error is None and parsed.parse_mode == "native", (example, parsed.error)

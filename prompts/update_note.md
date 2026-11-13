@@ -10,7 +10,42 @@
 
 대상(최신순): [v10_extended](../prompts/scene_graph_v10_extended.md) · [v10_core](../prompts/scene_graph_v10_core.md) → [v9_extended](../prompts/scene_graph_v9_extended.md) · [v9_core](../prompts/scene_graph_v9_core.md) → [v9(삭제됨)](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
 
-**개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증).**
+**개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증) → tool·place 라벨화와 줄 배치 템플릿(v9·v10, 효과 미검증).**
+
+### 2026-11-13: v9·v10의 tool·place 라벨화와 줄 배치 템플릿
+
+[v9_core](../prompts/scene_graph_v9_core.md), [v9_extended](../prompts/scene_graph_v9_extended.md), [v10_core](../prompts/scene_graph_v10_core.md), [v10_extended](../prompts/scene_graph_v10_extended.md) 네 파일을 같은 파일에서 수정했습니다. 버전 번호는 올리지 않았으므로 같은 이름이라도 이 날짜 이전과 이후는 다른 프롬프트입니다(프롬프트 해시가 바뀝니다). extended가 core 전문으로 시작하는 구조는 그대로입니다.
+
+**이유.** 행동 줄의 `; knife; kitchen`은 위치만으로 tool과 place를 구분해 직관적이지 않고, 해당 없는 칸도 `none`·`unknown`으로 채워야 했습니다. 또 출력 형식을 “medium: value, format: value, topics: value; value”처럼 한 문장으로 설명해, 필드마다 줄을 바꿔야 한다는 점이 형식 설명에서 드러나지 않았습니다.
+
+**행동 줄 형식.**
+
+| | 이전 | 현재 |
+| --- | --- | --- |
+| tool·place 있음 | `chef - cutting - sea urchin; knife; kitchen` | `chef - cutting - sea urchin; tool: knife; place: kitchen` |
+| tool만 있음 | `man1 - sanding - wooden board; sanding block; unknown` | `man1 - sanding - wooden board; tool: sanding block` |
+| 둘 다 없음 | `man2 - carrying - wooden board; none; unknown` | `man2 - carrying - wooden board` |
+| target 없음 | `enemy character - falling - none; none; rooftop` | `enemy character - falling - none; place: rooftop` |
+
+- actor·action·target은 항상 쓰고, target이 없으면 이전처럼 `none`을 씁니다.
+- `tool:`과 `place:`는 해당할 때만 이 순서로 붙이고, 아니면 칸을 생략합니다. 생략한 tool은 `none`, 생략한 place는 `unknown`으로 저장되어 이전 기본값과 같습니다.
+- 행동 줄에 번호(`action1:`)는 붙이지 않습니다. R10의 2B가 이름의 38%에 번호를 붙이고 반복 루프를 보인 점을 근거로 한 판단이며, 번호 유무를 비교한 실험은 없습니다.
+- 콜론은 medium·format·topics·tool·place 뒤에만 쓴다는 문장을 v9에 추가했습니다.
+
+**줄 배치.** `[Output Format]`의 한 문장 설명을 실제 줄 배치를 그대로 보여 주는 템플릿으로 바꾸고, “섹션 헤더·context 필드·엔티티·행동마다 줄을 바꾸고 한 줄에 두 개를 쓰지 않는다”는 문장을 추가했습니다. 섹션 사이에 빈 줄은 넣지 않습니다(예시와 동일).
+
+**함께 바뀐 문장.** v9는 tool·place 역할 정의에 “없으면 칸을 생략”을 넣고 “The place default is unknown. Defaults are not observations.”를 “생략한 tool은 none, 생략한 place는 unknown; 칸을 채우려고 쓰지 않는다”로 바꿨습니다. v10은 “Every action line has all five slots”를 뺐습니다. 예시의 행동 줄은 모두 새 형식입니다.
+
+**파서 변경(`graph-text/v20`, 이름 형식만).**
+
+- 엄격 파싱이 `; tool: 이름`, `; place: 이름`을 읽습니다. 각각 생략할 수 있고 순서가 바뀌어도 읽습니다. 같은 라벨이 두 번 나오거나 값이 비면 엄격 파싱은 실패합니다.
+- 이전의 위치 형식(`; knife; kitchen`)도 그대로 읽으므로 기존 v9 생성분의 파싱 결과는 바뀌지 않습니다. 다만 tool·place 없이 `actor - action - target`만 쓴 줄은 이전에는 `repaired`였고 이제 `native`입니다(그래프 내용은 같습니다).
+- 복구 파싱은 `Tool : knife`처럼 대소문자·공백이 다른 라벨, 값이 빈 라벨(기본값 처리), 라벨과 위치 표기가 섞인 줄, 세미콜론으로 이어 쓴 라벨 행동을 읽습니다.
+- ID 형식(v8)은 라벨을 받지 않으며 동작이 바뀌지 않습니다.
+
+**검증한 것.** 네 프롬프트의 예시가 모두 `native`로 파싱되는지와 위 파서 동작을 테스트에 추가했고, 전체 테스트 91개가 통과했습니다.
+
+**미검증.** 이 형식으로는 한 장면도 생성하지 않았습니다. 라벨이 tool·place 혼동을 줄이는지, 칸 생략이 8B의 place 과다 기입(R10에서 86%)을 줄이는지, 템플릿의 `value`·`name` 자리표시를 소형 모델이 그대로 베끼지 않는지, 줄 배치 템플릿이 줄바꿈 오류를 줄이는지는 모두 확인되지 않았습니다. 칸 수가 줄마다 달라지는 것이 2B의 형식 안정성에 주는 영향도 확인이 필요합니다.
 
 ### 2026-11-13: 파일 이름 변경 (_2b → _core, _8b → _extended)
 

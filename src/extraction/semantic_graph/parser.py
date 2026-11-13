@@ -12,12 +12,16 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v19"
+GRAPH_PARSER_VERSION = "graph-text/v20"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
 _DELIMITER = re.compile(r"-+>|=+>|→|⇒|－＞|(?<=\s)[-–—](?=\s)")
 _ACTION_MARK = re.compile(r"[<>=→⇒←↔⇐⟵⟷⟺－＞]|(?<=\s)[-–—](?=\s)")
+# Name-form tool and place slots are labelled and optional; these are the values of an omitted slot.
+_SLOT_DEFAULTS = {"tool": "none", "place": "unknown"}
+_SLOT = re.compile(r"(tool|place):\s*(.*)")
+_LOOSE_SLOT = re.compile(r"(tool|place)\s*[:：]\s*(.*)", re.IGNORECASE)
 
 
 class GraphTextError(ValueError):
@@ -97,6 +101,13 @@ def _action_endpoints(line, *, named=False):
 
 def _action(line, *, repair, named=False):
     parts = re.split(r"[;；]" if repair else ";", line)
+    labels = [_SLOT.fullmatch(part.strip()) for part in parts[1:]]
+    if named and not repair and len(parts) <= 3 and all(labels):
+        # Labelled slots: "; tool: name; place: name", each optional.
+        slots = dict(_SLOT_DEFAULTS, **{match[1]: match[2] for match in labels})
+        if len({match[1] for match in labels}) != len(labels) or not all(slots.values()):
+            raise GraphTextError("duplicate or empty tool/place slot")
+        parts = [parts[0], slots["tool"], slots["place"]]
     if len(parts) != 3:
         raise GraphTextError("expected actor - action - target; tool; place")
     body, tool, place = (part.strip() for part in parts)
@@ -129,8 +140,9 @@ def _split_joined_actions(rows):
     """Regroup name-form actions that were joined with semicolons or lost slots.
 
     A piece containing an action delimiter starts an action; the pieces after it
-    are its tool and place. Missing slots take the prompt defaults (tool none,
-    place unknown), and "actor - action" keeps the action with an unknown target.
+    are its tool and place, labelled ("tool: knife") or in that order. Missing
+    slots take the prompt defaults (tool none, place unknown), and
+    "actor - action" keeps the action with an unknown target.
     """
     actions = []
     for row in rows:
@@ -143,13 +155,16 @@ def _split_joined_actions(rows):
             if delimiters:
                 if delimiters > 2:
                     raise GraphTextError("expected actor - action - target; tool; place")
-                current = [piece if delimiters == 2 else f"{piece} - unknown"]
+                current = {"body": piece if delimiters == 2 else f"{piece} - unknown"}
                 actions.append(current)
-            elif current is None or len(current) == 3 or not piece:
+                continue
+            label = _LOOSE_SLOT.fullmatch(piece)
+            slot = label[1].lower() if label else next((s for s in _SLOT_DEFAULTS if s not in (current or {})), None)
+            if current is None or not piece or slot is None or slot in current:
                 raise GraphTextError("expected actor - action - target; tool; place")
-            else:
-                current.append(piece)
-    return ["; ".join([*action, *("none", "unknown")[len(action) - 1:]]) for action in actions]
+            current[slot] = (label[2] if label else piece) or _SLOT_DEFAULTS[slot]
+    return ["; ".join([action["body"], *(action.get(slot, default) for slot, default in _SLOT_DEFAULTS.items())])
+            for action in actions]
 
 
 # Largest per-scene ceilings of the current prompts (scene_graph_v9_extended).

@@ -23,21 +23,32 @@ Use unknown when uncertain and topics: none when no topic is supported. Topics d
 Select at most 4 distinct, supported actions. Use concise active phrases that preserve the distinguishing technique and who acts on whom. Roles are specific to each action:
 - actor: who or what performs the action.
 - target: what is acted on or transferred, not merely its holder. For transfers, keep the transferred object as target.
-- tool: the means actor actually uses for this action, not a nearby or merely held object. A knife is tool when cutting, target when washed. Use none when no tool is used; the actor is never the tool.
-- place: where the action occurs, not its destination. Do not infer a kitchen from a knife or repeat the same place in attributes.
+- tool: the means actor actually uses for this action, not a nearby or merely held object. A knife is tool when cutting, target when washed. Leave the tool slot out when no tool is used; the actor is never the tool.
+- place: where the action occurs, not its destination. Do not infer a kitchen from a knife or repeat the same place in attributes. Leave the place slot out when no specific place is visible.
 
 Each role is one entity name copied exactly from [Entities], including spaces and any number, or none, or unknown. Do not use a synonym, a longer phrase, or attributes. Declare every actor, target, tool, and place in [Entities] before using it in an action.
 - none: the role is absent or inapplicable.
-- unknown: a relevant value cannot be identified or faithfully represented. The place default is unknown. Defaults are not observations.
+- unknown: a relevant value cannot be identified or faithfully represented.
+- A tool slot left out means none and a place slot left out means unknown. Never write a slot just to fill it.
 - At least actor or target must reference a declared entity; unknown does not count. A visibly supported group can be one entity; otherwise use unknown for unrepresentable multiple participants, not name lists or duplicate actions.
 - If the action itself is uncertain, omit it. Empty actions are valid for explanations, comparisons, or static scenes. Never create links just to connect entities. Preserve supported order without inferring causality.
 
 [Output Format]
-Output [Context], [Entities], [Actions] in that order.
-Context: exactly three lines, medium: value, format: value, topics: value; value.
-Entities: one per line, name; attribute; attribute. Omit unnecessary attributes. Do not add IDs or colons.
-Actions: one per line, actor - action - target; tool; place. Write all five slots on every line; use none or unknown as defined above, not empty slots. Never put two actions on one line or join actions with semicolons.
-Only space-dash-space ( - ) separates actor, action, and target. Do not use space-dash-space, semicolons, or colons inside names or other fields; internal word hyphens are allowed. Semicolons separate attributes, topics, and the last two action slots.
+Output [Context], [Entities], [Actions] in that order, in exactly this layout:
+
+[Context]
+medium: value
+format: value
+topics: value; value
+[Entities]
+name; attribute; attribute
+[Actions]
+actor - action - target; tool: name; place: name
+
+Start a new line after every section header, every context field, every entity, and every action. Never put two fields, two entities, or two actions on one line.
+Entities: omit unnecessary attributes. Do not add IDs or colons.
+Actions: always write actor, action, and target, using none or unknown as defined above. Add tool: and then place: only when they apply; otherwise leave the slot out. Never join actions with semicolons.
+Only space-dash-space ( - ) separates actor, action, and target. Do not use space-dash-space, semicolons, or colons inside names or other fields; internal word hyphens are allowed. Semicolons separate attributes, topics, and the tool and place slots. Colons follow only medium, format, topics, tool, and place.
 Write none alone for empty Entities or Actions. No JSON, bullets, code fences, extra sections, or commentary. Stop after Actions. All limits are ceilings, not quotas.
 
 [Examples]
@@ -54,7 +65,7 @@ sea urchin
 knife
 kitchen
 [Actions]
-chef - cutting - sea urchin; knife; kitchen
+chef - cutting - sea urchin; tool: knife; place: kitchen
 
 Two men are in an unclear place; one sands a wooden board with a sanding block, then the other carries the board away:
 [Context]
@@ -67,8 +78,8 @@ man2; wearing cap
 wooden board
 sanding block
 [Actions]
-man1 - sanding - wooden board; sanding block; unknown
-man2 - carrying - wooden board; none; unknown
+man1 - sanding - wooden board; tool: sanding block
+man2 - carrying - wooden board
 
 Close-ups compare heavy and light makeup on the same face; no application is shown:
 [Context]

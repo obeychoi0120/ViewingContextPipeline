@@ -21,7 +21,7 @@ Graph는 `graph_qwen3vl_2b`·`graph_qwen3vl_8b`·`graph_gemini`, Description은 
 | --- | --- |
 | Context | 표현 매체 `medium`, 형식 `format`, 주제 `topics` |
 | Entities | 중요한 개체의 이름·속성 |
-| Actions | `actor - action - target; tool; place`의 역할 구조 |
+| Actions | `actor - action - target; tool: 이름; place: 이름`의 역할 구조 (tool·place는 해당할 때만) |
 
 다음은 출력 형식의 예시이며 실제 Run 결과가 아닙니다.
 
@@ -36,11 +36,11 @@ tomato
 knife
 kitchen
 [Actions]
-person - cutting - tomato; knife; kitchen
+person - cutting - tomato; tool: knife; place: kitchen
 [End]
 ```
 
-역할에는 선언한 개체 이름을 공백·번호까지 정확히 복사하거나 `none`(부재·비해당), `unknown`(식별 불가)을 사용합니다. 같은 이름의 서로 다른 개체를 구분할 때만 `person1`, `person2` 같은 번호를 붙입니다. Actions가 없으면 `none`을 씁니다.
+역할에는 선언한 개체 이름을 공백·번호까지 정확히 복사하거나 `none`(부재·비해당), `unknown`(식별 불가)을 사용합니다. 같은 이름의 서로 다른 개체를 구분할 때만 `person1`, `person2` 같은 번호를 붙입니다. Actions가 없으면 `none`을 씁니다. `tool:`과 `place:`는 생략할 수 있으며, 생략한 tool은 `none`, 생략한 place는 `unknown`으로 저장합니다. 라벨 없이 `; knife; kitchen`처럼 위치로 쓴 이전 형식도 읽습니다.
 
 파서는 장면 안에서 이름을 내부 ID로 바꿉니다. 예를 들어 `person → e1`, `tomato → e2`로 변환하고 역할 참조도 연결합니다. `none`은 `null`, `unknown`은 문자열로 저장합니다. 미선언 역할 참조는 `unknown`으로 정규화하며 개체를 추측해 추가하지 않습니다.
 

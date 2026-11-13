@@ -17,17 +17,28 @@ Up to 6 entities: the main participants and the targets and tools their actions 
 - Add a place only when the frames show a specific location, such as kitchen.
 
 [Actions]
-Up to 4 actions, one per line: actor - action - target; tool; place.
+Up to 4 actions, one per line: actor - action - target; tool: name; place: name.
 - actor performs the action. target is who or what it is done to. tool is what the actor uses. place is the specific location.
-- Each slot is a name copied exactly from [Entities], or none, or unknown. Use none when there is no target or no tool, and unknown when the place is unclear.
+- actor and target are names copied exactly from [Entities], or unknown. Write none when there is no target.
+- Add tool: and then place: only when the frames show them, each with a name copied exactly from [Entities]. Otherwise leave the slot out.
 - Write what someone does to an object or to another participant. Posture and expression are attributes, not actions.
 - If no action is supported, write none.
 
 [Output Format]
-The first line is [Context]. Then [Entities], then [Actions], each header on its own line. Stop after Actions.
-Context is three lines: medium: value, format: value, topics: value; value.
+Use exactly this layout. The first line is [Context]. Stop after Actions.
+
+[Context]
+medium: value
+format: value
+topics: value; value
+[Entities]
+name; attribute; attribute
+[Actions]
+actor - action - target; tool: name; place: name
+
+Start a new line after every section header, every context field, every entity, and every action. Never put two fields, two entities, or two actions on one line.
 Separate topics, attributes, and the tool and place slots with semicolons. Use space-dash-space ( - ) only between actor, action, and target. No colons or IDs in entity lines.
-Every action line has all five slots and holds exactly one action. Write none alone when Entities or Actions is empty. No JSON, bullets, or commentary. Limits are ceilings, not quotas.
+Every action line holds exactly one action. Write none alone when Entities or Actions is empty. No JSON, bullets, or commentary. Limits are ceilings, not quotas.
 
 [Examples]
 Examples illustrate format, not content to copy.
@@ -43,7 +54,7 @@ sea urchin
 knife
 kitchen
 [Actions]
-chef - cutting - sea urchin; knife; kitchen
+chef - cutting - sea urchin; tool: knife; place: kitchen
 
 Two men are in an unclear place; one sands a wooden board with a sanding block, then the other carries the board away:
 [Context]
@@ -56,8 +67,8 @@ man2; wearing cap
 wooden board
 sanding block
 [Actions]
-man1 - sanding - wooden board; sanding block; unknown
-man2 - carrying - wooden board; none; unknown
+man1 - sanding - wooden board; tool: sanding block
+man2 - carrying - wooden board
 
 Close-ups compare heavy and light makeup on the same face; no application is shown:
 [Context]
