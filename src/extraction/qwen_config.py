@@ -68,7 +68,7 @@ def validate_presence_penalty(value: float) -> float:
 
 def generation_settings(
     model: str, *, representation: str,
-    repetition_penalty: float | None = None,
+    repetition_penalty: float | list[float] | None = None,
     presence_penalty: float | None = None,
     stop_repeated_lines: bool = False,
 ) -> dict[str, Any]:
@@ -85,7 +85,8 @@ def generation_settings(
         raise ValueError("stopping before a repeated line is supported only for Graph scenes")
     penalty = 1.05 if representation == "graph" else 1.0
     if repetition_penalty is not None:
-        penalty = penalty_schedule([repetition_penalty])[0]
+        # A schedule starts at its first value; later passes are set per request.
+        penalty = penalty_schedule(repetition_penalty)[0]
     return {
         "do_sample": False,
         "temperature": 0.0,

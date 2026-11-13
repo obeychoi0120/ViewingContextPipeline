@@ -68,6 +68,29 @@ def test_qwen_requests_sampling_and_context_overflow(context, monkeypatch):
     assert calls == [384]
 
 
+def test_cli_repetition_penalty_schedule(context, monkeypatch):
+    from extraction import cli
+
+    calls = []
+    monkeypatch.setattr(cli.RunContext, "load", lambda *a, **k: context)
+    monkeypatch.setitem(cli.STEP_HANDLERS, "extract-graph-scenes",
+                        lambda ctx, **options: calls.append(options) or {})
+    base = ["extract-graph-scenes", "--run-id", "r", "--dataset", "microlens_100k",
+            "--schema", "prompts/scene_graph_v9_core.md", "--model", "qwen3vl_2b"]
+    # One value keeps the single-penalty form; several values become a pass schedule.
+    assert cli.main([*base, "--repetition-penalty", "1.05"]) == 0
+    assert cli.main([*base, "--repetition-penalty", "1.05", "1.10", "1.15", "--stop-repeated-lines"]) == 0
+    assert [call["repetition_penalty"] for call in calls] == [1.05, [1.05, 1.1, 1.15]]
+    assert cli.main([*base, "--repetition-penalty", "1.05", "2.5"]) == 1
+
+    arm = generation_registry(context.config)["graph_qwen3vl_2b"]
+    single = prompt_provenance(context, "prompts/scene_graph_v9_core.md", arm, repetition_penalty=1.05)
+    schedule = prompt_provenance(context, "prompts/scene_graph_v9_core.md", arm, repetition_penalty=[1.05, 1.1])
+    assert single["settings"]["repetition_penalty"] == [1.05]
+    assert schedule["settings"]["repetition_penalty"] == [1.05, 1.1]
+    assert schedule["settings"]["generation"]["repetition_penalty"] == 1.05
+
+
 def test_qwen_identity_sizes_and_prompts(context):
     from pathlib import Path
     from extraction.qwen_config import validate_checkpoint

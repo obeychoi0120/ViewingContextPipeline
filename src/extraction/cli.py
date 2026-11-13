@@ -27,7 +27,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--repetition-penalty",
         type=float,
-        help="Local vLLM generated-token repetition penalty in [1, 2]. Defaults: Graph scenes 1.05; Description scenes 1.0.",
+        nargs="+",
+        help="Local vLLM generated-token repetition penalty in [1, 2]. Defaults: Graph scenes 1.05; "
+        "Description scenes 1.0. Several values run one pass each: the first pass covers every "
+        "pending scene and each later pass retries the scenes that did not succeed.",
     )
     parser.add_argument(
         "--presence-penalty",
@@ -54,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.repetition_penalty is not None:
             if args.model not in LOCAL_MODELS:
                 raise ValueError("--repetition-penalty is supported only for local vLLM models")
-            options["repetition_penalty"] = penalty_schedule([args.repetition_penalty])[0]
+            schedule = penalty_schedule(args.repetition_penalty)
+            # One value keeps the single-penalty form so existing generation identities match.
+            options["repetition_penalty"] = schedule[0] if len(schedule) == 1 else schedule
         if args.presence_penalty is not None:
             if args.model not in LOCAL_MODELS:
                 raise ValueError("--presence-penalty is supported only for local vLLM models")

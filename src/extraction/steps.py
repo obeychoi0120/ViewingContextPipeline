@@ -7,7 +7,9 @@ from extraction.backends import GeminiWorkerPool
 from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
-from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
+from extraction.qwen_config import (
+    QWEN_MODELS, generation_settings, penalty_schedule, qwen_settings, validate_checkpoint,
+)
 from extraction.graph_warnings import DESCRIPTION_OUTCOMES, OUTCOMES, needs_generation, outcome
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
@@ -63,7 +65,10 @@ def prompt_provenance(
             backend="vllm",
             qwen=qwen_settings(extraction.get("qwen")),
             generation=generation,
-            repetition_penalty=[generation["repetition_penalty"]],
+            repetition_penalty=(
+                penalty_schedule(repetition_penalty) if repetition_penalty is not None
+                else [generation["repetition_penalty"]]
+            ),
         )
     else:
         settings["backend"] = "gemini"

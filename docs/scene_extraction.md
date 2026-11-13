@@ -92,10 +92,10 @@ Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, 
 | 옵션 | 허용 범위 | 적용 |
 | --- | --- | --- |
 | `--presence-penalty FLOAT` | 유한한 수 −2.0~2.0 | 해당 실행의 presence penalty. `0`은 비활성화 |
-| `--repetition-penalty FLOAT` | 유한한 수 1.0~2.0 | 생성 토큰 전용 repetition penalty |
+| `--repetition-penalty FLOAT [FLOAT ...]` | 유한한 수 1.0~2.0, 하나 이상 | 생성 토큰 전용 repetition penalty. 여러 값이면 값마다 패스를 하나씩 돌며, 첫 패스는 대상 장면 전체를, 다음 패스는 success가 아닌 장면만 생성 |
 | `--stop-repeated-lines` | 플래그(기본 꺼짐), 로컬 Qwen의 `extract-graph-scenes`만 | 앞의 완성된 줄과 토큰 단위로 같은 줄을 쓰기 직전에 출력을 끝내고, 마지막 중복 줄은 버림. 해당 장면은 `REPEAT_OCCURRED` |
 
-Repetition penalty는 전용 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용하지 않습니다. 최초 요청·구조 복구·재실행에 같은 옵션값을 사용하고 증가 schedule은 적용하지 않습니다. 예를 들어 Graph에 이전 기본값인 presence penalty 1.5를 적용하려면 다음과 같이 실행합니다.
+Repetition penalty는 전용 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용하지 않습니다. 값을 하나만 주면 최초 요청·구조 복구·재실행에 같은 값을 쓰고, 여러 개 주면 적은 순서대로 패스마다 하나씩 씁니다(자동 증가는 없습니다). `generation_identity.json`에는 첫 패스 값이 `generation.repetition_penalty`로, 전체 목록이 `repetition_penalty`로 기록됩니다. 예를 들어 Graph에 이전 기본값인 presence penalty 1.5를 적용하려면 다음과 같이 실행합니다.
 
 ```bash
 python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_core.md --model qwen3vl_2b --arm graph_qwen3vl_2b --presence-penalty 1.5
