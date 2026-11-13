@@ -3,6 +3,7 @@
 from vllm.v1.sample.logits_processor import LogitsProcessor
 
 from extraction.backends.qwen_penalty import GeneratedTokenPenalty, GeneratedTokenPenaltyV2
+from extraction.backends.qwen_repeat import RepeatedLineStop, RepeatedLineStopV2
 
 try:
     from vllm.v1.worker.gpu.sample.logits_processor.interface import (
@@ -28,6 +29,32 @@ else:
             self.v2 = None
             if is_pin_memory is None:
                 self.v2 = GeneratedTokenPenaltyV2(vllm_config, device)
+            else:
+                super().__init__(vllm_config, device, is_pin_memory)
+
+        def add_request(self, req_idx, sampling_params):
+            return self.v2.add_request(req_idx, sampling_params)
+
+        def apply_staged_writes(self):
+            self.v2.apply_staged_writes()
+
+        def apply(self, logits, ctx=None):
+            if self.v2 is not None:
+                return self.v2.apply(logits, ctx)
+            return super().apply(logits)
+
+
+if V2LogitsProcessor is None:
+    class RepeatedLineStopLogitsProcessor(RepeatedLineStop, LogitsProcessor):
+        pass
+else:
+    class RepeatedLineStopLogitsProcessor(RepeatedLineStop, LogitsProcessor, V2LogitsProcessor):
+        """The same FQCN supports both loaders; constructor selects their state contract."""
+
+        def __init__(self, vllm_config, device, is_pin_memory=None):
+            self.v2 = None
+            if is_pin_memory is None:
+                self.v2 = RepeatedLineStopV2(vllm_config, device)
             else:
                 super().__init__(vllm_config, device, is_pin_memory)
 

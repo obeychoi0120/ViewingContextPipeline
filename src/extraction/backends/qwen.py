@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from extraction.backends.qwen_penalty import PENALTY_KEY
+from extraction.backends.qwen_repeat import REPEAT_STOP_KEY, drop_repeated_last_line
 from extraction.evidence import load_images
 from extraction.qwen_config import qwen_settings, validate_checkpoint, validate_checkpoint_family
 
@@ -68,7 +69,10 @@ class QwenBackend:
             "tensor_parallel_size": 1,
             "generation_config": "vllm",
             "limit_mm_per_prompt": {"image": image_limit, "video": 0},
-            "logits_processors": ["extraction.backends.qwen_logits:GeneratedTokenLogitsProcessor"],
+            "logits_processors": [
+                "extraction.backends.qwen_logits:GeneratedTokenLogitsProcessor",
+                "extraction.backends.qwen_logits:RepeatedLineStopLogitsProcessor",
+            ],
             "structured_outputs_config": {"backend": "xgrammar"},
             "enable_log_requests": False,
             "disable_log_stats": True,
@@ -151,6 +155,11 @@ class QwenBackend:
             from vllm.sampling_params import StructuredOutputsParams
 
             structured = StructuredOutputsParams(**task.structured_output)
+        extra_args = {PENALTY_KEY: task.repetition_penalty}
+        if task.stop_repeated_lines:
+            if not self.stop_token_ids:
+                raise ValueError("stopping before a repeated line requires a stop token id")
+            extra_args[REPEAT_STOP_KEY] = self.stop_token_ids[0]
         return SamplingParams(
             n=1,
             temperature=task.temperature if task.do_sample else 0.0,
@@ -162,7 +171,7 @@ class QwenBackend:
             presence_penalty=task.presence_penalty,
             min_p=task.min_p,
             frequency_penalty=0.0,
-            extra_args={PENALTY_KEY: task.repetition_penalty},
+            extra_args=extra_args,
             structured_outputs=structured,
             stop_token_ids=self.stop_token_ids,
             ignore_eos=False,
@@ -213,8 +222,11 @@ class QwenBackend:
             if final is None or len(final.outputs) != 1:
                 raise RuntimeError("vLLM did not return one completed output")
             result = final.outputs[0]
+            text = result.text
+            if task.stop_repeated_lines and getattr(result, "finish_reason", None) == "stop":
+                text = drop_repeated_last_line(text)
             return QwenOutput(
-                result.text,
+                text,
                 prompt_length,
                 len(result.token_ids),
                 getattr(result, "finish_reason", None),

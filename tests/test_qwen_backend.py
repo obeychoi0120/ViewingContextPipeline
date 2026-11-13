@@ -115,3 +115,95 @@ def test_qwen_identity_sizes_and_prompts(context):
     with pytest.raises(ValueError, match="expects 8B"):
         context.config["models"]["qwen3vl_8b"] = context.config["models"]["qwen3vl_2b"]
         prompt_provenance(context, "prompts/scene_graph_v9_extended.md", large)
+
+
+@pytest.mark.torch
+def test_stop_before_repeated_line(monkeypatch):
+    import numpy as np
+    import torch
+    from extraction.backends.qwen import QwenBackend
+    from extraction.backends.qwen_repeat import (
+        REPEAT_STOP_KEY, LineHashes, RepeatedLineStop, RepeatedLineStopV2, drop_repeated_last_line,
+    )
+    from extraction.cli import main
+
+    NL, STOP, VOCAB = 9, 15, 16
+    hashes = LineHashes([NL], "cpu")
+
+    def repeated(*outputs):
+        width = max(map(len, outputs))
+        history = torch.tensor([o + [0] * (width - len(o)) for o in outputs])
+        valid = torch.tensor([[i < len(o) for i in range(width)] for o in outputs])
+        return hashes.repeated(history, valid, VOCAB).tolist()
+
+    line = [1, 2, 3, NL]
+    # Only a partial line identical to an earlier complete line counts; one-token lines may repeat.
+    assert repeated(line + [1, 2, 3], line + [1, 2], line + [1, 2, 3, 4], [5, NL, 5], line, line + [4, 5, NL, 1, 2, 3]) == [
+        True, False, False, False, False, True]
+    assert repeated(line + [2, 1, 3]) == [False]
+
+    # The stop token wins only where a line break would have been chosen.
+    logits = torch.zeros(2, VOCAB)
+    logits[:, NL] = 5.0
+    logits[1, 4] = 7.0
+    hashes.raise_stop(logits, torch.tensor([True, True]), torch.tensor([STOP, STOP]))
+    assert logits.argmax(1).tolist() == [STOP, 4]
+    untouched = torch.zeros(1, VOCAB)
+    untouched[0, NL] = 5.0
+    hashes.raise_stop(untouched, torch.tensor([False]), torch.tensor([STOP]))
+    assert untouched.argmax(1).tolist() == [NL]
+
+    # V1: live output lists; a request without the option is left alone.
+    params = SimpleNamespace(extra_args={REPEAT_STOP_KEY: STOP})
+    v1 = RepeatedLineStop(None, "cpu", False)
+    v1.hashes = hashes
+    outputs = [line + [1, 2, 3], line + [1, 2, 3]]
+    v1.update_state(SimpleNamespace(removed=[], moved=[], added=[
+        (0, params, [], outputs[0]), (1, SimpleNamespace(extra_args={}), [], outputs[1])]))
+    logits = torch.zeros(2, VOCAB)
+    logits[:, NL] = 1.0
+    assert v1.apply(logits).argmax(1).tolist() == [STOP, NL]
+    with pytest.raises(ValueError):
+        RepeatedLineStop.validate_params(SimpleNamespace(extra_args={REPEAT_STOP_KEY: -1}))
+
+    # V2: committed history on device plus this step's input token.
+    prompt = [7, 7]
+    tokens = torch.zeros(3, 20, dtype=torch.long)
+    tokens[0, : len(prompt) + 6] = torch.tensor(prompt + line + [1, 2])
+    states = SimpleNamespace(
+        max_num_reqs=3, device="cpu",
+        prompt_len=SimpleNamespace(gpu=torch.tensor([2, 2, 2]), np=np.array([2, 2, 2])),
+        total_len=SimpleNamespace(gpu=torch.tensor([8, 8, 8])),
+        all_token_ids=SimpleNamespace(gpu=tokens),
+    )
+    v2 = RepeatedLineStopV2(None, states)
+    v2.hashes = hashes
+    assert v2.add_request(0, params) and not v2.add_request(1, SimpleNamespace(extra_args=None))
+    v2.apply_staged_writes()
+    context = SimpleNamespace(
+        expanded_idx_mapping=torch.tensor([0, 1]), idx_mapping_np=np.array([0, 1]),
+        pos=torch.tensor([8, 8]), input_ids=torch.tensor([3, 3]),
+        seq_lens_upper_bound_np=np.array([9, 9]),
+    )
+    tokens[1] = tokens[0]
+    logits = torch.zeros(2, VOCAB)
+    logits[:, NL] = 1.0
+    assert v2.apply(logits, context).argmax(1).tolist() == [STOP, NL]
+
+    # The backend sends the option only when enabled and drops the duplicate it left.
+    assert drop_repeated_last_line("a\nb\na") == "a\nb"
+    assert drop_repeated_last_line("a\nb\nc") == "a\nb\nc"
+    assert "stop_repeated_lines" not in generation_settings("qwen3vl_2b", representation="graph")
+    enabled = generation_settings("qwen3vl_2b", representation="graph", stop_repeated_lines=True)
+    with pytest.raises(ValueError):
+        generation_settings("qwen3vl_2b", representation="description", stop_repeated_lines=True)
+    monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(SamplingParams=lambda **kw: kw))
+    monkeypatch.setitem(sys.modules, "vllm.sampling_params", SimpleNamespace(RequestOutputKind=SimpleNamespace(FINAL_ONLY="final")))
+    backend = QwenBackend(None, None, "unused", None, [151645], {})
+    sent = backend.sampling_params(QwenGenerationTask("t", (), "p", 8, **enabled))["extra_args"]
+    assert sent[REPEAT_STOP_KEY] == 151645
+    plain = generation_settings("qwen3vl_2b", representation="graph")
+    assert REPEAT_STOP_KEY not in backend.sampling_params(QwenGenerationTask("t", (), "p", 8, **plain))["extra_args"]
+    for model, step in (("gemini", "extract-graph-scenes"), ("qwen3vl_2b", "extract-description-scenes")):
+        assert main([step, "--run-id", "r", "--dataset", "microlens_100k", "--schema", "x.md",
+                     "--model", model, "--stop-repeated-lines"]) == 1

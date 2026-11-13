@@ -70,12 +70,19 @@ def generation_settings(
     model: str, *, representation: str,
     repetition_penalty: float | None = None,
     presence_penalty: float | None = None,
+    stop_repeated_lines: bool = False,
 ) -> dict[str, Any]:
-    """Greedy generation with optional presence and generated-token repetition penalties."""
+    """Greedy generation with optional presence and generated-token repetition penalties.
+
+    ``stop_repeated_lines`` ends a Graph output instead of repeating an earlier line. It is
+    recorded only when enabled, so existing generation identities are unchanged.
+    """
     if model not in QWEN_MODELS:
         raise ValueError(f"unsupported Qwen model: {model}")
     if representation not in ("graph", "description"):
         raise ValueError(f"unsupported representation: {representation}")
+    if stop_repeated_lines and representation != "graph":
+        raise ValueError("stopping before a repeated line is supported only for Graph scenes")
     penalty = 1.05 if representation == "graph" else 1.0
     if repetition_penalty is not None:
         penalty = penalty_schedule([repetition_penalty])[0]
@@ -93,6 +100,7 @@ def generation_settings(
         ),
         "repetition_penalty": penalty,
         "model": model,
+        **({"stop_repeated_lines": True} if stop_repeated_lines else {}),
     }
 
 

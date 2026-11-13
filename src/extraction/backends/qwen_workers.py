@@ -31,6 +31,7 @@ class QwenGenerationTask:
     min_p: float = 0.0
     presence_penalty: float = 0.0
     model: str | None = None
+    stop_repeated_lines: bool = False
 
 
 def _start_worker(context, worker_index, gpu_id, model_path, result_queue, settings, image_limit):

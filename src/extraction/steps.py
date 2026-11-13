@@ -30,7 +30,7 @@ GRAPH_SOURCES = (*QWEN_MODELS, "gemini")
 
 
 def prompt_provenance(
-    context, schema, arm, *, repetition_penalty=None, presence_penalty=None,
+    context, schema, arm, *, repetition_penalty=None, presence_penalty=None, stop_repeated_lines=False,
 ):
     path = context.prompt_path(schema)
     source = arm.model
@@ -38,6 +38,8 @@ def prompt_provenance(
         raise ValueError("repetition penalty is supported only for local vLLM models")
     if presence_penalty is not None and source not in LOCAL_MODELS:
         raise ValueError("presence penalty is supported only for local vLLM models")
+    if stop_repeated_lines and source not in LOCAL_MODELS:
+        raise ValueError("stopping before a repeated line is supported only for local vLLM models")
     if source in LOCAL_MODELS:
         import json
         checkpoint = context.path("models", source)
@@ -55,7 +57,7 @@ def prompt_provenance(
     if source in LOCAL_MODELS:
         generation = generation_settings(
             source, representation=kind, repetition_penalty=repetition_penalty,
-            presence_penalty=presence_penalty,
+            presence_penalty=presence_penalty, stop_repeated_lines=stop_repeated_lines,
         )
         settings.update(
             backend="vllm",
@@ -133,7 +135,7 @@ def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
 
 def _extract(
     context, *, representation, model, schema, force=False, arm=None,
-    repetition_penalty=None, presence_penalty=None,
+    repetition_penalty=None, presence_penalty=None, stop_repeated_lines=False,
 ):
     from pipeline_runtime import require_generation_config
 
@@ -147,6 +149,7 @@ def _extract(
         context, stage, model=model, schema=path, force=force, arm=arm.name,
         **({"repetition_penalty": repetition_penalty} if repetition_penalty is not None else {}),
         **({"presence_penalty": presence_penalty} if presence_penalty is not None else {}),
+        **({"stop_repeated_lines": True} if stop_repeated_lines else {}),
     )
     context.initialize()
     prompt = path.read_text(encoding="utf-8")
@@ -154,6 +157,7 @@ def _extract(
     settings = context.config["extraction"]
     provenance = prompt_provenance(
         context, path, arm, repetition_penalty=repetition_penalty, presence_penalty=presence_penalty,
+        stop_repeated_lines=stop_repeated_lines,
     )
     penalties = provenance["settings"].get("repetition_penalty", [1.0])
     scene_dir = context.extraction_dir(arm.representation, model, "scenes")
@@ -242,10 +246,12 @@ def _extract(
 
 def extract_graph_scenes(
     context, *, model, schema, force=False, arm=None, repetition_penalty=None, presence_penalty=None,
+    stop_repeated_lines=False,
 ):
     return _extract(
         context, representation="graph", model=model, schema=schema, force=force, arm=arm,
         repetition_penalty=repetition_penalty, presence_penalty=presence_penalty,
+        stop_repeated_lines=stop_repeated_lines,
     )
 
 

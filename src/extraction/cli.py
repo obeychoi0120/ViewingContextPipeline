@@ -35,6 +35,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Local vLLM presence penalty in [-2, 2]. Defaults: Graph scenes 0; Description scenes 1.5. Use 0 to disable.",
     )
     parser.add_argument(
+        "--stop-repeated-lines",
+        action="store_true",
+        help="Local vLLM Graph scenes only: end the output instead of writing a line identical "
+        "to an earlier line (the repeated line is dropped). Off by default.",
+    )
+    parser.add_argument(
         "--arm",
         help="Optional generation source; defaults to the one set by --model and the extraction step.",
     )
@@ -53,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.model not in LOCAL_MODELS:
                 raise ValueError("--presence-penalty is supported only for local vLLM models")
             options["presence_penalty"] = validate_presence_penalty(args.presence_penalty)
+        if args.stop_repeated_lines:
+            if args.model not in LOCAL_MODELS or args.step != "extract-graph-scenes":
+                raise ValueError("--stop-repeated-lines is supported only for local vLLM Graph scenes")
+            options["stop_repeated_lines"] = True
         context = RunContext.load(args.run_id, dataset=args.dataset)
         result = STEP_HANDLERS[args.step](
             context,
