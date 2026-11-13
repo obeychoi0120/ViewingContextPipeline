@@ -8,7 +8,7 @@ from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
 from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
-from extraction.graph_warnings import DESCRIPTION_OUTCOMES, OUTCOMES, outcome
+from extraction.graph_warnings import DESCRIPTION_OUTCOMES, OUTCOMES, needs_generation, outcome
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
 from extraction.semantic_graph import GRAPH_SCHEMA_VERSION
@@ -103,7 +103,7 @@ def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
                 f"cannot safely identify existing scenes: {output}: {exc}"
             ) from exc
         normalize([
-            row for row in cached if "error" not in row and not row.get("semantic_warnings")
+            row for row in cached if not needs_generation(row)
         ], output)
         by_index = {r["scene_idx"]: r for r in cached}
         if len(by_index) != len(cached):
@@ -111,7 +111,7 @@ def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
         missing = []
         for row in rows:
             saved = by_index.get(row["scene_idx"])
-            if saved is None or "error" in saved or saved.get("semantic_warnings"):
+            if needs_generation(saved):
                 missing.append(row)
         expected_indices = {row["scene_idx"] for row in rows}
         existing[cid] = [row for row in cached if row["scene_idx"] in expected_indices]
@@ -184,7 +184,7 @@ def _extract(
     )
     total = sum((len(scenes) for _, scenes in planned))
     reused = sum(
-        "error" not in row and not row.get("semantic_warnings")
+        not needs_generation(row)
         for records in existing.values() for row in records
     )
 

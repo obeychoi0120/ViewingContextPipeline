@@ -21,6 +21,8 @@ class QwenOutput:
     output_tokens: int
     finish_reason: str | None = None
     stop_reason: str | int | None = None
+    # The output stopped before repeating an earlier line, which was dropped.
+    repeat_stopped: bool = False
 
 
 @dataclass
@@ -231,6 +233,7 @@ class QwenBackend:
                 len(result.token_ids),
                 getattr(result, "finish_reason", None),
                 getattr(result, "stop_reason", None),
+                repeat_stopped=text != result.text,
             )
         except Exception as exc:
             raise RuntimeError(f"Qwen task {task.task_id}: {exc}") from exc

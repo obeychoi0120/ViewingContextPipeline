@@ -7,7 +7,7 @@ import torch
 
 from arm_registry import registry
 from artifact_io import write_jsonl
-from extraction.graph_warnings import PARSE_FAILED
+from extraction.graph_warnings import PARSE_FAILED, REPEAT_OCCURRED
 from helpers import (
     failure_row,
     graph_store,
@@ -108,12 +108,15 @@ def _check_graph_exclusions_preserve_items(context):
         scene_row(cid, 1, warnings=[PARSE_FAILED]),
         scene_row(cid, 2, value="unrecoverable observation"),
         failure_row(cid, 3),
+        # A repeat-stopped scene is used and only counted.
+        scene_row(cid, 4, warnings=[REPEAT_OCCURRED]),
     ]
     write_jsonl(context.scene_arm_dir("graph_qwen3vl_2b") / f"{cid}.jsonl", rows)
     _, arrays, stats = build_input(context, cohort, registry(context.config)["graph-activity"])
-    assert arrays["video_offsets"].tolist() == [0, 1, 1]
+    assert arrays["video_offsets"].tolist() == [0, 2, 2]
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 2
-    assert stats["counts"]["valid_scenes"] == 1
+    assert stats["counts"]["valid_scenes"] == 2
+    assert stats["counts"]["repeat_occurred"] == 1
     assert [r["reason"] for r in stats["excluded_scenes"]] == ["parse_failed", "parse_failed", "error"]
     assert stats["counts"]["zero_scene_video"] == 1
 

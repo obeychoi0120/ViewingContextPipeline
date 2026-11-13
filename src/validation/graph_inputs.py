@@ -12,14 +12,14 @@ import numpy as np
 
 from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, select_arms
 from artifact_io import fingerprint
-from extraction.graph_warnings import warning_tags
+from extraction.graph_warnings import REPEAT_OCCURRED, blocking_tags, warning_tags
 from extraction.structured_output import validate_graph_structure, OutputValidationError
 from extraction.scene_storage import read_scene_records, validate_scene_payload, recover_scene_graph
 from model_provenance import local_model_identity
 from artifact_io import read_json, write_json
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "scene-bge-inputs/v3"
+VERSION = "scene-bge-inputs/v4"
 ROLES = ("actor", "target", "tool", "receiver", "place")
 # Keep the receiver tensor slot for model/checkpoint shape compatibility.
 # Current receiver-free input always supplies the absent state.
@@ -96,7 +96,7 @@ def build_input(context, cohort, arm):
                 "actionless",
                 "raw",
                 "parse_failed",
-                "trash_info",
+                "repeat_occurred",
                 "token_limit",
                 "error",
                 "unsupported_format",
@@ -166,10 +166,12 @@ def build_input(context, cohort, arm):
                 report["valid_scenes"] += 1
                 continue
             g, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
-            # Warned scenes keep their output but never enter BGE or the Graph.
-            if warnings:
-                reject(warnings[0].lower())
+            # Warned scenes keep their output but never enter BGE or the Graph,
+            # except a usable warning, which is only counted.
+            if blocking_tags(warnings):
+                reject(blocking_tags(warnings)[0].lower())
                 continue
+            report["repeat_occurred"] += REPEAT_OCCURRED in warnings
             if not isinstance(g, dict):
                 reject("raw")
                 continue

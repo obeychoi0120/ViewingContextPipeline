@@ -197,9 +197,10 @@ class FakeEncoder:
 
 
 class FakeGenerator:
-    def __init__(self, text=GRAPH_TEXT, *, finish_reason="stop"):
+    def __init__(self, text=GRAPH_TEXT, *, finish_reason="stop", repeat_stopped=False):
         self.text = text
         self.finish_reason = finish_reason
+        self.repeat_stopped = repeat_stopped
         self.tasks = []
 
     @contextmanager
@@ -213,6 +214,7 @@ class FakeGenerator:
                     runtime.current_result = {
                         "output_tokens": 19,
                         "finish_reason": self.finish_reason,
+                        "repeat_stopped": self.repeat_stopped,
                     }
                 try:
                     on_task_complete(task.task_id, text)

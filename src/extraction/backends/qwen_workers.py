@@ -334,6 +334,7 @@ async def _serve_worker(backend, task_queue, result_queue, worker_index, gpu_id,
                 "output_tokens": output.output_tokens,
                 "finish_reason": getattr(output, "finish_reason", None),
                 "stop_reason": getattr(output, "stop_reason", None),
+                "repeat_stopped": bool(getattr(output, "repeat_stopped", False)),
                 "generation": {
                     key: value
                     for key, value in asdict(task).items()

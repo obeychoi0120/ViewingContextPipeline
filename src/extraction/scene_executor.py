@@ -5,7 +5,7 @@ from itertools import chain
 from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
-from extraction.graph_warnings import TOKEN_LIMIT, outcome
+from extraction.graph_warnings import REPEAT_OCCURRED, TOKEN_LIMIT, USABLE_OUTCOMES, outcome
 from extraction.semantic_graph import parse_or_repair_graph
 from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
@@ -14,8 +14,12 @@ from extraction.step_support import (
 )
 
 
-def graph_scene_result(row, text, *, error=None, truncated=False, diagnostics=None):
-    """Convert one response; preserve unresolved or cut graphs as raw text."""
+def graph_scene_result(row, text, *, error=None, truncated=False, diagnostics=None, repeated=False):
+    """Convert one response; preserve unresolved or cut graphs as raw text.
+
+    ``repeated`` marks an output stopped before repeating a line: a graph that parses is
+    used as usual and only tagged REPEAT_OCCURRED for counting.
+    """
     if error is None and not text.strip():
         error = "model produced an empty graph"
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
@@ -27,6 +31,8 @@ def graph_scene_result(row, text, *, error=None, truncated=False, diagnostics=No
     warnings = list(parsed.warning) if parsed is not None else []
     if error is None and parsed is not None:
         structured = parsed.graph is not None and parse_warning is None
+        if repeated and not warnings:
+            warnings = [REPEAT_OCCURRED]
         return {
             **common,
             "graph": parsed.graph if structured else text,
@@ -109,6 +115,7 @@ class SceneResults:
         truncated=False,
         final=True,
         tokens=None,
+        repeated=False,
     ):
         if task_id not in self.rows:
             raise RuntimeError(f"unexpected scene result: {task_id}")
@@ -117,7 +124,7 @@ class SceneResults:
         cid, row = self.rows[task_id]
         if self.arm == "graph":
             record, failure = graph_scene_result(
-                row, text, error=error, truncated=truncated, diagnostics=diagnostics,
+                row, text, error=error, truncated=truncated, diagnostics=diagnostics, repeated=repeated,
             )
         else:
             record, failure = description_scene_result(
@@ -145,8 +152,8 @@ class SceneResults:
         self.completed.add(task_id)
         result = outcome(record)
         self.progress.complete(task_id=task_id, outcome=result)
-        # Warnings and errors are both generated again by a later penalty pass.
-        return result != "success"
+        # Warnings and errors are generated again by a later penalty pass; usable outcomes are kept.
+        return result not in USABLE_OUTCOMES
 
 
 def run_qwen_scenes(
@@ -182,6 +189,7 @@ def run_qwen_scenes(
             task_id,
             text,
             truncated=event.get("finish_reason") == "length",
+            repeated=bool(event.get("repeat_stopped")),
             final=final,
             tokens=qwen_output_tokens(event),
         )

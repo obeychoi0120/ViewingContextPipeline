@@ -12,6 +12,28 @@
 
 **개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증) → tool·place 라벨화와 줄 배치 템플릿(v9·v10, 효과 미검증) → 행동 반복 방지 규칙(v9·v10, 효과 미검증).**
 
+### 2026-11-13: TRASH_INFO 제거와 REPEAT_OCCURRED 추가 (`graph-text/v23`)
+
+프롬프트 파일은 변경하지 않았습니다. 장면 결과 판정과 진행바를 바꿨습니다(사용자 결정).
+
+**변경.**
+
+| | 이전(`graph-text/v22`) | 현재(`graph-text/v23`) |
+| --- | --- | --- |
+| warning 우선순위 | `TOKEN_LIMIT` > `PARSE_FAILED` > `TRASH_INFO` | `TOKEN_LIMIT` > `PARSE_FAILED` > `REPEAT_OCCURRED` |
+| 정보 없는 그래프 | `TRASH_INFO`로 입력 제외·재생성 | 판정하지 않음. 구조화되면 success로 사용 |
+| 반복 직전에 멈춘 출력 | 태그 없음(success) | `REPEAT_OCCURRED`. 입력에 사용하고 재생성하지 않으며 집계만 따로 함 |
+| 진행바·`generation_stats.json` | `success`·`parse_failed`·`trash_info`·`token_limit`·`error` | `success`·`repeat_occurred`·`parse_failed`·`token_limit`·`error` |
+
+- `REPEAT_OCCURRED`는 `--stop-repeated-lines`(로컬 Qwen Graph 전용)로 생성을 끝내고 마지막 중복 줄을 버린 장면에만 붙습니다. 남은 출력이 파싱되지 않으면 `PARSE_FAILED`가 우선합니다.
+- `token_limit`은 반복 중단을 켜도 대상만 바꾸는 변형 루프 등으로 생길 수 있어 진행바에 남겼습니다.
+
+**호환성.** 저장된 `TRASH_INFO` 태그는 읽을 때 버리고 현재 규칙으로 다시 판정합니다. `--force` 없이 재실행하면 해당 행의 태그가 비워지고 재생성하지 않습니다. 이전에 제외되던 장면이 입력에 들어가므로 Graph 입력 버전을 `scene-bge-inputs/v4`로 올렸고, 기존 임베딩 캐시는 다시 만들어집니다.
+
+**검증한 것.** 단위·통합 테스트 37개가 통과했습니다. 반복 중단 장면이 `REPEAT_OCCURRED`로 저장·집계되고, 입력에 쓰이며, 재실행 때 다시 생성되지 않는지 확인했습니다.
+
+**미검증.** 실제 Run에서 `REPEAT_OCCURRED` 비율과, 이전 `TRASH_INFO` 장면을 입력에 넣은 것이 추천 성능에 주는 영향은 확인하지 않았습니다.
+
 ### 2026-11-13: v10_core·v10_extended 재작성(현재 v9 기준 간소화)
 
 삭제된 v10 두 파일을 현재 [v9_core](../prompts/scene_graph_v9_core.md)·[v9_extended](../prompts/scene_graph_v9_extended.md)(바로 아래 항목의 반복 방지 규칙 포함)를 기준으로 다시 간소화해 [v10_core](../prompts/scene_graph_v10_core.md)와 [v10_extended](../prompts/scene_graph_v10_extended.md)로 새로 만들었습니다. v9 두 파일은 바꾸지 않았습니다. extended가 core 전문으로 시작하고 `[Additional Instructions]` 블록만 덧붙이는 구조는 같습니다.

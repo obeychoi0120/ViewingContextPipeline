@@ -6,11 +6,10 @@ from artifact_io import atomic_write_jsonl, read_jsonl
 from extraction.errors import UnsupportedArtifactError
 from extraction.token_usage import validate_tokens
 from extraction.graph_warnings import (
-    DESCRIPTION_WARNING_TAGS, LEGACY_TRUNCATION_ERRORS, PARSE_FAILED, TOKEN_LIMIT, TRASH_INFO,
+    DESCRIPTION_WARNING_TAGS, LEGACY_TRUNCATION_ERRORS, PARSE_FAILED, TOKEN_LIMIT,
     warning_tags,
 )
 from extraction.semantic_graph import parse_or_repair_graph, graph_semantic_warnings
-from extraction.semantic_graph.schema import is_trash_info
 from extraction.structured_output import (
     GRAPH_JSON_SCHEMA, OutputValidationError, normalize_graph_fields, normalize_graph_references,
 )
@@ -89,7 +88,7 @@ def recover_scene_graph(graph, warnings):
         normalized, _ = normalize_graph_references(graph)
     except OutputValidationError as exc:
         return graph, exc.tags
-    return normalized, [TRASH_INFO] if is_trash_info(normalized) else []
+    return normalized, []
 
 
 def _payload(path, record):

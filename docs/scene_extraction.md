@@ -48,7 +48,7 @@ person - cutting - tomato; tool: knife; place: kitchen
 
 ## 파싱과 지원 경계
 
-Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `graph-text/v22` 파서는 위 이름 선언 형식, 기존 `id: kind; attribute` 선언 형식과 현재 구조의 JSON을 읽습니다. 한 출력 안의 두 선언 형식 혼용은 원문으로 보존합니다.
+Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `graph-text/v23` 파서는 위 이름 선언 형식, 기존 `id: kind; attribute` 선언 형식과 현재 구조의 JSON을 읽습니다. 한 출력 안의 두 선언 형식 혼용은 원문으로 보존합니다.
 
 이름 형식 출력이 엄격 파싱과 구분자 복구에 모두 실패하면 줄 모양으로 섹션을 나눕니다. `medium:`·`format:`·`topics:` 줄은 Context, 행동 구분자가 있는 줄은 Action, 나머지는 Entity입니다. 이때 다음과 같이 처리합니다.
 
@@ -59,17 +59,19 @@ Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `gra
 - 출력에 그래프가 여러 개 이어져 있으면 첫 그래프만 씁니다.
 - ID 형식 출력에는 이 단계를 적용하지 않습니다.
 
-장면 결과는 다음 다섯 가지 중 하나이며, warning은 장면당 하나만 붙습니다(우선순위 `TOKEN_LIMIT` > `PARSE_FAILED` > `TRASH_INFO`).
+장면 결과는 다음 다섯 가지 중 하나이며, warning은 장면당 하나만 붙습니다(우선순위 `TOKEN_LIMIT` > `PARSE_FAILED` > `REPEAT_OCCURRED`).
 
-| 결과 | 조건 | 대상 |
-| --- | --- | --- |
-| success | 구조화 성공, 정보 있음 | Graph, Description |
-| `PARSE_FAILED` | Context 세 필드, Entities(또는 `none`), Actions(또는 `none`) 중 하나라도 분리하지 못함 | Graph |
-| `TRASH_INFO` | medium·format·topics가 전부 `unknown`/`none`이거나, 이름 있는 엔티티와 행동이 하나도 없음 | Graph |
-| `TOKEN_LIMIT` | 출력 토큰 한도에서 잘림. 원문만 저장하고 파싱하지 않음 | Graph, Description |
-| error | 위에 해당하지 않는 생성 실패(예외, API 오류, 빈 출력) | Graph, Description |
+| 결과 | 조건 | 입력 사용 | 재생성 | 대상 |
+| --- | --- | --- | --- | --- |
+| success | 구조화 성공 | 사용 | 안 함 | Graph, Description |
+| `REPEAT_OCCURRED` | `--stop-repeated-lines`로 앞 줄을 반복하기 직전에 멈췄고, 남은 출력은 구조화 성공 | 사용(집계만 따로) | 안 함 | Graph |
+| `PARSE_FAILED` | Context 세 필드, Entities(또는 `none`), Actions(또는 `none`) 중 하나라도 분리하지 못함 | 제외 | 함 | Graph |
+| `TOKEN_LIMIT` | 출력 토큰 한도에서 잘림. 원문만 저장하고 파싱하지 않음 | 제외 | 함 | Graph, Description |
+| error | 위에 해당하지 않는 생성 실패(예외, API 오류, 빈 출력) | 제외 | 함 | Graph, Description |
 
-이전 버전의 태그는 읽을 때 `MISSING_REQUIRED`·`PARSE_ERROR` → `PARSE_FAILED`, `TRUNCATION_RECOVERED` → `TOKEN_LIMIT`로 변환합니다. `--force` 없이 재실행하면 먼저 저장된 행에 현재 규칙을 적용합니다. 이전의 절단 error 행은 `TOKEN_LIMIT` 행이 되고, `PARSE_FAILED` 원문은 현재 파서로 다시 읽습니다.
+정보가 없는 그래프(맥락이 전부 `unknown`/`none`이거나 엔티티·행동이 없음)를 따로 판정하던 `TRASH_INFO`는 `graph-text/v23`에서 없앴습니다. 이런 장면도 구조화에 성공하면 success로 사용합니다.
+
+이전 버전의 태그는 읽을 때 `MISSING_REQUIRED`·`PARSE_ERROR` → `PARSE_FAILED`, `TRUNCATION_RECOVERED` → `TOKEN_LIMIT`로 변환하고, 저장된 `TRASH_INFO`는 버린 뒤 현재 규칙으로 다시 판정합니다. `--force` 없이 재실행하면 먼저 저장된 행에 현재 규칙을 적용합니다. 이전의 절단 error 행은 `TOKEN_LIMIT` 행이 되고, `PARSE_FAILED` 원문은 현재 파서로 다시 읽습니다.
 
 기존 v8 JSON의 Action `location`은 읽기용 복사본에서 `place`로 정규화합니다. 두 필드가 함께 있으면 값이 같아도 거부합니다. 원본 파일은 수정하지 않으며 Relations·receiver·필수 장소 필드 누락 등은 자동으로 다른 스키마로 변환하지 않습니다. 지원하지 않는 입력은 경로·원인과 함께 오류로 처리합니다.
 
@@ -89,6 +91,7 @@ Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, 
 | --- | --- | --- |
 | `--presence-penalty FLOAT` | 유한한 수 −2.0~2.0 | 해당 실행의 presence penalty. `0`은 비활성화 |
 | `--repetition-penalty FLOAT` | 유한한 수 1.0~2.0 | 생성 토큰 전용 repetition penalty |
+| `--stop-repeated-lines` | 플래그(기본 꺼짐), 로컬 Qwen의 `extract-graph-scenes`만 | 앞의 완성된 줄과 토큰 단위로 같은 줄을 쓰기 직전에 출력을 끝내고, 마지막 중복 줄은 버림. 해당 장면은 `REPEAT_OCCURRED` |
 
 Repetition penalty는 전용 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용하지 않습니다. 최초 요청·구조 복구·재실행에 같은 옵션값을 사용하고 증가 schedule은 적용하지 않습니다. 예를 들어 Graph에 이전 기본값인 presence penalty 1.5를 적용하려면 다음과 같이 실행합니다.
 
@@ -125,6 +128,6 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$D
 
 `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다. 실패의 토큰 수는 실제 출력 토큰 수 또는 `null`이며, 응답 원문이 없으면 빈 문자열을 기록합니다. 같은 장면은 최신 결과 한 행으로 원자적으로 교체합니다.
 
-진행바는 `success=… parse_failed=… trash_info=… token_limit=… error=…`로 표시하며 합이 완료 수입니다. Description은 `success`, `token_limit`, `error`만 표시합니다. Graph·Description 모두 source 디렉터리의 `generation_stats.json`에 재사용·신규 결과를 합친 같은 키의 집계를 기록합니다. warning·error가 있으면 해당 JSONL의 원문과 태그를 확인합니다. error가 남으면 CLI는 종료 코드 1을 반환하고 완료된 출력은 보존합니다. warning만 남으면 종료 코드는 0입니다.
+진행바는 `success=… repeat_occurred=… parse_failed=… token_limit=… error=…`로 표시하며 합이 완료 수입니다. Description은 `success`, `token_limit`, `error`만 표시합니다. Graph·Description 모두 source 디렉터리의 `generation_stats.json`에 재사용·신규 결과를 합친 같은 키의 집계를 기록합니다. warning·error가 있으면 해당 JSONL의 원문과 태그를 확인합니다. `REPEAT_OCCURRED`는 정상 사용되는 warning이므로 재실행해도 다시 생성하지 않습니다. error가 남으면 CLI는 종료 코드 1을 반환하고 완료된 출력은 보존합니다. warning만 남으면 종료 코드는 0입니다.
 
 정상 장면 재사용, 기존 실패 로그 통합, `generation_identity.json`의 한계는 [실행·저장 계약](runtime.md#장면-저장과-추적-정보)에 설명합니다. 프롬프트 변경 의도와 버전은 [변경 이력](../prompts/update_note.md)을 참고하세요.

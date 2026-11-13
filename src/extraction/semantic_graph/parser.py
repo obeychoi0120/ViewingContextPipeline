@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import re
 
-from extraction.graph_warnings import PARSE_FAILED, TRASH_INFO
+from extraction.graph_warnings import PARSE_FAILED
 from extraction.structured_output import OutputValidationError, normalize_graph_references
-from extraction.semantic_graph.schema import is_trash_info
 
 from extraction.semantic_graph.json_repair import (
     GraphParseResult,
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v22"
+GRAPH_PARSER_VERSION = "graph-text/v23"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -431,8 +430,7 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
     """Parse Actions graphs strictly, then with delimiter repair, then by line shape.
 
     Name-form roles missing from [Entities] are kept as attribute-less entities;
-    undeclared ID-form roles still become unknown. A structured graph with no
-    usable information carries TRASH_INFO.
+    undeclared ID-form roles still become unknown.
     """
     raw = str(text or "")
     if not raw.strip():
@@ -445,7 +443,7 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
                 if parsed.graph is None:
                     return parsed
                 mode = "repaired" if unwrapped != raw.strip() else parsed.parse_mode
-                return _checked(_validated_graph(parsed.graph, mode))
+                return _validated_graph(parsed.graph, mode)
             try:
                 graph, named = _parse_context_actions(raw, repair=False)
                 mode = "native"
@@ -457,17 +455,11 @@ def parse_or_repair_graph(text: str) -> GraphParseResult:
                 graph, named, mode = _parse_lenient(raw), True, "repaired"
             except GraphTextError:
                 raise exc from None
-        return _checked(_validated_graph(graph, mode, named=named))
+        return _validated_graph(graph, mode, named=named)
     except OutputValidationError as exc:
         return GraphParseResult(None, error=str(exc), warning=tuple(exc.tags))
     except GraphTextError as exc:
         return GraphParseResult(None, error=f"graph text repair failed: {exc}", warning=(exc.tag,))
-
-
-def _checked(result):
-    if result.graph is not None and is_trash_info(result.graph):
-        return GraphParseResult(result.graph, parse_mode=result.parse_mode, warning=(TRASH_INFO,))
-    return result
 
 
 def _declare_referenced_names(graph):

@@ -1,7 +1,7 @@
 import pytest
 
 from artifact_io import read_jsonl
-from extraction.graph_warnings import PARSE_FAILED, TOKEN_LIMIT, TRASH_INFO
+from extraction.graph_warnings import PARSE_FAILED, REPEAT_OCCURRED, TOKEN_LIMIT
 from extraction.qwen_runtime import QwenRuntime
 from extraction.scene_executor import graph_scene_result, run_qwen_scenes
 from extraction.scene_storage import read_scene_records, write_scene_records
@@ -181,10 +181,7 @@ TAGGED_CASES = [
     (LENIENT_HEAD.replace("topics: kitchen\n", "") + "man\n[Actions]\nnone", PARSE_FAILED),
     (LENIENT_HEAD + "man\n[Actions]\nplace: kitchen", PARSE_FAILED),
     (LENIENT_HEAD + "man", PARSE_FAILED),
-    ("Context: unknown; unknown; unknown\nEntities: mountain; cloud\nActions: none", TRASH_INFO),
-    (LENIENT_HEAD + "unknown\n[Actions]\nunknown - none - unknown; none; unknown", TRASH_INFO),
     # Without headers, the first none answers Entities and the second Actions.
-    ("medium: animation\nformat: narrative\ntopics: city at dusk\nnone\nnone", TRASH_INFO),
     ("medium: animation\nformat: narrative\ntopics: wolves\nwolf1; gray fur\nforest", PARSE_FAILED),
 ]
 
@@ -199,9 +196,16 @@ def test_lenient_parsing_warning_tags_and_prompt_examples():
         names = {e["id"]: e["name"] for e in parsed.graph["entities"]}
         assert [e["name"] for e in parsed.graph["entities"]] == entities, text
         assert [tuple(names.get(v, v) for v in a.values()) for a in parsed.graph["actions"]] == actions, text
-    # Unseparable or empty graphs are tagged.
+    # Unseparable graphs are tagged.
     for text, tag in TAGGED_CASES:
         assert parse_or_repair_graph(text).warning == (tag,), text
+    # Graphs without informative values are no longer tagged (TRASH_INFO was removed).
+    for text in ("Context: unknown; unknown; unknown\nEntities: mountain; cloud\nActions: none",
+                 LENIENT_HEAD + "unknown\n[Actions]\nunknown - none - unknown; none; unknown",
+                 # Without headers, the first none answers Entities and the second Actions.
+                 "medium: animation\nformat: narrative\ntopics: city at dusk\nnone\nnone"):
+        parsed = parse_or_repair_graph(text)
+        assert parsed.graph is not None and not parsed.warning, text
     # Every example in the current prompts parses natively.
     for name in ("v9_core", "v9_extended", "v10_core", "v10_extended"):
         text = (Path(__file__).parents[1] / "prompts" / f"scene_graph_{name}.md").read_text(encoding="utf-8")
@@ -275,14 +279,14 @@ def test_scene_storage_resume_and_progress(context, tmp_path):
     stream = io.StringIO()
     with InferenceProgress(total=5, desc="x", unit="scene",
                            progress_factory=lambda **kw: tqdm(file=stream, **kw)) as progress:
-        for task_id, result in zip("abcde", ("success", "parse_failed", "trash_info", "token_limit", "error")):
+        for task_id, result in zip("abcde", ("success", "repeat_occurred", "parse_failed", "token_limit", "error")):
             progress.complete(task_id=task_id, outcome=result)
         progress.complete(task_id="e", outcome="success")  # a later pass replaces the outcome
         counts = dict(progress.counts)
         with pytest.raises(ValueError, match="unknown scene outcome"):
             progress.complete(outcome="warning")
-    assert counts == {"success": 2, "parse_failed": 1, "trash_info": 1, "token_limit": 1, "error": 0}
-    assert "success=2 parse_failed=1 trash_info=1 token_limit=1 error=0" in stream.getvalue()
+    assert counts == {"success": 2, "repeat_occurred": 1, "parse_failed": 1, "token_limit": 1, "error": 0}
+    assert "success=2 repeat_occurred=1 parse_failed=1 token_limit=1 error=0" in stream.getvalue()
 
 
 @pytest.mark.torch
@@ -410,7 +414,7 @@ def test_truncated_scenes_are_token_limit_warnings_and_regenerate(context, monke
     total = len(generator.tasks)
     directory = context.scene_arm_dir(options["arm"])
     assert read_json(directory / "generation_stats.json") == {
-        "total": total, "success": 0, "parse_failed": 0, "trash_info": 0, "token_limit": total, "error": 0}
+        "total": total, "success": 0, "repeat_occurred": 0, "parse_failed": 0, "token_limit": total, "error": 0}
     path = next(directory.glob("*.jsonl"))
     assert all(row["warning"] == [TOKEN_LIMIT] and row["scene_graph"] == LOOPED_GRAPH_TEXT
                for row in read_jsonl(path))
@@ -439,6 +443,27 @@ def test_truncated_scenes_are_token_limit_warnings_and_regenerate(context, monke
     assert saved[0]["warning"] == [] and isinstance(saved[0]["scene_graph"], dict)
     if len(rows) > 1:
         assert saved[-1]["warning"] == [] and saved[-1]["scene_graph"]["entities"][0]["name"] == "man"
+
+    # An output stopped before a repeated line is used and counted, never generated again;
+    # one that does not parse stays PARSE_FAILED.
+    from extraction.graph_warnings import blocking_tags, needs_generation
+    from extraction.scene_executor import graph_scene_result
+    from extraction.scene_storage import read_scene_records
+
+    generator.text, generator.finish_reason, generator.repeat_stopped = GRAPH_TEXT, "stop", True
+    generator.tasks.clear()
+    assert extract_graph_scenes(context, force=True, **options)["failure_count"] == 0
+    assert read_json(directory / "generation_stats.json")["repeat_occurred"] == len(generator.tasks)
+    assert all(row["warning"] == [REPEAT_OCCURRED] and isinstance(row["scene_graph"], dict)
+               for row in read_jsonl(path))
+    assert not any(needs_generation(row) for row in read_scene_records(path))
+    generator.tasks.clear()
+    extract_graph_scenes(context, **options)
+    assert not generator.tasks
+    assert blocking_tags([REPEAT_OCCURRED]) == [] and blocking_tags([PARSE_FAILED]) == [PARSE_FAILED]
+    prose, _ = graph_scene_result({"scene_idx": 0, "keyframes": []}, "A man cooks.", repeated=True)
+    assert prose["semantic_warnings"] == [PARSE_FAILED]
+    generator.repeat_stopped = False
 
     # Descriptions use only TOKEN_LIMIT, and regenerate it the same way.
     generator.text, generator.finish_reason = "A person cuts a tomato and", "length"
