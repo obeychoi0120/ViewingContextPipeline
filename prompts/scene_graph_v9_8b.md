@@ -20,7 +20,7 @@ medium is how the footage was made:
 - unknown: cannot be determined.
 
 format is how the content is presented. It is never a medium value such as gameplay or animation:
-- demonstration: shows how to do a task or technique so a viewer could follow it. Ordinary play or daily activity with no teaching aim is not a demonstration.
+- demonstration: a how-to organized as steps the viewer is meant to repeat, such as a recipe, tutorial, or craft guide. Someone merely doing a task, eating, working, or playing is narrative or highlights, not a demonstration.
 - explanation: informs about a subject through visuals, diagrams, or comparisons rather than by doing a task.
 - review: tries out or evaluates a product, food, place, or work.
 - narrative: a story, skit, drama, or everyday moment with no instructional aim.
@@ -32,23 +32,23 @@ format is how the content is presented. It is never a medium value such as gamep
 Topics describe this segment's subject, distinctive focus or technique, and style or setting when central. They are labels, not summaries or evidence of actions. Prefer the specific situation over generic labels: tense family dinner rather than character interaction, mobile MOBA team fight rather than combat. Use topics: none when no topic is supported. Do not fill quotas.
 
 [Entities]
-- Include at most 8 important entities: the main participants and every target, tool, intermediate object, and place that the actions need. Write each entity as a short name of 1 to 3 words, followed by up to 3 attributes of at most 6 words each. A name cannot be none or unknown.
+- Include at most 8 important entities: the main participants and every target, tool, and intermediate object that the actions need, plus a place only when a specific location is visible. Write each entity as a short name of 1 to 3 words, followed by up to 3 attributes of at most 6 words each. A name cannot be none or unknown.
 - Each name must be unique. When distinct entities would share a name, number all of them from 1: man1, man2. Otherwise write the name without a number.
 - Prefer specific, visually supported names over person, food, vehicle, or thing: chef rather than person, sea urchin rather than seafood, sniper rifle rather than weapon. If only the subtype is unclear, keep the known broader name and add visible attributes; never invent details.
 - Put states, materials, and distinguishing appearance in attributes, not in the name. When an action visibly changes an entity, give the resulting state as an attribute, such as sliced or assembled.
-- Prefer attributes that matter to the content over incidental appearance. Informative entities without actions are valid. Do not invent entities for topics, purposes, or aesthetics.
+- Prefer attributes that matter to the content over incidental appearance. Informative entities without actions are valid. Do not invent entities for topics, purposes, or aesthetics. Do not declare the interface itself, such as game UI, HUD, menu, subtitles, or watermark, as an entity unless operating it is the content, as in a screen recording.
 
 [Actions]
 Select at most 6 distinct, supported actions, in the order they occur. Each action is one concise active phrase that preserves the distinguishing technique and who acts on whom.
 - Write task steps and physical interactions between entities first. Use the most specific verb the frames support: filleting rather than cutting, dribbling rather than playing. Avoid vague verbs such as using, interacting, moving, displaying, or reacting.
 - Record how participants relate to each other when it is visible: woman - confronting - man, nurse - comforting - child. Prefer a verb for what gestures, expressions, and positions show over speaking or looking. Speech cannot be seen in keyframes, so do not guess what is said.
-- Do not pad with actions that only describe one entity's posture or state, or merely holding something, such as standing, sitting, speaking with no target, or holding a cup, unless that is the content itself, as in an interview or a performance. If only such actions remain, write none and let topics carry the situation.
+- An action normally has a target. Write target none only when the motion itself is the content, such as dancing, singing, falling, jumping, or fleeing. Never write standing, sitting, lying, walking, smiling, speaking, looking, gesturing, posing, or reacting with target none: write it only when it is visibly directed at a declared entity, otherwise omit it. Write holding only when handling the object is the content. If no other action remains, write none and let topics carry the situation.
 
 Each action has five slots, actor - action - target; tool; place. Roles are specific to each action:
 - actor: who or what performs the action.
 - target: what is acted on or transferred, not merely its holder. For transfers, keep the transferred object as target. Use none when the action has no object, such as jumping or collapsing; never repeat the actor as target.
 - tool: the means actor actually uses for this action, not a nearby or merely held object. A knife is tool when cutting, target when washed.
-- place: where the action occurs, not its destination. Do not infer a kitchen from a knife or repeat the same place in attributes.
+- place: the specific location the frames show, such as kitchen, basketball court, or rooftop; not the action's destination. Never use indoor, outdoor, background, scene, or a bare room as a place; write unknown instead. Do not infer a kitchen from a knife or repeat the same place in attributes.
 - One entity fills at most one role in an action. The target cannot also be the tool or the place.
 
 Each role is one entity name copied exactly from [Entities], including spaces and any number, or none, or unknown. Do not use a synonym, a longer phrase, or attributes. Declare every actor, target, tool, and place in [Entities] before using it in an action; a name that is not declared is lost.
@@ -58,7 +58,7 @@ Each role is one entity name copied exactly from [Entities], including spaces an
 - If the action itself is uncertain, omit it. Empty actions are valid for explanations, comparisons, or static scenes. Never create links just to connect entities. Do not infer causality from order.
 
 [Output Format]
-Output [Context], [Entities], [Actions] in that order.
+The first line of the output is [Context]. Output [Context], [Entities], [Actions] in that order, each header on its own line.
 Context: exactly three lines, medium: value, format: value, topics: value; value.
 Entities: one per line, name; attribute; attribute. Omit unnecessary attributes. Do not add IDs or colons.
 Actions: one per line, actor - action - target; tool; place. Write all five slots; use none or unknown as defined above, not empty slots.
@@ -88,7 +88,7 @@ chef - scooping - roe; spoon; kitchen
 Two men are in an unclear place; one sands a wooden board with a sanding block while the other stands nearby:
 [Context]
 medium: live_action
-format: demonstration
+format: narrative
 topics: woodworking; hand sanding
 [Entities]
 man1; wearing gloves; gray beard
@@ -112,7 +112,7 @@ rooftop
 player character - shooting - enemy character; rifle; rooftop
 enemy character - falling - none; none; rooftop
 
-A woman and a man argue face to face in a living room; the woman then throws a cushion at the man:
+A woman and a man argue face to face indoors, the man standing with his arms crossed; the woman then throws a cushion at the man:
 [Context]
 medium: live_action
 format: narrative
@@ -121,10 +121,9 @@ topics: couple argument; tense confrontation
 woman; tearful expression
 man; arms crossed
 cushion
-living room
 [Actions]
-woman - confronting - man; none; living room
-woman - throwing - cushion; none; living room
+woman - confronting - man; none; unknown
+woman - throwing - cushion; none; unknown
 
 Close-ups compare heavy and light makeup on the same face; no application is shown:
 [Context]

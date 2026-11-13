@@ -12,7 +12,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v18"
+GRAPH_PARSER_VERSION = "graph-text/v19"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -215,7 +215,17 @@ def _parse_context_actions(text, *, repair):
         for line in text.splitlines()
     }
     missing = [name for name in required if name not in headers]
-    if missing:
+    # Name-form output sometimes starts at "medium:" without [Context], and then
+    # often without [Entities] too: the context lines end where the entities begin.
+    field = re.compile(r"\s*(medium|format|topics)\s*[:：]")
+    headless = repair and missing in (["Context"], ["Context", "Entities"]) and bool(field.match(text))
+    if headless:
+        lines = text.strip().splitlines()
+        if "Entities" in missing:
+            split = next((i for i, line in enumerate(lines) if not field.match(line)), len(lines))
+            lines.insert(split, "[Entities]")
+        text = "\n".join(["[Context]", *lines])
+    elif missing:
         raise GraphTextError(f"missing [{missing[0]}]", MISSING_REQUIRED)
     order = (*required, "End")
     sections, current, seen = {}, None, 0
@@ -273,12 +283,18 @@ def _parse_context_actions(text, *, repair):
     if len(entity_styles) > 1:
         raise GraphTextError("mixed entity declaration formats")
     named = entity_styles == {False}
+    if headless and not named:
+        raise GraphTextError("missing [Context]", MISSING_REQUIRED)
     graph = dict(context)
     for section, parse in (("Entities", _entity), ("Actions", _action)):
         rows = sections[section]
         if not rows:
             raise GraphTextError(f"empty [{section}]; write none explicitly")
         empty = [line == "none" or repair and line.casefold() in {"none", "[]"} for line in rows]
+        if repair and named and section == "Actions" and any(empty) and not all(empty):
+            # A stray none beside real actions: keep the actions.
+            rows = [line for line, skip in zip(rows, empty) if not skip]
+            empty = [False] * len(rows)
         if any(empty):
             if len(rows) != 1:
                 raise GraphTextError(f"[{section}]: none mixed with other items")

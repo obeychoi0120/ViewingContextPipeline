@@ -8,9 +8,69 @@
 
 ## scene_graph
 
-대상(최신순): [v9_8b](../prompts/scene_graph_v9_8b.md) · [v9_2b](../prompts/scene_graph_v9_2b.md) → [v9(삭제됨)](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
+대상(최신순): [v10_8b](../prompts/scene_graph_v10_8b.md) · [v10_2b](../prompts/scene_graph_v10_2b.md) → [v9_8b](../prompts/scene_graph_v9_8b.md) · [v9_2b](../prompts/scene_graph_v9_2b.md) → [v9(삭제됨)](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
 
-**개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리.**
+**개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증).**
+
+### 2026-11-13: v10_2b·v10_8b 신규(간소화)
+
+[scene_graph_v10_2b](../prompts/scene_graph_v10_2b.md)와 [scene_graph_v10_8b](../prompts/scene_graph_v10_8b.md)를 새로 추가했습니다. v9_2b와 아래 항목에서 수정한 v9_8b는 그대로 남깁니다.
+
+**이유.** R10(`R10_v9_261111`)의 8B 출력에서 길게 쓴 금지 규칙은 지켜지지 않았고(자세·상태 행동 금지가 있는데도 `standing`의 92%가 target 없이 출력), 예시의 형태는 그대로 따라갔습니다(행동이 있는 예시 4개 중 3개가 place를 채웠고 8B 행동의 86%가 place를 채움). 같은 프롬프트를 Gemini는 더 잘 따랐습니다. 그래서 규칙 문장을 줄이고 예시는 유지하는 방향을 시험하려는 것입니다.
+
+**분량(예시 제외 본문).**
+
+| 프롬프트 | 줄 수 | 단어 수 |
+| --- | --- | --- |
+| v9_2b → v10_2b | 35 → 25 | 834 → 405 |
+| v9_8b(수정 후) → v10_8b | 57 → 41 | 1,473 → 670 |
+
+**유지한 것.** 출력 형식(세 섹션, 이름 직접 참조, 행동 5칸, 구분자, none·unknown)은 v9와 같아 파서는 그대로 씁니다. 상한(2B 엔티티 6·속성 2·행동 4·주제 3, 8B 8·3·6·4), 번호 붙이기, 역할 이름 권장, 8B의 medium·format 값별 정의, 예시(2B 3개, 8B 5개; 8B는 아래 항목에서 고친 예시)를 유지했습니다.
+
+**줄이거나 뺀 것.**
+
+- `[Selection and Evidence]` 5~6개 항목을 `[Evidence]` 2~3개로 합쳤습니다: 보이는 것만 쓴다, 화면 글자는 주제 단서로만 쓴다, (8B) 같은 엔티티는 근거가 있을 때만 잇는다.
+- 드문 경우를 막는 방어 규칙을 뺐습니다: 전달 대상 처리, 인과 추론, 화면 속 지시 따르기, 보이지 않는 조작자, 한 엔티티 한 역할, 행동 간 연결 금지, 선언 후 사용 문장(“[Entities]에서 그대로 복사”로 대체), 표현 의도와 묘사 내용의 구분.
+- 긴 금지 규칙을 짧은 긍정문으로 바꿨습니다: “자세·표정·대상 없는 말은 행동이 아니라 속성”, “place는 구체적인 장소가 보일 때만”, “인터페이스는 엔티티가 아님”(8B).
+- 8B의 format 정의에서 부정 설명(“~는 demonstration이 아니다”)을 뺐습니다.
+
+**v10_2b에만 추가한 것.** “같은 종류가 셋 이상이면 하나의 그룹 엔티티로 쓴다”를 넣었습니다. R10의 2B 출력에서 9.1%(10,572장면)가 토큰 상한에서 잘려 복구됐고 `man1`, `man2`…로 번호를 세다 잘린 경우가 포함되어 있어서입니다.
+
+**미검증.** v10 프롬프트로는 아직 한 장면도 생성하지 않았습니다. 간소화가 출력 품질이나 추천 성능을 높이는지, 뺀 규칙 중 실제로 필요했던 것이 있는지, 그룹 엔티티 규칙이 2B의 반복을 줄이는지는 모두 확인되지 않았습니다. 후속 과제로 v9_8b(수정 전·후)와 v10_8b, v9_2b와 v10_2b를 같은 장면 표본에 돌려 target 없는 행동 비율, place 비율, format 분포, 파싱 실패율, 절단 비율을 비교해야 합니다.
+
+### 2026-11-13: v9_8b 규칙·예시 수정, 섹션 헤더 누락 복구
+
+[scene_graph_v9_8b](../prompts/scene_graph_v9_8b.md)를 같은 파일에서 수정했습니다. R10의 기존 8B·Gemini 생성분은 수정 전 내용(프롬프트 해시 `447ec822…`, git 이력의 이전 버전) 기준입니다.
+
+**근거(R10, 장면 115,947개, Gemini는 8B와 같은 프롬프트로 생성).** 분석 코드와 수치는 `artifacts/runs/R10_v9_261111/reports/compare_2b_8b_gemini.py`와 `.json`에 있습니다.
+
+| 지표 | 2B | 8B | Gemini |
+| --- | --- | --- | --- |
+| target이 없는 행동 | 14% | 38% | 15% |
+| place를 채운 행동 | 30% | 86% | 63% |
+| 장면당 place로만 쓰인 엔티티 | 0.29 | 1.18 | 0.64 |
+| 약한 동사 비율(look·stand·hold·speak 등) | 46% | 34% | 16% |
+| format이 demonstration인 장면 | 6,430 | 12,526 | 5,700 |
+| Gemini와 format 일치 | 71.1% | 81.0% | — |
+
+추천 지표는 hgvrec-2b 0.043520 ± 0.0011, hgvrec-8b 0.043510 ± 0.0018, hgvrec-gemini 0.044278 ± 0.0002(NDCG@10)로, 2B와 8B의 차이는 표준편차 안입니다.
+
+**프롬프트 변경(v9_8b).**
+
+- 자세·상태 행동: “채우지 말라”는 권고를 구조 규칙으로 바꿨습니다. target none은 춤·노래·넘어짐처럼 동작 자체가 내용일 때만 쓰고, 서기·앉기·말하기·보기 등은 선언된 엔티티를 향할 때만 씁니다.
+- place: 프레임에 보이는 구체적인 장소로 정의하고 `indoor`, `outdoor`, `background`, `scene`, 단독 `room`을 금지했습니다. 엔티티 선정 문장에서도 place는 구체적인 장소가 보일 때만 넣도록 했습니다.
+- 인터페이스(game UI, HUD, 메뉴, 자막, 워터마크)는 조작이 내용인 경우가 아니면 엔티티로 선언하지 않습니다. 8B 출력에 `game ui`·`game interface` 엔티티가 약 11,000개 있었습니다.
+- demonstration을 “시청자가 따라 하도록 단계로 구성된 how-to”로 좁혔습니다.
+- 출력 첫 줄이 `[Context]`임을 명시했습니다.
+- 예시: 목공 예시의 format을 narrative로, 말다툼 예시의 place를 unknown으로 바꾸고(`living room` 엔티티 삭제) 서 있는 자세는 속성으로만 남겼습니다. 행동이 있는 예시 중 place를 채운 것이 3개에서 2개가 됩니다.
+
+**파서 변경(`graph-text/v19`, 이름 형식만).**
+
+- `[Context]` 헤더 없이 `medium:`으로 시작하는 출력을 복구합니다. `[Entities]`까지 함께 빠진 경우에는 `medium`·`format`·`topics` 줄이 끝나는 곳을 엔티티의 시작으로 봅니다.
+- `[Actions]`에 `none`과 실제 행동이 섞여 있으면 `none` 줄만 버립니다.
+- 두 복구 모두 ID 형식(v8) 출력에는 적용하지 않아 기존 v8 Run의 결과는 달라지지 않습니다. 복구된 장면의 parse_mode는 repaired입니다.
+
+**검증 범위.** R10의 경고 장면을 새 파서로 다시 해석하면 8B는 1,563건 중 1,124건, Gemini는 830건 중 23건이 구조화되고 2B는 371건 모두 그대로입니다. 저장된 파일은 바꾸지 않았고, embed-representations가 저장된 원문을 다시 해석할 때 반영됩니다. 수정한 v9_8b로는 아직 생성하지 않았으므로 위 프롬프트 변경이 각 지표를 실제로 움직이는지, 행동 없는 장면이 얼마나 늘어나는지, 추천 성능에 영향이 있는지는 확인되지 않았습니다.
 
 ### 2026-11-11: 토큰 상한에서 잘린 출력 복구와 recovered 집계
 

@@ -92,9 +92,31 @@ def test_named_graph_regroups_actions_joined_on_one_line():
     for ambiguous in ("man1 - cutting - door; knife; room; door", "knife; man1 - cutting - door",
                       "man1 - cutting - door - room"):
         assert parse_or_repair_graph(head + names + ambiguous).warning == (PARSE_FAILED,)
+
     # ID-form output keeps its earlier behavior.
     legacy = head + "p1: woman\nf1: door\n[Actions]\np1 - pushing - f1; p1 - leaving - f1"
     assert parse_or_repair_graph(legacy).warning == (PARSE_FAILED,)
+
+
+def test_named_graph_repairs_missing_context_header_and_stray_none():
+    body = "medium: animation\nformat: narrative\ntopics: dorm\n[Entities]\n{entities}\n[Actions]\n{actions}"
+    parsed = parse_or_repair_graph(body.format(entities="woman; white blouse\ndoor",
+                                               actions="none\nwoman - pushing - door; none; unknown"))
+    assert parsed.error is None and parsed.parse_mode == "repaired", parsed.error
+    assert parsed.graph["medium"] == "animation"
+    assert [tuple(a.values()) for a in parsed.graph["actions"]] == [("e1", "pushing", "e2", None, "unknown")]
+    both = parse_or_repair_graph("medium: animation\nformat: narrative\ntopics: dorm\n"
+                                 "woman; white blouse\ndoor\n[Actions]\nwoman - pushing - door; none; unknown")
+    assert both.parse_mode == "repaired" and [e["name"] for e in both.graph["entities"]] == ["woman", "door"]
+    # ID-form output keeps its previous behaviour for both cases.
+    legacy = "p1: woman; white blouse\no1: door"
+    assert parse_or_repair_graph(body.format(entities=legacy, actions="none")).warning == (MISSING_REQUIRED,)
+    assert parse_or_repair_graph("[Context]\n" + body.format(
+        entities=legacy, actions="none\np1 - pushing - o1; none; unknown")).warning == (PARSE_FAILED,)
+    # Other missing headers are still unusable.
+    assert parse_or_repair_graph("[Context]\nmedium: animation\nformat: narrative\ntopics: dorm\n"
+                                 "woman\n[Actions]\nnone").warning == (MISSING_REQUIRED,)
+
 
 
 def test_compact_scene_storage_roundtrip(tmp_path):
