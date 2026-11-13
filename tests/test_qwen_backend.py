@@ -70,7 +70,7 @@ def test_qwen_context_overflow_never_truncates(monkeypatch):
 
 def test_qwen_generation_identity_preserves_initial_settings(context):
     arm = generation_registry(context.config)["graph_qwen3vl_2b"]
-    initial = prompt_provenance(context, "prompts/scene_graph_v9_2b.md", arm)
+    initial = prompt_provenance(context, "prompts/scene_graph_v9_core.md", arm)
     directory = context.scene_arm_dir(arm.name)
     ensure_generation_identity(directory, initial)
     before = read_json(directory / "generation_identity.json")
@@ -84,6 +84,18 @@ def test_qwen_generation_identity_preserves_initial_settings(context):
     assert not (directory / "old.jsonl").exists()
 
 
+@pytest.mark.parametrize("version", ["v9", "v10"])
+def test_extended_prompt_is_the_core_plus_an_extension_block(version):
+    from pathlib import Path
+
+    prompts = Path(__file__).resolve().parents[1] / "prompts"
+    core = (prompts / f"scene_graph_{version}_core.md").read_text(encoding="utf-8")
+    extended = (prompts / f"scene_graph_{version}_extended.md").read_text(encoding="utf-8")
+    # The extended prompt only appends to the core, verbatim.
+    assert extended.startswith(core)
+    assert extended[len(core):].lstrip().startswith("[Additional Instructions]")
+
+
 def test_qwen_sizes_use_separate_sources_and_checkpoints(context):
     from extraction.qwen_config import validate_checkpoint
 
@@ -92,8 +104,8 @@ def test_qwen_sizes_use_separate_sources_and_checkpoints(context):
     assert context.scene_arm_dir(small.name) != context.scene_arm_dir(large.name)
     assert context.extraction_dir("graph", "qwen3vl_8b", "scenes") == context.scene_arm_dir(large.name)
     identities = [
-        prompt_provenance(context, f"prompts/scene_graph_v9_{size}.md", arm)
-        for size, arm in (("2b", small), ("8b", large))
+        prompt_provenance(context, f"prompts/scene_graph_v9_{name}.md", arm)
+        for name, arm in (("core", small), ("extended", large))
     ]
     assert [item["scene_arm"] for item in identities] == ["graph_qwen3vl_2b", "graph_qwen3vl_8b"]
     assert identities[0]["model"]["path"] != identities[1]["model"]["path"]
@@ -105,4 +117,4 @@ def test_qwen_sizes_use_separate_sources_and_checkpoints(context):
     validate_checkpoint("qwen3vl_8b", config, context.path("models", "qwen3vl_2b").parent / "local-vl")
     with pytest.raises(ValueError, match="expects 8B"):
         context.config["models"]["qwen3vl_8b"] = context.config["models"]["qwen3vl_2b"]
-        prompt_provenance(context, "prompts/scene_graph_v9_8b.md", large)
+        prompt_provenance(context, "prompts/scene_graph_v9_extended.md", large)

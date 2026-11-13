@@ -67,7 +67,8 @@ class RunContext:
         )
         run_root = artifact_root / "runs" / selected / dataset
         if dataset == "microlens_100k" and (
-            any((run_root.parent / name).exists() for name in ("extraction", "validation", "reports"))
+            # reports/ at the Run root is the current home of per-Run analyses (AGENTS.md), not legacy data.
+            any((run_root.parent / name).exists() for name in ("extraction", "validation"))
             or (artifact_root / "preparation" / "cohort").exists()
         ):
             raise ConfigError("legacy MicroLens layout found; run python -m preparation.migrate_dataset_layout --apply first")

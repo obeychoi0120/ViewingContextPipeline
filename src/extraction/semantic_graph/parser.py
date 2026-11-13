@@ -152,7 +152,7 @@ def _split_joined_actions(rows):
     return ["; ".join([*action, *("none", "unknown")[len(action) - 1:]]) for action in actions]
 
 
-# Largest per-scene ceilings of the current prompts (scene_graph_v9_8b).
+# Largest per-scene ceilings of the current prompts (scene_graph_v9_extended).
 _RECOVERY_LIMITS = {"entities": 8, "attributes": 3, "actions": 6}
 
 

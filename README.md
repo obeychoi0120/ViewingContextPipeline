@@ -140,8 +140,8 @@ python -m preparation prepare-input-data --run-id "$RUN_ID" --dataset "$DATASET"
 YAML에서 사용하는 서로 다른 시각 source만 준비합니다. 추출 명령의 `--arm`은 source 식별자이며 추천 실험의 label과 구분합니다. source는 추출 명령과 `--model`로 정해지므로 `--arm`은 생략할 수 있고, 넣으면 일치하는지만 확인합니다. `config.yaml`의 `models`·`extraction.graph`·`extraction.description`에는 실제로 쓰는 모델만 두면 되며(`bge`는 필수), Gemini를 쓰지 않으면 `models.gemini`·`extraction.gemini`도 생략할 수 있습니다. 빠진 모델로 추출을 시작하면 그 단계에서 바로 오류를 냅니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_2b.md --model qwen3vl_2b --arm graph_qwen3vl_2b
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_8b.md --model qwen3vl_8b --arm graph_qwen3vl_8b
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_core.md --model qwen3vl_2b --arm graph_qwen3vl_2b
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_extended.md --model qwen3vl_8b --arm graph_qwen3vl_8b
 python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_description_v3.md --model qwen3vl_2b --arm desc_qwen3vl_2b
 ```
 

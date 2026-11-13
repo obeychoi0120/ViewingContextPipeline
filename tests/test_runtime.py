@@ -29,6 +29,15 @@ def test_current_config_and_extractor_protocol_load(context):
     _validate_config(config)
 
 
+def test_run_level_reports_directory_is_not_a_legacy_layout(context):
+    from pipeline_runtime import RunContext
+
+    # Per-Run analyses live in artifacts/runs/<RUN_ID>/reports/ (AGENTS.md).
+    (context.run_root.parent / "reports").mkdir(parents=True)
+    loaded = RunContext.load(context.run_id, dataset=context.dataset, root=context.root)
+    assert loaded.run_root == context.run_root
+
+
 def test_unused_models_may_be_omitted_until_a_step_needs_them(context):
     from copy import deepcopy
     from pipeline_runtime import ConfigError, _validate_config, require_generation_config

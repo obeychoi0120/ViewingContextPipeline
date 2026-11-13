@@ -8,13 +8,81 @@
 
 ## scene_graph
 
-대상(최신순): [v10_8b](../prompts/scene_graph_v10_8b.md) · [v10_2b](../prompts/scene_graph_v10_2b.md) → [v9_8b](../prompts/scene_graph_v9_8b.md) · [v9_2b](../prompts/scene_graph_v9_2b.md) → [v9(삭제됨)](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
+대상(최신순): [v10_extended](../prompts/scene_graph_v10_extended.md) · [v10_core](../prompts/scene_graph_v10_core.md) → [v9_extended](../prompts/scene_graph_v9_extended.md) · [v9_core](../prompts/scene_graph_v9_core.md) → [v9(삭제됨)](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
 
 **개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증).**
 
+### 2026-11-13: 파일 이름 변경 (_2b → _core, _8b → _extended)
+
+프롬프트 내용은 바꾸지 않고 파일 이름만 바꿨습니다. v9는 사용자가 직접 바꿨고, v10은 같은 규칙에 맞췄습니다.
+
+| 이전 | 현재 |
+| --- | --- |
+| `scene_graph_v9_2b.md` | [scene_graph_v9_core.md](../prompts/scene_graph_v9_core.md) |
+| `scene_graph_v9_8b.md` | [scene_graph_v9_extended.md](../prompts/scene_graph_v9_extended.md) |
+| `scene_graph_v10_2b.md` | [scene_graph_v10_core.md](../prompts/scene_graph_v10_core.md) |
+| `scene_graph_v10_8b.md` | [scene_graph_v10_extended.md](../prompts/scene_graph_v10_extended.md) |
+
+**이유.** extended는 core 전문에 확장 블록을 붙인 구조여서, 모델 크기가 아니라 프롬프트의 구성을 이름으로 나타냅니다. 어느 모델에 어느 프롬프트를 줄지는 실행할 때 `--schema`로 정합니다.
+
+**연동.** 프롬프트 해시는 파일 내용으로 계산하므로 이름 변경으로 바뀌지 않습니다. 테스트와 `README.md`의 경로를 새 이름으로 바꿨고, 구조 테스트는 v9·v10 모두에서 extended가 core로 시작하는지 확인합니다. 아래 이력의 본문은 당시 이름(v9_2b, v9_8b, v10_2b, v10_8b)을 그대로 쓰며, 링크만 새 파일을 가리킵니다. `run_script.sh`는 사용자 스크립트라 수정하지 않았습니다.
+
+### 2026-11-13: v10_8b를 공통 코어(v10_2b) + 확장 블록 구조로 재작성
+
+[scene_graph_v10_8b](../prompts/scene_graph_v10_extended.md)를 같은 파일에서 다시 썼습니다. [scene_graph_v10_2b](../prompts/scene_graph_v10_core.md)는 바꾸지 않았습니다. 바로 아래 항목의 v9와 같은 구조이며 이유도 같습니다(2B·8B 비교에서 프롬프트 차이를 확장 블록 하나로 분리). v10 프롬프트는 두 파일 모두 아직 생성에 쓰인 적이 없습니다.
+
+**구조.** v10_8b = v10_2b 전문 + `[Additional Instructions]` 블록입니다. 테스트가 v9와 v10 모두에서 8B 파일이 2B 파일로 시작하는지 확인합니다. 분량은 코어 552단어 + 확장 약 400단어입니다.
+
+**확장 블록의 내용.** v9의 확장보다 짧습니다. v10_2b 코어에 이미 “place는 구체적인 장소가 보일 때만”, “자세·표정은 속성”, “첫 줄은 [Context]”가 있어 확장에서 반복하지 않습니다.
+
+- 상한 교체: 엔티티 8·속성 3·행동 6·주제 4.
+- Context: medium·format 값별 정의, 구체적인 주제.
+- Entities: 같은 엔티티로 잇는 조건, 사용자명·점수·숫자 금지, 인터페이스는 엔티티가 아님, 결과 상태 속성.
+- Actions: 일어난 순서와 구체적인 동사, 대상 없는 말은 행동이 아님, target none은 동작 자체가 내용일 때만.
+- Output: 쉼표 금지.
+- 추가 예시 2개: 게임 플레이, 말다툼(place unknown).
+
+**이전 v10_8b와의 차이.** 코어의 문장과 예시 3개(요리 한 단계, 두 남자 목공, 메이크업)로 통일되어 이전의 요리 여러 단계 예시와 “한 명은 서 있기만 하는” 목공 예시가 없어졌습니다. 코어의 “같은 종류가 셋 이상이면 그룹 엔티티” 규칙이 8B에도 들어갑니다. 이전 v10_8b에 있던 역할 이름 예시(`soldier`, `street vendor`)와 “man·woman은 역할이 안 보일 때만”은 코어의 “보이는 역할로 이름 붙이기” 한 문장으로 대체됐습니다. demonstration 정의는 v9 확장과 같은 문장입니다.
+
+**연동.** 출력 형식은 그대로여서 파서(`graph-text/v19`)는 바뀌지 않습니다.
+
+**미검증.** 생성에 쓴 적이 없어 효과는 전부 확인되지 않았습니다. 한 프롬프트에 상한이 두 번 나오는 구조를 8B가 확장 쪽으로 따르는지도 v9와 마찬가지로 확인이 필요합니다.
+
+### 2026-11-13: v9_8b를 공통 코어(v9_2b) + 확장 블록 구조로 재작성
+
+[scene_graph_v9_8b](../prompts/scene_graph_v9_extended.md)를 같은 파일에서 다시 썼습니다. [scene_graph_v9_2b](../prompts/scene_graph_v9_core.md)는 한 글자도 바꾸지 않았습니다(프롬프트 해시 유지, R10의 2B 생성분과 계속 일치). 아래 두 항목(같은 날의 v9_8b 규칙 수정, v10 신규)보다 나중 작업입니다.
+
+**이유.** 두 파일을 따로 써 온 탓에 같은 규칙도 문장이 달랐고 예시 내용도 달라서, 2B와 8B 결과의 차이에 모델 크기와 프롬프트 차이가 섞여 있었습니다. 또 8B 전용 규칙은 MicroLens 출력에서 본 증상마다 하나씩 붙인 것이어서 데이터에 맞춘 측면이 있었습니다. 공통 부분을 글자 그대로 같게 두고 8B에 더한 부분만 따로 떼어, 그 효과를 분리해 잴 수 있게 했습니다.
+
+**구조.**
+
+- v9_8b = v9_2b 전문 + `[Additional Instructions]` 블록입니다. 테스트가 v9_8b가 v9_2b로 시작하는지 확인합니다.
+- 확장 블록은 “위 지시에 더하며, 다르면 이쪽을 따른다”로 시작합니다.
+
+**확장 블록의 내용.**
+
+- 상한 교체: 엔티티 8·속성 3·행동 6·주제 4(코어는 6·2·4·3).
+- Context: medium·format 값별 정의, 구체적인 주제 권장.
+- Entities: 화면 문자열·사용자명·점수·숫자 금지, 결과 상태 속성, 구체적인 장소만 선언, 인터페이스 엔티티 금지.
+- Actions: 일어난 순서, 구체적인 동사, 참여자 간 관계, 자세·표정·대상 없는 말은 속성으로, 한 엔티티 한 역할.
+- Output: 첫 줄 `[Context]`, 쉼표 금지.
+- 추가 예시 3개: 도자기(여러 단계와 결과 상태), 게임 플레이, 말다툼(place unknown).
+
+**이전 v9_8b와의 차이.**
+
+- 코어에 있던 규칙이 8B에도 들어갑니다: “한 줄에 한 행동, 세미콜론으로 잇지 않기”, “actor는 tool이 될 수 없음”.
+- 코어의 예시 3개(요리 한 단계, 두 남자 목공, 메이크업)를 그대로 쓰므로, 이전 v9_8b의 요리 여러 단계 예시와 “한 명은 서 있기만 하는” 목공 예시는 없어졌습니다. 여러 단계 예시는 도자기 예시로 대신했습니다.
+- 금지 단어 나열을 줄였습니다: place의 `indoor`·`outdoor`·`background`·`room` 금지 목록, 자세·상태 동사 10개 나열, 모호한 동사 목록을 빼고 짧은 긍정문으로 바꿨습니다.
+- demonstration 정의를 “과제나 기법을 하는 법을 보여 줌(레시피, 튜토리얼, 공예 작업)”으로 완화했습니다. 코어의 목공 예시가 demonstration이어서, 직전 수정의 “따라 하도록 단계로 구성된 how-to”와는 맞지 않기 때문입니다.
+- 코어와 겹치던 8B 전용 문장(역할 정의, none·unknown, 근거 원칙 등)은 코어의 문장으로 통일됐습니다.
+
+**연동.** 출력 형식은 그대로여서 파서(`graph-text/v19`)와 스키마는 바뀌지 않습니다. v9_8b의 프롬프트 해시가 바뀌므로 이전 v9_8b로 만든 생성분(R10의 8B, 그리고 같은 날 수정본으로 생성했다면 그 Gemini 생성분)과는 다른 프롬프트입니다. v10_2b·v10_8b는 이 구조를 따르지 않고 그대로 둡니다.
+
+**미검증.** 이 v9_8b로는 아직 생성하지 않았습니다. 한 프롬프트 안에 상한이 두 번 나오는 구조(코어의 6·2·4·3과 확장의 8·3·6·4)를 모델이 확장 쪽으로 따르는지, 확장 블록이 코어만 쓴 경우보다 8B 출력을 낫게 하는지는 확인되지 않았습니다. 후속 과제는 8B에 v9_2b(코어만)와 v9_8b(코어+확장)를 같은 장면 표본으로 돌려 비교하는 것이고, 차이가 없으면 프롬프트를 하나로 합칠 수 있습니다.
+
 ### 2026-11-13: v10_2b·v10_8b 신규(간소화)
 
-[scene_graph_v10_2b](../prompts/scene_graph_v10_2b.md)와 [scene_graph_v10_8b](../prompts/scene_graph_v10_8b.md)를 새로 추가했습니다. v9_2b와 아래 항목에서 수정한 v9_8b는 그대로 남깁니다.
+[scene_graph_v10_2b](../prompts/scene_graph_v10_core.md)와 [scene_graph_v10_8b](../prompts/scene_graph_v10_extended.md)를 새로 추가했습니다. v9_2b와 아래 항목에서 수정한 v9_8b는 그대로 남깁니다.
 
 **이유.** R10(`R10_v9_261111`)의 8B 출력에서 길게 쓴 금지 규칙은 지켜지지 않았고(자세·상태 행동 금지가 있는데도 `standing`의 92%가 target 없이 출력), 예시의 형태는 그대로 따라갔습니다(행동이 있는 예시 4개 중 3개가 place를 채웠고 8B 행동의 86%가 place를 채움). 같은 프롬프트를 Gemini는 더 잘 따랐습니다. 그래서 규칙 문장을 줄이고 예시는 유지하는 방향을 시험하려는 것입니다.
 
@@ -40,7 +108,7 @@
 
 ### 2026-11-13: v9_8b 규칙·예시 수정, 섹션 헤더 누락 복구
 
-[scene_graph_v9_8b](../prompts/scene_graph_v9_8b.md)를 같은 파일에서 수정했습니다. R10의 기존 8B·Gemini 생성분은 수정 전 내용(프롬프트 해시 `447ec822…`, git 이력의 이전 버전) 기준입니다.
+[scene_graph_v9_8b](../prompts/scene_graph_v9_extended.md)를 같은 파일에서 수정했습니다. R10의 기존 8B·Gemini 생성분은 수정 전 내용(프롬프트 해시 `447ec822…`, git 이력의 이전 버전) 기준입니다.
 
 **근거(R10, 장면 115,947개, Gemini는 8B와 같은 프롬프트로 생성).** 분석 코드와 수치는 `artifacts/runs/R10_v9_261111/reports/compare_2b_8b_gemini.py`와 `.json`에 있습니다.
 
@@ -95,7 +163,7 @@
 
 ### 2026-11-11: v9_2b에 한 줄 한 행동 규칙 추가, 이어 쓴 행동 복구
 
-[scene_graph_v9_2b](../prompts/scene_graph_v9_2b.md)를 같은 파일에서 수정했습니다. 사용자가 붙여 준 v9_2b(Qwen3-VL 2B) 출력 24장면에서 성공 10, `PARSE_FAILED` 10, 토큰 상한 절단 4였고, 실패 10건을 파서로 재현한 결과 모두 행동 여러 개를 한 줄에 세미콜론으로 이어 쓰고 tool·place 슬롯을 생략한 경우였습니다. Run 전체 출력은 이 작업 환경에 없어 집계하지 못했습니다. 수정 전 내용으로 생성한 출력(`R10_v9_2b_261111`의 기존 생성분)은 커밋 `d293563`의 파일 기준입니다.
+[scene_graph_v9_2b](../prompts/scene_graph_v9_core.md)를 같은 파일에서 수정했습니다. 사용자가 붙여 준 v9_2b(Qwen3-VL 2B) 출력 24장면에서 성공 10, `PARSE_FAILED` 10, 토큰 상한 절단 4였고, 실패 10건을 파서로 재현한 결과 모두 행동 여러 개를 한 줄에 세미콜론으로 이어 쓰고 tool·place 슬롯을 생략한 경우였습니다. Run 전체 출력은 이 작업 환경에 없어 집계하지 못했습니다. 수정 전 내용으로 생성한 출력(`R10_v9_2b_261111`의 기존 생성분)은 커밋 `d293563`의 파일 기준입니다.
 
 **프롬프트 변경(v9_2b).**
 
@@ -130,7 +198,7 @@
 
 ### v8 → v9_2b·v9_8b: 이름 직접 참조 전환과 모델 크기별 분리
 
-2026-11-11 프롬프트 반영. 사용자가 기존 `scene_graph_v9.md`를 의도적으로 삭제했고, v8을 기준으로 두 파일을 새로 작성했습니다. [scene_graph_v9_2b](../prompts/scene_graph_v9_2b.md)는 Qwen3-VL 2B용, [scene_graph_v9_8b](../prompts/scene_graph_v9_8b.md)는 8B용입니다. 2026-10-14자 기존 v9 이력은 아래에 그대로 보존하며, 이 항목의 v9_2b·v9_8b는 그 파일의 수정본이 아니라 v8에서 다시 출발한 버전입니다.
+2026-11-11 프롬프트 반영. 사용자가 기존 `scene_graph_v9.md`를 의도적으로 삭제했고, v8을 기준으로 두 파일을 새로 작성했습니다. [scene_graph_v9_2b](../prompts/scene_graph_v9_core.md)는 Qwen3-VL 2B용, [scene_graph_v9_8b](../prompts/scene_graph_v9_extended.md)는 8B용입니다. 2026-10-14자 기존 v9 이력은 아래에 그대로 보존하며, 이 항목의 v9_2b·v9_8b는 그 파일의 수정본이 아니라 v8에서 다시 출발한 버전입니다.
 
 **변경 근거.** 같은 v8 프롬프트로 생성한 `R05_v8_261105`(2B)와 `R05_v8_8b_261106`(8B)의 MicroLens-100K 115,947장면을 문자열 기준으로 집계했습니다([스크립트](../artifacts/runs/R05_v8_8b_261106/reports/compare_2b_8b_scene_graph.py), [통계](../artifacts/runs/R05_v8_8b_261106/reports/compare_2b_8b_scene_graph.json)). 키프레임과 대조하지 않았으므로 의미 정확도는 확인하지 않은 수치입니다.
 

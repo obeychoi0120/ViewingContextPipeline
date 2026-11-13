@@ -239,7 +239,7 @@ def test_scene_sources_extract_reuse_and_retry(
     options = dict(
         model=model,
         arm=f"{'graph' if graph_source else 'desc'}_{model}",
-        schema="prompts/scene_graph_v9_2b.md" if graph_source else "prompts/scene_description_v3.md",
+        schema="prompts/scene_graph_v9_core.md" if graph_source else "prompts/scene_description_v3.md",
     )
     assert extract(context, **options)["failure_count"] == 0
     assert generator.tasks
@@ -324,7 +324,7 @@ def test_truncated_graph_scenes_are_recovered_counted_and_reused(context, monkey
     prepare_input_data(context)
     generator = FakeGenerator(LOOPED_GRAPH_TEXT, finish_reason="length")
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
-    options = dict(model="qwen3vl_2b", arm="graph_qwen3vl_2b", schema="prompts/scene_graph_v9_2b.md")
+    options = dict(model="qwen3vl_2b", arm="graph_qwen3vl_2b", schema="prompts/scene_graph_v9_core.md")
     assert extract_graph_scenes(context, **options)["failure_count"] == 0
     directory = context.scene_arm_dir(options["arm"])
     stats = read_json(directory / "generation_stats.json")

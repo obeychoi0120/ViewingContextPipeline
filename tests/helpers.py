@@ -159,8 +159,8 @@ def make_context(root, lengths=(5, 6, 13)):
     prompts = root / "prompts"
     prompts.mkdir()
     for name in (
-        "scene_graph_v9_2b.md",
-        "scene_graph_v9_8b.md",
+        "scene_graph_v9_core.md",
+        "scene_graph_v9_extended.md",
         "scene_description_v3.md",
     ):
         (prompts / name).write_text((ROOT / "prompts" / name).read_text())
@@ -251,7 +251,7 @@ def extract_scenes(context, monkeypatch):
     generator = FakeGenerator()
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     extract_graph_scenes(
-        context, model="qwen3vl_2b", schema="prompts/scene_graph_v9_2b.md", arm="graph_qwen3vl_2b"
+        context, model="qwen3vl_2b", schema="prompts/scene_graph_v9_core.md", arm="graph_qwen3vl_2b"
     )
     return generator
 
