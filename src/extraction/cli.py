@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--presence-penalty",
         type=float,
-        help="Local vLLM presence penalty in [-2, 2]. Default: 1.5. Use 0 to disable.",
+        help="Local vLLM presence penalty in [-2, 2]. Defaults: Graph scenes 0; Description scenes 1.5. Use 0 to disable.",
     )
     parser.add_argument(
         "--arm",

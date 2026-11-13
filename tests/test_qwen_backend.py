@@ -47,7 +47,7 @@ def test_qwen_image_preparation_and_sampling(context, monkeypatch):
     monkeypatch.setitem(sys.modules, "vllm.sampling_params", SimpleNamespace(RequestOutputKind=SimpleNamespace(FINAL_ONLY="final")))
     params = backend.sampling_params(task)
     assert params["max_tokens"] == 384 and params["temperature"] == 0
-    assert params["presence_penalty"] == 1.5 and params["repetition_penalty"] == 1.0
+    assert params["presence_penalty"] == 0.0 and params["repetition_penalty"] == 1.0
     assert params["extra_args"] == {"generated_token_repetition_penalty": 1.05}
 
 
@@ -75,7 +75,7 @@ def test_qwen_generation_identity_preserves_initial_settings(context):
     ensure_generation_identity(directory, initial)
     before = read_json(directory / "generation_identity.json")
     changed = deepcopy(initial)
-    changed["settings"]["generation"]["presence_penalty"] = 0
+    changed["settings"]["generation"]["presence_penalty"] = 1.5
     ensure_generation_identity(directory, changed)
     assert read_json(directory / "generation_identity.json") == before
     write_json(directory / "old.jsonl", {})

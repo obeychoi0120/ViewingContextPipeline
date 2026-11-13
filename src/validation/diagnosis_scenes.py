@@ -3,7 +3,6 @@ import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
-from extraction.graph_warnings import blocking_tags
 from extraction.scene_storage import read_scene_records
 from visual_sampling import truncate_timestamp, timestamp_filename
 from .diagnosis_support import _bounded_examples, _error, _read_json, _read_jsonl
@@ -270,7 +269,7 @@ def _scene_arm_contract(
                 if outcome == "success" and arm.startswith("graph_"):
                     parse_mode = row["parse_mode"]
                     parse_modes[key] = str(parse_mode)
-                    warnings = blocking_tags(row["semantic_warnings"])
+                    warnings = row["semantic_warnings"]
                     if warnings:
                         semantic_warning_scenes.add(key)
     overlap = success & (failures | raw_scenes)

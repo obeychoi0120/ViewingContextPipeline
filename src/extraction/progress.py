@@ -77,7 +77,7 @@ class InferenceProgress:
         self.reused = reused
         self.empty = empty
         self.success = self.failed = 0
-        self.warning = self.recovered = 0
+        self.warning = 0
         self._outcomes = {}
         self.stats = {"phase": "initializing", "inflight": 0}
         self._clock = clock or time.monotonic
@@ -131,10 +131,9 @@ class InferenceProgress:
             self.total = self.discovered
             self.bar.total = self.total
 
-    def complete(self, *, failed=False, task_id=None, warning=False, recovered=False):
-        """Count one scene as exactly one of failed, warning, recovered, or success."""
-        outcome = ("failed" if failed else "warning" if warning
-                   else "recovered" if recovered else "success")
+    def complete(self, *, failed=False, task_id=None, warning=False):
+        """Count one scene as exactly one of failed, warning, or success."""
+        outcome = "failed" if failed else "warning" if warning else "success"
         with self._lock:
             if task_id is not None:
                 previous = self._outcomes.get(task_id)
@@ -150,7 +149,7 @@ class InferenceProgress:
             if self._outcomes:
                 self._render(refresh=True)
             self.total = self.discovered = total
-            self.success = self.failed = self.warning = self.recovered = 0
+            self.success = self.failed = self.warning = 0
             self._outcomes.clear()
             self.stats = {"phase": "initializing", "inflight": 0}
             self._started = self._clock()
@@ -174,7 +173,7 @@ class InferenceProgress:
 
     def _render(self, *, refresh):
         with self._lock, tqdm.get_lock():
-            completed = self.success + self.warning + self.recovered + self.failed
+            completed = self.success + self.warning + self.failed
             remaining = None if self.total is None else max(0, self.total - completed)
             elapsed = max(0, self._clock() - self._started) if self._started is not None else 0
             rate = completed / elapsed if elapsed > 0 else 0
@@ -187,8 +186,7 @@ class InferenceProgress:
                 eta = tqdm.format_interval(remaining / rate)
             else:
                 eta = "estimating"
-            fields = (f"ETA={eta} success={self.success} warning={self.warning} "
-                      f"recovered={self.recovered} failed={self.failed}")
+            fields = f"ETA={eta} success={self.success} warning={self.warning} failed={self.failed}"
             if hasattr(self, "pass_label"):
                 fields = f"{self.pass_label} {fields}"
             formatted_rate = f"{rate:.2f}" if elapsed > 0 else "--"

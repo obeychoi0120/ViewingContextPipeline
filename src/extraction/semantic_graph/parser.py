@@ -12,7 +12,7 @@ from extraction.semantic_graph.json_repair import (
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v20"
+GRAPH_PARSER_VERSION = "graph-text/v21"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -165,62 +165,6 @@ def _split_joined_actions(rows):
             current[slot] = (label[2] if label else piece) or _SLOT_DEFAULTS[slot]
     return ["; ".join([action["body"], *(action.get(slot, default) for slot, default in _SLOT_DEFAULTS.items())])
             for action in actions]
-
-
-# Largest per-scene ceilings of the current prompts (scene_graph_v9_extended).
-_RECOVERY_LIMITS = {"entities": 8, "attributes": 3, "actions": 6}
-
-
-def _unique(values):
-    return list(dict.fromkeys(values))
-
-
-def recover_truncated_graph(text):
-    """Salvage a name-form Graph that was cut at the token limit, or return None.
-
-    Such output is almost always a repetition loop after valid content. The cut
-    line is dropped, repeated entities, attributes and actions collapse, and the
-    prompt ceilings bound what remains. Nothing is invented. ID-form output and
-    output cut before [Entities] are left as failures.
-    """
-    head, marker, rest = str(text or "").partition("[Entities]")
-    if not marker:
-        return None
-    entity_text, marker, action_text = rest.partition("[Actions]")
-    entity_rows = [row.strip() for row in entity_text.splitlines() if row.strip()]
-    action_rows = [row.strip() for row in action_text.splitlines() if row.strip()]
-    if not marker:
-        entity_rows = entity_rows[:-1]
-    elif action_rows:
-        *complete, cut = action_rows
-        # Pieces before the last semicolon of the cut line were written in full.
-        kept = cut.rpartition(";")[0].strip()
-        action_rows = complete + ([kept] if kept else [])
-    entities = []
-    for row in _unique(entity_rows):
-        name, *attributes = [part.strip() for part in re.split(r"[;；]", row)]
-        if not name or re.search(r"[:：]", name):
-            return None
-        attributes = _unique(part for part in attributes if part)
-        entities.append("; ".join([name, *attributes[: _RECOVERY_LIMITS["attributes"]]]))
-    entities = _unique(entities)[: _RECOVERY_LIMITS["entities"]]
-    if not entities:
-        return None
-    actions = []
-    for row in action_rows:
-        if row.casefold() == "none":
-            continue
-        try:
-            actions.extend(_split_joined_actions([row]))
-        except GraphTextError:
-            continue
-    actions = _unique(actions)[: _RECOVERY_LIMITS["actions"]]
-    parsed = parse_or_repair_graph(
-        "\n".join([head.strip(), "[Entities]", *entities, "[Actions]", *(actions or ["none"])])
-    )
-    if parsed.graph is None:
-        return None
-    return GraphParseResult(parsed.graph, parse_mode="repaired")
 
 
 def _parse_context_actions(text, *, repair):

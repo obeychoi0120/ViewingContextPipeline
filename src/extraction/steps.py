@@ -8,13 +8,11 @@ from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
 from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
-from extraction.graph_warnings import WARNING_TAGS, blocking_tags, is_recovered
+from extraction.graph_warnings import WARNING_TAGS
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
 from extraction.semantic_graph import GRAPH_SCHEMA_VERSION
-from extraction.scene_executor import (
-    GRAPH_TRUNCATED_ERROR, recovered_graph_record, run_gemini_scenes, run_qwen_scenes,
-)
+from extraction.scene_executor import run_gemini_scenes, run_qwen_scenes
 from extraction.step_support import (
     minimal_description_records,
     minimal_graph_records,
@@ -22,7 +20,6 @@ from extraction.step_support import (
     scene_generation_rows,
     video_name_map,
     visual_rows,
-    write_scene_results,
 )
 from extraction.generation import qwen_generator
 from extraction.scene_storage import read_scene_records, migrate_scene_failures
@@ -100,18 +97,8 @@ def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
             raise ExtractionStepError(
                 f"cannot safely identify existing scenes: {output}: {exc}"
             ) from exc
-        if not force and any(row.get("error") == GRAPH_TRUNCATED_ERROR for row in cached):
-            # Salvage outputs cut at the token limit instead of generating them again.
-            cached = [
-                ({**record, "tokens": row["tokens"]}
-                 if row.get("error") == GRAPH_TRUNCATED_ERROR
-                 and (record := recovered_graph_record(row, row["raw_output"])) else row)
-                for row in cached
-            ]
-            write_scene_results(output, list(cached))
         normalize([
-            row for row in cached
-            if "error" not in row and not blocking_tags(row.get("semantic_warnings"))
+            row for row in cached if "error" not in row and not row.get("semantic_warnings")
         ], output)
         by_index = {r["scene_idx"]: r for r in cached}
         if len(by_index) != len(cached):
@@ -119,8 +106,7 @@ def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
         missing = []
         for row in rows:
             saved = by_index.get(row["scene_idx"])
-            if (saved is None or "error" in saved
-                    or blocking_tags(saved.get("semantic_warnings"))):
+            if saved is None or "error" in saved or saved.get("semantic_warnings"):
                 missing.append(row)
         expected_indices = {row["scene_idx"] for row in rows}
         existing[cid] = [row for row in cached if row["scene_idx"] in expected_indices]
@@ -192,7 +178,7 @@ def _extract(
     )
     total = sum((len(scenes) for _, scenes in planned))
     reused = sum(
-        "error" not in row and not blocking_tags(row.get("semantic_warnings"))
+        "error" not in row and not row.get("semantic_warnings")
         for records in existing.values() for row in records
     )
 
@@ -244,7 +230,6 @@ def _extract(
             "total": total + reused,
             "success": 0,
             "warning": 0,
-            "recovered": 0,
             "failed": failure_count,
             "warning_counts": dict.fromkeys(WARNING_TAGS, 0),
         }
@@ -252,11 +237,10 @@ def _extract(
             for record in records:
                 if "error" in record:
                     continue
-                tags = blocking_tags(record["semantic_warnings"])
-                recovered = is_recovered(record["semantic_warnings"])
-                stats["warning" if tags else "recovered" if recovered else "success"] += 1
+                tags = record["semantic_warnings"]
+                stats["warning" if tags else "success"] += 1
                 for tag in tags:
-                    stats["warning_counts"][tag] += 1
+                    stats["warning_counts"][tag] = stats["warning_counts"].get(tag, 0) + 1
         atomic_write_json(scene_dir / "generation_stats.json", stats, durable=True)
     return result(
         f"{stage}-{model}", content_count=len(visuals), failure_count=failure_count

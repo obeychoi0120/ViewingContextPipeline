@@ -12,6 +12,22 @@
 
 **개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증) → tool·place 라벨화와 줄 배치 템플릿(v9·v10, 효과 미검증).**
 
+### 2026-11-13: 토큰 상한 절단 출력 복구 제거 (`graph-text/v21`)
+
+프롬프트 파일은 변경하지 않았습니다. 2026-11-11에 추가한 절단 출력 복구(`recover_truncated_graph`, `TRUNCATION_RECOVERED`)를 제거했습니다.
+
+**변경 이유.** R10 v9 `graph_qwen3vl_2b`에서 recovered가 115,947장면 중 10,572건(9.1%)이었습니다. 복구는 완전히 같은 줄만 합치고 엔티티 8·속성 3·행동 6개에서 자르는 규칙이라, `man1`…`man8` 같은 번호 세기 반복은 상한까지 그대로 남았고(엔티티 구간 절단 1,959건 중 1,223건이 같은 이름 번호 5개 이상), 행동 0개인 장면도 recovered로 집계되었습니다. 반복 직전까지의 내용이 맞는지도 확인하지 않습니다. 사용자 결정에 따라 임의 복구 대신 절단 장면을 실패로 두고, 생성 설정(penalty·토큰 한도)을 바꿔 다시 생성하는 방향으로 전환합니다.
+
+**처리 변경.**
+
+- 잘린 출력(Qwen `finish_reason=length`, Gemini `MAX_TOKENS`)은 v17 이전처럼 `graph: output truncated at token limit` 실패로 원문과 함께 저장하고, 재실행 시 다시 생성합니다. 다중 penalty 패스에서는 마지막 패스까지 재시도합니다.
+- 저장된 절단 실패 행을 재실행 시 제자리에서 복구하던 경로를 제거했습니다.
+- 진행 표시와 `generation_stats.json`의 `recovered` 집계를 제거했습니다. 한 장면은 success·warning·failed 중 하나입니다.
+
+**호환성.** 기존 Run에 저장된 `warning: ["TRUNCATION_RECOVERED"]` 행은 읽기 오류 없이 경고로 취급합니다. 추천 입력·진단에서 제외되고, 같은 Run을 다시 실행하면 재생성 대상이 됩니다. `generation_stats.json`의 `warning_counts`에 `TRUNCATION_RECOVERED`가 나타날 수 있습니다. 원본 파일은 재실행 전까지 수정하지 않습니다.
+
+**검증 범위.** `vc_cloud`에서 전체 테스트 90개와 `ruff check src tests`가 통과했습니다. 회귀 테스트는 절단 출력의 실패 저장과 재생성, 기존 복구 행의 재생성을 확인합니다. 실제 모델로 다시 생성하지는 않았으며, 높은 penalty나 큰 토큰 한도가 절단을 줄이는지는 확인하지 않았습니다.
+
 ### 2026-11-13: v9·v10의 tool·place 라벨화와 줄 배치 템플릿
 
 [v9_core](../prompts/scene_graph_v9_core.md), [v9_extended](../prompts/scene_graph_v9_extended.md), [v10_core](../prompts/scene_graph_v10_core.md), [v10_extended](../prompts/scene_graph_v10_extended.md) 네 파일을 같은 파일에서 수정했습니다. 버전 번호는 올리지 않았으므로 같은 이름이라도 이 날짜 이전과 이후는 다른 프롬프트입니다(프롬프트 해시가 바뀝니다). extended가 core 전문으로 시작하는 구조는 그대로입니다.

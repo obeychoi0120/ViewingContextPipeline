@@ -87,7 +87,9 @@ def generation_settings(
         "min_p": 0.0,
         "presence_penalty": (
             validate_presence_penalty(presence_penalty)
-            if presence_penalty is not None else 1.5
+            # Graph roles copy entity names and repeat delimiters on every line,
+            # so reuse of generated tokens is not penalised by default.
+            if presence_penalty is not None else 0.0 if representation == "graph" else 1.5
         ),
         "repetition_penalty": penalty,
         "model": model,

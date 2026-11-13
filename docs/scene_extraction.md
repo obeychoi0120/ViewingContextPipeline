@@ -48,7 +48,7 @@ person - cutting - tomato; tool: knife; place: kitchen
 
 ## 파싱과 지원 경계
 
-Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `graph-text/v15` 파서는 위 이름 선언 형식, 기존 `id: kind; attribute` 선언 형식과 현재 구조의 JSON을 읽습니다. 한 출력 안의 두 선언 형식 혼용은 원문으로 보존합니다. 필드·타입을 검증하며 `MISSING_REQUIRED`, `PARSE_FAILED` 경고를 구분합니다.
+Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `graph-text/v21` 파서는 위 이름 선언 형식, 기존 `id: kind; attribute` 선언 형식과 현재 구조의 JSON을 읽습니다. 한 출력 안의 두 선언 형식 혼용은 원문으로 보존합니다. 필드·타입을 검증하며 `MISSING_REQUIRED`, `PARSE_FAILED` 경고를 구분합니다. 출력 토큰 한도에서 잘린 출력은 복구하지 않고 원문과 함께 실패로 저장하며, 재실행 시 다시 생성합니다. 이전 파서(v18~v20)가 남긴 `TRUNCATION_RECOVERED` 행은 경고로 읽어 추천 입력에서 제외하고 재실행 시 다시 생성합니다.
 
 기존 v8 JSON의 Action `location`은 읽기용 복사본에서 `place`로 정규화합니다. 두 필드가 함께 있으면 값이 같아도 거부합니다. 원본 파일은 수정하지 않으며 Relations·receiver·필수 장소 필드 누락 등은 자동으로 다른 스키마로 변환하지 않습니다. 지원하지 않는 입력은 경로·원인과 함께 오류로 처리합니다.
 
@@ -62,17 +62,17 @@ Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `gra
 
 CLI 모델 식별자 `qwen3vl_2b`·`qwen3vl_8b`는 각각 Qwen3-VL 2B·8B Instruct checkpoint를 사용합니다. 로컬 checkpoint 경로는 `models.qwen3vl_2b`·`models.qwen3vl_8b`에 지정하며, 폴더 이름(또는 `_name_or_path`)에 요청한 크기만 들어 있어야 합니다. 이전 식별자 `qwen3vl`과 `graph_qwen3vl`·`desc_qwen3vl` source는 지원하지 않으므로, 기존 결과를 이어 쓰려면 source 폴더를 생성 당시 크기의 새 이름으로 옮깁니다. Thinking checkpoint는 지원하지 않습니다. Linux/CUDA의 vLLM 실행이며 설치 요구사항은 [pyproject.toml](../pyproject.toml)의 `qwen` extra를 확인하세요.
 
-Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 기본 presence penalty는 1.5, repetition penalty는 Graph 1.05·Description 1.0입니다. 출력 토큰 한도는 `extraction.{graph,description}.{qwen3vl_2b,qwen3vl_8b}.scene_max_new_tokens`를 따르며 문서에 별도 값으로 복제하지 않습니다.
+Greedy decoding의 설정은 `do_sample=False`, `temperature=0.0`, `top_p=1.0`, `top_k=0`, `min_p=0.0`입니다. 기본 presence penalty는 Graph 0·Description 1.5, repetition penalty는 Graph 1.05·Description 1.0입니다. 출력 토큰 한도는 `extraction.{graph,description}.{qwen3vl_2b,qwen3vl_8b}.scene_max_new_tokens`를 따르며 문서에 별도 값으로 복제하지 않습니다.
 
 | 옵션 | 허용 범위 | 적용 |
 | --- | --- | --- |
 | `--presence-penalty FLOAT` | 유한한 수 −2.0~2.0 | 해당 실행의 presence penalty. `0`은 비활성화 |
 | `--repetition-penalty FLOAT` | 유한한 수 1.0~2.0 | 생성 토큰 전용 repetition penalty |
 
-Repetition penalty는 전용 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용하지 않습니다. 최초 요청·구조 복구·재실행에 같은 옵션값을 사용하고 증가 schedule은 적용하지 않습니다. 예를 들어 presence penalty를 끄려면 다음과 같이 실행합니다.
+Repetition penalty는 전용 logits processor를 사용하며 vLLM 기본 repetition penalty는 1.0으로 두어 중복 적용하지 않습니다. 최초 요청·구조 복구·재실행에 같은 옵션값을 사용하고 증가 schedule은 적용하지 않습니다. 예를 들어 Graph에 이전 기본값인 presence penalty 1.5를 적용하려면 다음과 같이 실행합니다.
 
 ```bash
-python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_2b.md --model qwen3vl_2b --arm graph_qwen3vl_2b --presence-penalty 0
+python -m extraction extract-graph-scenes --run-id "$RUN_ID" --dataset "$DATASET" --schema prompts/scene_graph_v9_core.md --model qwen3vl_2b --arm graph_qwen3vl_2b --presence-penalty 1.5
 ```
 
 옵션은 새로 생성하는 결과와 provenance에 적용됩니다. 기존 정상 장면을 갱신하려면 새 Run 또는 해당 추출의 `--force`를 사용합니다. 생성 정책 변경의 형식 준수율·추천 성능 효과는 별도의 비교가 필요합니다.

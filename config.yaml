@@ -65,16 +65,16 @@ extraction:
     num_keyframes: 6
   description:
     qwen3vl_2b:
-      scene_max_new_tokens: 384
+      scene_max_new_tokens: 448
     qwen3vl_8b:
-      scene_max_new_tokens: 384
+      scene_max_new_tokens: 448
     gemini:
       scene_max_new_tokens: 1024
   graph:
     qwen3vl_2b:
-      scene_max_new_tokens: 384
+      scene_max_new_tokens: 512
     qwen3vl_8b:
-      scene_max_new_tokens: 384
+      scene_max_new_tokens: 512
     gemini:
       scene_max_new_tokens: 1024
 validation:

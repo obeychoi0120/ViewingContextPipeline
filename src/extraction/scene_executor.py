@@ -5,30 +5,12 @@ from itertools import chain
 from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
-from extraction.graph_warnings import TRUNCATION_RECOVERED, blocking_tags, is_recovered
-from extraction.semantic_graph import parse_or_repair_graph, recover_truncated_graph
+from extraction.semantic_graph import parse_or_repair_graph
 from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
     write_progress,
     write_scene_results,
 )
-
-
-GRAPH_TRUNCATED_ERROR = "graph: output truncated at token limit"
-
-
-def recovered_graph_record(row, text):
-    """Structured record for output cut at the token limit, or None if unusable."""
-    parsed = recover_truncated_graph(text)
-    if parsed is None:
-        return None
-    return {
-        "scene_idx": row["scene_idx"],
-        "keyframes": row.get("keyframes", []),
-        "graph": parsed.graph,
-        "parse_mode": parsed.parse_mode,
-        "semantic_warnings": [TRUNCATION_RECOVERED],
-    }
 
 
 def graph_scene_result(row, text, *, error=None, diagnostics=None):
@@ -127,16 +109,12 @@ class SceneResults:
             return
         cid, row = self.rows[task_id]
         if self.arm == "graph":
-            # Earlier passes still retry a cut output; only the last one salvages it.
-            record = recovered_graph_record(row, text) if truncated and final and not error else None
-            failure = None
-            if record is None:
-                record, failure = graph_scene_result(
-                    row,
-                    text,
-                    error=error or (GRAPH_TRUNCATED_ERROR if truncated else None),
-                    diagnostics=diagnostics,
-                )
+            record, failure = graph_scene_result(
+                row,
+                text,
+                error=error or ("graph: output truncated at token limit" if truncated else None),
+                diagnostics=diagnostics,
+            )
         else:
             record, failure = description_scene_result(
                 row,
@@ -168,8 +146,7 @@ class SceneResults:
         self.progress.complete(
             task_id=task_id,
             failed=failure is not None,
-            warning=record is not None and bool(blocking_tags(record.get("semantic_warnings"))),
-            recovered=record is not None and is_recovered(record.get("semantic_warnings")),
+            warning=record is not None and bool(record.get("semantic_warnings")),
         )
         return failure is not None
 

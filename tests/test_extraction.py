@@ -277,7 +277,7 @@ def test_scene_sources_extract_reuse_and_retry(
         assert task.max_new_tokens == context.config["extraction"][representation][model]["scene_max_new_tokens"]
         assert "TITLE_SECRET" not in task.prompt
         if model != "gemini":
-            assert task.presence_penalty == 1.5
+            assert task.presence_penalty == (0.0 if graph_source else 1.5)
             assert task.repetition_penalty == (1.05 if graph_source else 1.0)
     generator.tasks.clear()
     assert extract(context, **options)["failure_count"] == 0
@@ -294,36 +294,11 @@ def test_scene_sources_extract_reuse_and_retry(
 
 LOOPED_GRAPH_TEXT = (
     "[Context]\nmedium: animation\nformat: narrative\ntopics: forest scene\n"
-    "[Entities]\npanda1; white robe; white robe\npanda2; orange robe\njar\n"
+    "[Entities]\npanda1; white robe\npanda2; orange robe\njar\n"
     "[Actions]\n"
     + "panda1 - greeting - panda2; none; unknown\npanda2 - lifting - jar; none; unknown\n" * 9
     + "panda1 - greet"
 )
-
-
-def test_truncated_named_graph_is_salvaged_without_inventing_content():
-    from extraction.semantic_graph import recover_truncated_graph
-
-    graph = recover_truncated_graph(LOOPED_GRAPH_TEXT).graph
-    assert [(e["name"], e["attributes"]) for e in graph["entities"]] == [
-        ("panda1", ["white robe"]), ("panda2", ["orange robe"]), ("jar", [])]
-    assert [(a["actor"], a["action"], a["target"]) for a in graph["actions"]] == [
-        ("e1", "greeting", "e2"), ("e2", "lifting", "e3")]
-
-    head = "[Context]\nmedium: live_action\nformat: narrative\ntopics: army\n[Entities]\n"
-    counting = head + "".join(f"man{i}; wearing armor\n" for i in range(1, 31)) + "man31; wea"
-    graph = recover_truncated_graph(counting).graph
-    assert [e["name"] for e in graph["entities"]] == [f"man{i}" for i in range(1, 9)]
-    assert graph["actions"] == []
-
-    joined = head + "woman\nbook\n[Actions]\n" + "woman - reading - book; woman - closing - book; " * 20
-    actions = recover_truncated_graph(joined + "woman - rea").graph["actions"]
-    assert [a["action"] for a in actions] == ["reading", "closing"]
-
-    # ID-form output, and output cut before any entity, stay failures.
-    assert recover_truncated_graph(GRAPH_TEXT + "p1 - cutting - f1; t1; l1\np1 - cut") is None
-    assert recover_truncated_graph("[Context]\nmedium: live_action\nformat: narrative\ntopics: a; b") is None
-    assert recover_truncated_graph(head + "man1; wea") is None
 
 
 def test_progress_counts_each_scene_in_exactly_one_outcome():
@@ -331,20 +306,19 @@ def test_progress_counts_each_scene_in_exactly_one_outcome():
     from tqdm import tqdm
     import io
 
-    with InferenceProgress(total=4, desc="x", unit="scene",
+    with InferenceProgress(total=3, desc="x", unit="scene",
                            progress_factory=lambda **kw: tqdm(file=io.StringIO(), **kw)) as progress:
         progress.complete(task_id="a")
         progress.complete(task_id="b", warning=True)
-        progress.complete(task_id="c", recovered=True)
-        progress.complete(task_id="d", failed=True, warning=True, recovered=True)
-        progress.complete(task_id="d", recovered=True)  # a later pass replaces the outcome
-        counts = (progress.success, progress.warning, progress.recovered, progress.failed)
-    assert counts == (1, 1, 2, 0) and sum(counts) == 4
+        progress.complete(task_id="c", failed=True, warning=True)
+        progress.complete(task_id="c", warning=True)  # a later pass replaces the outcome
+        counts = (progress.success, progress.warning, progress.failed)
+    assert counts == (1, 2, 0) and sum(counts) == 3
 
 
-def test_truncated_graph_scenes_are_recovered_counted_and_reused(context, monkeypatch):
-    from artifact_io import read_json
-    from extraction.graph_warnings import TRUNCATION_RECOVERED
+def test_truncated_graph_scenes_fail_and_legacy_recoveries_regenerate(context, monkeypatch):
+    from artifact_io import atomic_write_jsonl, read_json
+    from extraction.graph_warnings import LEGACY_TRUNCATION_RECOVERED
     from extraction.steps import extract_graph_scenes
     from helpers import install_doubles
     from preparation.input_data import prepare_input_data
@@ -355,33 +329,31 @@ def test_truncated_graph_scenes_are_recovered_counted_and_reused(context, monkey
     generator = FakeGenerator(LOOPED_GRAPH_TEXT, finish_reason="length")
     monkeypatch.setattr("extraction.steps.qwen_generator", generator)
     options = dict(model="qwen3vl_2b", arm="graph_qwen3vl_2b", schema="prompts/scene_graph_v9_core.md")
-    assert extract_graph_scenes(context, **options)["failure_count"] == 0
+    total = extract_graph_scenes(context, **options)["failure_count"]
+    assert total == len(generator.tasks) > 0
     directory = context.scene_arm_dir(options["arm"])
     stats = read_json(directory / "generation_stats.json")
-    assert stats["recovered"] == stats["total"] == len(generator.tasks) > 0
-    assert stats["success"] + stats["warning"] + stats["recovered"] + stats["failed"] == stats["total"]
+    assert stats["failed"] == stats["total"] == total and "recovered" not in stats
     path = next(directory.glob("*.jsonl"))
-    rows = read_jsonl(path)
-    assert all(row["warning"] == [TRUNCATION_RECOVERED] and len(row["scene_graph"]["actions"]) == 2
-               for row in rows)
+    assert all("truncated" in row["error"] and row["raw_output"] == LOOPED_GRAPH_TEXT
+               for row in read_jsonl(path))
 
-    # Recovered scenes are final: a rerun generates nothing, also when --arm is omitted.
+    # Cut outputs are generated again, also when --arm is omitted.
+    generator.text, generator.finish_reason = GRAPH_TEXT, "stop"
     generator.tasks.clear()
-    extract_graph_scenes(context, **options)
-    extract_graph_scenes(context, model="qwen3vl_2b", schema=options["schema"])
-    assert not generator.tasks
+    assert extract_graph_scenes(context, model="qwen3vl_2b", schema=options["schema"])["failure_count"] == 0
+    assert len(generator.tasks) == total
     with pytest.raises(ValueError, match="invalid graph generation arm"):
         extract_graph_scenes(context, model="qwen3vl_2b", arm="desc_qwen3vl_2b", schema=options["schema"])
 
-    # A stored truncation failure is salvaged in place instead of being generated again.
-    rows[0] = {"content_id": path.stem, "scene_idx": rows[0]["scene_idx"], "tokens": 384,
-               "error": "graph: output truncated at token limit", "raw_output": LOOPED_GRAPH_TEXT}
-    from artifact_io import atomic_write_jsonl
+    # Rows stored by the removed recovery are read as warnings and regenerated.
+    rows = read_jsonl(path)
+    rows[0]["warning"] = [LEGACY_TRUNCATION_RECOVERED]
     atomic_write_jsonl(path, rows, durable=True, sort_keys=False)
+    generator.tasks.clear()
     assert extract_graph_scenes(context, **options)["failure_count"] == 0
-    assert not generator.tasks
-    assert read_jsonl(path)[0]["warning"] == [TRUNCATION_RECOVERED]
-    assert read_json(directory / "generation_stats.json")["recovered"] == stats["total"]
+    assert len(generator.tasks) == 1
+    assert read_jsonl(path)[0]["warning"] == []
 
 
 @pytest.mark.parametrize("name", ["v9_core", "v9_extended", "v10_core", "v10_extended"])
