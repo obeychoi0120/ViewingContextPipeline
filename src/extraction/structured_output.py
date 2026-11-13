@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from extraction.graph_warnings import (
-    MISSING_REQUIRED,
-    PARSE_FAILED,
-)
+from extraction.graph_warnings import PARSE_FAILED
 
 
 def _object(properties):
@@ -107,7 +104,7 @@ def _validate_shape(value, schema, path):
         raise OutputValidationError(f"{path}: expected {kind}")
     if kind == "object":
         if set(schema["required"]) - set(value):
-            raise OutputValidationError(f"{path}: missing required fields", (MISSING_REQUIRED,))
+            raise OutputValidationError(f"{path}: missing required fields")
         if set(value) - set(schema["properties"]):
             raise OutputValidationError(f"{path}: extra fields")
         for key, child in schema["properties"].items():

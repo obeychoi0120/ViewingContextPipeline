@@ -8,6 +8,8 @@ import threading
 
 from tqdm import tqdm
 
+from extraction.graph_warnings import OUTCOMES
+
 
 class RecentThroughput:
     WINDOW_SECONDS = 180
@@ -59,6 +61,7 @@ class InferenceProgress:
         unit,
         reused=0,
         empty=0,
+        outcomes=OUTCOMES,
         progress_factory=tqdm,
         clock=None,
     ):
@@ -76,8 +79,8 @@ class InferenceProgress:
         self.unit = unit
         self.reused = reused
         self.empty = empty
-        self.success = self.failed = 0
-        self.warning = 0
+        self.outcomes = tuple(outcomes)
+        self.counts = dict.fromkeys(self.outcomes, 0)
         self._outcomes = {}
         self.stats = {"phase": "initializing", "inflight": 0}
         self._clock = clock or time.monotonic
@@ -131,16 +134,17 @@ class InferenceProgress:
             self.total = self.discovered
             self.bar.total = self.total
 
-    def complete(self, *, failed=False, task_id=None, warning=False):
-        """Count one scene as exactly one of failed, warning, or success."""
-        outcome = "failed" if failed else "warning" if warning else "success"
+    def complete(self, *, outcome="success", task_id=None):
+        """Count one scene as exactly one outcome; a later pass replaces the earlier one."""
+        if outcome not in self.counts:
+            raise ValueError(f"unknown scene outcome: {outcome}")
         with self._lock:
             if task_id is not None:
                 previous = self._outcomes.get(task_id)
                 if previous is not None:
-                    setattr(self, previous, getattr(self, previous) - 1)
+                    self.counts[previous] -= 1
                 self._outcomes[task_id] = outcome
-            setattr(self, outcome, getattr(self, outcome) + 1)
+            self.counts[outcome] += 1
         # Counts are collected immediately; only the timer paints them.
 
     def begin_pass(self, total, *, index, count):
@@ -149,7 +153,7 @@ class InferenceProgress:
             if self._outcomes:
                 self._render(refresh=True)
             self.total = self.discovered = total
-            self.success = self.failed = self.warning = 0
+            self.counts = dict.fromkeys(self.outcomes, 0)
             self._outcomes.clear()
             self.stats = {"phase": "initializing", "inflight": 0}
             self._started = self._clock()
@@ -173,7 +177,7 @@ class InferenceProgress:
 
     def _render(self, *, refresh):
         with self._lock, tqdm.get_lock():
-            completed = self.success + self.warning + self.failed
+            completed = sum(self.counts.values())
             remaining = None if self.total is None else max(0, self.total - completed)
             elapsed = max(0, self._clock() - self._started) if self._started is not None else 0
             rate = completed / elapsed if elapsed > 0 else 0
@@ -186,7 +190,7 @@ class InferenceProgress:
                 eta = tqdm.format_interval(remaining / rate)
             else:
                 eta = "estimating"
-            fields = f"ETA={eta} success={self.success} warning={self.warning} failed={self.failed}"
+            fields = f"ETA={eta} " + " ".join(f"{name}={count}" for name, count in self.counts.items())
             if hasattr(self, "pass_label"):
                 fields = f"{self.pass_label} {fields}"
             formatted_rate = f"{rate:.2f}" if elapsed > 0 else "--"

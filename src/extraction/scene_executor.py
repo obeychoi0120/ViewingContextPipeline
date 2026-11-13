@@ -5,6 +5,7 @@ from itertools import chain
 from extraction.token_usage import qwen_output_tokens, gemini_output_tokens
 
 from extraction.descriptions import SCENE_SCHEMA_VERSION
+from extraction.graph_warnings import TOKEN_LIMIT, outcome
 from extraction.semantic_graph import parse_or_repair_graph
 from extraction.generation import generate_penalty_passes
 from extraction.step_support import (
@@ -13,12 +14,15 @@ from extraction.step_support import (
 )
 
 
-def graph_scene_result(row, text, *, error=None, diagnostics=None):
-    """Convert one response; preserve unresolved graphs as raw text."""
+def graph_scene_result(row, text, *, error=None, truncated=False, diagnostics=None):
+    """Convert one response; preserve unresolved or cut graphs as raw text."""
     if error is None and not text.strip():
         error = "model produced an empty graph"
-    parsed = parse_or_repair_graph(text) if error is None else None
     common = {"scene_idx": row["scene_idx"], "keyframes": row["keyframes"]}
+    if error is None and truncated:
+        # Output cut at the token limit is kept as text and never parsed.
+        return {**common, "graph": text, "parse_mode": "text", "semantic_warnings": [TOKEN_LIMIT]}, None
+    parsed = parse_or_repair_graph(text) if error is None else None
     parse_warning = parsed.error if parsed is not None else None
     warnings = list(parsed.warning) if parsed is not None else []
     if error is None and parsed is not None:
@@ -40,7 +44,7 @@ def graph_scene_result(row, text, *, error=None, diagnostics=None):
     return None, failure
 
 
-def description_scene_result(row, text, *, content_id, error=None):
+def description_scene_result(row, text, *, content_id, error=None, truncated=False):
     common = {
         "content_id": content_id,
         "scene_idx": row["scene_idx"],
@@ -48,7 +52,10 @@ def description_scene_result(row, text, *, content_id, error=None):
     }
     description = text.strip()
     if description and error is None:
-        return {"schema_version": SCENE_SCHEMA_VERSION, **common, "description": description}, None
+        return {
+            "schema_version": SCENE_SCHEMA_VERSION, **common, "description": description,
+            "semantic_warnings": [TOKEN_LIMIT] if truncated else [],
+        }, None
     return None, {
         "schema_version": "description-generation-failure/v1",
         **common,
@@ -110,18 +117,11 @@ class SceneResults:
         cid, row = self.rows[task_id]
         if self.arm == "graph":
             record, failure = graph_scene_result(
-                row,
-                text,
-                error=error or ("graph: output truncated at token limit" if truncated else None),
-                diagnostics=diagnostics,
+                row, text, error=error, truncated=truncated, diagnostics=diagnostics,
             )
         else:
             record, failure = description_scene_result(
-                row,
-                text,
-                content_id=cid,
-                error=error
-                or ("description: output truncated at token limit" if truncated else None),
+                row, text, content_id=cid, error=error, truncated=truncated,
             )
         provenance = self.provenance
         if provenance and self.penalty is not None:
@@ -143,12 +143,10 @@ class SceneResults:
         write_scene_results(self.scene_dir / f"{cid}.jsonl", records)
         self.records[cid] = records
         self.completed.add(task_id)
-        self.progress.complete(
-            task_id=task_id,
-            failed=failure is not None,
-            warning=record is not None and bool(record.get("semantic_warnings")),
-        )
-        return failure is not None
+        result = outcome(record)
+        self.progress.complete(task_id=task_id, outcome=result)
+        # Warnings and errors are both generated again by a later penalty pass.
+        return result != "success"
 
 
 def run_qwen_scenes(

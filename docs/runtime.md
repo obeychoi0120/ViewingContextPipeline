@@ -82,7 +82,7 @@ Graph·Description·실패는 source 디렉터리의 `<content_id>.jsonl`에 저
 
 기존 `failures/<content_id>.jsonl`이 있으면 추출 재개 준비에서 원본 JSONL에 통합하고 저장 성공 후 해당 실패 파일을 제거합니다. 양쪽에 같은 장면이 있으면 기존 실패 로그를 우선하고 누락 토큰 수는 `null`로 둡니다. 새 실패 디렉터리는 만들지 않습니다.
 
-진행바의 `success`·`warning`·`failed` 합으로 완료 수·처리량·ETA를 계산합니다. Graph의 `generation_stats.json`은 현재 대상의 재사용·새 결과 전체와 경고 종류별 수를 기록합니다. 실패 원문은 보존하지만 임베딩·Graph 구성에는 사용하지 않습니다.
+진행바의 `success`·`parse_failed`·`trash_info`·`token_limit`·`error` 합으로 완료 수·처리량·ETA를 계산합니다(Description은 `success`·`token_limit`·`error`). `generation_stats.json`은 현재 대상의 재사용·새 결과 전체를 같은 결과별로 기록합니다. warning·error 원문은 보존하지만 임베딩·Graph 구성에는 사용하지 않습니다.
 
 `generation_identity.json`은 초기 생성 설정 기록입니다. 기존 기록은 보존하고 없으면 현재 설정을 기록하며, 이 파일의 설정 차이로 정상 장면 재사용을 막지는 않습니다. 따라서 폴더 내 모든 장면의 생성 조건이 동일함을 보장하지 않습니다. 생성 옵션을 바꿔 재개하면 서로 다른 조건이 섞일 수 있습니다.
 
@@ -93,7 +93,7 @@ Graph·Description·실패는 source 디렉터리의 `<content_id>.jsonl`에 저
 | 단계·상황 | 일반 재실행 | `--force` |
 | --- | --- | --- |
 | 정상 장면 | 생성 옵션이 바뀌어도 재사용 | 해당 추출 source의 정상 결과까지 제거 후 재생성 |
-| 누락·실패·Graph warning 장면 | 현재 조건으로 한 번씩 생성. 자동 추가 pass 없음 | 전체 source 재생성에 포함 |
+| 누락·error·warning 장면 | 저장된 행에 현재 규칙을 적용한 뒤 남은 장면을 현재 조건으로 한 번씩 생성. 자동 추가 pass 없음 | 전체 source 재생성에 포함 |
 | 고정 특징 준비 | 유효한 로컬 bundle → 공유 캐시 → 새 계산 | 캐시 읽기를 우회해 재계산 |
 | 활동 구간 준비 | 필요한 source의 구간 파일을 다시 생성 | 같은 준비 경로를 수행 |
 | 완료 추천 조합 | 입력·구성·학습·평가 조건 검증 후 재사용 | 호환되는 조합을 다시 학습 |

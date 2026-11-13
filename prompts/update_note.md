@@ -12,6 +12,66 @@
 
 **개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증) → tool·place 라벨화와 줄 배치 템플릿(v9·v10, 효과 미검증).**
 
+### 2026-11-13: 장면 결과를 warning 3종과 error로 단순화 (`graph-text/v22`)
+
+프롬프트 파일은 변경하지 않았습니다. 다운스트림(BGE 임베딩·Graph 입력)이 실제로 요구하는 조건보다 파서가 엄격해서, 사용 가능한 출력까지 실패로 처리하던 문제를 고쳤습니다. 다운스트림의 요구 조건은 세 가지입니다.
+
+- Context: medium·format은 빈 문자열이 아니어야 하고, topics는 문자열 목록이어야 합니다.
+- 엔티티: 이름이 빈 문자열이 아니어야 합니다.
+- 행동: 행동 문구가 빈 문자열이 아니어야 하고, 역할은 선언된 엔티티·`none`·`unknown` 중 하나여야 합니다.
+
+**판정 체계(사용자 결정).** 장면당 결과는 하나이며, warning이 겹치면 `TOKEN_LIMIT` > `PARSE_FAILED` > `TRASH_INFO` 순으로 하나만 붙습니다.
+
+| 결과 | 조건 | 대상 |
+| --- | --- | --- |
+| success | 구조화 성공, 정보 있음 | Graph, Description |
+| `PARSE_FAILED` | Context 세 필드, Entities(또는 `none`), Actions(또는 `none`) 중 하나라도 분리하지 못함 | Graph |
+| `TRASH_INFO` | medium·format·topics가 전부 unknown/none이거나, 이름 있는 엔티티와 행동이 하나도 없음 | Graph |
+| `TOKEN_LIMIT` | 출력 토큰 한도에서 잘림(기존 error). 원문만 저장하고 파싱하지 않음 | Graph, Description |
+| error | 위에 해당하지 않는 생성 실패 | Graph, Description |
+
+`MISSING_REQUIRED`는 `PARSE_FAILED`로 통합했습니다. warning 장면은 BGE·Graph 입력에서 모두 제외합니다. 재실행 시와 다음 penalty 패스에서는 warning 장면도 다시 생성합니다. penalty가 바뀌면 PARSE_FAILED·TRASH_INFO 출력도 바뀌기 때문입니다.
+
+**파서 변경.**
+
+- **처리 순서**: 엄격 파싱과 구분자 복구가 실패하면 이름 형식에 한해 줄 모양으로 섹션을 나누는 완화 단계를 거칩니다.
+- **완화 단계의 처리**:
+  - 헤더가 없거나 한 줄로 쓴 형식(`Entities: a; b`)도 읽습니다.
+  - 행동은 앞 세 구간만 씁니다. 공백 없는 구분자도 인정합니다.
+  - 라벨 없는 슬롯이 3개 이상이면 tool·place를 구분할 수 없어 모두 버립니다. `tool:`·`place:`가 아닌 라벨도 버립니다.
+  - `unknown`·`none` 이름의 엔티티 줄은 버리고, 이름의 콜론은 공백으로 바꿉니다. 같은 이름을 참조하는 역할도 같은 이름으로 연결합니다.
+  - 출력에 그래프가 여러 개 이어져 있으면 첫 그래프만 씁니다.
+- **유지한 동작**: 내용을 새로 만들지 않습니다. ID 형식(v8)과 JSON 경로는 기존과 같습니다.
+
+**연동 변경.**
+
+- **진행바**: `success=… parse_failed=… trash_info=… token_limit=… error=…` 형식입니다. Description은 `success`·`token_limit`·`error`만 표시합니다.
+- **`generation_stats.json`**: Graph·Description 모두 같은 키로 기록합니다. 기존 `warning`·`failed`·`warning_counts` 키는 없어졌습니다.
+- **저장 형식**: Description 행은 `TOKEN_LIMIT`일 때만 `warning` 필드를 가집니다.
+- **판정 일치**: 저장된 warning은 읽을 때 다시 판정하지 않고 그대로 따릅니다. 이전에는 Graph 입력 단계만 문자열을 다시 파싱해, 추출 단계와 판정이 달랐습니다.
+- **Graph 입력 제외 사유**: `parse_failed`·`trash_info`·`token_limit`·`error`로 기록합니다. 입력 버전은 `scene-bge-inputs/v3`입니다.
+
+**호환성.**
+
+- **태그 변환**: 기존 태그는 읽을 때 `MISSING_REQUIRED`·`PARSE_ERROR` → `PARSE_FAILED`, `TRUNCATION_RECOVERED` → `TOKEN_LIMIT`로 변환합니다.
+- **재실행 시 재분류**: `--force` 없이 재실행하면 생성 전에 저장된 행에 현재 규칙을 적용하고, 바뀐 파일만 다시 씁니다.
+  - 기존 절단 error 행은 원문을 가진 `TOKEN_LIMIT` 행이 됩니다.
+  - `PARSE_FAILED` 원문은 현재 파서로 다시 읽습니다.
+  - 태그 없는 구조화 행에는 `TRASH_INFO` 판정을 적용합니다.
+
+**검증 범위.**
+
+- `vc_cloud`에서 전체 테스트 104개와 `ruff check src tests`가 통과했습니다.
+- R10 v9 microlens_100k(각 115,947장면)의 저장 행에 재분류 규칙을 읽기 전용으로 적용했습니다(파일 미수정).
+
+  | 모델 | 저장 상태 | 현재 규칙 적용 |
+  | --- | --- | --- |
+  | 2B | success 104,970 / recovered 10,572 / 경고 371 / error 34 | success 105,275 / token_limit 10,606 / trash_info 66 / parse_failed 0 |
+  | 8B | success 113,785 / recovered 594 / 경고 1,563 / error 5 | success 115,211 / token_limit 599 / trash_info 127 / parse_failed 10 |
+
+  8B의 trash_info 중 118건은 기존 success 행(엔티티·행동이 모두 없는 장면)이고, parse_failed 10건은 헤더 없이 행동 줄과 `none`이 모두 없는 출력입니다.
+- 완화 단계가 만든 그래프의 정확성은 표본 몇 건만 눈으로 확인했습니다. 추천 성능에 미치는 영향은 확인하지 않았습니다.
+
 ### 2026-11-13: 토큰 상한 절단 출력 복구 제거 (`graph-text/v21`)
 
 프롬프트 파일은 변경하지 않았습니다. 2026-11-11에 추가한 절단 출력 복구(`recover_truncated_graph`, `TRUNCATION_RECOVERED`)를 제거했습니다.

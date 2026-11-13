@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import re
 
-from extraction.graph_warnings import MISSING_REQUIRED, PARSE_FAILED
+from extraction.graph_warnings import PARSE_FAILED, TRASH_INFO
 from extraction.structured_output import OutputValidationError, normalize_graph_references
+from extraction.semantic_graph.schema import is_trash_info
 
 from extraction.semantic_graph.json_repair import (
     GraphParseResult,
     parse_or_repair_graph as parse_json_graph,
 )
 
-GRAPH_PARSER_VERSION = "graph-text/v21"
+GRAPH_PARSER_VERSION = "graph-text/v22"
 _SECTIONS = ("Context", "Entities", "Actions", "End")
 _ID = re.compile(r"[\w.-]+")
 _BULLET = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)")
@@ -67,7 +68,7 @@ def _entity(line, *, repair, named=False):
     if repair and len(values) > 1 and not values[-1]:
         values.pop()  # One trailing delimiter; never discard an empty middle field.
     if not values or not values[0]:
-        raise GraphTextError("missing entity kind", MISSING_REQUIRED)
+        raise GraphTextError("missing entity kind")
     if any(not value for value in values):
         raise GraphTextError("empty entity kind or attribute")
     return {"id": parts[0].strip(), "name": values[0], "attributes": values[1:]}
@@ -167,6 +168,167 @@ def _split_joined_actions(rows):
             for action in actions]
 
 
+# Lenient fallback: name-form output whose sections still separate by line shape.
+_LOOSE_DELIMITER = re.compile(
+    r"-+>|=+>|→|⇒|－＞|\s[-–—]+\s|(?<=\s)[-–—](?=\S)|(?<=\S)[-–—](?=\s)"
+)
+_LOOSE_HEADER = re.compile(
+    r"(?:#{1,6}\s*)?(?:\[\s*(context|entities|actions|end)\s*\]"
+    r"|(context|entities|actions|end)\s*(?:[:：]|$))\s*(.*)",
+    re.IGNORECASE,
+)
+_CONTEXT_FIELD = re.compile(r"(medium|format|topics)\s*[:：]\s*(.*)", re.IGNORECASE)
+_LABEL = re.compile(r"(\w+)\s*[:：]\s*(.*)")
+_ID_FORM_ROW = re.compile(r"[A-Za-z]{1,3}\d+\s*[:：]")
+_EMPTY = {"none", "[]"}
+
+
+def _pieces(text):
+    return [piece.strip() for piece in re.split(r"[;；]", text) if piece.strip()]
+
+
+def _endpoints(piece):
+    """actor, action, target of one action piece, or None; pieces after the target are dropped."""
+    parts = [part.strip() for part in _LOOSE_DELIMITER.split(piece)]
+    if len(parts) < 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1], (parts[2] if len(parts) > 2 else "") or "unknown"
+
+
+def _is_action_row(line):
+    parts = _LOOSE_DELIMITER.split(_pieces(line)[0]) if _pieces(line) else []
+    return len(parts) >= 3 and all(part.strip() for part in parts[:2])
+
+
+def _lenient_name(value):
+    return re.sub(r"\s*[:：]\s*", " ", value).strip()
+
+
+def _lenient_reference(value, names):
+    """A role value: none, unknown, or a name (a colon name matches its declared entity)."""
+    value = value.strip()
+    token = value.casefold()
+    if token == "none":
+        return None
+    if _lenient_name(value) in names:
+        return _lenient_name(value)
+    if not value or token == "unknown" or not _valid_reference(value, named=True):
+        return "unknown"
+    return value
+
+
+def _lenient_actions(line):
+    """Actions on one line; slots that cannot be told apart are dropped, never guessed."""
+    actions = []
+    for piece in _pieces(line):
+        ends = _endpoints(piece)
+        if ends:
+            actions.append({"ends": ends, "labels": {}, "slots": []})
+            continue
+        if not actions:
+            continue  # A piece before the first action belongs to none.
+        label = _LABEL.fullmatch(piece)
+        if label:
+            key = label[1].lower()
+            if key in _SLOT_DEFAULTS and label[2].strip():
+                actions[-1]["labels"].setdefault(key, label[2].strip())
+            continue  # Other labels (target:, 12:00) are dropped.
+        actions[-1]["slots"].append(piece)
+    result = []
+    for action in actions:
+        slots = dict(action["labels"])
+        # More than two unlabelled slots is a list of entities, not tool and place.
+        for piece in action["slots"] if len(action["slots"]) <= 2 else []:
+            key = next((slot for slot in _SLOT_DEFAULTS if slot not in slots), None)
+            if key:
+                slots[key] = piece
+        actor, verb, target = action["ends"]
+        result.append({
+            "actor": actor, "action": verb, "target": target,
+            **{slot: slots.get(slot, default) for slot, default in _SLOT_DEFAULTS.items()},
+        })
+    return result  # Role values are resolved once all entity names are known.
+
+
+def _parse_lenient(text):
+    """Separate Context, Entities and Actions by line shape, or raise GraphTextError."""
+    context, entity_rows, actions = {}, [], []
+    answered = {"entities": False, "actions": False}
+    section, started = None, False
+    for source in str(text or "").splitlines():
+        line = _BULLET.sub("", source.strip(), count=1).strip()
+        if not line or re.fullmatch(r"```[\w-]*", line):
+            continue
+        header = _LOOSE_HEADER.fullmatch(line)
+        if header:
+            name, rest = (header[1] or header[2]).lower(), header[3].strip()
+            if name == "end":
+                break
+            if name == "context" and (entity_rows or actions):
+                break  # A second graph follows; keep the first.
+            section = name
+            if not rest:
+                continue
+            if name == "context":  # "Context: medium; format; topics"
+                for key, value in zip(("medium", "format", "topics"), re.split(r"[;；]", rest)):
+                    context.setdefault(key, value.strip())
+                continue
+            if name == "entities" and not _is_action_row(rest):  # "Entities: a; b; c"
+                answered["entities"] = True
+                entity_rows += [] if rest.casefold() in _EMPTY else _pieces(rest)
+                continue
+            line = rest
+        field = _CONTEXT_FIELD.fullmatch(line)
+        if field and section in (None, "context") and not started:
+            context.setdefault(field[1].lower(), field[2].strip())
+            continue
+        started = True
+        if line.casefold() in _EMPTY:
+            # Without headers, the first none answers Entities and the next one Actions.
+            target = section if section in answered else (
+                "actions" if answered["entities"] else "entities")
+            answered[target] = True
+            continue
+        if section == "actions" or _is_action_row(line):
+            parsed = _lenient_actions(line)
+            actions += parsed
+            answered["actions"] |= bool(parsed)
+            continue
+        answered["entities"] = True
+        entity_rows.append(line)
+    if any(not context.get(key) for key in ("medium", "format", "topics")):
+        raise GraphTextError("missing context field")
+    if not answered["entities"]:
+        raise GraphTextError("missing [Entities]")
+    if not answered["actions"]:
+        raise GraphTextError("missing [Actions]")
+    if any(_ID_FORM_ROW.match(row) for row in entity_rows):
+        raise GraphTextError("ID-form entities are not repaired leniently")
+    entities = []
+    for row in entity_rows:
+        name, *attributes = [part.strip() for part in re.split(r"[;；]", row)]
+        name = _lenient_name(name)
+        if not name or name.casefold() in {"none", "unknown"}:
+            continue
+        entities.append({"id": name, "name": name,
+                         "attributes": list(dict.fromkeys(part for part in attributes if part))})
+    names = {entity["name"] for entity in entities}
+    topics = context["topics"]
+    graph = {
+        "medium": context["medium"],
+        "format": context["format"],
+        "topics": [] if topics.casefold() == "none" else [
+            topic for topic in _pieces(topics) if topic.casefold() != "none"],
+        "entities": entities,
+        "actions": [
+            {role: value if role == "action" else _lenient_reference(value, names)
+             for role, value in action.items()}
+            for action in actions
+        ],
+    }
+    return graph
+
+
 def _parse_context_actions(text, *, repair):
     required = ("Context", "Entities", "Actions")
     headers = {
@@ -185,7 +347,7 @@ def _parse_context_actions(text, *, repair):
             lines.insert(split, "[Entities]")
         text = "\n".join(["[Context]", *lines])
     elif missing:
-        raise GraphTextError(f"missing [{missing[0]}]", MISSING_REQUIRED)
+        raise GraphTextError(f"missing [{missing[0]}]")
     order = (*required, "End")
     sections, current, seen = {}, None, 0
     for number, source in enumerate(text.splitlines(), 1):
@@ -213,7 +375,7 @@ def _parse_context_actions(text, *, repair):
         else:
             sections[current].append(line)
     if seen < len(required):
-        raise GraphTextError(f"missing [{required[seen]}]", MISSING_REQUIRED)
+        raise GraphTextError(f"missing [{required[seen]}]")
     context = {}
     for line in sections["Context"]:
         parts = re.split(r"[:：]" if repair else ":", line, maxsplit=1)
@@ -223,7 +385,7 @@ def _parse_context_actions(text, *, repair):
         if key not in {"medium", "format", "topics"} or key in context:
             raise GraphTextError("unknown or duplicate context field")
         if not value:
-            raise GraphTextError("missing context value", MISSING_REQUIRED)
+            raise GraphTextError("missing context value")
         if key == "topics":
             context[key] = (
                 []
@@ -235,7 +397,7 @@ def _parse_context_actions(text, *, repair):
         else:
             context[key] = value
     if set(context) != {"medium", "format", "topics"}:
-        raise GraphTextError("missing context field", MISSING_REQUIRED)
+        raise GraphTextError("missing context field")
     # A whole entity section uses either v9 names or legacy id: kind rows.
     entity_styles = {bool(re.search(r"[:：]", re.split(r"[;；]", row, maxsplit=1)[0]))
                      for row in sections["Entities"]}
@@ -243,7 +405,7 @@ def _parse_context_actions(text, *, repair):
         raise GraphTextError("mixed entity declaration formats")
     named = entity_styles == {False}
     if headless and not named:
-        raise GraphTextError("missing [Context]", MISSING_REQUIRED)
+        raise GraphTextError("missing [Context]")
     graph = dict(context)
     for section, parse in (("Entities", _entity), ("Actions", _action)):
         rows = sections[section]
@@ -266,33 +428,46 @@ def _parse_context_actions(text, *, repair):
 
 
 def parse_or_repair_graph(text: str) -> GraphParseResult:
-    """Parse complete Actions graphs.
+    """Parse Actions graphs strictly, then with delimiter repair, then by line shape.
 
     Name-form roles missing from [Entities] are kept as attribute-less entities;
-    undeclared ID-form roles still become unknown.
+    undeclared ID-form roles still become unknown. A structured graph with no
+    usable information carries TRASH_INFO.
     """
     raw = str(text or "")
     if not raw.strip():
-        return GraphParseResult(None, error="empty VLM output", warning=(MISSING_REQUIRED,))
+        return GraphParseResult(None, error="empty VLM output", warning=(PARSE_FAILED,))
     try:
-        unwrapped = _unwrap(raw)
-        if unwrapped.startswith("{"):
-            parsed = parse_json_graph(unwrapped)
-            if parsed.graph is not None:
-                mode = "repaired" if unwrapped != raw.strip() else parsed.parse_mode
-                return _validated_graph(parsed.graph, mode)
-            return parsed
         try:
-            graph, named = _parse_context_actions(raw, repair=False)
-            mode = "native"
-        except GraphTextError:
-            graph, named = _parse_context_actions(unwrapped, repair=True)
-            mode = "repaired"
-        return _validated_graph(graph, mode, named=named)
+            unwrapped = _unwrap(raw)
+            if unwrapped.startswith("{"):
+                parsed = parse_json_graph(unwrapped)
+                if parsed.graph is None:
+                    return parsed
+                mode = "repaired" if unwrapped != raw.strip() else parsed.parse_mode
+                return _checked(_validated_graph(parsed.graph, mode))
+            try:
+                graph, named = _parse_context_actions(raw, repair=False)
+                mode = "native"
+            except GraphTextError:
+                graph, named = _parse_context_actions(unwrapped, repair=True)
+                mode = "repaired"
+        except GraphTextError as exc:
+            try:
+                graph, named, mode = _parse_lenient(raw), True, "repaired"
+            except GraphTextError:
+                raise exc from None
+        return _checked(_validated_graph(graph, mode, named=named))
     except OutputValidationError as exc:
         return GraphParseResult(None, error=str(exc), warning=tuple(exc.tags))
     except GraphTextError as exc:
         return GraphParseResult(None, error=f"graph text repair failed: {exc}", warning=(exc.tag,))
+
+
+def _checked(result):
+    if result.graph is not None and is_trash_info(result.graph):
+        return GraphParseResult(result.graph, parse_mode=result.parse_mode, warning=(TRASH_INFO,))
+    return result
 
 
 def _declare_referenced_names(graph):

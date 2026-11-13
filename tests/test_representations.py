@@ -70,7 +70,7 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(cont
         )
         embed_representations(context, target=["graph-activity"])
     stats_path = context.representations_dir / arm.scene_arm / "statistics.json"
-    assert read_json(stats_path)["counts"]["raw"] == len(rows)
+    assert read_json(stats_path)["counts"]["parse_failed"] == len(rows)
 
     texts, arrays, stats = build_input(context, cohort, arm)
     assert texts == texts_before and stats == stats_before
@@ -113,7 +113,7 @@ def test_graph_exclusions_preserve_items(context):
     assert arrays["video_offsets"].tolist() == [0, 1, 1]
     assert len(arrays["titles"]) == len(cohort["catalog"]) == 2
     assert stats["counts"]["valid_scenes"] == 1
-    assert {r["reason"] for r in stats["excluded_scenes"]} == {"warning", "raw", "failed"}
+    assert [r["reason"] for r in stats["excluded_scenes"]] == ["parse_failed", "parse_failed", "error"]
     assert stats["counts"]["zero_scene_video"] == 1
 
 

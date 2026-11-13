@@ -8,7 +8,7 @@ from extraction.errors import ExtractionStepError
 from extraction.qwen_runtime import QwenRuntime
 from artifact_io import atomic_write_json, file_fingerprint
 from extraction.qwen_config import QWEN_MODELS, generation_settings, qwen_settings, validate_checkpoint
-from extraction.graph_warnings import WARNING_TAGS
+from extraction.graph_warnings import DESCRIPTION_OUTCOMES, OUTCOMES, outcome
 from extraction.progress import InferenceProgress
 from extraction.semantic_graph.parser import GRAPH_PARSER_VERSION
 from extraction.semantic_graph import GRAPH_SCHEMA_VERSION
@@ -22,7 +22,7 @@ from extraction.step_support import (
     visual_rows,
 )
 from extraction.generation import qwen_generator
-from extraction.scene_storage import read_scene_records, migrate_scene_failures
+from extraction.scene_storage import read_scene_records, migrate_scene_failures, reclassify_scene_file
 from pipeline_logging import log_step_start
 
 LOCAL_MODELS = QWEN_MODELS
@@ -88,6 +88,9 @@ def prepare_scene_batch(visuals, scene_dir, prepare_rows, normalize, *, force):
         output = scene_dir / f"{cid}.jsonl"
         rows = prepare_rows(visual)
         try:
+            if output.is_file() and not force:
+                # Stored rows follow the current rules before deciding what to generate.
+                reclassify_scene_file(output)
             cached = (
                 read_scene_records(output, include_failures=True)
                 if output.is_file() and (not force)
@@ -157,8 +160,7 @@ def _extract(
     from extraction.scene_storage import ensure_generation_identity
 
     ensure_generation_identity(scene_dir, provenance, force=force)
-    if representation == "graph":
-        (scene_dir / "generation_stats.json").unlink(missing_ok=True)
+    (scene_dir / "generation_stats.json").unlink(missing_ok=True)
     migrate_scene_failures(scene_dir)
     normalize = minimal_graph_records if representation == "graph" else minimal_description_records
     visuals = visual_rows(context)
@@ -187,11 +189,13 @@ def _extract(
             missing = prepare_rows(visual, scenes=scenes)
             yield (visual, missing)
 
+    outcomes = OUTCOMES if representation == "graph" else DESCRIPTION_OUTCOMES
     with InferenceProgress(
         total=total,
         reused=reused,
         desc=arm.name,
         unit="scene",
+        outcomes=outcomes,
         progress_factory=tqdm,
     ) as progress:
         if model in LOCAL_MODELS:
@@ -225,23 +229,12 @@ def _extract(
                 arm=representation,
             )
     failure_count = sum("error" in row for records in existing.values() for row in records)
-    if representation == "graph":
-        stats = {
-            "total": total + reused,
-            "success": 0,
-            "warning": 0,
-            "failed": failure_count,
-            "warning_counts": dict.fromkeys(WARNING_TAGS, 0),
-        }
-        for records in existing.values():
-            for record in records:
-                if "error" in record:
-                    continue
-                tags = record["semantic_warnings"]
-                stats["warning" if tags else "success"] += 1
-                for tag in tags:
-                    stats["warning_counts"][tag] = stats["warning_counts"].get(tag, 0) + 1
-        atomic_write_json(scene_dir / "generation_stats.json", stats, durable=True)
+    # Each scene is counted once; the outcomes sum to the total.
+    stats = {"total": total + reused, **dict.fromkeys(outcomes, 0)}
+    for records in existing.values():
+        for record in records:
+            stats[outcome(record)] += 1
+    atomic_write_json(scene_dir / "generation_stats.json", stats, durable=True)
     return result(
         f"{stage}-{model}", content_count=len(visuals), failure_count=failure_count
     )

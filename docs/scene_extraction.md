@@ -48,11 +48,32 @@ person - cutting - tomato; tool: knife; place: kitchen
 
 ## 파싱과 지원 경계
 
-Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `graph-text/v21` 파서는 위 이름 선언 형식, 기존 `id: kind; attribute` 선언 형식과 현재 구조의 JSON을 읽습니다. 한 출력 안의 두 선언 형식 혼용은 원문으로 보존합니다. 필드·타입을 검증하며 `MISSING_REQUIRED`, `PARSE_FAILED` 경고를 구분합니다. 출력 토큰 한도에서 잘린 출력은 복구하지 않고 원문과 함께 실패로 저장하며, 재실행 시 다시 생성합니다. 이전 파서(v18~v20)가 남긴 `TRUNCATION_RECOVERED` 행은 경고로 읽어 추천 입력에서 제외하고 재실행 시 다시 생성합니다.
+Graph 출력은 생성 시 JSON Schema로 강제하지 않습니다. 현행 `graph-text/v22` 파서는 위 이름 선언 형식, 기존 `id: kind; attribute` 선언 형식과 현재 구조의 JSON을 읽습니다. 한 출력 안의 두 선언 형식 혼용은 원문으로 보존합니다.
+
+이름 형식 출력이 엄격 파싱과 구분자 복구에 모두 실패하면 줄 모양으로 섹션을 나눕니다. `medium:`·`format:`·`topics:` 줄은 Context, 행동 구분자가 있는 줄은 Action, 나머지는 Entity입니다. 이때 다음과 같이 처리합니다.
+
+- 섹션 헤더가 없거나 `Entities: a; b`처럼 한 줄로 쓴 형식도 읽습니다.
+- 행동은 앞 세 구간만 actor·action·target으로 씁니다. 공백 없는 구분자(`man -cutting- fish`)도 인정합니다.
+- 라벨 없는 슬롯이 3개 이상이면 tool·place를 구분할 수 없으므로 모두 버립니다. `tool:`·`place:`가 아닌 라벨도 버립니다.
+- `unknown`·`none` 이름의 엔티티 줄은 버리고, 이름 안의 콜론은 공백으로 바꿉니다.
+- 출력에 그래프가 여러 개 이어져 있으면 첫 그래프만 씁니다.
+- ID 형식 출력에는 이 단계를 적용하지 않습니다.
+
+장면 결과는 다음 다섯 가지 중 하나이며, warning은 장면당 하나만 붙습니다(우선순위 `TOKEN_LIMIT` > `PARSE_FAILED` > `TRASH_INFO`).
+
+| 결과 | 조건 | 대상 |
+| --- | --- | --- |
+| success | 구조화 성공, 정보 있음 | Graph, Description |
+| `PARSE_FAILED` | Context 세 필드, Entities(또는 `none`), Actions(또는 `none`) 중 하나라도 분리하지 못함 | Graph |
+| `TRASH_INFO` | medium·format·topics가 전부 `unknown`/`none`이거나, 이름 있는 엔티티와 행동이 하나도 없음 | Graph |
+| `TOKEN_LIMIT` | 출력 토큰 한도에서 잘림. 원문만 저장하고 파싱하지 않음 | Graph, Description |
+| error | 위에 해당하지 않는 생성 실패(예외, API 오류, 빈 출력) | Graph, Description |
+
+이전 버전의 태그는 읽을 때 `MISSING_REQUIRED`·`PARSE_ERROR` → `PARSE_FAILED`, `TRUNCATION_RECOVERED` → `TOKEN_LIMIT`로 변환합니다. `--force` 없이 재실행하면 먼저 저장된 행에 현재 규칙을 적용합니다. 이전의 절단 error 행은 `TOKEN_LIMIT` 행이 되고, `PARSE_FAILED` 원문은 현재 파서로 다시 읽습니다.
 
 기존 v8 JSON의 Action `location`은 읽기용 복사본에서 `place`로 정규화합니다. 두 필드가 함께 있으면 값이 같아도 거부합니다. 원본 파일은 수정하지 않으며 Relations·receiver·필수 장소 필드 누락 등은 자동으로 다른 스키마로 변환하지 않습니다. 지원하지 않는 입력은 경로·원인과 함께 오류로 처리합니다.
 
-구조화하지 못한 출력은 원문과 경고를 보존합니다. Graph 추천 입력은 읽기·복구 후 구조·경고 검사를 통과한 장면만 사용합니다. 실패의 `raw_output`은 임베딩이나 Graph 구성에 사용하지 않습니다. **파싱 성공과 경고 부재는 시각적 사실성 검증을 뜻하지 않습니다.**
+warning 장면은 원문 또는 그래프를 보존하지만 BGE 임베딩과 Graph 구성에서 제외하고, 재실행 시 다시 생성합니다. 저장된 warning은 그대로 따르며 읽을 때 다시 판정하지 않습니다. error의 `raw_output`도 임베딩이나 Graph 구성에 사용하지 않습니다. **파싱 성공과 경고 부재는 시각적 사실성 검증을 뜻하지 않습니다.**
 
 장면 순서와 활동 키를 이용하는 Hypergraph는 추출된 사건 엣지와 별도의 전처리·학습 경로입니다. 현재는 장면 간 동일 개체 추적·명시적 사건/인과 관계·시각적 행동 경계 검출을 수행하지 않습니다. 활동 구간의 의미와 한계는 [활동 Hypergraph](graph_training.md#activity_hypergraph)를 참고하세요.
 
@@ -98,12 +119,12 @@ python -m extraction extract-description-scenes --run-id "$RUN_ID" --dataset "$D
 
 | 행 종류 | compact 필드 |
 | --- | --- |
-| Description | `content_id`, `scene_idx`, `tokens`, `description` |
+| Description | `content_id`, `scene_idx`, `tokens`, `description`, (`TOKEN_LIMIT`일 때만) `warning` |
 | Graph | `content_id`, `scene_idx`, `tokens`, `warning`, `scene_graph` |
 | 실패 | `content_id`, `scene_idx`, `tokens`, `error`, `raw_output` |
 
 `scene_graph`는 구조화 객체 또는 보존한 원문 문자열입니다. 실패의 토큰 수는 실제 출력 토큰 수 또는 `null`이며, 응답 원문이 없으면 빈 문자열을 기록합니다. 같은 장면은 최신 결과 한 행으로 원자적으로 교체합니다.
 
-진행바의 `success`, `warning`, `failed` 합이 완료 수입니다. Graph는 source 디렉터리의 `generation_stats.json`에 재사용·신규 결과를 합친 집계를 기록합니다. 실패·경고가 있으면 해당 JSONL의 오류·원문·경고를 확인합니다. 최종 실패가 남으면 CLI는 종료 코드 1을 반환하고 완료된 출력은 보존합니다. Graph 경고는 실패와 구분합니다.
+진행바는 `success=… parse_failed=… trash_info=… token_limit=… error=…`로 표시하며 합이 완료 수입니다. Description은 `success`, `token_limit`, `error`만 표시합니다. Graph·Description 모두 source 디렉터리의 `generation_stats.json`에 재사용·신규 결과를 합친 같은 키의 집계를 기록합니다. warning·error가 있으면 해당 JSONL의 원문과 태그를 확인합니다. error가 남으면 CLI는 종료 코드 1을 반환하고 완료된 출력은 보존합니다. warning만 남으면 종료 코드는 0입니다.
 
 정상 장면 재사용, 기존 실패 로그 통합, `generation_identity.json`의 한계는 [실행·저장 계약](runtime.md#장면-저장과-추적-정보)에 설명합니다. 프롬프트 변경 의도와 버전은 [변경 이력](../prompts/update_note.md)을 참고하세요.

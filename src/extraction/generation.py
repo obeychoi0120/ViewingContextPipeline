@@ -34,7 +34,8 @@ def generate_once(generate, tasks, complete):
 def generate_penalty_passes(generate, tasks, penalties, complete, log=None, on_pass=None):
     """Finish each pass before retrying failures; keep only pending tasks in memory.
 
-    complete(task_id, text, final=...) publishes the outcome and returns failure.
+    complete(task_id, text, final=...) publishes the outcome and returns whether to retry
+    (an error or a warning).
     """
     from dataclasses import replace
     from extraction.qwen_config import penalty_schedule

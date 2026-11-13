@@ -141,7 +141,7 @@ def minimal_description_records(
     invalid = [
         index
         for index, row in enumerate(records)
-        if set(row) - {"provenance", "tokens"} != required
+        if set(row) - {"provenance", "tokens", "semantic_warnings"} != required
     ]
     if invalid:
         raise ExtractionStepError(

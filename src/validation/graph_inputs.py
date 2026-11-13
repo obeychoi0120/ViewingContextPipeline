@@ -12,13 +12,14 @@ import numpy as np
 
 from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, select_arms
 from artifact_io import fingerprint
+from extraction.graph_warnings import warning_tags
 from extraction.structured_output import validate_graph_structure, OutputValidationError
 from extraction.scene_storage import read_scene_records, validate_scene_payload, recover_scene_graph
 from model_provenance import local_model_identity
 from artifact_io import read_json, write_json
 from validation.shared_cache import SharedCache, checksum
 
-VERSION = "scene-bge-inputs/v2"
+VERSION = "scene-bge-inputs/v3"
 ROLES = ("actor", "target", "tool", "receiver", "place")
 # Keep the receiver tensor slot for model/checkpoint shape compatibility.
 # Current receiver-free input always supplies the absent state.
@@ -94,8 +95,10 @@ def build_input(context, cohort, arm):
                 "valid_scenes",
                 "actionless",
                 "raw",
-                "warning",
-                "failed",
+                "parse_failed",
+                "trash_info",
+                "token_limit",
+                "error",
                 "unsupported_format",
                 "invalid_structure",
                 "missing_file",
@@ -144,12 +147,16 @@ def build_input(context, cohort, arm):
 
             validate_scene_payload(path, row)
             if "error" in row:
-                reject("failed", row["error"])
+                reject("error", row["error"])
                 continue
             expected = "description" if arm.representation == "description" else "scene_graph"
             if expected not in row:
                 raise ValueError(f"scene representation mismatch: expected {expected}: {path}")
             if arm.representation == "description":
+                tags = warning_tags(row.get("warning", []))
+                if tags:
+                    reject(tags[0].lower())
+                    continue
                 data["contexts"].append(text_id(row["description"]))
                 data["scene_keys"].append(json.dumps([str(cid), row["scene_idx"]]))
                 for name, values in (("scene_offsets", "nodes"),
@@ -159,11 +166,12 @@ def build_input(context, cohort, arm):
                 report["valid_scenes"] += 1
                 continue
             g, warnings = recover_scene_graph(row["scene_graph"], row["warning"])
+            # Warned scenes keep their output but never enter BGE or the Graph.
+            if warnings:
+                reject(warnings[0].lower())
+                continue
             if not isinstance(g, dict):
                 reject("raw")
-                continue
-            if warnings:
-                reject("warning", str(warnings))
                 continue
             try:
                 validate_graph_structure(g)

@@ -120,7 +120,7 @@ def _success_scene_row_issues(arm: str, row: dict[str, Any], content_id: str) ->
         if not isinstance(row.get("semantic_warnings"), list):
             invalid.append("invalid_semantic_warnings")
     else:
-        if set(row) - {"provenance", "tokens"} != {
+        if set(row) - {"provenance", "tokens", "semantic_warnings"} != {
             "schema_version",
             "content_id",
             "scene_idx",
