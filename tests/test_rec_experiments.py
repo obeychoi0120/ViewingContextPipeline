@@ -4,10 +4,12 @@ import pytest
 import torch
 
 from arm_registry import Arm, registry
+from helpers import make_context
 from rec_experiments import CONFIG_KEY, load_experiments, parse_experiments
 
 
-def test_explicit_sources_defaults_modules_and_order():
+def test_experiment_config_parsing_validation_and_snapshot(context, monkeypatch, tmp_path):
+    # Explicit sources, defaults, module order.
     value = {"version": 1, "defaults": {"readout": "mean"}, "experiments": [
         {"label": "custom-role", "source": "graph_gemini", "modules": ["role_fusion"]},
         {"label": "combined", "source": "graph_qwen3vl_2b",
@@ -24,8 +26,7 @@ def test_explicit_sources_defaults_modules_and_order():
     assert arms["description-only"].model == "gemini"
     assert all(arm.uses_title for arm in arms.values())
 
-
-def test_config_module_names_resolve_to_result_identity_names():
+    # Config module names resolve to result identity names.
     def modules(names):
         value = {"version": 1, "experiments": [
             {"label": "trial", "source": "graph_qwen3vl_2b", "modules": names}]}
@@ -39,8 +40,14 @@ def test_config_module_names_resolve_to_result_identity_names():
         with pytest.raises(ValueError):
             modules(duplicate)
 
+    # The snapshot survives file changes, and extraction does not require the file.
+    _snapshot_survives_file_changes(context)
+    # Run comparison rejects the same label with a different definition (separate tree).
+    with monkeypatch.context() as patch:
+        _comparison_rejects_changed_definition(tmp_path, patch)
 
-def test_invalid_settings_are_rejected_before_outputs(context, monkeypatch):
+    # Invalid settings are rejected before outputs.
+    context = make_context(tmp_path / "invalid")
     value = {"version": 1, "experiments": [{"label": "trial", "source": "graph_qwen3vl_2b"}]}
     invalid = [None, {}, {**value, "version": True}, {**value, "experiments": []},
                {**value, "defaults": {"source": "graph_qwen3vl_2b"}},
@@ -73,7 +80,7 @@ def test_invalid_settings_are_rejected_before_outputs(context, monkeypatch):
     assert not context.run_root.exists()
 
 
-def test_snapshot_survives_file_changes_and_extraction_does_not_require_file(context):
+def _snapshot_survives_file_changes(context):
     import pickle
     from pipeline_runtime import RunContext
 
@@ -125,12 +132,20 @@ def replace_experiments(context, rows):
     load_experiments(context)
 
 
-@pytest.mark.parametrize("rows, baseline", [
-    ([{"label": "just-description", "source": "desc_qwen3vl_2b"}], None),
-    ([{"label": "title-only", "source": "metadata"},
-      {"label": "base", "source": "graph_qwen3vl_2b", "modules": ["role_fusion"]}], "title-only"),
-])
-def test_custom_labels_and_sources_complete_the_pipeline(context, monkeypatch, rows, baseline):
+def test_custom_labels_and_sources_complete_the_pipeline(monkeypatch, tmp_path):
+    from helpers import make_context
+
+    cases = [
+        ([{"label": "just-description", "source": "desc_qwen3vl_2b"}], None),
+        ([{"label": "title-only", "source": "metadata"},
+          {"label": "base", "source": "graph_qwen3vl_2b", "modules": ["role_fusion"]}], "title-only"),
+    ]
+    for index, (rows, baseline) in enumerate(cases):
+        with monkeypatch.context() as patch:
+            _complete_pipeline(make_context(tmp_path / f"case{index}"), patch, rows, baseline)
+
+
+def _complete_pipeline(context, monkeypatch, rows, baseline):
     from artifact_io import read_json
     from helpers import prepare_inputs
     from validation.steps import embed_representations, prepare_module, run_recommendation, run_diagnosis
@@ -182,11 +197,13 @@ def test_editing_experiment_list_reuses_results_and_preserves_conflicts(context,
     assert original["experiment_definition"]["modules"] == ["activity_hypergraph"]
 
 
-def test_run_comparison_rejects_same_label_with_different_definition(context, monkeypatch):
+def _comparison_rejects_changed_definition(tmp_path, monkeypatch):
     from dataclasses import replace
     from artifact_io import write_json
     from rec_experiments import experiment_definition
     from validation.run_comparison import compare_runs
+
+    context = make_context(tmp_path / "comparison")
 
     reference = replace(context, run_id="reference", run_root=context.run_root.parent / "reference")
     definitions = {name: experiment_definition(arm) for name, arm in registry(context.config).items()}

@@ -10,9 +10,10 @@ from pipeline_runtime import RunContext
 from validation.cli import main
 from validation.graph_inputs import load_scene_segments, scene_segments_identity
 from validation.representation_provenance import recommendation_identity
+from helpers import make_context
 
 
-def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys):
+def _check_prepare_module_cli_builds_segments_without_reencoding(context, monkeypatch, capsys):
     targets = ["graph-activity", "graph-role-activity"]
     prepare_inputs(context, monkeypatch, modules=False)
     directory = context.representations_dir / "graph_qwen3vl_2b"
@@ -68,7 +69,7 @@ def test_prepare_module_cli_builds_segments_without_reencoding(context, monkeypa
     assert all(path.read_bytes() == content for path, content in originals.items())
 
 
-def test_prepare_module_cli_with_no_activity_modules_is_noop(context, monkeypatch, capsys):
+def _check_prepare_module_cli_with_no_activity_modules_is_noop(context, monkeypatch, capsys):
     from rec_experiments import CONFIG_KEY, parse_experiments
 
     context.config[CONFIG_KEY] = parse_experiments({"version": 1, "experiments": [
@@ -85,3 +86,16 @@ def test_prepare_module_cli_with_no_activity_modules_is_noop(context, monkeypatc
     ]) == 0
     assert "[STEP] prepare-module" in capsys.readouterr().out
     assert not context.representations_dir.exists()
+
+
+def test_prepare_module_cli(tmp_path, capsys):
+    # Prepare module cli builds segments without reencoding.
+    case = tmp_path / "0"
+    capsys.readouterr()
+    with pytest.MonkeyPatch.context() as patch:
+        _check_prepare_module_cli_builds_segments_without_reencoding(context=make_context(case / "repo"), monkeypatch=patch, capsys=capsys)
+    # Prepare module cli with no activity modules is noop.
+    case = tmp_path / "1"
+    capsys.readouterr()
+    with pytest.MonkeyPatch.context() as patch:
+        _check_prepare_module_cli_with_no_activity_modules_is_noop(context=make_context(case / "repo"), monkeypatch=patch, capsys=capsys)

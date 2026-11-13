@@ -22,26 +22,26 @@ def shape(groups):
     return sorted(len(m) for _, m in groups), sorted(degree.values())
 
 
-def test_default_segments_of_the_example():
+def _check_default_segments_of_the_example():
     assert segments(SCENES) == [("cut", [0, 1]), ("cut", [3]), ("cut", [5]),
                                 ("pour", [6, 7]), ("stir", [2, 3])]
 
 
-def test_action_bag_merges_reappearances_and_ignores_gaps():
+def _check_action_bag_merges_reappearances_and_ignores_gaps():
     assert action_bag(SCENES, segments(SCENES)) == [("cut", [0, 1, 3, 5]), ("pour", [6, 7]), ("stir", [2, 3])]
     gapped = [(0, {"run"}, 1), (2, {"run"}, 1)]
     assert segments(gapped) == [("run", [0]), ("run", [1])]
     assert action_bag(gapped, segments(gapped)) == [("run", [0, 1])]
 
 
-def test_contiguous_starts_respect_missing_windows():
+def _check_contiguous_starts_respect_missing_windows():
     scenes = [(0, set(), 0), (1, set(), 0), (2, set(), 0), (4, set(), 0), (5, set(), 0)]
     assert contiguous_starts(scenes, 1) == [0, 1, 2, 3, 4]
     assert contiguous_starts(scenes, 2) == [0, 1, 3]
     assert contiguous_starts(scenes, 3) == [0]
 
 
-def test_time_window_keeps_lengths_and_contiguity():
+def _check_time_window_keeps_lengths_and_contiguity():
     groups = segments(SCENES)
     for seed in range(20):
         moved = time_window(SCENES, groups, np.random.default_rng(seed))
@@ -51,7 +51,7 @@ def test_time_window_keeps_lengths_and_contiguity():
                                                                    SCENES[members[0]][0] + len(members)))
 
 
-def test_random_keeps_sizes_and_scene_degrees():
+def _check_random_keeps_sizes_and_scene_degrees():
     groups = segments(SCENES)
     for seed in range(20):
         shuffled = random_permutation(SCENES, groups, np.random.default_rng(seed))
@@ -59,8 +59,7 @@ def test_random_keeps_sizes_and_scene_degrees():
         assert all(members == sorted(set(members)) for _, members in shuffled)
 
 
-@pytest.mark.parametrize("variant", ["time_window", "random"])
-def test_random_variants_are_reproducible_per_seed_and_video(variant):
+def _check_random_variants_are_reproducible_per_seed_and_video(variant):
     def draw(seed, video):
         return variant_segments(SCENES, variant, seed, video)[1]
 
@@ -69,7 +68,7 @@ def test_random_variants_are_reproducible_per_seed_and_video(variant):
     assert len({str(draw(0, video)) for video in range(10)}) > 1
 
 
-def test_overlap_reports_identity_and_jaccard():
+def _check_overlap_reports_identity_and_jaccard():
     groups = segments(SCENES)
     assert all(same and best == 1.0 for same, best in overlap(groups, groups))
     bag = overlap(groups, action_bag(SCENES, groups))
@@ -81,7 +80,7 @@ def experiments(*rows):
     return parse_experiments({"version": 1, "experiments": list(rows)})
 
 
-def test_segments_config_is_optional_and_validated():
+def _check_segments_config_is_optional_and_validated():
     default = {"label": "asha", "source": "graph_qwen3vl_2b", "modules": ["ASHA"]}
     assert "segments" not in experiments(default)["experiments"][0]
     resolved = experiments({**default, "segments": "random", "segments_seed": 2})["experiments"][0]
@@ -181,3 +180,23 @@ def test_variant_arms_prepare_separate_sidecars_and_identities(context, monkeypa
     write_json(meta_path, {**meta, "seed": 9})
     with pytest.raises(ValueError, match="prepare-module"):
         load_scene_segments(directory, ("random", 0))
+
+
+def test_segment_variants_and_config():
+    # Default segments of the example.
+    _check_default_segments_of_the_example()
+    # Action bag merges reappearances and ignores gaps.
+    _check_action_bag_merges_reappearances_and_ignores_gaps()
+    # Contiguous starts respect missing windows.
+    _check_contiguous_starts_respect_missing_windows()
+    # Time window keeps lengths and contiguity.
+    _check_time_window_keeps_lengths_and_contiguity()
+    # Random keeps sizes and scene degrees.
+    _check_random_keeps_sizes_and_scene_degrees()
+    # Random variants are reproducible per seed and video.
+    for variant in ["time_window", "random"]:
+        _check_random_variants_are_reproducible_per_seed_and_video(variant=variant)
+    # Overlap reports identity and jaccard.
+    _check_overlap_reports_identity_and_jaccard()
+    # Segments config is optional and validated.
+    _check_segments_config_is_optional_and_validated()

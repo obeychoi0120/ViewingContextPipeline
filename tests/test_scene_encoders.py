@@ -11,7 +11,7 @@ from validation.graph_batching import PackedGraphStore
 from validation.graph_model import SceneRoleEncoder
 
 
-def test_scene_order_and_video_isolation_with_hypergraph():
+def _check_scene_order_and_video_isolation_with_hypergraph():
     store = synthetic_store(videos=12)
     packed = PackedGraphStore(store)
     encoder = SceneRoleEncoder(16, hidden=4, extensions=("segments",))
@@ -39,7 +39,7 @@ def test_scene_order_and_video_isolation_with_hypergraph():
     assert not torch.allclose(changed[1], expected[1])
 
 
-def test_legacy_scene_pair_limit_is_ignored_and_checkpoint_preserves_gradients():
+def _check_legacy_scene_pair_limit_is_ignored_and_checkpoint_preserves_gradients():
     store = synthetic_store(videos=12)
     reference = make_model(store, ("segments",), items=12, role_fusion=False).train()
     with torch.no_grad():
@@ -58,3 +58,10 @@ def test_legacy_scene_pair_limit_is_ignored_and_checkpoint_preserves_gradients()
     assert limited.execution_counts["chunks"] == 4
     assert reference.execution_counts["chunks"] == 1
     assert limited.execution_counts["checkpoint_batches"] == 1
+
+
+def test_scene_encoder_isolation_and_chunked_checkpoint():
+    # Scene order and video isolation with hypergraph.
+    _check_scene_order_and_video_isolation_with_hypergraph()
+    # Legacy scene pair limit is ignored and checkpoint preserves gradients.
+    _check_legacy_scene_pair_limit_is_ignored_and_checkpoint_preserves_gradients()

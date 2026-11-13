@@ -16,9 +16,10 @@ from helpers import (
 )
 from validation.graph_batching import PackedGraphStore
 from validation.graph_inputs import build_input
+from helpers import make_context
 
 
-def test_scene_sources_and_shared_features(context, monkeypatch):
+def _check_scene_sources_and_shared_features(context, monkeypatch):
     from artifact_io import read_json
     from validation.graph_inputs import GraphStore
     from validation.steps import embed_representations
@@ -36,7 +37,7 @@ def test_scene_sources_and_shared_features(context, monkeypatch):
     assert read_json(root / "desc_qwen3vl_2b" / "manifest.json")["source"] == "desc_qwen3vl_2b"
 
 
-def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(context, monkeypatch):
+def _check_v8_location_reaches_embeddings_and_segments_without_source_rewrite(context, monkeypatch):
     from artifact_io import read_json, read_jsonl
     from extraction.scene_storage import read_scene_records
     from validation.selection import load_validation_cohort
@@ -85,7 +86,7 @@ def test_v8_location_reaches_embeddings_and_segments_without_source_rewrite(cont
     assert (path.read_bytes(), path.stat().st_mtime_ns) == before
 
 
-def test_graph_edges_are_scene_local(context):
+def _check_graph_edges_are_scene_local(context):
     arrays, _, texts, _ = graph_store(context, counts=(2,))
     assert arrays["scene_offsets"].tolist() == [0, 5, 10]
     forward = arrays["edges"][arrays["edges"][:, 2] < 5].tolist()
@@ -99,7 +100,7 @@ def test_graph_edges_are_scene_local(context):
     assert arrays["missing"][:, 4].tolist() == [0, 0]  # receiver compatibility slot
 
 
-def test_graph_exclusions_preserve_items(context):
+def _check_graph_exclusions_preserve_items(context):
     _, cohort, _, _ = graph_store(context, counts=(1, 0))
     cid = cohort["catalog"][0]["content_id"]
     rows = [
@@ -117,8 +118,7 @@ def test_graph_exclusions_preserve_items(context):
     assert stats["counts"]["zero_scene_video"] == 1
 
 
-@pytest.mark.torch
-def test_packed_graph_indices_match_reference(context):
+def _check_packed_graph_indices_match_reference(context):
     arrays, _, _, _ = graph_store(context, counts=(2, 1, 0))
     batch = PackedGraphStore(arrays, feature_cache_mb=0).batch([1, 2, 0], "cpu")
     assert batch["offsets"] == [0, 1, 1, 3]
@@ -130,3 +130,27 @@ def test_packed_graph_indices_match_reference(context):
     expected_nodes = np.concatenate((arrays["nodes"][10:15], arrays["nodes"][:10]))
     torch.testing.assert_close(batch["features"], torch.tensor(arrays["features"][expected_nodes]))
     assert batch["available"].tolist() == [1, 1, 1]
+
+
+def test_scene_sources_shared_features_and_v8_location(tmp_path):
+    # Scene sources and shared features.
+    case = tmp_path / "0"
+    with pytest.MonkeyPatch.context() as patch:
+        _check_scene_sources_and_shared_features(context=make_context(case / "repo"), monkeypatch=patch)
+    # V8 location reaches embeddings and segments without source rewrite.
+    case = tmp_path / "1"
+    with pytest.MonkeyPatch.context() as patch:
+        _check_v8_location_reaches_embeddings_and_segments_without_source_rewrite(context=make_context(case / "repo"), monkeypatch=patch)
+
+
+@pytest.mark.torch
+def test_graph_edges_exclusions_and_packed_indices(tmp_path):
+    # Graph edges are scene local.
+    case = tmp_path / "0"
+    _check_graph_edges_are_scene_local(context=make_context(case / "repo"))
+    # Graph exclusions preserve items.
+    case = tmp_path / "1"
+    _check_graph_exclusions_preserve_items(context=make_context(case / "repo"))
+    # Packed graph indices match reference.
+    case = tmp_path / "2"
+    _check_packed_graph_indices_match_reference(context=make_context(case / "repo"))

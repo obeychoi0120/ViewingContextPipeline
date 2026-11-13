@@ -10,7 +10,7 @@ pytestmark = pytest.mark.torch
 
 
 
-def test_sasrec_causal_prefix():
+def _check_sasrec_causal_prefix():
     model = simple_model().eval()
     a = model.encode(torch.tensor([[1, 2, 3, 4]]))
     b = model.encode(torch.tensor([[1, 2, 8, 9]]))
@@ -18,7 +18,7 @@ def test_sasrec_causal_prefix():
     assert not torch.allclose(a[:, 2:], b[:, 2:])
 
 
-def test_role_fusion_matches_reference():
+def _check_role_fusion_matches_reference():
     encoder = SceneRoleEncoder(feature_dim=2, hidden=1)
     with torch.no_grad():
         for module in (
@@ -60,3 +60,10 @@ def test_role_fusion_matches_reference():
     output.sum().backward()
     assert encoder.role_states.grad[2, 0, 0] != 0
     assert encoder.role_states.grad[3, 1, 0] != 0
+
+
+def test_sasrec_causal_prefix_and_role_fusion():
+    # Sasrec causal prefix.
+    _check_sasrec_causal_prefix()
+    # Role fusion matches reference.
+    _check_role_fusion_matches_reference()

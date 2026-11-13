@@ -3,9 +3,10 @@ from helpers import events, ready_cohort
 from preparation.cohort import load_csv
 from validation.leave_one_out_data import EventTable
 from visual_sampling import build_fixed_windows, timestamp_stem
+from helpers import make_context
 
 
-def test_csv_preserves_duplicate_events(tmp_path):
+def _check_csv_preserves_duplicate_events(tmp_path):
     path = tmp_path / "events.csv"
     path.write_text("user,item,timestamp\n1,2,1000\n1,2,1000\n1,3,999\n")
     table, duplicates = load_csv(path)
@@ -15,7 +16,7 @@ def test_csv_preserves_duplicate_events(tmp_path):
     assert table.by_user["1"] == [2, 0, 1]
 
 
-def test_full_cohort_roundtrip(context):
+def _check_full_cohort_roundtrip(context):
     cohort = ready_cohort(context)
     assert len(cohort["catalog"]) == 24
     assert cohort["eligibility"]["status"] == "ready"
@@ -29,7 +30,7 @@ def test_full_cohort_roundtrip(context):
     ]
 
 
-def test_fixed_window_sampling():
+def _check_fixed_window_sampling():
     windows = build_fixed_windows(32.2, scene_duration=30, num_keyframes=6)
     assert windows == [
         {
@@ -51,7 +52,7 @@ def test_fixed_window_sampling():
     assert timestamp_stem(31.199999) == "0031_1"
 
 
-def test_leave_one_out_partitions():
+def _check_leave_one_out_partitions():
     rows = events((5,))
     rows[0].update(timestamp=3000, source_event_id=30)
     rows[1].update(timestamp=1000, source_event_id=20)
@@ -66,3 +67,21 @@ def test_leave_one_out_partitions():
     assert split["phases"]["train"]["eligible_count"] == 2
     assert split["phases"]["train"]["no_history_count"] == 1
     assert set(split["phases"]["train"]["event_ids"]).isdisjoint({3, 4})
+
+
+def test_cohort_csv_windows_and_partitions(tmp_path):
+    # Csv preserves duplicate events.
+    case = tmp_path / "0"
+    _check_csv_preserves_duplicate_events(tmp_path=_fresh_dir(case))
+    # Full cohort roundtrip.
+    case = tmp_path / "1"
+    _check_full_cohort_roundtrip(context=make_context(case / "repo"))
+    # Fixed window sampling.
+    _check_fixed_window_sampling()
+    # Leave one out partitions.
+    _check_leave_one_out_partitions()
+
+
+def _fresh_dir(path):
+    path.mkdir(parents=True, exist_ok=True)
+    return path

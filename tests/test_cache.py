@@ -14,9 +14,10 @@ from validation.leave_one_out_recommendation import combination_complete
 from validation.selection import training_signature
 from validation.shared_cache import SharedCache
 from validation.steps import validation_config
+from helpers import make_context
 
 
-def test_training_identity_invalidates_changed_inputs(context, monkeypatch):
+def _check_training_identity_invalidates_changed_inputs(context, monkeypatch):
     from validation.recommendation_contracts import EVALUATION_CONTRACT
 
     prepare_inputs(context, monkeypatch)
@@ -66,7 +67,7 @@ def test_completion_requires_valid_bundle(context, monkeypatch):
     assert not combination_complete(directory, identity, 3)
 
 
-def test_shared_cache_roundtrip_and_corruption(context):
+def _check_shared_cache_roundtrip_and_corruption(context):
     source = context.root / "source"
     source.mkdir()
     (source / "data.bin").write_bytes(b"immutable features")
@@ -87,7 +88,7 @@ def test_shared_cache_roundtrip_and_corruption(context):
     assert cache.restore(target)["origin"]["run_id"] == "repaired"
 
 
-def test_preflight_protects_entire_grid_before_restoring_or_training(context, monkeypatch):
+def _check_preflight_protects_entire_grid_before_restoring_or_training(context, monkeypatch):
     from validation.steps import run_recommendation
     from validation import recommendation_cache
 
@@ -107,3 +108,17 @@ def test_preflight_protects_entire_grid_before_restoring_or_training(context, mo
     with pytest.raises(ValueError, match="new Run ID"):
         run_recommendation(context, target=["base", "graph-activity"], force=True)
     assert before == {p: p.read_bytes() for p in context.recommendations_dir.rglob("*") if p.is_file()}
+
+
+def test_training_identity_shared_cache_and_preflight(tmp_path):
+    # Training identity invalidates changed inputs.
+    case = tmp_path / "0"
+    with pytest.MonkeyPatch.context() as patch:
+        _check_training_identity_invalidates_changed_inputs(context=make_context(case / "repo"), monkeypatch=patch)
+    # Shared cache roundtrip and corruption.
+    case = tmp_path / "1"
+    _check_shared_cache_roundtrip_and_corruption(context=make_context(case / "repo"))
+    # Preflight protects entire grid before restoring or training.
+    case = tmp_path / "2"
+    with pytest.MonkeyPatch.context() as patch:
+        _check_preflight_protects_entire_grid_before_restoring_or_training(context=make_context(case / "repo"), monkeypatch=patch)

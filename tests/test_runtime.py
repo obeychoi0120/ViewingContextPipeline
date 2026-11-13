@@ -6,9 +6,9 @@ from arm_registry import generation_registry, registry, select_arms
 from validation.steps import validation_config
 
 
-def test_current_config_and_extractor_protocol_load(context):
+def test_config_loading_and_validation(context):
     from copy import deepcopy
-    from pipeline_runtime import _validate_config
+    from pipeline_runtime import ConfigError, RunContext, _validate_config, require_generation_config
 
     settings = validation_config(context)
     assert settings.encoder.embedding_dim == 1024
@@ -28,20 +28,12 @@ def test_current_config_and_extractor_protocol_load(context):
     config["protocol"]["description_extractors"] = ["qwen3vl_2b", "qwen3vl_8b", "gemini"]
     _validate_config(config)
 
-
-def test_run_level_reports_directory_is_not_a_legacy_layout(context):
-    from pipeline_runtime import RunContext
-
     # Per-Run analyses live in artifacts/runs/<RUN_ID>/reports/ (AGENTS.md).
     (context.run_root.parent / "reports").mkdir(parents=True)
     loaded = RunContext.load(context.run_id, dataset=context.dataset, root=context.root)
     assert loaded.run_root == context.run_root
 
-
-def test_unused_models_may_be_omitted_until_a_step_needs_them(context):
-    from copy import deepcopy
-    from pipeline_runtime import ConfigError, _validate_config, require_generation_config
-
+    # Unused models may be omitted until a step needs them.
     config = deepcopy(context.config)
     config.pop("_rec_experiments")
     for section in (config["models"], config["extraction"]["graph"], config["extraction"]["description"]):
@@ -62,7 +54,7 @@ def test_unused_models_may_be_omitted_until_a_step_needs_them(context):
             _validate_config(changed)
 
 
-def test_arm_sources_and_title_policy(context):
+def test_arm_sources_title_policy_and_cli(context, monkeypatch):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT, feature_source, target_set
 
     arms = registry(context.config)
@@ -103,8 +95,7 @@ def test_arm_sources_and_title_policy(context):
         with pytest.raises(ValueError):
             select_arms(context.config, targets)
 
-
-def test_cli_mixed_arms_and_removed_options(context, monkeypatch):
+    # The CLI requires a dataset and rejects removed options.
     from pipeline_runtime import RunContext
     from validation.cli import STEP_HANDLERS, main
 
@@ -125,25 +116,25 @@ def test_cli_mixed_arms_and_removed_options(context, monkeypatch):
             main(command + option)
 
 
-
-@pytest.mark.parametrize("configured, expected", [(False, "false"), (True, "true"), (None, "true")])
-def test_recommendation_logs_effective_deterministic(context, monkeypatch, capsys, configured, expected):
+def test_recommendation_logs_effective_deterministic(context, monkeypatch, capsys):
     from validation import leave_one_out_recommendation
     from validation.steps import run_recommendation
 
     settings = context.config["validation"]["model"]
-    if configured is None:
-        settings.pop("deterministic", None)
-    else:
-        settings["deterministic"] = configured
     calls = []
     monkeypatch.setattr(
         leave_one_out_recommendation, "run_leave_one_out",
         lambda ctx, **kwargs: calls.append(kwargs),
     )
-    run_recommendation(context, target=["base"], workers_per_gpu=4)
-    output = capsys.readouterr().out
-    assert f"  deterministic: {expected}\n" in output
-    assert "profile_every" not in output
-    assert "profile_operators" not in output
-    assert calls == [{"force": False, "target": ["base"], "workers_per_gpu": 4}]
+    for configured, expected in ((False, "false"), (True, "true"), (None, "true")):
+        if configured is None:
+            settings.pop("deterministic", None)
+        else:
+            settings["deterministic"] = configured
+        calls.clear()
+        run_recommendation(context, target=["base"], workers_per_gpu=4)
+        output = capsys.readouterr().out
+        assert f"  deterministic: {expected}\n" in output, configured
+        assert "profile_every" not in output
+        assert "profile_operators" not in output
+        assert calls == [{"force": False, "target": ["base"], "workers_per_gpu": 4}]

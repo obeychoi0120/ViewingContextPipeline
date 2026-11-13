@@ -31,6 +31,10 @@ Each role is one entity name copied exactly from [Entities], including spaces an
 - unknown: a relevant value cannot be identified or faithfully represented.
 - A tool slot left out means none and a place slot left out means unknown. Never write a slot just to fill it.
 - At least actor or target must reference a declared entity; unknown does not count. A visibly supported group can be one entity; otherwise use unknown for unrepresentable multiple participants, not name lists or duplicate actions.
+- Write each action once. Every action line differs from all earlier lines; never return to an earlier action or alternate between actions.
+- Write a mutual or shared action such as talking once, not once per participant or per pair.
+- The action is a verb phrase without entity names; the target has its own slot: woman - pointing at - dish.
+- Stop after the last distinct action. Fewer actions than the limit is correct.
 - If the action itself is uncertain, omit it. Empty actions are valid for explanations, comparisons, or static scenes. Never create links just to connect entities. Preserve supported order without inferring causality.
 
 [Output Format]

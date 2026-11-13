@@ -21,6 +21,7 @@ from validation.steps import (
     run_recommendation,
     validation_config,
 )
+from helpers import make_context
 
 
 def test_paired_bootstrap_and_bonferroni_comparisons(context):
@@ -64,8 +65,7 @@ def test_paired_bootstrap_and_bonferroni_comparisons(context):
         assert item["ci_high"] == pytest.approx(high)
 
 
-@pytest.mark.torch
-def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
+def _check_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
     train_inputs(context, monkeypatch)
     cohort, _, _ = selected_table(context)
     config = validation_config(context)
@@ -88,8 +88,7 @@ def test_diagnosis_rejects_metric_rank_mismatch(context, monkeypatch, capsys):
     assert "[Diagnosis] Arm별 최종 test 지표" not in capsys.readouterr().out
 
 
-@pytest.mark.torch
-def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
+def _check_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
     from arm_registry import RECOMMENDATION_ARM_CONTRACT
     from pipeline_runtime import RunContext
     from validation.cli import main
@@ -151,3 +150,17 @@ def test_five_arm_cpu_roundtrip(context, monkeypatch, capsys):
     assert run_recommendation(context, target=arms)["skipped"] == 15
     assert all(path.read_bytes() == content for path, content in source_bytes.items())
     assert not (context.run_root / "run_contract.json").exists()
+
+
+@pytest.mark.torch
+def test_diagnosis_rank_mismatch_and_five_arm_cpu_roundtrip(tmp_path, capsys):
+    # Diagnosis rejects metric rank mismatch.
+    case = tmp_path / "0"
+    capsys.readouterr()
+    with pytest.MonkeyPatch.context() as patch:
+        _check_diagnosis_rejects_metric_rank_mismatch(context=make_context(case / "repo"), monkeypatch=patch, capsys=capsys)
+    # Five arm cpu roundtrip.
+    case = tmp_path / "1"
+    capsys.readouterr()
+    with pytest.MonkeyPatch.context() as patch:
+        _check_five_arm_cpu_roundtrip(context=make_context(case / "repo"), monkeypatch=patch, capsys=capsys)

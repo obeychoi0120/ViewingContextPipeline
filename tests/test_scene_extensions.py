@@ -88,7 +88,7 @@ def make_model(store, extensions=(), items=8, aggregation="mean", role_fusion=Tr
 
 
 
-def test_segments_start_as_matching_backbone_and_leave_the_rng_alone():
+def _check_segments_start_as_matching_backbone_and_leave_the_rng_alone():
     role_fusion = True
     store = synthetic_store()
     reference = make_model(store, role_fusion=role_fusion)
@@ -102,7 +102,7 @@ def test_segments_start_as_matching_backbone_and_leave_the_rng_alone():
     assert model.execution_report()["segment_gates"] == {"scene_update": 0.0, "video_readout": 0.0}
 
 
-def test_open_segment_gates_change_only_videos_with_segments_and_membership_matters():
+def _check_open_segment_gates_change_only_videos_with_segments_and_membership_matters():
     store = synthetic_store()
     reference, model = make_model(store), make_model(store, ("segments",))
     with torch.no_grad():
@@ -161,3 +161,10 @@ def test_attach_builds_segments_and_identity_records_them(context, monkeypatch):
     assert "gcn" not in g2["item_model"]
     assert g2["item_model"]["extensions"]["segments"]["applied_after"] == "scene_mlp_without_scene_exchange"
     assert g2["item_model"]["scene_mlp"] is True
+
+
+def test_segment_backbone_rng_and_gates():
+    # Segments start as matching backbone and leave the rng alone.
+    _check_segments_start_as_matching_backbone_and_leave_the_rng_alone()
+    # Open segment gates change only videos with segments and membership matters.
+    _check_open_segment_gates_change_only_videos_with_segments_and_membership_matters()

@@ -21,7 +21,7 @@ from validation.steps import validation_config
 pytestmark = pytest.mark.torch
 
 
-def test_history_inputs_and_training_popularity_exclude_holdouts():
+def _check_history_inputs_and_training_popularity_exclude_holdouts():
     table = EventTable(events((13,)))
     execution = execution_for(table)
     actual = execution.inputs([0, 3, 12], 10, "cpu")
@@ -46,7 +46,7 @@ def test_history_inputs_and_training_popularity_exclude_holdouts():
         assert probabilities["train"][table.targets[event]] == 0
 
 
-def test_transition_loss_matches_reference():
+def _check_transition_loss_matches_reference():
     table = EventTable(events((5, 5)))
     model = simple_model(item_count=10)
     ids = np.array([2, 7, 3])
@@ -75,7 +75,7 @@ def test_transition_loss_matches_reference():
     assert all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None)
 
 
-def test_ranking_masks_full_preceding_history():
+def _check_ranking_masks_full_preceding_history():
     rows = events((13,))
     rows[-1]["item_id"] = "1"  # Repeated target, outside the model's latest ten inputs.
     table = EventTable(rows)
@@ -93,7 +93,7 @@ def test_ranking_masks_full_preceding_history():
     assert torch.isneginf(scores[0, :12]).all()
 
 
-def test_hr_ndcg_cutoff_boundaries():
+def _check_hr_ndcg_cutoff_boundaries():
     for cutoff in (4, 8, 10, 20, 30):
         assert metrics_from_rank(1, [cutoff]) == {f"HR@{cutoff}": 1.0, f"NDCG@{cutoff}": 1.0}
         at = metrics_from_rank(cutoff, [cutoff])
@@ -162,3 +162,14 @@ def test_best_checkpoint_is_tested_once(context, monkeypatch):
     checkpoint = torch.load(directory / "sasrec.pt", map_location="cpu", weights_only=True)
     for name, tensor in checkpoint["state_dict"].items():
         torch.testing.assert_close(tensor, best_state[name], rtol=0, atol=0)
+
+
+def test_inputs_loss_ranking_and_metric_cutoffs():
+    # History inputs and training popularity exclude holdouts.
+    _check_history_inputs_and_training_popularity_exclude_holdouts()
+    # Transition loss matches reference.
+    _check_transition_loss_matches_reference()
+    # Ranking masks full preceding history.
+    _check_ranking_masks_full_preceding_history()
+    # Hr ndcg cutoff boundaries.
+    _check_hr_ndcg_cutoff_boundaries()

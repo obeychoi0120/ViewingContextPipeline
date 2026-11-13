@@ -10,7 +10,69 @@
 
 대상(최신순): [v10_extended](../prompts/scene_graph_v10_extended.md) · [v10_core](../prompts/scene_graph_v10_core.md) → [v9_extended](../prompts/scene_graph_v9_extended.md) · [v9_core](../prompts/scene_graph_v9_core.md) → [v9(삭제됨)](https://github.com/obeychoi0120/ViewingContextPipeline/commits/HEAD/prompts/scene_graph_v9.md) → [v8](../prompts/scene_graph_v8.md) → [v7](../prompts/scene_graph_v7.md) → [v6](../prompts/scene_graph_v6.md) → [v5](../prompts/scene_graph_v5.md) → [v4](../prompts/scene_graph_v4.md)
 
-**개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증) → tool·place 라벨화와 줄 배치 템플릿(v9·v10, 효과 미검증).**
+**개선 흐름: 콘텐츠 맥락과 행동을 분리 → 같은 주제 안의 차별점 보존 → 행동별 역할과 불확실성 명확화 → receiver 제거로 역할 구분 부담 축소 → 이름 직접 참조와 모델 크기별 프롬프트 분리 → 규칙 문장 간소화(v10, 효과 미검증) → tool·place 라벨화와 줄 배치 템플릿(v9·v10, 효과 미검증) → 행동 반복 방지 규칙(v9·v10, 효과 미검증).**
+
+### 2026-11-13: v10_core·v10_extended 재작성(현재 v9 기준 간소화)
+
+삭제된 v10 두 파일을 현재 [v9_core](../prompts/scene_graph_v9_core.md)·[v9_extended](../prompts/scene_graph_v9_extended.md)(바로 아래 항목의 반복 방지 규칙 포함)를 기준으로 다시 간소화해 [v10_core](../prompts/scene_graph_v10_core.md)와 [v10_extended](../prompts/scene_graph_v10_extended.md)로 새로 만들었습니다. v9 두 파일은 바꾸지 않았습니다. extended가 core 전문으로 시작하고 `[Additional Instructions]` 블록만 덧붙이는 구조는 같습니다.
+
+**분량(예시 제외 본문, 빈 줄 제외).**
+
+| 프롬프트 | 줄 수 | 단어 수 |
+| --- | --- | --- |
+| v9_core → v10_core | 48 → 36 | 979 → 494 |
+| v9_extended → v10_extended | 66 → 51 | 1,371 → 805 |
+
+**간소화 방식.** 이전 v10과 같은 원칙입니다(아래 "v10_2b·v10_8b 신규(간소화)" 항목 참고).
+
+- `[Selection and Evidence]` 5개 항목을 `[Evidence]` 2개로 줄였습니다.
+- 드문 경우를 막는 방어 규칙을 빼고, 긴 금지 규칙을 짧은 긍정문으로 바꿨습니다.
+- 출력 형식, 상한(core 엔티티 6·속성 2·행동 4·주제 3, extended 8·3·6·4), 예시(core 3개, extended 5개)는 v9와 같습니다. extended의 추가 블록은 삭제 전 v10_extended의 것을 그대로 썼습니다.
+- 같은 종류 셋 이상은 그룹 엔티티로 쓰는 규칙을 유지했습니다(v9에는 없음).
+
+**삭제 전 v10과의 차이.** 본문은 거의 같고 `[Actions]`와 `[Output Format]`만 다릅니다.
+
+| | 삭제 전 v10(커밋 `0d351f4`) | 현재 v10 |
+| --- | --- | --- |
+| 반복 방지 | 없음 | v9의 4개 규칙을 3줄로 줄여 넣음: 이름 없는 동사구, 각 행동은 한 번(공동 행동도 한 번), 마지막 행동 뒤에 멈춤 |
+| 교대 금지 문장 | 없음 | 넣지 않음("모든 줄은 앞의 줄과 달라야 한다"로 대신) |
+| "Every action line holds exactly one action." | 있음 | 뺌(바로 위의 "한 줄에 두 행동을 쓰지 않는다"와 중복) |
+
+**호환성.** 출력 형식, 스키마, 파서(`graph-text/v22`)는 바뀌지 않습니다. 파일 이름은 같지만 삭제 전 v10과 프롬프트 해시가 다릅니다.
+
+**검증한 것.** 두 파일의 예시가 `native`로 파싱되는지와 extended가 core 전문으로 시작하는지를 기존 테스트로 확인했습니다.
+
+**미검증.** 이 프롬프트로는 한 장면도 생성하지 않았습니다. 간소화와 반복 방지 규칙이 출력 품질, 반복 루프, TOKEN_LIMIT에 주는 영향은 확인되지 않았습니다.
+
+### 2026-11-13: v9·v10에 행동 반복 방지 규칙 추가
+
+[v9_core](../prompts/scene_graph_v9_core.md), [v9_extended](../prompts/scene_graph_v9_extended.md), [v10_core](../prompts/scene_graph_v10_core.md), [v10_extended](../prompts/scene_graph_v10_extended.md) 네 파일의 `[Actions]` 규칙에 문장을 추가했습니다. 버전 번호는 올리지 않았으므로 프롬프트 해시가 바뀝니다. extended가 core 전문으로 시작하는 구조는 그대로입니다.
+
+**이유.** R11 qwen3vl_2b(v9_core, repetition_penalty 1.05, 512토큰)의 부분 집계에서 TOKEN_LIMIT 3,817건 중 97.5%가 반복 루프로 끝났습니다. 근거는 [분석 보고서](../artifacts/runs/R11_v9_261113/reports/token_limit_repetition.md)입니다.
+
+- 94.7%가 Actions 섹션에서 잘렸고, 정확 반복의 84%는 주기 1~4줄이었습니다.
+- 루프는 대화·시선 행동을 참가자 조합별로 되풀이하는 형태가 중심이었습니다.
+- 루프의 38%는 `man1 - looking at man2 - man2`처럼 동사에 대상 이름을 넣고 target을 또 썼습니다.
+
+**추가한 규칙.**
+
+| 규칙 | v9 | v10 |
+| --- | --- | --- |
+| 행동은 한 번만 쓰고, 모든 행동 줄은 앞의 줄과 달라야 함 | 추가(앞 행동으로 돌아가거나 교대하지 않는다는 문장 포함) | 추가 |
+| 상호·공동 행동(예: talking)은 참가자마다 쓰지 않고 한 번만 씀 | 추가(쌍마다 쓰지 않는다는 표현 포함) | 추가 |
+| 행동은 엔티티 이름이 없는 동사구로 씀 (`woman - pointing at - dish`) | 추가 | 추가 |
+| 마지막으로 구별되는 행동 뒤에 멈춤. 상한보다 적어도 됨 | 추가 | 추가 |
+
+- 행동 수 상한(core 4개, extended 6개)은 바꾸지 않았습니다.
+- 같은 actor와 target의 행동을 한 번만 쓰게 하는 규칙은 넣지 않았습니다. extended 예시의 `potter - shaping - clay` / `potter - trimming - clay`처럼 같은 쌍에 서로 다른 행동이 정당한 경우가 있기 때문입니다.
+- 예시 문장은 시선 행동을 유도하지 않도록 `looking at` 대신 `pointing at`을 썼습니다.
+- Entities의 번호 세기 루프(TOKEN_LIMIT의 약 5%)에 대한 규칙은 이번에 추가하지 않았습니다.
+
+**호환성.** 출력 형식, 스키마, 파서(`graph-text/v22`)는 바뀌지 않습니다. 프롬프트 해시가 바뀌므로 이전 프롬프트로 생성한 Run을 `--force` 없이 이어서 실행하면 생성 식별 정보가 맞지 않습니다.
+
+**검증한 것.** 네 프롬프트의 예시가 그대로 `native`로 파싱되는지 기존 테스트로 확인했습니다.
+
+**미검증.** 이 규칙으로는 한 장면도 생성하지 않았습니다. 규칙이 반복 루프와 TOKEN_LIMIT을 줄이는지, 정당한 행동까지 줄이는지, 소형 모델이 예시 줄(`woman - pointing at - dish`)을 베끼는지는 확인되지 않았습니다.
 
 ### 2026-11-13: 장면 결과를 warning 3종과 error로 단순화 (`graph-text/v22`)
 

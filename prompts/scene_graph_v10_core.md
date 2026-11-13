@@ -22,7 +22,9 @@ Up to 4 actions, one per line: actor - action - target; tool: name; place: name.
 - actor and target are names copied exactly from [Entities], or unknown. Write none when there is no target.
 - Add tool: and then place: only when the frames show them, each with a name copied exactly from [Entities]. Otherwise leave the slot out.
 - Write what someone does to an object or to another participant. Posture and expression are attributes, not actions.
-- If no action is supported, write none.
+- The action is a verb phrase without entity names: woman - pointing at - dish.
+- Write each action once; every line differs from all earlier lines. Write a shared action such as talking once, not once per participant.
+- Stop after the last distinct action. Fewer actions than the limit is correct. If no action is supported, write none.
 
 [Output Format]
 Use exactly this layout. The first line is [Context]. Stop after Actions.
@@ -38,7 +40,7 @@ actor - action - target; tool: name; place: name
 
 Start a new line after every section header, every context field, every entity, and every action. Never put two fields, two entities, or two actions on one line.
 Separate topics, attributes, and the tool and place slots with semicolons. Use space-dash-space ( - ) only between actor, action, and target. No colons or IDs in entity lines.
-Every action line holds exactly one action. Write none alone when Entities or Actions is empty. No JSON, bullets, or commentary. Limits are ceilings, not quotas.
+Write none alone when Entities or Actions is empty. No JSON, bullets, or commentary. Limits are ceilings, not quotas.
 
 [Examples]
 Examples illustrate format, not content to copy.

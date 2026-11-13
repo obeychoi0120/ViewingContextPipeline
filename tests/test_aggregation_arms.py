@@ -6,6 +6,7 @@ import torch
 from helpers import graph_store
 from validation.graph_batching import PackedGraphStore
 from validation.graph_model import DescriptionSceneEncoder, SceneRoleEncoder
+from helpers import make_context
 
 
 def description_batch():
@@ -16,7 +17,7 @@ def description_batch():
     }
 
 
-def test_d_title_description_residual_mlp_mean_and_missing_components():
+def _check_d_title_description_residual_mlp_mean_and_missing_components():
     encoder = DescriptionSceneEncoder(4, hidden=2, aggregation="mean")
     batch = description_batch()
     scene_inputs = []
@@ -67,7 +68,7 @@ def test_worker_consumes_mixed_arm_jobs(context, monkeypatch):
         assert np.isfinite(np.load(directory / "catalog_vectors.npy")).all()
 
 
-def test_g0_ignores_roles_and_retains_all_feature_gradients(context):
+def _check_g0_ignores_roles_and_retains_all_feature_gradients(context):
     arrays, _, _, _ = graph_store(context)
     batch = PackedGraphStore(arrays).batch([0, 1], "cpu")
     encoder = SceneRoleEncoder(hidden=4, role_fusion=False)
@@ -87,3 +88,11 @@ def test_g0_ignores_roles_and_retains_all_feature_gradients(context):
     assert batch["contexts"].grad.abs().sum() > 0
     assert batch["titles"].grad.abs().sum() > 0
     assert encoder.scene_mlp.fc1.weight.grad.abs().sum() > 0
+
+
+def test_description_and_role_free_graph_encoders(tmp_path):
+    # D title description residual mlp mean and missing components.
+    _check_d_title_description_residual_mlp_mean_and_missing_components()
+    # G0 ignores roles and retains all feature gradients.
+    case = tmp_path / "1"
+    _check_g0_ignores_roles_and_retains_all_feature_gradients(context=make_context(case / "repo"))

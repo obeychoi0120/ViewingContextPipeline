@@ -20,7 +20,8 @@ from helpers import (
 )
 
 
-def test_graph_parsing_and_invalid_output_preservation():
+def test_named_graph_parsing_and_repairs():
+    # Native named output, and invalid output preserved as text.
     parsed = parse_or_repair_graph(NAMED_GRAPH_TEXT)
     assert parsed.error is None and not parsed.warning
     expected = graph()
@@ -41,8 +42,7 @@ def test_graph_parsing_and_invalid_output_preservation():
     assert record["semantic_warnings"] == [PARSE_FAILED]
     assert record["scene_idx"] == 7
 
-
-def test_named_graph_keeps_roles_missing_from_entities():
+    # Roles missing from [Entities] are kept as new entities.
     text = (
         "[Context]\nmedium: live_action\nformat: narrative\ntopics: hospital visit\n"
         "[Entities]\nman; wearing coat\n"
@@ -68,8 +68,7 @@ def test_named_graph_keeps_roles_missing_from_entities():
     assert legacy.graph["entities"] == [{"id": "p1", "name": "man", "attributes": []}]
     assert legacy.graph["actions"][0]["target"] == "unknown"
 
-
-def test_named_graph_regroups_actions_joined_on_one_line():
+    # Actions joined on one line are regrouped.
     head = "[Context]\nmedium: animation\nformat: narrative\ntopics: dorm\n[Entities]\n"
     names = "woman1; white blouse\nman1\ndoor\nknife\nroom\n[Actions]\n"
 
@@ -98,41 +97,39 @@ def test_named_graph_regroups_actions_joined_on_one_line():
     legacy = head + "p1: woman\nf1: door\n[Actions]\np1 - pushing - f1; p1 - leaving - f1"
     assert parse_or_repair_graph(legacy).warning == (PARSE_FAILED,)
 
-
-def test_named_graph_reads_labelled_optional_tool_and_place():
+    # Labelled optional tool and place.
     head = ("[Context]\nmedium: animation\nformat: narrative\ntopics: dorm\n"
             "[Entities]\nwoman\ndoor\nknife\nroom\n[Actions]\n")
 
-    def actions(text, mode="native"):
+    def labelled(text, mode="native"):
         parsed = parse_or_repair_graph(head + text)
         assert parsed.error is None and parsed.parse_mode == mode, parsed.error
         return [tuple(a.values()) for a in parsed.graph["actions"]]
 
     # e1 woman, e2 door, e3 knife, e4 room. An omitted tool is none, an omitted place unknown.
-    assert actions("woman - cutting - door; tool: knife; place: room\nwoman - pushing - door; place: room\n"
+    assert labelled("woman - cutting - door; tool: knife; place: room\nwoman - pushing - door; place: room\n"
                    "woman - prying - door; tool: knife\nwoman - leaving - none") == [
         ("e1", "cutting", "e2", "e3", "e4"), ("e1", "pushing", "e2", None, "e4"),
         ("e1", "prying", "e2", "e3", "unknown"), ("e1", "leaving", None, None, "unknown")]
-    assert actions("woman - cutting - door; place: room; tool: knife\nwoman - pushing - door; tool: none") == [
+    assert labelled("woman - cutting - door; place: room; tool: knife\nwoman - pushing - door; tool: none") == [
         ("e1", "cutting", "e2", "e3", "e4"), ("e1", "pushing", "e2", None, "unknown")]
     # Positional slots still parse, and loose labels are repaired.
-    assert actions("woman - cutting - door; knife; room") == [("e1", "cutting", "e2", "e3", "e4")]
-    assert actions("woman - cutting - door; Tool : knife; room\nwoman - pushing - door; place:",
+    assert labelled("woman - cutting - door; knife; room") == [("e1", "cutting", "e2", "e3", "e4")]
+    assert labelled("woman - cutting - door; Tool : knife; room\nwoman - pushing - door; place:",
                    "repaired") == [("e1", "cutting", "e2", "e3", "e4"), ("e1", "pushing", "e2", None, "unknown")]
-    assert actions("woman - cutting - door; tool: knife; woman - pushing - door; place: room", "repaired") == [
+    assert labelled("woman - cutting - door; tool: knife; woman - pushing - door; place: room", "repaired") == [
         ("e1", "cutting", "e2", "e3", "unknown"), ("e1", "pushing", "e2", None, "e4")]
     # A repeated label keeps the first value; a slot beyond tool and place is dropped.
-    assert actions("woman - cutting - door; tool: knife; tool: room", "repaired") == [
+    assert labelled("woman - cutting - door; tool: knife; tool: room", "repaired") == [
         ("e1", "cutting", "e2", "e3", "unknown")]
-    assert actions("woman - cutting - door; tool: knife; place: room; door", "repaired") == [
+    assert labelled("woman - cutting - door; tool: knife; place: room; door", "repaired") == [
         ("e1", "cutting", "e2", "e3", "e4")]
     assert parse_or_repair_graph(head + "place: room").warning == (PARSE_FAILED,)
     # ID-form output does not take labelled slots.
     legacy = head.replace("woman\ndoor\nknife\nroom", "p1: woman\nf1: door\nt1: knife")
     assert parse_or_repair_graph(legacy + "p1 - cutting - f1; tool: t1").warning == (PARSE_FAILED,)
 
-
-def test_named_graph_repairs_missing_context_header_and_stray_none():
+    # A missing [Context] header and a stray none are repaired.
     body = "medium: animation\nformat: narrative\ntopics: dorm\n[Entities]\n{entities}\n[Actions]\n{actions}"
     parsed = parse_or_repair_graph(body.format(entities="woman; white blouse\ndoor",
                                                actions="none\nwoman - pushing - door; none; unknown"))
@@ -156,7 +153,7 @@ def test_named_graph_repairs_missing_context_header_and_stray_none():
 LENIENT_HEAD = "[Context]\nmedium: live_action\nformat: narrative\ntopics: kitchen\n[Entities]\n"
 
 
-@pytest.mark.parametrize("text, entities, actions", [
+LENIENT_CASES = [
     # Slot list after the target: tool and place cannot be told apart.
     (LENIENT_HEAD + "woman\nman\n[Actions]\nwoman - speaking - man; man; door; car",
      ["woman", "man"], [("woman", "speaking", "man", None, "unknown")]),
@@ -177,16 +174,9 @@ LENIENT_HEAD = "[Context]\nmedium: live_action\nformat: narrative\ntopics: kitch
     # One-line sections.
     ("Context: animation; narrative; mountains\nEntities: mountain; cloud\nActions: none",
      ["mountain", "cloud"], []),
-])
-def test_lenient_parser_keeps_separable_sections(text, entities, actions):
-    parsed = parse_or_repair_graph(text)
-    assert parsed.error is None and not parsed.warning, parsed.error
-    names = {e["id"]: e["name"] for e in parsed.graph["entities"]}
-    assert [e["name"] for e in parsed.graph["entities"]] == entities
-    assert [tuple(names.get(v, v) for v in a.values()) for a in parsed.graph["actions"]] == actions
+]
 
-
-@pytest.mark.parametrize("text, tag", [
+TAGGED_CASES = [
     ("A man cooks pasta in a kitchen.", PARSE_FAILED),
     (LENIENT_HEAD.replace("topics: kitchen\n", "") + "man\n[Actions]\nnone", PARSE_FAILED),
     (LENIENT_HEAD + "man\n[Actions]\nplace: kitchen", PARSE_FAILED),
@@ -196,13 +186,39 @@ def test_lenient_parser_keeps_separable_sections(text, entities, actions):
     # Without headers, the first none answers Entities and the second Actions.
     ("medium: animation\nformat: narrative\ntopics: city at dusk\nnone\nnone", TRASH_INFO),
     ("medium: animation\nformat: narrative\ntopics: wolves\nwolf1; gray fur\nforest", PARSE_FAILED),
-])
-def test_unseparable_or_empty_graphs_are_tagged(text, tag):
-    assert parse_or_repair_graph(text).warning == (tag,)
+]
 
 
+def test_lenient_parsing_warning_tags_and_prompt_examples():
+    from pathlib import Path
 
-def test_compact_scene_storage_roundtrip(tmp_path):
+    # Separable sections are kept.
+    for text, entities, actions in LENIENT_CASES:
+        parsed = parse_or_repair_graph(text)
+        assert parsed.error is None and not parsed.warning, (text, parsed.error)
+        names = {e["id"]: e["name"] for e in parsed.graph["entities"]}
+        assert [e["name"] for e in parsed.graph["entities"]] == entities, text
+        assert [tuple(names.get(v, v) for v in a.values()) for a in parsed.graph["actions"]] == actions, text
+    # Unseparable or empty graphs are tagged.
+    for text, tag in TAGGED_CASES:
+        assert parse_or_repair_graph(text).warning == (tag,), text
+    # Every example in the current prompts parses natively.
+    for name in ("v9_core", "v9_extended", "v10_core", "v10_extended"):
+        text = (Path(__file__).parents[1] / "prompts" / f"scene_graph_{name}.md").read_text(encoding="utf-8")
+        blocks = [block for block in text.split("\n\n") if "\n[Context]\nmedium: " in "\n" + block]
+        layout, *examples = [block[block.index("[Context]"):] for block in blocks]
+        assert "medium: value" in layout and len(examples) >= 3, name
+        for example in examples:
+            parsed = parse_or_repair_graph(example)
+            assert parsed.error is None and parsed.parse_mode == "native", (name, example, parsed.error)
+
+
+def test_scene_storage_resume_and_progress(context, tmp_path):
+    from extraction.progress import InferenceProgress
+    from tqdm import tqdm
+    import io
+
+    # Compact storage round trip.
     cid = "video"
     path = tmp_path / f"{cid}.jsonl"
     records = [
@@ -226,9 +242,7 @@ def test_compact_scene_storage_roundtrip(tmp_path):
         write_scene_records(path, [records[1], records[1]])
     assert path.read_bytes() == before
 
-
-def test_scene_resume_selects_pending_only(context):
-    cid = "video"
+    # Resume selects pending scenes only.
     directory = context.scene_arm_dir("graph_qwen3vl_2b")
     path = directory / f"{cid}.jsonl"
     write_scene_records(
@@ -257,9 +271,22 @@ def test_scene_resume_selects_pending_only(context):
     _, forced = prepare_scene_batch([visual], directory, prepare, minimal_graph_records, force=True)
     assert [r["scene_idx"] for r in forced[0][1]] == [0, 1, 2, 3]
 
+    # Progress counts each scene in exactly one outcome.
+    stream = io.StringIO()
+    with InferenceProgress(total=5, desc="x", unit="scene",
+                           progress_factory=lambda **kw: tqdm(file=stream, **kw)) as progress:
+        for task_id, result in zip("abcde", ("success", "parse_failed", "trash_info", "token_limit", "error")):
+            progress.complete(task_id=task_id, outcome=result)
+        progress.complete(task_id="e", outcome="success")  # a later pass replaces the outcome
+        counts = dict(progress.counts)
+        with pytest.raises(ValueError, match="unknown scene outcome"):
+            progress.complete(outcome="warning")
+    assert counts == {"success": 2, "parse_failed": 1, "trash_info": 1, "token_limit": 1, "error": 0}
+    assert "success=2 parse_failed=1 trash_info=1 token_limit=1 error=0" in stream.getvalue()
+
 
 @pytest.mark.torch
-def test_truncated_scene_is_token_limit_warning(context, monkeypatch):
+def test_qwen_scene_runs_warn_on_token_limit_and_retry_with_penalty(context, monkeypatch):
     from preparation.input_data import prepare_input_data
     from extraction.step_support import visual_rows
     from helpers import install_doubles
@@ -289,20 +316,34 @@ def test_truncated_scene_is_token_limit_warning(context, monkeypatch):
     assert saved[0]["warning"] == [TOKEN_LIMIT] and saved[0]["scene_graph"] == GRAPH_TEXT
     assert saved[0]["tokens"] == 19 and "error" not in saved[0]
 
+    # Penalty passes retry warned scenes: prose first (PARSE_FAILED), a graph at the higher penalty.
+    factory = FakeGenerator(lambda task: GRAPH_TEXT if task.repetition_penalty > 1 else "A man cooks.")
+    directory = context.scene_arm_dir("graph_qwen3vl_8b")
+    run_qwen_scenes(
+        [(visual, rows)], scene_dir=directory, model_path=context.path("models", "qwen3vl_2b"),
+        generator_factory=factory, names={}, progress=quiet_progress(), arm="graph",
+        existing_records={}, runtime=QwenRuntime(), penalties=(1.0, 1.1),
+    )
+    assert [task.repetition_penalty for task in factory.tasks] == [1.0, 1.1]
+    assert read_jsonl(directory / f"{visual['content_id']}.jsonl")[0]["warning"] == []
 
-@pytest.mark.parametrize("representation", ["graph", "description"])
-@pytest.mark.parametrize("model", ["qwen3vl_2b", "gemini"])
-def test_scene_sources_extract_reuse_and_retry(
-    context, monkeypatch, representation, model,
-):
-    from extraction.backends.gemini_workers import GeminiGenerationOutcome
-    from extraction.steps import extract_description_scenes, extract_graph_scenes
+
+def test_scene_sources_extract_reuse_and_retry(context, monkeypatch):
     from helpers import install_doubles
     from preparation.input_data import prepare_input_data
 
     ready_cohort(context)
     install_doubles(monkeypatch)
     prepare_input_data(context)
+    for model in ("qwen3vl_2b", "gemini"):
+        for representation in ("graph", "description"):
+            _extract_reuse_and_retry(context, monkeypatch, model, representation)
+
+
+def _extract_reuse_and_retry(context, monkeypatch, model, representation):
+    from extraction.backends.gemini_workers import GeminiGenerationOutcome
+    from extraction.steps import extract_description_scenes, extract_graph_scenes
+
     graph_source = representation == "graph"
     generator = FakeGenerator(GRAPH_TEXT if graph_source else "A person cuts a tomato.")
 
@@ -351,24 +392,6 @@ LOOPED_GRAPH_TEXT = (
     + "panda1 - greeting - panda2; none; unknown\npanda2 - lifting - jar; none; unknown\n" * 9
     + "panda1 - greet"
 )
-
-
-def test_progress_counts_each_scene_in_exactly_one_outcome():
-    from extraction.progress import InferenceProgress
-    from tqdm import tqdm
-    import io
-
-    stream = io.StringIO()
-    with InferenceProgress(total=5, desc="x", unit="scene",
-                           progress_factory=lambda **kw: tqdm(file=stream, **kw)) as progress:
-        for task_id, result in zip("abcde", ("success", "parse_failed", "trash_info", "token_limit", "error")):
-            progress.complete(task_id=task_id, outcome=result)
-        progress.complete(task_id="e", outcome="success")  # a later pass replaces the outcome
-        counts = dict(progress.counts)
-        with pytest.raises(ValueError, match="unknown scene outcome"):
-            progress.complete(outcome="warning")
-    assert counts == {"success": 2, "parse_failed": 1, "trash_info": 1, "token_limit": 1, "error": 0}
-    assert "success=2 parse_failed=1 trash_info=1 token_limit=1 error=0" in stream.getvalue()
 
 
 def test_truncated_scenes_are_token_limit_warnings_and_regenerate(context, monkeypatch):
@@ -431,39 +454,3 @@ def test_truncated_scenes_are_token_limit_warnings_and_regenerate(context, monke
     generator.tasks.clear()
     extract_description_scenes(context, **desc)
     assert generator.tasks and all("warning" not in row for row in read_jsonl(desc_path))
-
-
-@pytest.mark.torch
-def test_penalty_passes_retry_warned_scenes(context, monkeypatch):
-    from preparation.input_data import prepare_input_data
-    from extraction.step_support import visual_rows
-    from helpers import install_doubles
-
-    ready_cohort(context)
-    install_doubles(monkeypatch)
-    prepare_input_data(context)
-    visual = visual_rows(context)[0]
-    rows = scene_generation_rows(visual, prompt="observe", max_new_tokens=384)[:1]
-    # The first pass writes prose (PARSE_FAILED); the higher penalty writes a graph.
-    factory = FakeGenerator(lambda task: GRAPH_TEXT if task.repetition_penalty > 1 else "A man cooks.")
-    directory = context.scene_arm_dir("graph_qwen3vl_2b")
-    run_qwen_scenes(
-        [(visual, rows)], scene_dir=directory, model_path=context.path("models", "qwen3vl_2b"),
-        generator_factory=factory, names={}, progress=quiet_progress(), arm="graph",
-        existing_records={}, runtime=QwenRuntime(), penalties=(1.0, 1.1),
-    )
-    assert [task.repetition_penalty for task in factory.tasks] == [1.0, 1.1]
-    assert read_jsonl(directory / f"{visual['content_id']}.jsonl")[0]["warning"] == []
-
-
-@pytest.mark.parametrize("name", ["v9_core", "v9_extended", "v10_core", "v10_extended"])
-def test_current_prompt_examples_parse_natively(name):
-    from pathlib import Path
-
-    text = (Path(__file__).parents[1] / "prompts" / f"scene_graph_{name}.md").read_text(encoding="utf-8")
-    blocks = [block for block in text.split("\n\n") if "\n[Context]\nmedium: " in "\n" + block]
-    layout, *examples = [block[block.index("[Context]"):] for block in blocks]
-    assert "medium: value" in layout and len(examples) >= 3
-    for example in examples:
-        parsed = parse_or_repair_graph(example)
-        assert parsed.error is None and parsed.parse_mode == "native", (example, parsed.error)

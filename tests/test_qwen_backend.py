@@ -17,7 +17,8 @@ from extraction.scene_storage import ensure_generation_identity
 from extraction.steps import prompt_provenance
 
 
-def test_qwen_image_preparation_and_sampling(context, monkeypatch):
+def test_qwen_requests_sampling_and_context_overflow(context, monkeypatch):
+    # Images are prepared in order and sampling follows the graph settings.
     model_path = context.path("models", "qwen3vl_2b")
     images = []
     for index in range(6):
@@ -50,8 +51,7 @@ def test_qwen_image_preparation_and_sampling(context, monkeypatch):
     assert params["presence_penalty"] == 0.0 and params["repetition_penalty"] == 1.0
     assert params["extra_args"] == {"generated_token_repetition_penalty": 1.05}
 
-
-def test_qwen_context_overflow_never_truncates(monkeypatch):
+    # A context overflow fails instead of truncating the input.
     calls = []
 
     async def render(inputs, **kwargs):
@@ -68,7 +68,11 @@ def test_qwen_context_overflow_never_truncates(monkeypatch):
     assert calls == [384]
 
 
-def test_qwen_generation_identity_preserves_initial_settings(context):
+def test_qwen_identity_sizes_and_prompts(context):
+    from pathlib import Path
+    from extraction.qwen_config import validate_checkpoint
+
+    # The generation identity keeps its initial settings unless forced.
     arm = generation_registry(context.config)["graph_qwen3vl_2b"]
     initial = prompt_provenance(context, "prompts/scene_graph_v9_core.md", arm)
     directory = context.scene_arm_dir(arm.name)
@@ -83,22 +87,15 @@ def test_qwen_generation_identity_preserves_initial_settings(context):
     assert read_json(directory / "generation_identity.json") != before
     assert not (directory / "old.jsonl").exists()
 
-
-@pytest.mark.parametrize("version", ["v9", "v10"])
-def test_extended_prompt_is_the_core_plus_an_extension_block(version):
-    from pathlib import Path
-
+    # Each extended prompt only appends an extension block to its core, verbatim.
     prompts = Path(__file__).resolve().parents[1] / "prompts"
-    core = (prompts / f"scene_graph_{version}_core.md").read_text(encoding="utf-8")
-    extended = (prompts / f"scene_graph_{version}_extended.md").read_text(encoding="utf-8")
-    # The extended prompt only appends to the core, verbatim.
-    assert extended.startswith(core)
-    assert extended[len(core):].lstrip().startswith("[Additional Instructions]")
+    for version in ("v9", "v10"):
+        core = (prompts / f"scene_graph_{version}_core.md").read_text(encoding="utf-8")
+        extended = (prompts / f"scene_graph_{version}_extended.md").read_text(encoding="utf-8")
+        assert extended.startswith(core), version
+        assert extended[len(core):].lstrip().startswith("[Additional Instructions]"), version
 
-
-def test_qwen_sizes_use_separate_sources_and_checkpoints(context):
-    from extraction.qwen_config import validate_checkpoint
-
+    # Qwen sizes use separate sources and checkpoints.
     small = generation_registry(context.config)["graph_qwen3vl_2b"]
     large = generation_registry(context.config)["graph_qwen3vl_8b"]
     assert context.scene_arm_dir(small.name) != context.scene_arm_dir(large.name)
